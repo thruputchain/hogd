@@ -12,12 +12,15 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
+#include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "precompiles.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -50,11 +53,7 @@ GenesisBlockLoader::load_genesis_block(
   // Process each initial configuration entry
   for (auto const &entry : genesis_block_.initial_config) {
     // Calculate storage key based on the preset contract configuration
-    auto const &config = entry.config;
-    auto storage_key = calculate_storage_key(
-        config.contract_hash, config.initial_nonce,
-        ContractEntrypointID{}, // Assuming initialize is entrypoint 0
-        config.initialize_calldata);
+    auto storage_key = calculate_storage_key(entry.config);
 
     // Convert int128_xdr to int128_t and create allocation bytestring
     auto amount = from_xdr(entry.amount);
@@ -80,6 +79,29 @@ GenesisBlockLoader::load_genesis_block(
   write_contract(precompiled_token_contract);
   write_deployment(kPresetNativeTokenAddress,
                    sha256(*precompiled_token_contract));
+}
+
+std::vector<SignedTransaction>
+GenesisBlockLoader::make_unfurl_genesis_transactions()
+{
+  std::vector<SignedTransaction> unfurl_transactions;
+  using token_claim_client_t =
+      ContractTraitClient<initial_token_claim::InitialTokenClaim>;
+  token_claim_client_t client(kDeployContractAddress);
+  constexpr static GasAmount kClaimGas = 1'000'000'000;
+
+  for (auto const &entry : genesis_block_.initial_config) {
+    auto const &config = entry.config;
+
+    SignedTransaction tx{
+        .tx = Transaction{
+            .invocation = client.make_invocation<"claim_initial_tokens">(
+                kClaimGas, config.contract_hash, config.initial_nonce,
+                config.entrypoint, config.calldata)}};
+    unfurl_transactions.push_back(tx);
+  }
+
+  return unfurl_transactions;
 }
 
 StorageKey
@@ -115,6 +137,13 @@ GenesisBlockLoader::calculate_storage_key(
   std::copy_n(hash_result.begin(), 32, storage_key.contract_data_key().begin());
 
   return storage_key;
+}
+
+StorageKey
+GenesisBlockLoader::calculate_storage_key(PresetDeploymentConfig const &config)
+{
+  return calculate_storage_key(config.contract_hash, config.initial_nonce,
+                               config.entrypoint, config.calldata);
 }
 
 } // namespace hogd

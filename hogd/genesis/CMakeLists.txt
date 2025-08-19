@@ -8,12 +8,12 @@ target_link_libraries(genesis
   storage_item
   protocol
   contract_loader
+  runtime
 )
 
-target_include_directories(genesis PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
+target_include_directories(genesis PRIVATE
+  ${CMAKE_BINARY_DIR}
   ${CMAKE_BINARY_DIR}/hogd/xdr
-  ${CMAKE_SOURCE_DIR}/built_contracts
 )
 
 # Add test objects
@@ -24,12 +24,13 @@ add_library(genesis_test_objects OBJECT
 target_link_libraries(genesis_test_objects
   GTest::gtest_main
   crypto
+  runtime
+  protocol
 )
 
 target_include_directories(genesis_test_objects PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_BINARY_DIR}
   ${CMAKE_BINARY_DIR}/hogd/xdr
-  ${CMAKE_SOURCE_DIR}/built_contracts
 )
 
 # Create test executable
@@ -39,6 +40,7 @@ add_executable(genesis_test
 
 target_link_libraries(genesis_test
   genesis
+  runtime
   GTest::gtest_main
 )
 
