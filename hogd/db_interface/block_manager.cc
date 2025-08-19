@@ -18,7 +18,6 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
