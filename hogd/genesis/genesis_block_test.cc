@@ -54,7 +54,8 @@ protected:
 
     preset_entry.config.contract_hash = contract_hash;
     preset_entry.config.initial_nonce = nonce;
-    preset_entry.config.initialize_calldata = {0x01, 0x02, 0x03, 0x04};
+    preset_entry.config.entrypoint = ContractEntrypointID{};
+    preset_entry.config.calldata = {0x01, 0x02, 0x03, 0x04};
     preset_entry.amount = to_xdr(int128_t{1000000}); // 1 million tokens
 
     genesis_block.initial_config.push_back(preset_entry);
@@ -70,7 +71,8 @@ protected:
 
     preset_entry2.config.contract_hash = contract_hash2;
     preset_entry2.config.initial_nonce = nonce2;
-    preset_entry2.config.initialize_calldata = {0x05, 0x06, 0x07, 0x08};
+    preset_entry2.config.entrypoint = ContractEntrypointID{};
+    preset_entry2.config.calldata = {0x05, 0x06, 0x07, 0x08};
     preset_entry2.amount = to_xdr(int128_t{500000}); // 500k tokens
 
     genesis_block.initial_config.push_back(preset_entry2);

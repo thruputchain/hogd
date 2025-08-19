@@ -4,10 +4,12 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <vector>
 
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -41,6 +43,11 @@ public:
                          SHA256Hash const &contract_hash)> const
           &write_deployment);
 
+  // The set of transactions that claim the balances that are set up
+  // in the genesis block.
+  // These could be, but are not required to be, all run in the first block.
+  std::vector<SignedTransaction> make_unfurl_genesis_transactions();
+
   // Calculate storage key for a genesis entry
   // Format: sha256("Initial Deployment" || hash || nonce || entrypoint ||
   // calldata)
@@ -48,6 +55,7 @@ public:
   calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
                         ContractEntrypointID entrypoint,
                         std::span<const std::uint8_t> calldata);
+  static StorageKey calculate_storage_key(PresetDeploymentConfig const &config);
 
   constexpr static ContractAddress kDeployContractAddress =
       make_precompile_address(
