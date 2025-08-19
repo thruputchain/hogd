@@ -1,13 +1,14 @@
 #!/bin/bash
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <build_dir>"
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <build_dir> <contract_name>"
     exit 1
 fi
 
 BUILD_DIR=$1
+CONTRACT_NAME=$2
 
-FILE="$BUILD_DIR/built_contracts/fibonacci.wasm"
+FILE="$BUILD_DIR/built_contracts/$CONTRACT_NAME.wasm"
 if [ ! -f "$FILE" ]; then
     echo "File not found: $FILE" >&2
     exit 2
