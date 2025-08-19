@@ -14,24 +14,18 @@ template<typename T, typename E = ErrorXDR> class Result {
 public:
   constexpr static bool kIsContractResultType = true;
 
-  template<typename S> struct OkType;
-
-  template<typename S> requires (!std::is_void_v<S>)
-  struct OkType<S> {
-    S value_;
-  };
-
-  template<> struct OkType<void> {
-    std::tuple<> value_;
-  };
-
   using ok_type = std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>;
   using err_type = std::conditional_t<std::is_same_v<E, void>, std::tuple<>, E>;
+
+  struct OkType
+  {
+    ok_type value_;
+  };
 
   template<typename... Args> requires std::is_constructible_v<ok_type, Args...>
   static Result make_ok(Args &&...args)
   {
-    return Result(OkType<T>(std::forward<Args>(args)...));
+    return Result(OkType(std::forward<Args>(args)...));
   }
 
   template<typename... Args> requires std::is_constructible_v<err_type, Args...>
@@ -40,18 +34,18 @@ public:
     return Result(err_type(std::forward<Args>(args)...));
   }
 
-  Result(OkType<T> &&t) : variant_(std::move(t)) {}
+  Result(OkType &&t) : variant_(std::move(t)) {}
   Result(err_type e) : variant_(std::move(e)) {}
 
-  auto const &ok() const { return std::get<OkType<T>>(variant_).value_; }
+  auto const &ok() const { return std::get<OkType>(variant_).value_; }
   auto const &err() const { return std::get<err_type>(variant_); }
 
-  bool is_ok() const { return std::holds_alternative<OkType<T>>(variant_); }
+  bool is_ok() const { return std::holds_alternative<OkType>(variant_); }
   bool is_err() const { return std::holds_alternative<err_type>(variant_); }
 
 private:
-  static_assert(!std::is_same_v<OkType<T>, err_type>);
-  std::variant<OkType<T>, err_type> variant_;
+  static_assert(!std::is_same_v<OkType, err_type>);
+  std::variant<OkType, err_type> variant_;
 };
 
 template<typename T>
