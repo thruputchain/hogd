@@ -9,6 +9,7 @@ members = [
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/manual_revert_test",
     "integration_test_contracts/manual_revert_caller",
+    "integration_test_contracts/initial_token_claim",
     "integration_test_contracts/itc_erc20",
 ]
 resolver = "2"

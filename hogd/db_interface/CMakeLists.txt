@@ -21,6 +21,7 @@ target_link_libraries(
   storage_item
   storage_cost
   mock_db
+  genesis
 )
 
 add_library(db_interface_test_objects OBJECT

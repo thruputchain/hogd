@@ -32,6 +32,7 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  contract_loader
   GTest::gtest_main
 )
 

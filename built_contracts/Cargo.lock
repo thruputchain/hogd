@@ -287,6 +287,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "initial_token_claim"
+version = "0.1.0"
+dependencies = [
+ "initial_token_claim",
+ "sdk",
+ "serde",
+ "xdrs",
+]
+
+[[package]]
 name = "itc_erc20"
 version = "0.1.1"
 dependencies = [

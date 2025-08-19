@@ -5,6 +5,8 @@
 #include <memory>
 #include <string_view>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/manual_revert_caller.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -12,9 +14,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "rpc_types.hh"
-#include "test_contracts/manual_revert_caller.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -38,15 +38,14 @@ protected:
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
     // Load and deploy the manual_revert_test contract (target)
-    auto target_contract = test::load_test_contract("manual_revert_test.wasm");
+    auto target_contract = hogd::load_contract("manual_revert_test.wasm");
     target_contract_addr_ = make_contract_address(0);
     write_contract(target_contract);
     write_deployment(target_contract_addr_, sha256(*target_contract));
     setup_grant_storage_token(target_contract_addr_, 1'000'000'000);
 
     // Load and deploy the manual_revert_caller contract
-    auto caller_contract =
-        test::load_test_contract("manual_revert_caller.wasm");
+    auto caller_contract = hogd::load_contract("manual_revert_caller.wasm");
     caller_contract_addr_ = make_contract_address(1);
     write_contract(caller_contract);
     write_deployment(caller_contract_addr_, sha256(*caller_contract));

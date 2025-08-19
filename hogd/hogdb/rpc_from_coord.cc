@@ -3,25 +3,33 @@
 #include "hogd/hogdb/rpc_from_coord.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <netinet/in.h>
+#include <span>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <utility>
 
 // generated x23 headers
 #include "db_coord.hh"
-#include "hogd/base/status.h"
-#include "hogd/hogdb/db.h"
-#include "rpc_types.hh"
+#include "genesis.hh"
 
+#include "rpc_types.hh"
+#include "types.hh"
+
+#include "hogd/base/log.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
@@ -31,6 +39,15 @@
 namespace hogd {
 
 namespace {
+
+ItemKey
+make_item_key(const AddressAndKey &addr)
+{
+  if (addr.key.key_type() ==
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
+    return ItemKey(addr.address, {}, true);
+  return ItemKey(addr.address, addr.key.contract_data_key());
+}
 
 template<typename T>
 DbResult
@@ -65,6 +82,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   DbBlockResult ret(to_db_result(btx->commit()));
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
+  ctx_.close_block_tx(id);
   co_return ret;
 }
 
@@ -77,6 +95,7 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 
   BlockTX &btx = *ret;
   btx.abort();
+  ctx_.close_block_tx(id);
   co_return DbResult::DbResultOK;
 }
 
@@ -187,6 +206,78 @@ HogDBCoordServer::start_server(uint16_t port)
       }
     }(cp_, this, std::move(lfd));
   }
+}
+
+x23::Async<DbResult>
+HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
+{
+  if (is_initialized_) {
+    co_return DbResult::DbResultError;
+  }
+
+  is_initialized_ = true;
+
+  auto r = ctx_.open_block_tx(0);
+  if (!r.has_value()) {
+    error("failed to open block tx: {}", r.error());
+    co_return DbResult::DbResultError;
+  }
+
+  auto *itx = ctx_.get_invoke_tx(0, 0);
+  assert(itx);
+
+  bool failure = false;
+  // If initialization fails, then the database is left in an invalid state.
+  // We should abort the entire run of the hog chain to fix if initialization
+  // doesn't work.
+
+  GenesisBlockLoader loader(genesis_block);
+  loader.load_genesis_block(
+      [&](StorageKey const &key, int128_t value) {
+        auto item_key = make_item_key(
+            AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
+                          .key = key});
+        auto r = itx->request_nnint128(item_key, value);
+        if (!r.has_value()) {
+          error("failed to write genesis block storage: {}", r.error());
+          failure = true;
+        }
+      },
+      [&](auto const &contract) {
+        auto data = x23::serialize(*contract);
+        const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+        auto buf = std::span<const std::byte>(cptr, data.size());
+        SHA256Hash hash = sha256(buf);
+        auto r = write_wasm_code(ctx_.get_db(), hash, buf);
+        if (!r.has_value()) {
+          error("failed to write genesis block contract: {}", r.error());
+          failure = true;
+        }
+      },
+      [&](ContractAddress const &addr, SHA256Hash const &hash) {
+        auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
+        if (!r.has_value()) {
+          error("failed to write genesis block deployment: {}", r.error());
+          failure = true;
+        }
+      });
+
+  if (failure) {
+    error("genesis block initialization failed");
+    co_return DbResult::DbResultError;
+  }
+
+  itx->commit();
+  ctx_.close_invoke_tx(0, 0);
+  auto commit_res = ctx_.get_block_tx(0)->commit();
+  if (!commit_res.has_value()) {
+    error("failed to commit genesis block: {}", commit_res.error());
+    co_return DbResult::DbResultError;
+  }
+
+  ctx_.close_block_tx(0);
+
+  co_return DbResult::DbResultOK;
 }
 
 uint16_t

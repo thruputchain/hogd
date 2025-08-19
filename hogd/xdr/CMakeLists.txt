@@ -11,6 +11,7 @@ add_xdr(
 	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/ffi_enums.x
+	../../protocol/genesis.x
 	../../protocol/nomination.x
 	../../protocol/precompiles.x
 	../../protocol/rpc_types.x

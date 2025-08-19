@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "built_contracts/itc_erc20.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -33,7 +34,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
-#include "test_contracts/itc_erc20.h"
 #include "transaction.hh"
 #include "types.hh"
 
