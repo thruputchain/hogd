@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "built_contracts/fibonacci.h"
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -129,7 +129,7 @@ bench_fibonacci(benchmark::State &state)
 
   bs.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
   fib_client_t fib_client(contract_addr);
 

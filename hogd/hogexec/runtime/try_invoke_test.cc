@@ -13,14 +13,16 @@
 #include <utility>
 #include <vector>
 
+#include "built_contracts/itc_erc20.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
+#include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
-#include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -2073,8 +2075,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto const *cost_model = get_default_cost_model();
   auto str_hello = make_bytestring("hello");
-  int128_t write_cost = cost_model->kBaseItemCost +
-                        cost_model->get_bytestring_cost(str_hello.size());
+  uint128_t write_cost = cost_model->kBaseItemCost +
+                         cost_model->get_bytestring_cost(str_hello.size());
 
   // Sender contract
   auto sender_contract = std::make_unique<NativeContract>(
@@ -2084,7 +2086,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
             write_cost](SystemCallHandler &handler,
                         NativeRuntime &runtime) -> InvokeStatus<void> {
              auto native_token_client =
-                 ContractTraitClient<NativeTokenTrait>(token_contract_addr);
+                 ContractTraitClient<itc_erc20::ERC20>(token_contract_addr);
 
              auto [r_transfer, g_transfer] =
                  native_token_client.invoke<"transfer">(handler, receiver_addr,
@@ -2106,11 +2108,12 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_balance, g_balance] =
                  native_token_client.invoke<"get_balance">(handler);
-             if ((!r_balance.has_value()) || !r_balance.value().has_value()) {
+             if ((!r_balance.has_value()) || !r_balance.value().has_value() ||
+                 !r_balance.value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (from_xdr(r_balance.value().value()) != 0) {
+             if (from_xdr(r_balance.value().value().ok()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -2213,34 +2216,36 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   StorageKeyContractData key = make_storage_key("test");
 
   // perform a set_add_nnint
-  builder.add(0,
-              [&](SystemCallHandler &handler, int64_t set_amount,
-                  int64_t add_amount) -> InvokeStatus<void> {
-                int128_t set_128 = set_amount;
-                auto [r, _gas] =
-                    syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
-                                                       add_amount);
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [&](SystemCallHandler &handler, int64_t set_amount,
+          int64_t add_amount) -> InvokeStatus<void> {
+        int128_t set_128 = set_amount;
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+                                               add_amount);
 
-                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   // perform a add_nnint
-  builder.add(1,
-              [&](SystemCallHandler &handler,
-                  int64_t add_amount) -> InvokeStatus<void> {
-                auto [r, _gas] =
-                    syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
-                                                       add_amount);
-                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      1,
+      [&](SystemCallHandler &handler,
+          int64_t add_amount) -> InvokeStatus<void> {
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                               add_amount);
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
-  builder.add(
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2,
       [&](SystemCallHandler &handler,
           NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2276,23 +2281,24 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
         return {};
       });
-  builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    // reset contract state
-    int128_t set_value = 35;
-    auto [r, _gas] =
-        syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
-    // auto r = handler.set_nnint(key, 35, 0);
-    // if (!r.has_value() || !r.value().has_value()) {
-    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    return {};
-  });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+        // reset contract state
+        int128_t set_value = 35;
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+        // auto r = handler.set_nnint(key, 35, 0);
+        // if (!r.has_value() || !r.value().has_value()) {
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr uint32_t kTestContractId = 0;
+  constexpr int32_t kTestContractId = 0;
   contract_map.emplace(kTestContractId, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -2448,8 +2454,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   // 5. try_invoke on the first contract, on the method that returns success.
   // Should succeed.
 
-  constexpr uint32_t kErrorContractId = 0;
-  constexpr uint32_t kCallerContractId = 1;
+  constexpr int32_t kErrorContractId = 0;
+  constexpr int32_t kCallerContractId = 1;
   ContractAddress error_contract_addr = make_contract_address(10);
   ContractAddress caller_contract_addr = make_contract_address(11);
   ContractAddress missing_contract_addr = make_contract_address(12);

@@ -17,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "precompiles.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -26,17 +27,19 @@ GenesisBlockLoader::GenesisBlockLoader(GenesisBlock genesis_block)
 {}
 
 namespace {
-std::shared_ptr<const Contract> make_native_contract(HogexecNativeContracts contract_id) {
+std::shared_ptr<const Contract>
+make_native_contract(HogexecPrecompiledNativeContracts contract_id)
+{
   auto out = std::make_shared<Contract>();
   out->contract_type(ContractType::kNative);
   out->native_contract_id() = std::to_underlying(contract_id);
   return out;
 }
-}
+} // namespace
 
 void
 GenesisBlockLoader::load_genesis_block(
-    std::function<void(StorageKey const &, int128_t const&)> const
+    std::function<void(StorageKey const &, int128_t const &)> const
         &write_storage,
     std::function<void(std::shared_ptr<const Contract> contract)> const
         &write_contract,
@@ -65,14 +68,18 @@ GenesisBlockLoader::load_genesis_block(
   write_deployment(kDeployContractAddress, sha256(*deploy_contract));
 
   // write the initial token allocation
-  StorageKey allocation_key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-  constexpr static int128_t kHogTokenTotalSupply = int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  StorageKey allocation_key(
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  constexpr static int128_t kHogTokenTotalSupply =
+      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
   write_storage(allocation_key, kHogTokenTotalSupply);
 
   // write the precompiled token contract
-  auto precompiled_token_contract = make_native_contract(HogexecNativeContracts::kNativeContractToken);
+  auto precompiled_token_contract = make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
   write_contract(precompiled_token_contract);
-  write_deployment(kPresetNativeTokenAddress, sha256(*precompiled_token_contract));
+  write_deployment(kPresetNativeTokenAddress,
+                   sha256(*precompiled_token_contract));
 }
 
 StorageKey

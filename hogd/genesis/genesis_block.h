@@ -13,17 +13,15 @@
 namespace hogd {
 
 constexpr static ContractAddress
-make_precompile_address(uint64_t idx)
+make_precompile_address(GenesisContractAddresses addr_enum)
 {
   ContractAddress addr{};
-  addr[0] = (idx >> 56) & 0xFF;
-  addr[1] = (idx >> 48) & 0xFF;
-  addr[2] = (idx >> 40) & 0xFF;
-  addr[3] = (idx >> 32) & 0xFF;
-  addr[4] = (idx >> 24) & 0xFF;
-  addr[5] = (idx >> 16) & 0xFF;
-  addr[6] = (idx >> 8) & 0xFF;
-  addr[7] = idx & 0xFF;
+  uint32_t underlying = std::to_underlying(addr_enum);
+  addr[28] = (underlying >> 24) & 0xFF;
+  addr[29] = (underlying >> 16) & 0xFF;
+  addr[30] = (underlying >> 8) & 0xFF;
+  addr[31] = underlying & 0xFF;
+  static_assert(sizeof(addr) == 32);
   return addr;
 }
 
@@ -35,7 +33,7 @@ public:
   // Load genesis block data into storage
   // This calculates storage keys and stores allocation amounts as int128s
   void load_genesis_block(
-      std::function<void(StorageKey const &, int128_t const&)> const
+      std::function<void(StorageKey const &, int128_t const &)> const
           &write_storage,
       std::function<void(std::shared_ptr<const Contract>)> const
           &write_contract,
@@ -52,9 +50,11 @@ public:
                         std::span<const std::uint8_t> calldata);
 
   constexpr static ContractAddress kDeployContractAddress =
-      make_precompile_address(kDeployContractPrecompileIndex);
+      make_precompile_address(
+          GenesisContractAddresses::kAddressInitialTokenClaim);
   constexpr static ContractAddress kPresetNativeTokenAddress =
-      make_precompile_address(kPresetNativeTokenPrecompileIndex);
+      make_precompile_address(
+          GenesisContractAddresses::kAddressPrecompiledHogToken);
 
 private:
   GenesisBlock genesis_block_;

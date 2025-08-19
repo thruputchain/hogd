@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "built_contracts/fibonacci.h"
 #include "db_coord.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/types.h"
@@ -27,6 +27,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -99,7 +100,7 @@ struct BenchmarkState {
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{});
+                             ProposalModeData{}, make_hogexec_context());
   }
 
   void advance_block()
@@ -160,7 +161,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
   WorkerPool exec_pool(1);
   exec_pool.adjust_workers(1);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
   std::optional<uint64_t> gas_consumed;
 
@@ -209,7 +210,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
 
   for (int nrep = 0; nrep < 10; nrep++) {

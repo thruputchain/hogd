@@ -13,6 +13,7 @@ add_xdr(
 	../../protocol/ffi_enums.x
 	../../protocol/genesis.x
 	../../protocol/nomination.x
+	../../protocol/precompiles.x
 	../../protocol/rpc_types.x
 	../../protocol/sched_coord.x
 	../../protocol/storage_delta_flags.x

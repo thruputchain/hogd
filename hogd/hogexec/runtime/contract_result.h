@@ -15,19 +15,36 @@ public:
   constexpr static bool kIsContractResultType = true;
 
   using ok_type = std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>;
-  using err_type = E;
+  using err_type = std::conditional_t<std::is_same_v<E, void>, std::tuple<>, E>;
 
-  Result(ok_type const &t) : variant_(t) {}
-  Result(err_type const &e) : variant_(e) {}
+  struct OkType {
+    ok_type value_;
+  };
 
-  auto const &ok() const { return std::get<ok_type>(variant_); }
+  template<typename... Args> requires std::is_constructible_v<ok_type, Args...>
+  static Result make_ok(Args &&...args)
+  {
+    return Result(OkType(std::forward<Args>(args)...));
+  }
+
+  template<typename... Args> requires std::is_constructible_v<err_type, Args...>
+  static Result make_err(Args &&...args)
+  {
+    return Result(err_type(std::forward<Args>(args)...));
+  }
+
+  Result(OkType &&t) : variant_(std::move(t)) {}
+  Result(err_type e) : variant_(std::move(e)) {}
+
+  auto const &ok() const { return std::get<OkType>(variant_).value_; }
   auto const &err() const { return std::get<err_type>(variant_); }
 
-  bool is_ok() const { return std::holds_alternative<ok_type>(variant_); }
+  bool is_ok() const { return std::holds_alternative<OkType>(variant_); }
   bool is_err() const { return std::holds_alternative<err_type>(variant_); }
 
 private:
-  std::variant<ok_type, err_type> variant_;
+  static_assert(!std::is_same_v<OkType, err_type>);
+  std::variant<OkType, err_type> variant_;
 };
 
 template<typename T>

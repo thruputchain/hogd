@@ -7,11 +7,12 @@
 #include <utility>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -41,6 +42,8 @@ protected:
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
+
   // An amount of gas that suffices for correct tests, but means that if there's
   // another calldata parsing error, we'll run out of gas and error out quickly
   // instead of trying to compute an absurdly high fibonacci.
@@ -56,7 +59,6 @@ TEST_P(FibonacciTest, FibonacciCalls)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -81,7 +83,6 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -108,24 +109,23 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
-
   NativeContractBuilder builder;
 
-  builder.add(0,
-              [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
-                                  uint32_t expect) -> InvokeStatus<void> {
-                fib_client_t client(fib_contract_addr);
-                auto [decoded, _gas] =
-                    client.template invoke<"fibonacci">(handler, input);
-                if (!decoded.has_value() || !decoded.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                if (decoded.value().value() != expect) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
+                          uint32_t expect) -> InvokeStatus<void> {
+        fib_client_t client(fib_contract_addr);
+        auto [decoded, _gas] =
+            client.template invoke<"fibonacci">(handler, input);
+        if (!decoded.has_value() || !decoded.value().has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (decoded.value().value() != expect) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 

@@ -4,7 +4,7 @@
 #include <memory>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
+#include "built_contracts/fibonacci_call.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -50,8 +50,10 @@ protected:
   const ContractAddress fibonacci_caller_contract_address_ =
       make_contract_address(1);
 
-  ContractTraitClient<FibonacciCaller> fibonacci_caller_client_ =
-      ContractTraitClient<FibonacciCaller>(fibonacci_caller_contract_address_);
+  ContractTraitClient<fibonacci_call::FibonacciCaller>
+      fibonacci_caller_client_ =
+          ContractTraitClient<fibonacci_call::FibonacciCaller>(
+              fibonacci_caller_contract_address_);
 
   void initialize_fibonacci_caller()
   {

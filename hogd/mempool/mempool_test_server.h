@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
 #include "coord.hh"
@@ -36,7 +37,8 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "nomination.hh"
+#include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
@@ -89,8 +91,7 @@ public:
     }
 
     {
-      std::shared_ptr<Contract> contract =
-          load_contract(kTestContractFileName);
+      std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
 
       // Write contract to hogdb
       auto bytes = x23::serialize(*contract);
@@ -192,7 +193,7 @@ private:
   uint16_t coordinator_db_port_;
 };
 
-using fib_client_t = ContractTraitClient<Fibonacci>;
+using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
 inline SignedTransactionBatch
 generate_txs(fib_client_t &fib_client, size_t num_txs)

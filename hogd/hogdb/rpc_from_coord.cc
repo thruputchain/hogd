@@ -22,11 +22,11 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
@@ -217,7 +217,6 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   is_initialized_ = true;
 
-  
   auto r = ctx_.open_block_tx(0);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
@@ -229,7 +228,8 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   bool failure = false;
   // If initialization fails, then the database is left in an invalid state.
-  // We should abort the entire run of the hog chain to fix if initialization doesn't work.
+  // We should abort the entire run of the hog chain to fix if initialization
+  // doesn't work.
 
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
@@ -266,7 +266,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
     error("genesis block initialization failed");
     co_return DbResult::DbResultError;
   }
-  
+
   itx->commit();
   ctx_.close_invoke_tx(0, 0);
   auto commit_res = ctx_.get_block_tx(0)->commit();
@@ -274,8 +274,6 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
     error("failed to commit genesis block: {}", commit_res.error());
     co_return DbResult::DbResultError;
   }
-
-
 
   ctx_.close_block_tx(0);
 

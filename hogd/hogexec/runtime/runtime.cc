@@ -3,19 +3,14 @@
 #include <cassert>
 #include <memory>
 #include <string_view>
-#include <unordered_map>
-#include <utility>
 
-#include "contract.hh"
 #include "ffi_enums.hh"
-#include "genesis.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/multiplexed_context.h"
-#include "hogd/hogexec/runtime/native_runtime.h"
-#include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -55,27 +50,6 @@ make_hogexec_wasm_context(RuntimeEngine engine)
   return out;
 }
 
-namespace {
-std::shared_ptr<RuntimeContext>
-make_hogexec_native_contract_context()
-{
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> map;
-  map.emplace(std::to_underlying(HogexecNativeContracts::kNativeContractToken),
-              make_native_token_contract());
-
-  return std::make_shared<NativeContext>(std::move(map));
-}
-} // namespace
-std::shared_ptr<RuntimeContext>
-make_hogexec_context()
-{
-  return std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kWasmi,
-           make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
-          {ContractType::kNative, make_hogexec_native_contract_context()}});
-}
-
 InvokeResult
 Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
@@ -83,7 +57,10 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   const uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
 
+  trace("Invoking method {} with gas limit {}", method_name, gas_limit);
   auto res = invoke_internal(method_name);
+  trace("Invoke result: {}",
+        res.has_value() ? "success" : x23::show(res.error().code()));
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.

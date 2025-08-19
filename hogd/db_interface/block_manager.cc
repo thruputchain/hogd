@@ -214,8 +214,7 @@ BlockManager::initialize_genesis_block(GenesisBlock const &config)
 
   loader.load_genesis_block(
       [&](StorageKey const &key, int128_t value) {
-        auto item =
-            std::make_shared<StorageItemWrapper>(value, &cost_model_);
+        auto item = std::make_shared<StorageItemWrapper>(value, &cost_model_);
         base_database_->write_item(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key},
