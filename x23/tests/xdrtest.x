@@ -161,7 +161,7 @@ struct StellarValue {
 
 enum StellarValueEnum {
   kStellarValue = 0,
-  kStellarValueVec = 1,
+  kStellarValueVec = 1
 };
 
 /************ End Stellar's XDR parse problem ************/

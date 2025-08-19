@@ -174,8 +174,10 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
   for (;;) {
     if (err == 0)
       co_return expected_void;
-    if (err != EINPROGRESS)
+    if (err != EINPROGRESS) {
+      reset(fd);
       co_return Errno{err};
+    }
 
     co_await write_wait(fd);
     write_clear(fd);
@@ -184,16 +186,15 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
     if (getsockopt(fd.get(), SOL_SOCKET, SO_ERROR, &err, &len) == -1)
       Errno{}.raise("SO_ERROR");
     if (!err) {
-      struct sockaddr peer;
+      sockaddr_storage peer;
       len = sizeof(peer);
-      if (getpeername(fd.get(), &peer, &len) == -1) {
+      if (getpeername(fd.get(), reinterpret_cast<sockaddr *>(&peer), &len) ==
+          -1) {
         if (errno != ENOTCONN)
-          Errno{}.raise("getpeername({}) after SO_ERROR 0", fd.get());
+          Errno{}.raise("getpeername({}): after SO_ERROR 0", fd.get());
         err = EINPROGRESS;
       }
     }
-    else
-      std::println("SO_ERROR: fd {}, err {}", fd.get(), Errno{err});
   }
 }
 
