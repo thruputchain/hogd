@@ -9,6 +9,7 @@ members = [
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/manual_revert_test",
     "integration_test_contracts/manual_revert_caller",
+    "integration_test_contracts/itc_erc20",
 ]
 resolver = "2"
 
@@ -18,6 +19,7 @@ serde = { version = "1.0.217", default-features = false }
 xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
 xdr_common = { git = "ssh://git@github.com/groundhogchain/xdr_common.git" }
 groundhog_xdr = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 
 [profile.dev]
 opt-level = "z"

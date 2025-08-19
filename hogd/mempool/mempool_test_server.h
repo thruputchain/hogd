@@ -193,7 +193,7 @@ private:
   uint16_t coordinator_db_port_;
 };
 
-using fib_client_t = ContractTraitClient<Fibonacci>;
+using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
 inline SignedTransactionBatch
 generate_txs(fib_client_t &fib_client, size_t num_txs)

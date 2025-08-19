@@ -42,6 +42,8 @@ protected:
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
+
   // An amount of gas that suffices for correct tests, but means that if there's
   // another calldata parsing error, we'll run out of gas and error out quickly
   // instead of trying to compute an absurdly high fibonacci.
@@ -57,7 +59,6 @@ TEST_P(FibonacciTest, FibonacciCalls)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -82,7 +83,6 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -108,8 +108,6 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   write_contract(contract);
   write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
-
-  using fib_client_t = ContractTraitClient<Fibonacci>;
 
   NativeContractBuilder builder;
 

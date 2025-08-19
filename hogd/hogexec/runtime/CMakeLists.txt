@@ -47,6 +47,7 @@ target_link_libraries(
 add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
 add_library(runtime_test_objects OBJECT
+  contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc

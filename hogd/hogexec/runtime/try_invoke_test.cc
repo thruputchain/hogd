@@ -33,6 +33,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
+#include "test_contracts/itc_erc20.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -2074,8 +2075,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto const *cost_model = get_default_cost_model();
   auto str_hello = make_bytestring("hello");
-  int128_t write_cost = cost_model->kBaseItemCost +
-                        cost_model->get_bytestring_cost(str_hello.size());
+  uint128_t write_cost = cost_model->kBaseItemCost +
+                         cost_model->get_bytestring_cost(str_hello.size());
 
   // Sender contract
   auto sender_contract = std::make_unique<NativeContract>(
@@ -2085,7 +2086,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
             write_cost](SystemCallHandler &handler,
                         NativeRuntime &runtime) -> InvokeStatus<void> {
              auto native_token_client =
-                 ContractTraitClient<NativeTokenTrait>(token_contract_addr);
+                 ContractTraitClient<itc_erc20::ERC20>(token_contract_addr);
 
              auto [r_transfer, g_transfer] =
                  native_token_client.invoke<"transfer">(handler, receiver_addr,
@@ -2107,11 +2108,12 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_balance, g_balance] =
                  native_token_client.invoke<"get_balance">(handler);
-             if ((!r_balance.has_value()) || !r_balance.value().has_value()) {
+             if ((!r_balance.has_value()) || !r_balance.value().has_value() ||
+                 !r_balance.value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (from_xdr(r_balance.value().value()) != 0) {
+             if (from_xdr(r_balance.value().value().ok()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

@@ -51,8 +51,10 @@ protected:
   const ContractAddress fibonacci_caller_contract_address_ =
       make_contract_address(1);
 
-  ContractTraitClient<FibonacciCaller> fibonacci_caller_client_ =
-      ContractTraitClient<FibonacciCaller>(fibonacci_caller_contract_address_);
+  ContractTraitClient<fibonacci_call::FibonacciCaller>
+      fibonacci_caller_client_ =
+          ContractTraitClient<fibonacci_call::FibonacciCaller>(
+              fibonacci_caller_contract_address_);
 
   void initialize_fibonacci_caller()
   {

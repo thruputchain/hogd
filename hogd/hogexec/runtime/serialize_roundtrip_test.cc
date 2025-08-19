@@ -51,7 +51,7 @@ protected:
          [this](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::Foo foo{0xABCD};
+           ::cxs_test::Foo foo{0xABCD};
            roundtrip_test<"roundtrip_foo">(foo, handler, client_, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -63,7 +63,7 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::senum senum{::test::senum::SE_POSITIVE};
+           ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
            roundtrip_test<"roundtrip_senum">(senum, handler, client_, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -74,20 +74,20 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::sunion sunion{::test::senum::SE_POSITIVE};
+           ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
            sunion.pos() = 5;
            roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
                                               success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
-           sunion.d(static_cast<::test::senum>(0)); // default case
+           sunion.d(static_cast<::cxs_test::senum>(0)); // default case
            roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
                                               success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
-           sunion.d(static_cast<::test::senum>(1000)); // default case
+           sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
            roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
                                               success);
            if (!success) {
@@ -135,7 +135,7 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::sunion_no_void sunion{::test::senum::SE_NEGATIVE};
+           ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
            sunion.neg() = true;
            roundtrip_test<"roundtrip_sunion_no_void">(sunion, handler, client_,
                                                       success);
@@ -148,7 +148,7 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::uunion uunion(1);
+           ::cxs_test::uunion uunion(1);
            uunion.one() = true;
            roundtrip_test<"roundtrip_uunion">(uunion, handler, client_,
                                               success);
@@ -176,7 +176,7 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::uunion_bool uunion_bool{true};
+           ::cxs_test::uunion_bool uunion_bool{true};
            uunion_bool.one() = false;
            roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, handler,
                                                    client_, success);
@@ -196,7 +196,7 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::test_recursive test_recursive;
+           ::cxs_test::test_recursive test_recursive;
 
            // empty
            test_recursive.elem = "hello";
@@ -411,7 +411,7 @@ protected:
             {ContractType::kWasmi, wasm_runtime_context_}});
   }
 
-  using cxs_client_t = ContractTraitClient<CxsRoundtrip>;
+  using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   template<StringLiteral MethodName, typename T>
