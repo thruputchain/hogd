@@ -203,21 +203,6 @@ public:
         else {
           return do_return(return_value.value(), false);
         }
-        // return do_return(return_value.value(), false);
-        // if constexpr (!std::is_same_v<return_t, void>) {
-        // return do_ok_return(return_value.value());
-        /*auto return_buffer =
-            Serializer<Format>::serialize(return_value.value());
-        if (!return_buffer.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        handler.set_return_buffer(std::move(return_buffer.value()), false);
-        return {}; */
-        //  }
-        //  else {
-        //   handler.set_return_buffer(ReturnBuffer{}, false);
-        //   return {};
-        //   }
       }
     };
 
