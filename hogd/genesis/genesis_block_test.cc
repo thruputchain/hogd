@@ -101,6 +101,8 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
       });
 
   EXPECT_EQ(storage_map_.size(), 3);
+  EXPECT_EQ(contract_map_.size(), 2);
+  EXPECT_EQ(deployment_map_.size(), 2);
 }
 
 TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
@@ -151,6 +153,8 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
       });
 
   EXPECT_EQ(storage_map_.size(), 1);
+  EXPECT_EQ(contract_map_.size(), 2);
+  EXPECT_EQ(deployment_map_.size(), 2);
 }
 
 TEST_F(GenesisBlockTest, MultipleEntries)
@@ -171,6 +175,8 @@ TEST_F(GenesisBlockTest, MultipleEntries)
       });
 
   EXPECT_EQ(storage_map_.size(), 3);
+  EXPECT_EQ(contract_map_.size(), 2);
+  EXPECT_EQ(deployment_map_.size(), 2);
 
   // Verify that different entries produce different keys
   auto keys = std::vector<StorageKey>();
