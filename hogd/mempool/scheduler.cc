@@ -165,7 +165,15 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
-{}
+{
+  for (const ContractAddress &account : accounts) {
+    std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
+    for (TxInfo *i : infos) {
+      // TODO(jhumphri): Need to update the age for all txs in [account] and
+      // move them in the runqueue accordingly.
+    }
+  }
+}
 
 void
 Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
