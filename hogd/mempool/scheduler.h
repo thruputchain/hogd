@@ -20,7 +20,7 @@ public:
   bool process_received_hogs(const ContractAddress &account_address,
                              uint128_xdr num_received,
                              BlockHeight current_block);
-  void update_accounts(const x23::Vec<ContractAddress> &accounts);
+  bool update_accounts(const x23::Vec<ContractAddress> &accounts);
 
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(size_t block_size);

@@ -163,16 +163,26 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   return write_average_hog_age({new_averages});
 }
 
-void
+bool
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
-  for (const ContractAddress &account : accounts) {
+  HogAgeBatch ages;
+  if (!read_average_hog_age(accounts, ages)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < accounts.size(); i++) {
+    const ContractAddress &account = accounts[i];
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
-    for (TxInfo *i : infos) {
-      // TODO(jhumphri): Need to update the age for all txs in [account] and
-      // move them in the runqueue accordingly.
+    const HogAge &averages = ages[i];
+
+    for (TxInfo *info : infos) {
+      CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
+      info->age = averages.average_ages[kHogAgeGroupToSchedule];
+      CHECK(age_to_tx_[info->age].insert(info).second);
     }
   }
+  return true;
 }
 
 void
