@@ -85,7 +85,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::optional<int> coord_port;
 
   int opt;
-  // NOLINTNEXTLINE(misc-include-cleaner)
+  // NOLINTBEGIN(misc-include-cleaner)
   while ((opt = getopt(argc, argv, "e:c:")) != -1) {
     switch (opt) {
     case 'e':
@@ -98,10 +98,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       usage(argv);
     }
   }
+  // NOLINTEND(misc-include-cleaner)
   if (!exec_port || !coord_port) {
     usage(argv);
   }
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   hogd::run_bench_server(1, *exec_port, *coord_port);
   return 0;
 }
