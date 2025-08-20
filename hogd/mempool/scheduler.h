@@ -20,6 +20,8 @@ public:
   bool process_received_hogs(const ContractAddress &account_address,
                              uint128_xdr num_received,
                              BlockHeight current_block);
+  void update_accounts(const x23::Vec<ContractAddress> &accounts);
+
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(size_t block_size);
 
@@ -39,18 +41,19 @@ public:
       const NominatedTransaction &nominated_tx =
           nomination.transaction_nominations[i];
 
-      auto it = tx_hashes_.find(hash);
-      if (it == tx_hashes_.end()) {
+      auto it = hash_to_tx_.find(hash);
+      if (it == hash_to_tx_.end()) {
         return false;
       }
       ret.push_back({.signed_tx = it->second.tx,
                      .nondeterministic_proposal_data =
                          nominated_tx.nondeterministic_proposal_data});
 
-      // We access [it] below, so we call [txs_.erase()] before
-      // [tx_hashes_.erase()] to avoid accessing an invalidated iterator.
-      CHECK_EQ(txs_[it->second.age].erase(&it->second), 1UL);
-      tx_hashes_.erase(it);
+      // We access [it] below before calling [hash_to_tx_.erase()] to avoid
+      // accessing an invalidated iterator.
+      CHECK_EQ(account_to_tx_[it->second.account].erase(&it->second), 1UL);
+      CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+      hash_to_tx_.erase(it);
     }
     return true;
   }
@@ -58,6 +61,7 @@ public:
 private:
   struct TxInfo {
     BlockHeight age;
+    ContractAddress account;
     SignedTransactionHash tx_hash;
     SignedTransaction tx;
   };
@@ -67,8 +71,10 @@ private:
                          x23::Vec<SignedTransaction> &txs);
 
   db_client_t &db_client_;
-  std::unordered_map<SignedTransactionHash, TxInfo> tx_hashes_;
-  std::map<BlockHeight, std::unordered_set<TxInfo *>> txs_;
+  std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
+  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
+      account_to_tx_;
+  std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
 };
 
 } // namespace hogd

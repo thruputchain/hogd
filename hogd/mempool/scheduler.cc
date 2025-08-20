@@ -55,7 +55,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
   // TODO(jhumphri): Optimize this with coroutines.
   for (const SignedTransaction &tx : txs) {
     SignedTransactionHash tx_hash = sha256(tx);
-    if (tx_hashes_.contains(tx_hash)) {
+    if (hash_to_tx_.contains(tx_hash)) {
       // The transaction is already present in the runqueue.
       continue;
     }
@@ -70,10 +70,14 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
              from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
 
-    TxInfo info{.age = age, .tx_hash = tx_hash, .tx = tx};
-    const auto &[it, inserted] = tx_hashes_.insert({tx_hash, info});
+    const TxInfo info{.age = age,
+                      .account = tx.tx.invocation.invoked_address,
+                      .tx_hash = tx_hash,
+                      .tx = tx};
+    const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
-    CHECK(txs_[age].insert(&it->second).second);
+    CHECK(account_to_tx_[info.account].insert(&it->second).second);
+    CHECK(age_to_tx_[info.age].insert(&it->second).second);
   }
 
   return true;
@@ -160,20 +164,31 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 }
 
 void
+Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
+{}
+
+void
 Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                              x23::Vec<SignedTransactionHash> &hashes,
                              x23::Vec<SignedTransaction> &txs)
 {
   for (auto it = info.begin(); it != info.end();) {
-    const TxInfo &i = **it;
+    TxInfo &i = **it;
     if (num-- == 0) {
       break;
     }
 
-    CHECK_EQ(tx_hashes_.count(i.tx_hash), 1UL);
     hashes.push_back(i.tx_hash);
     txs.push_back(i.tx);
-    tx_hashes_.erase(i.tx_hash);
+
+    CHECK_EQ(account_to_tx_[i.account].count(&i), 1UL);
+    CHECK_EQ(hash_to_tx_.count(i.tx_hash), 1UL);
+
+    CHECK_EQ(account_to_tx_[i.account].erase(&i), 1UL);
+    if (account_to_tx_[i.account].empty()) {
+      CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
+    }
+    CHECK_EQ(hash_to_tx_.erase(i.tx_hash), 1UL);
     it = info.erase(it);
   }
 }
@@ -185,22 +200,24 @@ Scheduler::schedule(size_t block_size)
   x23::Vec<SignedTransaction> txs;
 
   size_t num_scheduled = 0;
-  while (num_scheduled < block_size && !txs_.empty()) {
+  while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
 
-    auto &[average_age, info] = *txs_.begin();
+    auto &[average_age, info] = *age_to_tx_.begin();
     if (info.size() <= num_remaining) {
       num_scheduled += info.size();
-      // [add_txs_from_info] removes the hashes from [tx_hashes_] and [txs_].
+      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
+      // [account_to_tx_], and [age_to_tx_].
       add_txs_from_info(info, info.size(), hashes, txs);
     }
     else {
       num_scheduled += num_remaining;
-      // [add_txs_from_info] removes the hashes from [tx_hashes_] and [txs_].
+      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
+      // [account_to_tx_], and [age_to_tx_].
       add_txs_from_info(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
-      CHECK_EQ(txs_.erase(average_age), 1UL);
+      CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
   }
 
