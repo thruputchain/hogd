@@ -5,8 +5,6 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-set -x
-
 BUILD_DIR=$1
 
 CLIENT="$BUILD_DIR/hogd/hogexec/bench/fibonacci_wasmonly -c 10001 -e 10000"
