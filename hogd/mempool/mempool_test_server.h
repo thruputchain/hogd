@@ -130,6 +130,16 @@ public:
     executor_coord_server_.shut_down();
   }
 
+  void set_hogs(const ContractAddress &account, uint128_t num_hogs)
+  {
+    HogAge average;
+    memset(&average, 0, sizeof(average));
+    average.address = account;
+    average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(num_hogs);
+    average.average_ages[kHogAgeGroupToSchedule] = 1;
+    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
+  }
+
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
   uint16_t coordinator_port() const { return coordinator_port_; }
@@ -154,15 +164,9 @@ private:
       throw std::runtime_error("Failed to grant storage token");
     }
 
-    HogAge average;
-    memset(&average, 0, sizeof(average));
-    average.address = kAccountAddress;
-    average.num_hogs[kHogAgeGroupToSchedule] =
-        // TODO(jhumphri): Multiply by something other than 10. Or just give the
-        // account unlimited hogs with UINT128_MAX.
-        to_xdr(static_cast<uint128_t>(5'000'000'000 * 10));
-    average.average_ages[kHogAgeGroupToSchedule] = 1;
-    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
+    // TODO(jhumphri): Multiply by something other than 10. Or just give the
+    // account unlimited hogs with UINT128_MAX.
+    set_hogs(kAccountAddress, /*num_hogs=*/5'000'000'000 * 10);
   }
 
   // This is a fake coordinator server that the executor registers itself with

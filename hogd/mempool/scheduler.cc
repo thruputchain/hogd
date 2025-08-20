@@ -203,6 +203,10 @@ Scheduler::schedule(size_t block_size)
       CHECK_EQ(txs_.erase(average_age), 1UL);
     }
   }
+
+  // TODO(jhumphri): At some point, we need to deduct the hogs from the account.
+  // Note that we may need to reject transactions in the runqueue if the account
+  // no longer has enough hogs to run them.
   return {hashes, txs};
 }
 

@@ -183,6 +183,21 @@ TEST(Scheduler, ScheduleMultipleMultipleBlocksNonMultiple)
   }
 }
 
+TEST(Scheduler, ScheduleNotEnoughHogs)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
+  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  EXPECT_TRUE(scheduled.empty());
+}
+
 } // namespace hogd
 
 int
