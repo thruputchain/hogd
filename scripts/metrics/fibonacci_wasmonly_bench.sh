@@ -5,9 +5,12 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
+set -x
+
 BUILD_DIR=$1
 
-BIN="$BUILD_DIR/hogd/hogexec/bench/fibonacci_wasmonly"
+CLIENT="$BUILD_DIR/hogd/hogexec/bench/fibonacci_wasmonly -c 10001 -e 10000"
+SERVER="$BUILD_DIR/hogd/hogexec/bench/bench_server -c 10001 -e 10000"
 
 PIPE=$(mktemp -u)
 mkfifo "$PIPE"
@@ -23,7 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$BIN" -s < "$PIPE" > /dev/null 2>&1 &
+"$SERVER" < "$PIPE" > /dev/null 2>&1 &
 S_PID=$!
 
 # give it a moment to start
@@ -32,7 +35,7 @@ while ! nc -z localhost 10001; do
 done
 
 # Run the -c process (waits for it to finish)
-"$BIN" -c
+"$CLIENT"
 
 # After -c finishes, send a character to the -s process to stop it
 echo "q" >&3
