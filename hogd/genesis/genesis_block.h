@@ -30,7 +30,10 @@ make_precompile_address(GenesisContractAddresses addr_enum)
 
 class GenesisBlockBuilder {
 public:
-  void add_initial_config(std::shared_ptr<const Contract> const& contract, SHA256Hash const& nonce, ContractEntrypointID entrypoint, Calldata calldata, int128_t amount);
+  void add_initial_config(std::shared_ptr<const Contract> const &contract,
+                          SHA256Hash const &nonce,
+                          ContractEntrypointID entrypoint, Calldata calldata,
+                          int128_t amount);
 
   GenesisBlock build();
 
@@ -40,7 +43,6 @@ public:
   std::vector<SignedTransaction> make_unfurl_genesis_transactions();
 
 private:
-
   struct Entry {
     PresetDeploymentConfig config;
     int128_t amount;
@@ -81,8 +83,10 @@ public:
   constexpr static ContractAddress kPresetNativeTokenAddress =
       make_precompile_address(
           GenesisContractAddresses::kAddressPrecompiledHogToken);
-  
-  static ContractAddress calculate_deployed_address(SHA256Hash const& contract_hash, SHA256Hash const& nonce);
+
+  static ContractAddress
+  calculate_deployed_address(SHA256Hash const &contract_hash,
+                             SHA256Hash const &nonce);
 
 private:
   GenesisBlock genesis_block_;

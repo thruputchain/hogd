@@ -41,7 +41,8 @@ NativeContext::make_new_runtime(Contract const &contract,
 
   auto it = contracts_.find(host_index);
   if (it == contracts_.end()) {
-    warn("Attempt made to access a native contract that is not defined: {}", host_index);
+    warn("Attempt made to access a native contract that is not defined: {}",
+         host_index);
     return nullptr;
   }
 

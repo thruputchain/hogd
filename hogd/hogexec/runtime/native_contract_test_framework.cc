@@ -105,12 +105,14 @@ NativeContractTestFramework::write_deployment(ContractAddress const &addr,
       db_wrapper_);
 }
 
-void 
-NativeContractTestFramework::run_genesis_initialization(GenesisBlock const& genesis_block)
+void
+NativeContractTestFramework::run_genesis_initialization(
+    GenesisBlock const &genesis_block)
 {
   auto r = coord_wrapper_->client().dbcoord_load_genesis_block(genesis_block)();
   if (r != DbResult::DbResultOK) {
-    throw std::runtime_error("run_genesis_initialization: dbcoord_load_genesis_block failed");
+    throw std::runtime_error(
+        "run_genesis_initialization: dbcoord_load_genesis_block failed");
   }
 }
 

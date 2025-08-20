@@ -1427,7 +1427,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   advance_block();
 
   // 3. Check storage token balance is zero
-  AddressAndKey token_addrkey = make_free_native_token_balance_addrkey(contract_addr);
+  AddressAndKey token_addrkey =
+      make_free_native_token_balance_addrkey(contract_addr);
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   // assert that the free token balance item exists and has value 0
   ASSERT_TRUE(token_item_opt.has_value());

@@ -94,11 +94,12 @@ GenesisBlockBuilder::make_unfurl_genesis_transactions()
     auto const &config = entry.config;
 
     SignedTransaction tx{
-        .tx = Transaction{
-            .invocation = client.make_invocation<"claim_initial_tokens">(
-                kClaimGas, config.contract_hash, config.initial_nonce,
-                config.entrypoint, config.calldata),
-            .contracts_to_deploy = {*entry.deployed_contract}}};
+        .tx = Transaction{.invocation =
+                              client.make_invocation<"claim_initial_tokens">(
+                                  kClaimGas, config.contract_hash,
+                                  config.initial_nonce, config.entrypoint,
+                                  config.calldata),
+                          .contracts_to_deploy = {*entry.deployed_contract}}};
     unfurl_transactions.push_back(tx);
   }
 
@@ -148,38 +149,44 @@ GenesisBlockLoader::calculate_storage_key(PresetDeploymentConfig const &config)
 }
 
 ContractAddress
-GenesisBlockLoader::calculate_deployed_address(SHA256Hash const& contract_hash, SHA256Hash const& nonce)
+GenesisBlockLoader::calculate_deployed_address(SHA256Hash const &contract_hash,
+                                               SHA256Hash const &nonce)
 {
-  ContractDeploymentHashPreimage preimage {
-    .deployer_address = kDeployContractAddress,
-    .nonce = nonce,
-    .contract_hash = contract_hash,
+  ContractDeploymentHashPreimage preimage{
+      .deployer_address = kDeployContractAddress,
+      .nonce = nonce,
+      .contract_hash = contract_hash,
   };
 
   return sha256(preimage);
 }
 
-void GenesisBlockBuilder::add_initial_config(std::shared_ptr<const Contract> const& contract, SHA256Hash const& nonce, ContractEntrypointID entrypoint, Calldata calldata, int128_t amount)
+void
+GenesisBlockBuilder::add_initial_config(
+    std::shared_ptr<const Contract> const &contract, SHA256Hash const &nonce,
+    ContractEntrypointID entrypoint, Calldata calldata, int128_t amount)
 {
   entries_.push_back({
-    .config = PresetDeploymentConfig{
-      .initial_nonce = nonce,
-      .contract_hash = sha256(*contract),
-      .entrypoint = entrypoint,
-      .calldata = std::move(calldata),
-    },
-    .amount = amount,
-    .deployed_contract = contract,
+      .config =
+          PresetDeploymentConfig{
+              .initial_nonce = nonce,
+              .contract_hash = sha256(*contract),
+              .entrypoint = entrypoint,
+              .calldata = std::move(calldata),
+          },
+      .amount = amount,
+      .deployed_contract = contract,
   });
 }
 
-GenesisBlock GenesisBlockBuilder::build()
+GenesisBlock
+GenesisBlockBuilder::build()
 {
   GenesisBlock block;
-  for (auto const& entry : entries_) {
+  for (auto const &entry : entries_) {
     block.initial_config.push_back(InitialConfigurationEntry{
-      .config = entry.config,
-      .amount = to_xdr(entry.amount),
+        .config = entry.config,
+        .amount = to_xdr(entry.amount),
     });
   }
   return block;

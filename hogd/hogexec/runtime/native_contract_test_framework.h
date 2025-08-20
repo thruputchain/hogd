@@ -336,8 +336,7 @@ public:
                                        allocate_txid());
   }
 
-  void run_genesis_initialization(GenesisBlock const& genesis_block);
-
+  void run_genesis_initialization(GenesisBlock const &genesis_block);
 
 private:
   void initialize(BlockExecutionMode mode)
