@@ -62,14 +62,19 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 
     HogAgeBatch ages;
     if (!read_average_hog_age({tx.tx.invocation.invoked_address}, ages)) {
+      // TODO(jhumphri): Need some way of specifying which txs from previous
+      // iterations were successfully added to the runqueue.
       return false;
     }
     const HogAge &averages = ages[0];
-    // [add_vetted_tx] should only be called when this condition is true.
-    CHECK_LE(tx.tx.invocation.gas_limit,
-             from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
+    // TODO(jhumphri): Need to avoid enqueuing txs that we will not have enough
+    // hogs to execute. Currently, we can enqueue infinite txs for an account as
+    // long as there are enough hogs to execute one of them.
+    if (tx.tx.invocation.gas_limit >
+        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+      return false;
+    }
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
-
     const TxInfo info{.age = age,
                       .account = tx.tx.invocation.invoked_address,
                       .tx_hash = tx_hash,
@@ -176,10 +181,20 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
     const HogAge &averages = ages[i];
 
-    for (TxInfo *info : infos) {
+    for (auto it = infos.begin(); it != infos.end();) {
+      TxInfo *info = *it;
       CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
       info->age = averages.average_ages[kHogAgeGroupToSchedule];
+      if (info->tx.tx.invocation.gas_limit >
+          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+        // TODO(jhumphri): Need to store this tx somewhere so that we do not
+        // lose it.
+        it = infos.erase(it);
+        CHECK_EQ(hash_to_tx_.erase(info->tx_hash), 1UL);
+        continue;
+      }
       CHECK(age_to_tx_[info->age].insert(info).second);
+      it++;
     }
   }
   return true;

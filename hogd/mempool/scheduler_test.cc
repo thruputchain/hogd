@@ -192,8 +192,29 @@ TEST(Scheduler, ScheduleNotEnoughHogs)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
   server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
+  EXPECT_FALSE(scheduler.add_vetted_txs({txs[0]}));
+  // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
+  // anyway to test that it is a no-op.
+  CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));
+  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  EXPECT_TRUE(scheduled.empty());
+}
+
+TEST(Scheduler, ScheduleNotEnoughHogsAfterAdded)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  // Setting the account's hogs to 0 *after* adding the tx to the scheduler
+  // above.
+  server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
+  CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   EXPECT_TRUE(scheduled.empty());
 }
