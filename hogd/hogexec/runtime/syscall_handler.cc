@@ -33,6 +33,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -290,7 +291,7 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {
-    trace("Error resolving runtime for address: {}, error {}", address,
+    trace("Error resolving runtime for address: {}, error {}", x23::show(address),
           runtime.error());
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
