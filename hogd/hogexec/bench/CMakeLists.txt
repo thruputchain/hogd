@@ -43,3 +43,17 @@ target_include_directories(
 )
 
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  bench_server
+  bench_server.cc
+)
+target_link_libraries(
+  bench_server
+  hogd
+  protocol
+  runtime
+  hogdb
+)
+
+set_property(TARGET bench_server PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
