@@ -14,6 +14,7 @@
 
 #include "contract.hh"
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -334,6 +335,9 @@ public:
     return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
                                        allocate_txid());
   }
+
+  void run_genesis_initialization(GenesisBlock const& genesis_block);
+
 
 private:
   void initialize(BlockExecutionMode mode)

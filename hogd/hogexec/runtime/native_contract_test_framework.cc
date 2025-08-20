@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -102,6 +103,15 @@ NativeContractTestFramework::write_deployment(ContractAddress const &addr,
   std::visit(
       [&](auto &db_wrapper) { db_wrapper.write_deployment(addr, deployment); },
       db_wrapper_);
+}
+
+void 
+NativeContractTestFramework::run_genesis_initialization(GenesisBlock const& genesis_block)
+{
+  auto r = coord_wrapper_->client().dbcoord_load_genesis_block(genesis_block)();
+  if (r != DbResult::DbResultOK) {
+    throw std::runtime_error("run_genesis_initialization: dbcoord_load_genesis_block failed");
+  }
 }
 
 void
