@@ -65,10 +65,12 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   auto out = db_res.value();
 
   if constexpr (is_debug_build()) {
-    auto received_hash = sha256(*out);
-    if (received_hash != hash) {
-      panic("Received incorrect contract hash from db: {} != {}",
-            x23::show(received_hash), x23::show(hash));
+    if (out) {
+      auto received_hash = sha256(*out);
+      if (received_hash != hash) {
+        panic("Received incorrect contract hash from db: {} != {}",
+              x23::show(received_hash), x23::show(hash));
+      }
     }
   }
 

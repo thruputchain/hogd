@@ -19,18 +19,23 @@ target_include_directories(genesis PRIVATE
 # Add test objects
 add_library(genesis_test_objects OBJECT
   genesis_block_test.cc
+  genesis_block_unfurl_tests.cc
 )
 
 target_link_libraries(genesis_test_objects
-  GTest::gtest_main
+  GTest::gtest
+  hogd_interface
   crypto
-  runtime
-  protocol
 )
 
 target_include_directories(genesis_test_objects PRIVATE
   ${CMAKE_BINARY_DIR}
   ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
+add_dependencies(
+  genesis_test_objects
+  all_wasm_headers
 )
 
 # Create test executable
@@ -41,7 +46,9 @@ add_executable(genesis_test
 target_link_libraries(genesis_test
   genesis
   runtime
-  GTest::gtest_main
+  runtime_test_lib
+  precompiles
+  GTest::gtest
 )
 
 gtest_discover_tests(genesis_test)
