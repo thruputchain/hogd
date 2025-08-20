@@ -15,6 +15,12 @@
 
 namespace hogd {
 
+namespace {
+
+constexpr size_t kBlockSize = 100;
+
+} // namespace
+
 TEST(Scheduler, ReadAndWriteAge)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddress);
@@ -71,7 +77,7 @@ TEST(Scheduler, ScheduleSingle)
   Scheduler &scheduler = clients.interface->scheduler();
 
   EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
-  const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/100);
+  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestServer::kAccountAddress);
@@ -86,8 +92,95 @@ TEST(Scheduler, ScheduleEmpty)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/100);
+  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   EXPECT_TRUE(scheduled.empty());
+}
+
+TEST(Scheduler, ScheduleMultipleOneBlock)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kBlockSize);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  ASSERT_EQ(scheduled.size(), kBlockSize);
+  for (const SignedTransaction &signed_tx : scheduled) {
+    EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
+              MempoolTestServer::kAccountAddress);
+  }
+}
+
+TEST(Scheduler, ScheduleMultipleMultipleBlocks)
+{
+  constexpr size_t kNumBlocks = 10;
+
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs =
+      generate_txs(fib_client, kBlockSize * kNumBlocks);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), kBlockSize);
+    for (const SignedTransaction &signed_tx : scheduled) {
+      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
+                MempoolTestServer::kAccountAddress);
+    }
+  }
+
+  {
+    // Now check that no transactions remain.
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+  }
+}
+
+TEST(Scheduler, ScheduleMultipleMultipleBlocksNonMultiple)
+{
+  constexpr size_t kNumBlocks = 10;
+  constexpr size_t kRemainder = 5;
+
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs =
+      generate_txs(fib_client, kBlockSize * kNumBlocks + kRemainder);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  for (size_t i = 0; i < kNumBlocks; i++) {
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), kBlockSize);
+    for (const SignedTransaction &signed_tx : scheduled) {
+      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
+                MempoolTestServer::kAccountAddress);
+    }
+  }
+
+  {
+    // Now check the remainder.
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), kRemainder);
+    for (const SignedTransaction &signed_tx : scheduled) {
+      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
+                MempoolTestServer::kAccountAddress);
+    }
+  }
+
+  {
+    // Now check that no transactions remain.
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+  }
 }
 
 } // namespace hogd
