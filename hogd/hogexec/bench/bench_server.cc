@@ -1,0 +1,107 @@
+#include <cassert>
+#include <cstdlib>
+#include <memory>
+#include <optional>
+#include <print>
+#include <stdexcept>
+#include <string>
+#include <unistd.h>
+#include <utility>
+
+#include "hogd/base/io.h"
+#include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_coord.h"
+#include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/init.h"
+#include "hogd/ramdb/db.h"
+#include "x23/threadpool.h"
+
+namespace hogd {
+
+namespace {
+
+void
+run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
+{
+  x23::ThreadPool db_pool = x23::ThreadPool(nthreads);
+
+  // Create a temporary directory for the database
+  Directory dir = Directory::open_temporary().value();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+
+  // Open the database
+  auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
+  if (!db_result) {
+    throw std::runtime_error("Failed to open database");
+  }
+
+  HogDatabase db(std::move(*db_result));
+  MerkleTriePrefix trie;
+  RPCContext ctx(db, trie);
+
+  // Start the coordinator server
+  std::println("Starting coordinator server on port {}", coord_port);
+  HogDBCoordServer db_coord_server(ctx);
+  db_coord_server.start_server(coord_port);
+
+  // Start the executor server
+  std::println("Starting executor server on port {}", exec_port);
+  HogDBExecutorServer db_executor_server(ctx);
+  auto exec_ret = db_executor_server.start_server(exec_port);
+  if (!exec_ret) {
+    throw std::runtime_error("Failed to start executor server");
+  }
+
+  // Wait for a byte from stdin (blocking)
+  char buf;
+  if (read(STDIN_FILENO, &buf, 1) > 0) {
+    std::println("Exiting server on stdin input");
+  }
+}
+} // namespace
+
+} // namespace hogd
+
+namespace {
+void
+usage(char *argv[])
+{
+  std::println("Usage: {} -e <exec_port> -c <coord_port>", argv[0]);
+  exit(EXIT_FAILURE);
+}
+} // namespace
+
+int
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
+{
+  auto ret = hogd::hogd_init(argc, argv);
+  if (ret)
+    return ret;
+
+  std::optional<int> exec_port;
+  std::optional<int> coord_port;
+
+  int opt;
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  while ((opt = getopt(argc, argv, "e:c:")) != -1) {
+    switch (opt) {
+    case 'e':
+      exec_port = std::stoi(optarg);
+      break;
+    case 'c':
+      coord_port = std::stoi(optarg);
+      break;
+    default:
+      usage(argv);
+    }
+  }
+  if (!exec_port || !coord_port) {
+    usage(argv);
+  }
+
+  hogd::run_bench_server(1, *exec_port, *coord_port);
+  return 0;
+}
