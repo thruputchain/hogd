@@ -33,6 +33,11 @@ target_include_directories(genesis_test_objects PRIVATE
   ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
+add_dependencies(
+  genesis_test_objects
+  all_wasm_headers
+)
+
 # Create test executable
 add_executable(genesis_test
   $<TARGET_OBJECTS:genesis_test_objects>
