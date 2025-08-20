@@ -34,8 +34,11 @@ NativeContext::make_new_runtime(Contract const &contract,
                                 SystemCallHandler *syscall_handler,
                                 bool /*unused*/)
 {
-  if (contract.contract_type() != ContractType::kNative)
+  if (contract.contract_type() != ContractType::kNative) {
+    warn("Attempt made to access a non-native contract from NativeContext: {}",
+         contract.contract_type());
     return nullptr;
+  }
 
   auto host_index = contract.native_contract_id();
 

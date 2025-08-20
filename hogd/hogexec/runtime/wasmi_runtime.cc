@@ -43,6 +43,8 @@ WasmiContext::make_new_runtime(Contract const &contract, SHA256Hash const &hash,
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   if (contract.contract_type() != ContractType::kWasmi) {
+    warn("Attempt made to access a non-wasmi contract from WasmiContext: {}",
+         contract.contract_type());
     return nullptr;
   }
 
