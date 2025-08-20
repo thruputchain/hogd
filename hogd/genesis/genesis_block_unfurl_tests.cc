@@ -7,7 +7,6 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
-#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -44,6 +43,8 @@ protected:
     return nonce_hash;
   }
 };
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 {
@@ -140,6 +141,8 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
     EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
   }
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, GenesisBlockUnfurlTest,
                          ::testing::Values(TestDB::kMockInMemory,

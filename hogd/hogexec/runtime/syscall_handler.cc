@@ -291,8 +291,8 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {
-    trace("Error resolving runtime for address: {}, error {}", x23::show(address),
-          runtime.error());
+    trace("Error resolving runtime for address: {}, error {}",
+          x23::show(address), runtime.error());
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
   if (!runtime.value()) {
