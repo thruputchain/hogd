@@ -217,6 +217,7 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     else {
       // TODO(jhumphri): Need to do anything here?
       scheduler_.mark_txs_failed({nomination.transaction_hashes[i]});
+      scheduler_.add_vetted_txs({txs[i]});
     }
   }
 
@@ -290,7 +291,9 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   }
   CHECK(!txs.empty());
   if (!co_await validate_batch(block_id, txs)) {
-    scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    SignedTransactionBatch reenqueue =
+        scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    scheduler_.add_vetted_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -302,7 +305,9 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // [nomination.transaction_hashes] here because we already checked above that
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
-    scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    SignedTransactionBatch reenqueue =
+        scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    scheduler_.add_vetted_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);

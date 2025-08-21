@@ -43,13 +43,17 @@ public:
     }
   }
 
-  void mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
+  SignedTransactionBatch
+  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
   {
     SignedTransactionBatch txs;
     txs.reserve(hashes.size());
 
     for (const SignedTransactionHash &hash : hashes) {
-      TxInfo &info = hash_to_tx_[hash];
+      auto it = hash_to_tx_.find(hash);
+      CHECK(it != hash_to_tx_.end());
+      TxInfo &info = it->second;
+
       cached_hogs_[info.tx.tx.invocation.invoked_address]
           .num_hogs[kHogAgeGroupToSchedule] =
           to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
@@ -58,7 +62,7 @@ public:
       txs.push_back(info.tx);
       CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
     }
-    CHECK(add_vetted_txs(txs));
+    return txs;
   }
 
   bool find_and_remove_vetted_txs(const Nomination &nomination,

@@ -115,6 +115,54 @@ TEST(Scheduler, ScheduleSingle)
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestServer::kAccountAddress);
+
+  // Check that the correct number of hogs was deducted.
+  HogAge age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+}
+
+TEST(Scheduler, TxFailed)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  {
+    EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+              MempoolTestServer::kAccountAddress);
+  }
+
+  // Check that the correct number of hogs was deducted.
+  HogAge age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+
+  // Check that the correct number of hogs was added back.
+  scheduler.mark_txs_failed({sha256(txs[0])});
+  age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
+
+  // Check that the correct number of hogs was deducted again.
+  {
+    EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+              MempoolTestServer::kAccountAddress);
+    age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
+              5'000'000'000 * 9);
+  }
+
+  // Check that [mark_txs_executed()] does not change the number of hogs.
+  scheduler.mark_txs_executed({sha256(txs[0])});
+  age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 }
 
 TEST(Scheduler, ScheduleEmpty)
