@@ -33,7 +33,7 @@ div_round_up(uint128_xdr numerator, uint128_xdr denominator)
 
 bool
 Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
-                                HogAgeBatch &ages, bool force)
+                                bool force)
 {
   ContractAddressBatch to_send;
   if (force) {
@@ -51,7 +51,9 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
   if (res.result() != DbResult::DbResultOK) {
     return false;
   }
-  ages = res.hog_age_batch();
+  for (const HogAge &age : res.hog_age_batch()) {
+    cached_hogs_[age.address] = age;
+  }
   return true;
 }
 
@@ -59,7 +61,7 @@ bool
 Scheduler::write_average_hog_age(const HogAgeBatch &ages)
 {
   for (const HogAge &a : ages) {
-    cached_hogs_[a.address] = from_xdr(a.num_hogs[kHogAgeGroupToSchedule]);
+    cached_hogs_[a.address] = a;
   }
   return db_client_.dbcoord_write_hog_ages(ages)() == DbResult::DbResultOK;
 }
@@ -75,13 +77,12 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
       continue;
     }
 
-    HogAgeBatch ages;
-    if (!read_average_hog_age({tx.tx.invocation.invoked_address}, ages)) {
+    if (!read_average_hog_age({tx.tx.invocation.invoked_address})) {
       // TODO(jhumphri): Need some way of specifying which txs from previous
       // iterations were successfully added to the runqueue.
       return false;
     }
-    const HogAge &averages = ages[0];
+    const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     // TODO(jhumphri): Need to avoid enqueuing txs that we will not have enough
     // hogs to execute. Currently, we can enqueue infinite txs for an account as
     // long as there are enough hogs to execute one of them.
@@ -111,11 +112,10 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 bool
 Scheduler::update_groups(const ContractAddress &account_address)
 {
-  HogAgeBatch ages;
-  if (!read_average_hog_age({account_address}, ages)) {
+  if (!read_average_hog_age({account_address})) {
     return false;
   }
-  const HogAge &averages = ages[0];
+  const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages;
   new_averages.address = averages.address;
 
@@ -163,11 +163,10 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
-  HogAgeBatch ages;
-  if (!read_average_hog_age({account_address}, ages)) {
+  if (!read_average_hog_age({account_address})) {
     return false;
   }
-  const HogAge &averages = ages[0];
+  const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages = averages;
 
   const uint128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
@@ -191,15 +190,14 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 bool
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
-  HogAgeBatch ages;
-  if (!read_average_hog_age(accounts, ages)) {
+  if (!read_average_hog_age(accounts)) {
     return false;
   }
 
   for (size_t i = 0; i < accounts.size(); i++) {
     const ContractAddress &account = accounts[i];
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
-    const HogAge &averages = ages[i];
+    const HogAge &averages = cached_hogs_[account];
 
     for (auto it = infos.begin(); it != infos.end();) {
       TxInfo *info = *it;

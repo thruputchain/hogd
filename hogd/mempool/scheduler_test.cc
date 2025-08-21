@@ -30,15 +30,16 @@ TEST(Scheduler, ReadAndWriteAge)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  HogAgeBatch ret;
   EXPECT_TRUE(
       scheduler.read_average_hog_age({MempoolTestServer::kAccountAddress},
-                                     ret));
-  ASSERT_EQ(ret.size(), 1);
-  EXPECT_EQ(ret[0].num_hogs[kHogAgeGroupToSchedule],
+                                     /*force=*/true));
+  HogAge ret;
+  EXPECT_TRUE(
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress, ret));
+  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
-  EXPECT_EQ(ret[0].average_ages[kHogAgeGroupToSchedule], 1);
+  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
 }
 
 TEST(Scheduler, AddVettedTx)

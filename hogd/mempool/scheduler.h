@@ -26,7 +26,17 @@ public:
   schedule(size_t block_size);
 
   bool read_average_hog_age(const ContractAddressBatch &addresses,
-                            HogAgeBatch &ages, bool force = false);
+                            bool force = false);
+  bool get_cached_hog_age(const ContractAddress &address, HogAge &ret) const
+  {
+    auto it = cached_hogs_.find(address);
+    if (it == cached_hogs_.end()) {
+      return false;
+    }
+    ret = it->second;
+    return true;
+  }
+
   bool write_average_hog_age(const HogAgeBatch &ages);
 
   bool find_and_remove_vetted_txs(const Nomination &nomination,
@@ -76,7 +86,7 @@ private:
       account_to_tx_;
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
 
-  std::unordered_map<ContractAddress, uint128_t> cached_hogs_;
+  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>> stranded_;
 };
 
