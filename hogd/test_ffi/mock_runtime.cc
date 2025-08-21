@@ -9,11 +9,12 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "types.hh"
 
 namespace hogd {
 
 void
-MockRuntimeContext::set_trampoline(uint32_t contract,
+MockRuntimeContext::set_trampoline(int32_t contract,
                                    ForeignEntryPoint entry_point,
                                    void *foreign_context)
 {
@@ -34,7 +35,7 @@ MockRuntimeContext::make_new_runtime(Contract const &contract,
                                      bool do_contract_verify)
 {
   if (contract.contract_type() == ContractType::kMockTest) {
-    uint32_t mock_contract = contract.mock_contract_id();
+    int32_t mock_contract = contract.mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
       return std::make_unique<MockRuntime>(it->second);

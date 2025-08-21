@@ -51,7 +51,7 @@ void close_runtime_context(void *context);
 // Contract(ContractType::kMockTest, id) within the database.  If that creation
 // is performed without calling this method, instantiating the contract will
 // fail.
-int register_new_contract(void *context, uint32_t mock_contract_id,
+int register_new_contract(void *context, int32_t mock_contract_id,
                           ForeignEntryPoint entry_point, void *foreign_context);
 
 // Methods to assist in setup for a test.

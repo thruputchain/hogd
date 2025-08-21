@@ -219,8 +219,14 @@ ItemChange::get_raw_nnint128() const
 inline HogDBStatus<ItemChange>
 make_balance_change(HogDatabase &db, const Address &addr, int128_t delta)
 {
-  return read_address_balance(db, addr).transform(
-      [delta](int128_t base) { return ItemChange(NNInt128(base, delta)); });
+  auto balance = read_address_balance(db, addr);
+  if (!balance.has_value()) {
+    if (balance.error() != HogDBCode::kNotFound) {
+      return balance.error();
+    }
+    balance = 0;
+  }
+  return ItemChange(NNInt128(*balance, delta));
 }
 
 } // namespace hogd

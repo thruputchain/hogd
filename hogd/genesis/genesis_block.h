@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "contract.hh"
@@ -27,6 +28,30 @@ make_precompile_address(GenesisContractAddresses addr_enum)
   return addr;
 }
 
+class GenesisBlockBuilder {
+public:
+  void add_initial_config(std::shared_ptr<const Contract> const &contract,
+                          SHA256Hash const &nonce,
+                          ContractEntrypointID entrypoint, Calldata calldata,
+                          int128_t amount);
+
+  GenesisBlock build();
+
+  // The set of transactions that claim the balances that are set up
+  // in the genesis block.
+  // These could be, but are not required to be, all run in the first block.
+  std::vector<SignedTransaction> make_unfurl_genesis_transactions();
+
+private:
+  struct Entry {
+    PresetDeploymentConfig config;
+    int128_t amount;
+    std::shared_ptr<const Contract> deployed_contract;
+  };
+
+  std::vector<Entry> entries_;
+};
+
 class GenesisBlockLoader {
 public:
   // Constructor takes the genesis block
@@ -43,11 +68,6 @@ public:
                          SHA256Hash const &contract_hash)> const
           &write_deployment);
 
-  // The set of transactions that claim the balances that are set up
-  // in the genesis block.
-  // These could be, but are not required to be, all run in the first block.
-  std::vector<SignedTransaction> make_unfurl_genesis_transactions();
-
   // Calculate storage key for a genesis entry
   // Format: sha256("Initial Deployment" || hash || nonce || entrypoint ||
   // calldata)
@@ -63,6 +83,10 @@ public:
   constexpr static ContractAddress kPresetNativeTokenAddress =
       make_precompile_address(
           GenesisContractAddresses::kAddressPrecompiledHogToken);
+
+  static ContractAddress
+  calculate_deployed_address(SHA256Hash const &contract_hash,
+                             SHA256Hash const &nonce);
 
 private:
   GenesisBlock genesis_block_;

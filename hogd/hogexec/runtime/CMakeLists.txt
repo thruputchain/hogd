@@ -46,6 +46,18 @@ target_link_libraries(
 
 add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
+add_library(runtime_test_lib
+  native_contract_test_framework.cc
+)
+
+target_link_libraries(
+  runtime_test_lib
+  runtime
+  db_interface
+  hogdb
+  GTest::gtest
+)
+
 add_library(runtime_test_objects OBJECT
   contract_result_preset_handling_test.cc
   contract_trait_test.cc
@@ -67,7 +79,6 @@ add_library(runtime_test_objects OBJECT
   manual_revert_caller_wasm_test.cc
   memory_access_test.cc
   native_contract_test.cc
-  native_contract_test_framework.cc
   nnint_add_test.cc
   rcq_test.cc
   read_only_test.cc
@@ -125,6 +136,7 @@ target_link_libraries(
   runtime_test
   precompiles
   runtime
+  runtime_test_lib
   runtime_test_util
   db_interface
   hogdb
