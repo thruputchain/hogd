@@ -33,8 +33,20 @@ div_round_up(uint128_xdr numerator, uint128_xdr denominator)
 
 bool
 Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
-                                HogAgeBatch &ages)
+                                HogAgeBatch &ages, bool force)
 {
+  ContractAddressBatch to_send;
+  if (force) {
+    to_send = addresses;
+  }
+  else {
+    for (const ContractAddress &address : addresses) {
+      if (!cached_hogs_.count(address)) {
+        to_send.push_back(address);
+      }
+    }
+  }
+
   HogAgeResult res = db_client_.dbcoord_get_hog_ages(addresses)();
   if (res.result() != DbResult::DbResultOK) {
     return false;
@@ -70,10 +82,6 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     // TODO(jhumphri): Need to avoid enqueuing txs that we will not have enough
     // hogs to execute. Currently, we can enqueue infinite txs for an account as
     // long as there are enough hogs to execute one of them.
-    if (tx.tx.invocation.gas_limit >
-        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-      return false;
-    }
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo info{.age = age,
                       .account = tx.tx.invocation.invoked_address,
@@ -81,8 +89,16 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
                       .tx = tx};
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
-    CHECK(account_to_tx_[info.account].insert(&it->second).second);
-    CHECK(age_to_tx_[info.age].insert(&it->second).second);
+
+    if (tx.tx.invocation.gas_limit <=
+        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+      CHECK(account_to_tx_[info.account].insert(&it->second).second);
+      CHECK(age_to_tx_[info.age].insert(&it->second).second);
+    }
+    else {
+      // Not enough hogs for this tx.
+      CHECK(stranded_[info.account].insert(&it->second).second);
+    }
   }
 
   return true;
@@ -187,12 +203,11 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
       info->age = averages.average_ages[kHogAgeGroupToSchedule];
       if (info->tx.tx.invocation.gas_limit >
           from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-        // TODO(jhumphri): Need to store this tx somewhere so that we do not
-        // lose it.
         it = infos.erase(it);
-        CHECK_EQ(hash_to_tx_.erase(info->tx_hash), 1UL);
+        CHECK(stranded_[info->account].insert(info).second);
         continue;
       }
+      // TODO(jhumphri): Need to add txs back in if there are now enough hogs.
       CHECK(age_to_tx_[info->age].insert(info).second);
       it++;
     }

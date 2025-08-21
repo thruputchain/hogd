@@ -26,7 +26,7 @@ public:
   schedule(size_t block_size);
 
   bool read_average_hog_age(const ContractAddressBatch &addresses,
-                            HogAgeBatch &ages);
+                            HogAgeBatch &ages, bool force = false);
   bool write_average_hog_age(const HogAgeBatch &ages);
 
   bool find_and_remove_vetted_txs(const Nomination &nomination,
@@ -75,6 +75,9 @@ private:
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
       account_to_tx_;
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
+
+  std::unordered_map<ContractAddress, uint128_t> cached_hogs_;
+  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>> stranded_;
 };
 
 } // namespace hogd
