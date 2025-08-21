@@ -45,6 +45,9 @@ public:
 
   void mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
   {
+    SignedTransactionBatch txs;
+    txs.reserve(hashes.size());
+
     for (const SignedTransactionHash &hash : hashes) {
       TxInfo &info = hash_to_tx_[hash];
       cached_hogs_[info.tx.tx.invocation.invoked_address]
@@ -52,8 +55,10 @@ public:
           to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
                               .num_hogs[kHogAgeGroupToSchedule]) +
                  info.tx.tx.invocation.gas_limit);
+      txs.push_back(info.tx);
       CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
     }
+    CHECK(add_vetted_txs(txs));
   }
 
   bool find_and_remove_vetted_txs(const Nomination &nomination,
@@ -80,7 +85,6 @@ public:
       // accessing an invalidated iterator.
       CHECK_EQ(account_to_tx_[it->second.account].erase(&it->second), 1UL);
       CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
-      hash_to_tx_.erase(it);
     }
     return true;
   }
