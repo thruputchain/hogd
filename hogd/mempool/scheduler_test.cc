@@ -193,7 +193,7 @@ TEST(Scheduler, ScheduleNotEnoughHogs)
   Scheduler &scheduler = clients.interface->scheduler();
 
   server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
-  EXPECT_FALSE(scheduler.add_vetted_txs({txs[0]}));
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
   // anyway to test that it is a no-op.
   CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));

@@ -58,6 +58,9 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
 bool
 Scheduler::write_average_hog_age(const HogAgeBatch &ages)
 {
+  for (const HogAge &a : ages) {
+    cached_hogs_[a.address] = from_xdr(a.num_hogs[kHogAgeGroupToSchedule]);
+  }
   return db_client_.dbcoord_write_hog_ages(ages)() == DbResult::DbResultOK;
 }
 
@@ -90,6 +93,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
+    // TODO(jhumphri): Need to update this to deduct from [cached_hogs_].
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
       CHECK(account_to_tx_[info.account].insert(&it->second).second);
