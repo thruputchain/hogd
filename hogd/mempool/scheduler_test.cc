@@ -21,7 +21,7 @@ constexpr size_t kBlockSize = 100;
 
 } // namespace
 
-TEST(Scheduler, ReadAndWriteAge)
+TEST(Scheduler, ReadAge)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
@@ -33,12 +33,45 @@ TEST(Scheduler, ReadAndWriteAge)
   EXPECT_TRUE(
       scheduler.read_average_hog_age({MempoolTestServer::kAccountAddress},
                                      /*force=*/true));
-  HogAge ret;
-  EXPECT_TRUE(
-      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress, ret));
+  HogAge &ret =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
   EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
+  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
+}
+
+TEST(Scheduler, WriteAge)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddress},
+                                     /*force=*/true));
+  HogAge &ret =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
+            // TODO(jhumphri): Update this, too.
+            to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
+  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
+
+  // Now write a new hog balance.
+  ret.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(5));
+  EXPECT_TRUE(
+      scheduler.write_average_hog_age({MempoolTestServer::kAccountAddress}));
+
+  // Check that we read the new balance back.
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddress},
+                                     /*force=*/true));
+  ret = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddress);
+  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
+            to_xdr(static_cast<uint128_t>(5)));
   EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
 }
 

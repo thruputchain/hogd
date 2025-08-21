@@ -58,10 +58,16 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
 }
 
 bool
-Scheduler::write_average_hog_age(const HogAgeBatch &ages)
+Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
 {
-  for (const HogAge &a : ages) {
-    cached_hogs_[a.address] = a;
+  HogAgeBatch ages;
+  ages.reserve(addresses.size());
+  for (const ContractAddress &a : addresses) {
+    auto it = cached_hogs_.find(a);
+    if (it == cached_hogs_.end()) {
+      return false;
+    }
+    ages.push_back(it->second);
   }
   return db_client_.dbcoord_write_hog_ages(ages)() == DbResult::DbResultOK;
 }
@@ -155,7 +161,8 @@ Scheduler::update_groups(const ContractAddress &account_address)
       to_xdr(static_cast<uint128_t>(0));
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
-  return write_average_hog_age({new_averages});
+  cached_hogs_[account_address] = new_averages;
+  return write_average_hog_age({account_address});
 }
 
 bool
@@ -184,7 +191,8 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
         from_xdr(div_round_up(numerator, denominator));
   }
 
-  return write_average_hog_age({new_averages});
+  cached_hogs_[account_address] = new_averages;
+  return write_average_hog_age({account_address});
 }
 
 bool

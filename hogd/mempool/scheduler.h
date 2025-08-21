@@ -27,17 +27,14 @@ public:
 
   bool read_average_hog_age(const ContractAddressBatch &addresses,
                             bool force = false);
-  bool get_cached_hog_age(const ContractAddress &address, HogAge &ret) const
+  HogAge &get_cached_hog_age(const ContractAddress &address)
   {
     auto it = cached_hogs_.find(address);
-    if (it == cached_hogs_.end()) {
-      return false;
-    }
-    ret = it->second;
-    return true;
+    CHECK(it != cached_hogs_.end());
+    return it->second;
   }
 
-  bool write_average_hog_age(const HogAgeBatch &ages);
+  bool write_average_hog_age(const ContractAddressBatch &addresses);
 
   bool find_and_remove_vetted_txs(const Nomination &nomination,
                                   x23::Vec<ProposedTransaction> &ret)
