@@ -100,9 +100,13 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
-    // TODO(jhumphri): Need to update this to deduct from [cached_hogs_].
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+      cached_hogs_[tx.tx.invocation.invoked_address]
+          .num_hogs[kHogAgeGroupToSchedule] =
+          to_xdr(from_xdr(cached_hogs_[tx.tx.invocation.invoked_address]
+                              .num_hogs[kHogAgeGroupToSchedule]) -
+                 tx.tx.invocation.gas_limit);
       CHECK(account_to_tx_[info.account].insert(&it->second).second);
       CHECK(age_to_tx_[info.age].insert(&it->second).second);
     }
@@ -246,7 +250,7 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
     if (account_to_tx_[i.account].empty()) {
       CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
     }
-    CHECK_EQ(hash_to_tx_.erase(i.tx_hash), 1UL);
+    // CHECK_EQ(hash_to_tx_.erase(i.tx_hash), 1UL);
     it = info.erase(it);
   }
 }

@@ -207,10 +207,12 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   }
   else if (!co_await propose_batch(block_id, txs,
                                    nomination.transaction_nominations)) {
+    // TODO(jhumphri): Deduct hogs for the txs that did complete.
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  scheduler_.mark_txs_executed(nomination.transaction_hashes);
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);

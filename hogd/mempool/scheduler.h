@@ -36,6 +36,26 @@ public:
 
   bool write_average_hog_age(const ContractAddressBatch &addresses);
 
+  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes)
+  {
+    for (const SignedTransactionHash &hash : hashes) {
+      CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    }
+  }
+
+  void mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
+  {
+    for (const SignedTransactionHash &hash : hashes) {
+      TxInfo &info = hash_to_tx_[hash];
+      cached_hogs_[info.tx.tx.invocation.invoked_address]
+          .num_hogs[kHogAgeGroupToSchedule] =
+          to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
+                              .num_hogs[kHogAgeGroupToSchedule]) +
+                 info.tx.tx.invocation.gas_limit);
+      CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    }
+  }
+
   bool find_and_remove_vetted_txs(const Nomination &nomination,
                                   x23::Vec<ProposedTransaction> &ret)
   {
