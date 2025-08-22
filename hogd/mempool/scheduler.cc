@@ -209,21 +209,46 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
   for (size_t i = 0; i < accounts.size(); i++) {
     const ContractAddress &account = accounts[i];
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
-    const HogAge &averages = cached_hogs_[account];
 
+    // Handle existing txs in the runqueue.
     for (auto it = infos.begin(); it != infos.end();) {
       TxInfo *info = *it;
+      const HogAge &averages = cached_hogs_[account];
+
       CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
       info->age = averages.average_ages[kHogAgeGroupToSchedule];
       if (info->tx.tx.invocation.gas_limit >
           from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
         it = infos.erase(it);
-        CHECK(stranded_[info->account].insert(info).second);
+        cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+            from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
+            info->tx.tx.invocation.gas_limit);
+        CHECK(stranded_[account].insert(info).second);
         continue;
       }
-      // TODO(jhumphri): Need to add txs back in if there are now enough hogs.
       CHECK(age_to_tx_[info->age].insert(info).second);
       it++;
+    }
+
+    // Handle txs that are currently stranded. We may now have enough hogs to
+    // add some or all of them to the runqueue.
+    for (auto it = stranded_[account].begin();
+         it != stranded_[account].end();) {
+      TxInfo *info = *it;
+      const HogAge &averages = cached_hogs_[account];
+
+      if (info->tx.tx.invocation.gas_limit >
+          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+        it++;
+      }
+      else {
+        it = infos.erase(it);
+        cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+            from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
+            info->tx.tx.invocation.gas_limit);
+        CHECK(account_to_tx_[account].insert(info).second);
+        CHECK(age_to_tx_[info->age].insert(info).second);
+      }
     }
   }
   return true;
@@ -283,10 +308,66 @@ Scheduler::schedule(size_t block_size)
     }
   }
 
-  // TODO(jhumphri): At some point, we need to deduct the hogs from the account.
-  // Note that we may need to reject transactions in the runqueue if the account
-  // no longer has enough hogs to run them.
   return {hashes, txs};
+}
+
+void
+Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes)
+{
+  for (const SignedTransactionHash &hash : hashes) {
+    CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+  }
+}
+
+SignedTransactionBatch
+Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
+{
+  SignedTransactionBatch txs;
+  txs.reserve(hashes.size());
+
+  for (const SignedTransactionHash &hash : hashes) {
+    auto it = hash_to_tx_.find(hash);
+    CHECK(it != hash_to_tx_.end());
+    TxInfo &info = it->second;
+
+    cached_hogs_[info.tx.tx.invocation.invoked_address]
+        .num_hogs[kHogAgeGroupToSchedule] =
+        to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
+                            .num_hogs[kHogAgeGroupToSchedule]) +
+               info.tx.tx.invocation.gas_limit);
+    txs.push_back(info.tx);
+    CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+  }
+  return txs;
+}
+
+bool
+Scheduler::find_and_remove_vetted_txs(const Nomination &nomination,
+                                      x23::Vec<ProposedTransaction> &ret)
+{
+  CHECK_EQ(nomination.transaction_hashes.size(),
+           nomination.transaction_nominations.size());
+
+  ret.clear();
+  for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
+    const SignedTransactionHash &hash = nomination.transaction_hashes[i];
+    const NominatedTransaction &nominated_tx =
+        nomination.transaction_nominations[i];
+
+    auto it = hash_to_tx_.find(hash);
+    if (it == hash_to_tx_.end()) {
+      return false;
+    }
+    ret.push_back({.signed_tx = it->second.tx,
+                   .nondeterministic_proposal_data =
+                       nominated_tx.nondeterministic_proposal_data});
+
+    // We access [it] below before calling [hash_to_tx_.erase()] to avoid
+    // accessing an invalidated iterator.
+    CHECK_EQ(account_to_tx_[it->second.account].erase(&it->second), 1UL);
+    CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+  }
+  return true;
 }
 
 } // namespace hogd
