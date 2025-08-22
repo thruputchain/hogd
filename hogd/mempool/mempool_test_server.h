@@ -143,6 +143,11 @@ public:
 
     HogAge average;
     memset(&average, 0, sizeof(average));
+    HogDBStatus<HogAge> res = read_address_average_hog_age(*db_, account);
+    if (res.has_value()) {
+      average = *res;
+    }
+
     average.address = account;
     average.average_ages[group] = age;
     average.num_hogs[group] = to_xdr(num_hogs);
