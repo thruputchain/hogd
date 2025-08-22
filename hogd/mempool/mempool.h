@@ -96,7 +96,7 @@ private:
   static SHA256Hash
   get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
 
-  x23::Async<bool>
+  x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
 

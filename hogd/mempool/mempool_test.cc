@@ -16,7 +16,7 @@ namespace hogd {
 
 TEST(Mempool, SubmitUnvetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -27,7 +27,7 @@ TEST(Mempool, SubmitUnvetted)
 
 TEST(Mempool, SubmitVetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -39,7 +39,7 @@ TEST(Mempool, SubmitVetted)
 
 TEST(Mempool, Nominate)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -55,7 +55,7 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, NominateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -71,7 +71,7 @@ TEST(Mempool, NominateBatch)
 
 TEST(Mempool, NominateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
@@ -84,7 +84,7 @@ TEST(Mempool, NominateEmpty)
 
 TEST(Mempool, Validate)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -107,7 +107,7 @@ TEST(Mempool, Validate)
 
 TEST(Mempool, ValidateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -130,7 +130,7 @@ TEST(Mempool, ValidateBatch)
 
 TEST(Mempool, ValidateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
@@ -144,7 +144,7 @@ TEST(Mempool, ValidateEmpty)
 
 TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -172,7 +172,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
 TEST(Mempool, ValidateBatchMissingTx)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   SchedulerNominationResult res_nominate;

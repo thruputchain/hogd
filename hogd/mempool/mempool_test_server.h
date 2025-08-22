@@ -52,8 +52,11 @@ namespace hogd {
 class MempoolTestServer {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
-  static constexpr ContractAddress kAccountAddress =
-      NativeContractTestFramework::make_contract_address(3);
+  static constexpr std::array<ContractAddress, 4> kAccountAddresses = {
+      NativeContractTestFramework::make_contract_address(3),
+      NativeContractTestFramework::make_contract_address(4),
+      NativeContractTestFramework::make_contract_address(5),
+      NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
     : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
@@ -93,7 +96,7 @@ public:
     {
       std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
 
-      // Write contract to hogdb
+      // Write contract to hogdb.
       auto bytes = x23::serialize(*contract);
       auto contract_hash = sha256(*contract);
       auto ret =
@@ -102,13 +105,15 @@ public:
         throw std::runtime_error("Failed to write contract");
       }
 
-      // Write deployment
-      ret = write_address_wasm_hash(*db_, kAccountAddress, contract_hash);
-      if (!ret) {
-        throw std::runtime_error("Failed to write deployment");
-      }
+      for (const ContractAddress &address : kAccountAddresses) {
+        // Write deployment.
+        ret = write_address_wasm_hash(*db_, address, contract_hash);
+        if (!ret) {
+          throw std::runtime_error("Failed to write deployment");
+        }
 
-      set_up_grant_storage_token();
+        set_up_grant_storage_token(address);
+      }
     }
 
     coordinator_sched_port_ =
@@ -130,6 +135,25 @@ public:
     executor_coord_server_.shut_down();
   }
 
+  void set_hogs(const ContractAddress &account, int group, BlockHeight age,
+                uint128_t num_hogs)
+  {
+    CHECK_GE(group, 0);
+    CHECK_LT(group, kHogAgeNumGroups);
+
+    HogAge average;
+    memset(&average, 0, sizeof(average));
+    HogDBStatus<HogAge> res = read_address_average_hog_age(*db_, account);
+    if (res.has_value()) {
+      average = *res;
+    }
+
+    average.address = account;
+    average.average_ages[group] = age;
+    average.num_hogs[group] = to_xdr(num_hogs);
+    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
+  }
+
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
   uint16_t coordinator_port() const { return coordinator_port_; }
@@ -141,28 +165,23 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 1024 * 1024 * 400; // 400 MiB.
 
-  void set_up_grant_storage_token()
+  void set_up_grant_storage_token(const ContractAddress &address)
   {
     static_assert(kStorageTokenAmount >= 0);
     static_assert(kStorageTokenAmount <=
                   uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
     // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
-    Address addr(kAccountAddress);
+    Address addr(address);
     auto ret = write_address_balance(*db_, addr, kStorageTokenAmount);
     if (!ret) {
       throw std::runtime_error("Failed to grant storage token");
     }
 
-    HogAge average;
-    memset(&average, 0, sizeof(average));
-    average.address = kAccountAddress;
-    average.num_hogs[kHogAgeGroupToSchedule] =
-        // TODO(jhumphri): Multiply by something other than 10. Or just give the
-        // account unlimited hogs with UINT128_MAX.
-        to_xdr(static_cast<uint128_t>(5'000'000'000 * 10));
-    average.average_ages[kHogAgeGroupToSchedule] = 1;
-    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
+    // TODO(jhumphri): Multiply by something other than 10. Or just give the
+    // account unlimited hogs with UINT128_MAX.
+    set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
+             /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
 
   // This is a fake coordinator server that the executor registers itself with
@@ -170,8 +189,8 @@ private:
   Coordinator coordinator_server_;
   uint16_t coordinator_port_;
 
-  // This is a fake coordinator server that the mempool notifies when txs become
-  // vetted.
+  // This is a fake coordinator server that the mempool notifies when txs
+  // become vetted.
   CoordinatorSched coordinator_sched_server_;
   uint16_t coordinator_sched_port_;
 
