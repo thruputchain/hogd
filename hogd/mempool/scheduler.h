@@ -15,7 +15,7 @@ class Scheduler {
 public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
-  bool add_vetted_txs(const SignedTransactionBatch &txs);
+  void add_vetted_txs(const SignedTransactionBatch &txs);
   bool update_groups(const ContractAddress &account_address);
   bool process_received_hogs(const ContractAddress &account_address,
                              uint128_xdr num_received,

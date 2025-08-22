@@ -72,7 +72,7 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
   return db_client_.dbcoord_write_hog_ages(ages)() == DbResult::DbResultOK;
 }
 
-bool
+void
 Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 {
   // TODO(jhumphri): Optimize this with coroutines.
@@ -83,11 +83,9 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
       continue;
     }
 
-    if (!read_average_hog_age({tx.tx.invocation.invoked_address})) {
-      // TODO(jhumphri): Need some way of specifying which txs from previous
-      // iterations were successfully added to the runqueue.
-      return false;
-    }
+    // The mempool should not call [add_vetted_txs()] for txs that have an
+    // invalid account.
+    CHECK(read_average_hog_age({tx.tx.invocation.invoked_address}));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     // TODO(jhumphri): Need to avoid enqueuing txs that we will not have enough
     // hogs to execute. Currently, we can enqueue infinite txs for an account as
@@ -115,8 +113,6 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
       CHECK(stranded_[info.account].insert(&it->second).second);
     }
   }
-
-  return true;
 }
 
 bool

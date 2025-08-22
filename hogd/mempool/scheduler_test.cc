@@ -84,7 +84,7 @@ TEST(Scheduler, AddVettedTx)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
@@ -96,9 +96,9 @@ TEST(Scheduler, AddVettedTxDuplicate)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
   // Now add the transaction a second time.
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
 }
 
 TEST(Scheduler, ScheduleSingle)
@@ -110,7 +110,7 @@ TEST(Scheduler, ScheduleSingle)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -131,7 +131,7 @@ TEST(Scheduler, TxFailed)
   Scheduler &scheduler = clients.interface->scheduler();
 
   {
-    EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+    scheduler.add_vetted_txs({txs[0]});
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -149,7 +149,7 @@ TEST(Scheduler, TxFailed)
 
   // Check that the correct number of hogs was deducted again.
   {
-    EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+    scheduler.add_vetted_txs({txs[0]});
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -187,7 +187,7 @@ TEST(Scheduler, ScheduleMultipleOneBlock)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  scheduler.add_vetted_txs(txs);
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), kBlockSize);
   for (const SignedTransaction &signed_tx : scheduled) {
@@ -208,7 +208,7 @@ TEST(Scheduler, ScheduleMultipleMultipleBlocks)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  scheduler.add_vetted_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
@@ -238,7 +238,7 @@ TEST(Scheduler, ScheduleMultipleMultipleBlocksNonMultiple)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs(txs));
+  scheduler.add_vetted_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
@@ -275,7 +275,7 @@ TEST(Scheduler, ScheduleNotEnoughHogs)
   Scheduler &scheduler = clients.interface->scheduler();
 
   server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
   // anyway to test that it is a no-op.
   CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));
@@ -292,7 +292,7 @@ TEST(Scheduler, ScheduleNotEnoughHogsAfterAdded)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  scheduler.add_vetted_txs({txs[0]});
   // Setting the account's hogs to 0 *after* adding the tx to the scheduler
   // above.
   server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);

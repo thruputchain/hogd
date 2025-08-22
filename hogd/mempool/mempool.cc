@@ -35,7 +35,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted. This vetting logic will include the authentication logic from
   // Geoff's proposal.
-  CHECK(scheduler_.add_vetted_txs(batch));
+  scheduler_.add_vetted_txs(batch);
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
@@ -43,7 +43,7 @@ x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
-  CHECK(scheduler_.add_vetted_txs(batch));
+  scheduler_.add_vetted_txs(batch);
   co_return;
 }
 
