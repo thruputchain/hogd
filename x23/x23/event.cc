@@ -2,6 +2,7 @@
 #include <cerrno>
 
 #include <fcntl.h>
+#include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -21,60 +22,45 @@ namespace x23 {
 namespace detail {
 
 Errno
-WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
+WriteBuffer::Service::write(BufVec &work)
 {
-  if (service_lock_.try_lock()) {
-    std::unique_lock g(service_lock_, std::adopt_lock);
-    auto ptr = writer_.take();
-    auto res = ptr->write_or_append(fd.get(), std::move(buf));
-    if (res && !ptr->empty()) {
-      ptr.reset();
-      service(cp, fd, std::move(g));
-    }
-    else {
-      if (!res)
-        cp.poison(fd);
-      g.unlock();
-    }
-    return res.error_or(0);
+  cp_.write_clear(fd_);
+  if (auto res = work.write(fd_); !res) {
+    cp_.poison(fd_);
+    return res.error();
   }
+  return 0;
+}
 
-  writer_->append(std::move(buf));
-  if (service_lock_.try_lock())
-    service(cp, fd, {service_lock_, std::adopt_lock});
+Errno
+WriteBuffer::Service::go()
+{
+  wb_.want_write_ = true;
+  if (!lk_.try_lock())
+    return 0;
+  BufVec work = get_work();
+  // Try writing once before allocating coroutine
+  if (work.empty() && !work_needed())
+    return 0;
+  if (auto err = write(work))
+    return err;
+  worker(std::move(*this), std::move(work));
   return 0;
 }
 
 Detached
-WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
-                     std::unique_lock<std::mutex> g)
+WriteBuffer::Service::worker(Service self, BufVec work)
 {
-  assert(g.owns_lock() && g.mutex() == &service_lock_);
-
-  co_await cp.pool_.bg();
   for (;;) {
-    BufVec work;
-    if (auto ptr = writer_.take(); work.swap(*ptr), work.empty()) {
-      // If we are here, we must guarantee that at least one thread
-      // concurrently appending to writer_ will be able to acquire
-      // service_lock_.  That means we must release service_lock_
-      // before writer_.
-      g.unlock();
-      co_return;
+    while (!work.empty()) {
+      co_await self.cp_.write_wait(self.fd_);
+      if (self.write(work))
+	co_return;
     }
 
-    for (;;) {
-      cp.write_clear(fd);
-      auto res = work.write(fd);
-      if (!res) { // write returned error
-        cp.poison(fd);
-        co_return;
-      }
-      if (!*res) // no data left to write
-        break;
-      if (Errno err = co_await cp.write_wait(fd))
-        co_return;
-    }
+    if (!self.work_needed())
+      co_return;
+    work = self.get_work();
   }
 }
 

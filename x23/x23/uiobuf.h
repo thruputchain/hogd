@@ -140,6 +140,13 @@ struct BufVec {
   size_t skip_{};
 
   bool empty() const noexcept { return bufs_.empty(); }
+  size_t nbytes() const noexcept
+  {
+    size_t ret = -skip_;
+    for (const auto &b : bufs_)
+      ret += b.size();
+    return ret;
+  }
   void clear()
   {
     bufs_.clear();

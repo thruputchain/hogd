@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <stop_token>
 
 #include <sys/socket.h>
@@ -130,13 +131,61 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
 using ReadBuffer = GenReadBuffer<0x10000>;
 
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
-  std::mutex service_lock_;
-  MVar<BufVec> writer_;
+  static constexpr size_t kFlushThreshold = ReadBuffer::kStructSize;
 
-  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf);
+  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  {
+    writer_->append(std::move(buf));
+    return flush(cp, fd);
+  }
+  Errno buffer(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  {
+    if (auto bufsz = buf.size(); bufsz < kFlushThreshold)
+      if (auto ptr = writer_.take(); ptr->nbytes() < kFlushThreshold - bufsz) {
+        ptr->append(std::move(buf));
+        return 0;
+      }
+    return write(cp, fd, std::move(buf));
+  }
+  Errno flush(CoroPoll &cp, BorrowedFd fd)
+  {
+    return Service{*this, cp, fd}.go();
+  }
 
 private:
-  Detached service(CoroPoll &cp, BorrowedFd fd, std::unique_lock<std::mutex> g);
+  std::mutex service_lock_;
+  MVar<BufVec> writer_;
+  std::atomic_bool want_write_{false};
+
+  class Service {
+  public:
+    [[nodiscard]] Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
+      : wb_(wb), cp_(cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+    {}
+    Errno go();
+
+  private:
+    WriteBuffer &wb_;
+    CoroPoll &cp_;
+    BorrowedFd fd_;
+    std::unique_lock<std::mutex> lk_;
+
+    Service(Service &&) noexcept = default;
+    bool work_needed()
+    {
+      if (wb_.want_write_)
+        return true;
+      lk_.unlock();
+      return wb_.want_write_ && lk_.try_lock();
+    }
+    BufVec get_work()
+    {
+      wb_.want_write_ = false;
+      return wb_.writer_.exchange({});
+    }
+    Errno write(BufVec &work);
+    static Detached worker(Service self, BufVec work);
+  };
 };
 
 struct BufHolder {
@@ -215,6 +264,8 @@ protected:
   void wake();
   std::shared_ptr<ReadBuffer> get_reader(BorrowedFd fd);
   std::shared_ptr<WriteBuffer> get_writer(BorrowedFd fd);
+  std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+  get_rw(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
