@@ -135,13 +135,17 @@ public:
     executor_coord_server_.shut_down();
   }
 
-  void set_hogs(const ContractAddress &account, uint128_t num_hogs)
+  void set_hogs(const ContractAddress &account, uint32_t group, BlockHeight age,
+                uint128_t num_hogs)
   {
+    CHECK_GE(group, 0);
+    CHECK_LT(group, kHogAgeNumGroups);
+
     HogAge average;
     memset(&average, 0, sizeof(average));
     average.address = account;
-    average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(num_hogs);
-    average.average_ages[kHogAgeGroupToSchedule] = 1;
+    average.average_ages[group] = age;
+    average.num_hogs[group] = to_xdr(num_hogs);
     EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
   }
 
@@ -171,7 +175,8 @@ private:
 
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
     // account unlimited hogs with UINT128_MAX.
-    set_hogs(address, /*num_hogs=*/5'000'000'000 * 10);
+    set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
+             /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
 
   // This is a fake coordinator server that the executor registers itself with

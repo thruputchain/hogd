@@ -158,11 +158,8 @@ Scheduler::update_groups(const ContractAddress &account_address)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account_address] = new_averages;
-
-  // TODO(jhumphri): The txs have a new average age, so we need to move them on
-  // the runqueue.
-
   CHECK(write_average_hog_age({account_address}));
+  update_accounts_helper({account_address});
 }
 
 void
@@ -191,13 +188,22 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
+  // No need to call [update_accounts_helper({account_address})] because
+  // receiving hogs does not affect the [kHogAgeGroupReceived] group. So in
+  // other words, receiving hogs does not affect the order in which txs are
+  // scheduled.
 }
 
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
   CHECK(read_average_hog_age(accounts, /*force=*/true));
+  update_accounts_helper(accounts);
+}
 
+void
+Scheduler::update_accounts_helper(const x23::Vec<ContractAddress> &accounts)
+{
   for (size_t i = 0; i < accounts.size(); i++) {
     const ContractAddress &account = accounts[i];
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
@@ -241,6 +247,9 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
         CHECK(account_to_tx_[account].insert(info).second);
         CHECK(age_to_tx_[info->age].insert(info).second);
       }
+    }
+    if (stranded_[account].empty()) {
+      CHECK_EQ(stranded_.erase(account), 1UL);
     }
   }
 }
