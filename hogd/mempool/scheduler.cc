@@ -87,9 +87,6 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     // invalid account.
     CHECK(read_average_hog_age({tx.tx.invocation.invoked_address}));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
-    // TODO(jhumphri): Need to avoid enqueuing txs that we will not have enough
-    // hogs to execute. Currently, we can enqueue infinite txs for an account as
-    // long as there are enough hogs to execute one of them.
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo info{.age = age,
                       .account = tx.tx.invocation.invoked_address,
@@ -115,12 +112,10 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
   }
 }
 
-bool
+void
 Scheduler::update_groups(const ContractAddress &account_address)
 {
-  if (!read_average_hog_age({account_address})) {
-    return false;
-  }
+  CHECK(read_average_hog_age({account_address}));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages;
   new_averages.address = averages.address;
@@ -162,17 +157,15 @@ Scheduler::update_groups(const ContractAddress &account_address)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account_address] = new_averages;
-  return write_average_hog_age({account_address});
+  CHECK(write_average_hog_age({account_address}));
 }
 
-bool
+void
 Scheduler::process_received_hogs(const ContractAddress &account_address,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
-  if (!read_average_hog_age({account_address})) {
-    return false;
-  }
+  CHECK(read_average_hog_age({account_address}));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages = averages;
 
@@ -192,15 +185,13 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   }
 
   cached_hogs_[account_address] = new_averages;
-  return write_average_hog_age({account_address});
+  CHECK(write_average_hog_age({account_address}));
 }
 
-bool
+void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
-  if (!read_average_hog_age(accounts)) {
-    return false;
-  }
+  CHECK(read_average_hog_age(accounts));
 
   for (size_t i = 0; i < accounts.size(); i++) {
     const ContractAddress &account = accounts[i];
@@ -247,7 +238,6 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
       }
     }
   }
-  return true;
 }
 
 void

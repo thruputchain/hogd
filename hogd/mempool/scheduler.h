@@ -16,11 +16,11 @@ public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
   void add_vetted_txs(const SignedTransactionBatch &txs);
-  bool update_groups(const ContractAddress &account_address);
-  bool process_received_hogs(const ContractAddress &account_address,
+  void update_groups(const ContractAddress &account_address);
+  void process_received_hogs(const ContractAddress &account_address,
                              uint128_xdr num_received,
                              BlockHeight current_block);
-  bool update_accounts(const x23::Vec<ContractAddress> &accounts);
+  void update_accounts(const x23::Vec<ContractAddress> &accounts);
 
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(size_t block_size);
