@@ -278,7 +278,7 @@ TEST(Scheduler, ScheduleNotEnoughHogs)
   scheduler.add_vetted_txs({txs[0]});
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
   // anyway to test that it is a no-op.
-  CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));
+  scheduler.update_accounts({MempoolTestServer::kAccountAddress});
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   EXPECT_TRUE(scheduled.empty());
 }
@@ -296,7 +296,7 @@ TEST(Scheduler, ScheduleNotEnoughHogsAfterAdded)
   // Setting the account's hogs to 0 *after* adding the tx to the scheduler
   // above.
   server.set_hogs(MempoolTestServer::kAccountAddress, /*num_hogs=*/0);
-  CHECK(scheduler.update_accounts({MempoolTestServer::kAccountAddress}));
+  scheduler.update_accounts({MempoolTestServer::kAccountAddress});
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   EXPECT_TRUE(scheduled.empty());
 }

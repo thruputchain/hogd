@@ -85,7 +85,8 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 
     // The mempool should not call [add_vetted_txs()] for txs that have an
     // invalid account.
-    CHECK(read_average_hog_age({tx.tx.invocation.invoked_address}));
+    CHECK(read_average_hog_age({tx.tx.invocation.invoked_address},
+                               /*force=*/false));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo info{.age = age,
@@ -115,7 +116,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 void
 Scheduler::update_groups(const ContractAddress &account_address)
 {
-  CHECK(read_average_hog_age({account_address}));
+  CHECK(read_average_hog_age({account_address}, /*force=*/true));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages;
   new_averages.address = averages.address;
@@ -157,6 +158,10 @@ Scheduler::update_groups(const ContractAddress &account_address)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account_address] = new_averages;
+
+  // TODO(jhumphri): The txs have a new average age, so we need to move them on
+  // the runqueue.
+
   CHECK(write_average_hog_age({account_address}));
 }
 
@@ -165,7 +170,7 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
-  CHECK(read_average_hog_age({account_address}));
+  CHECK(read_average_hog_age({account_address}, /*force=*/false));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages = averages;
 
@@ -191,7 +196,7 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
-  CHECK(read_average_hog_age(accounts));
+  CHECK(read_average_hog_age(accounts, /*force=*/true));
 
   for (size_t i = 0; i < accounts.size(); i++) {
     const ContractAddress &account = accounts[i];
@@ -207,12 +212,12 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
       if (info->tx.tx.invocation.gas_limit >
           from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
         it = infos.erase(it);
-        cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
-            from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
-            info->tx.tx.invocation.gas_limit);
         CHECK(stranded_[account].insert(info).second);
         continue;
       }
+      cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+          from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
+          info->tx.tx.invocation.gas_limit);
       CHECK(age_to_tx_[info->age].insert(info).second);
       it++;
     }
@@ -229,7 +234,7 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
         it++;
       }
       else {
-        it = infos.erase(it);
+        it = stranded_[account].erase(it);
         cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
             from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
             info->tx.tx.invocation.gas_limit);
