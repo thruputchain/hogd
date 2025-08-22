@@ -135,7 +135,7 @@ public:
     executor_coord_server_.shut_down();
   }
 
-  void set_hogs(const ContractAddress &account, uint32_t group, BlockHeight age,
+  void set_hogs(const ContractAddress &account, int group, BlockHeight age,
                 uint128_t num_hogs)
   {
     CHECK_GE(group, 0);

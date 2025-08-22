@@ -41,7 +41,7 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
   }
   else {
     for (const ContractAddress &address : addresses) {
-      if (!cached_hogs_.count(address)) {
+      if (!cached_hogs_.contains(address)) {
         to_send.push_back(address);
       }
     }
@@ -204,8 +204,7 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 void
 Scheduler::update_accounts_helper(const x23::Vec<ContractAddress> &accounts)
 {
-  for (size_t i = 0; i < accounts.size(); i++) {
-    const ContractAddress &account = accounts[i];
+  for (const auto &account : accounts) {
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
     // Handle existing txs in the runqueue.

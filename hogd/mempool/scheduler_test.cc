@@ -2,12 +2,14 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <vector>
 
 #include "db_coord.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
 #include "hogd/mempool/scheduler.h"
@@ -234,7 +236,7 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
 
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, kBlockSize * kNumBlocks + kRemainder);
+      generate_txs(fib_client, (kBlockSize * kNumBlocks) + kRemainder);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
