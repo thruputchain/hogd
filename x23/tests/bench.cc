@@ -101,7 +101,8 @@ time_maybesync_return_sync(benchmark::State &state)
 {
   x23::Callback<int> dummy{[](int) {}};
   for (auto _ : state)
-    x23::MaybeAsync{0}(dummy);
+    // Specifying <int> works around gcc internal compiler error
+    x23::MaybeAsync<int>{0}(dummy);
 }
 BENCHMARK(time_maybesync_return_sync);
 
@@ -110,7 +111,8 @@ time_maybesync_return_async(benchmark::State &state)
 {
   x23::Callback<int> dummy{[](int) {}};
   for (auto _ : state)
-    x23::MaybeAsync{x23::async_return(0)}(dummy);
+    // Specifying <int> works around gcc internal compiler error
+    x23::MaybeAsync<int>{x23::async_return(0)}(dummy);
 }
 BENCHMARK(time_maybesync_return_async);
 
