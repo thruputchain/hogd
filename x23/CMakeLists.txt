@@ -57,6 +57,7 @@ include(cmake/epoll.cmake)
 include(cmake/getcpu.cmake)
 include(cmake/pause.cmake)
 include(cmake/stacktrace.cmake)
+include(cmake/coroICE.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
