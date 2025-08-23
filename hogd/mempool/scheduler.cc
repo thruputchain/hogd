@@ -57,6 +57,14 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
   return true;
 }
 
+HogAge &
+Scheduler::get_cached_hog_age(const ContractAddress &address)
+{
+  auto it = cached_hogs_.find(address);
+  CHECK(it != cached_hogs_.end());
+  return it->second;
+}
+
 bool
 Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
 {
@@ -114,7 +122,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 }
 
 void
-Scheduler::update_groups(const ContractAddress &account_address)
+Scheduler::cycle_groups(const ContractAddress &account_address)
 {
   CHECK(read_average_hog_age({account_address}, /*force=*/true));
   const HogAge &averages = cached_hogs_[account_address];

@@ -366,7 +366,7 @@ TEST(Scheduler, UpdateGroupsBasic)
     EXPECT_TRUE(scheduled.empty());
   }
 
-  scheduler.update_groups(MempoolTestServer::kAccountAddresses[0]);
+  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
   // Check that the correct number of hogs was moved into
   // [kHogAgeGroupToSchedule] and that the correct number of hogs was deducted
   // for the tx.
@@ -437,7 +437,7 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
   EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 90);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000 * 2);
 
-  scheduler.update_groups(MempoolTestServer::kAccountAddresses[0]);
+  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 20);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 3);
@@ -446,17 +446,17 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
             5'000'000'000 * 2);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 
-  scheduler.update_groups(MempoolTestServer::kAccountAddresses[0]);
+  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 48);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 5);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 
-  // Calling [scheduler.update_groups()] again should not do anything as there
+  // Calling [scheduler.cycle_groups()] again should not do anything as there
   // are no hogs to move between groups (hogs in the [kHogAgeGroupToSchedule]
   // group cannot be moved to another group, and the other groups have no hogs).
-  scheduler.update_groups(MempoolTestServer::kAccountAddresses[0]);
+  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 48);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 5);
