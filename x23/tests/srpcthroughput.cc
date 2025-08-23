@@ -90,21 +90,11 @@ formatL(uint64_t v)
   return ret;
 }
 
-template<bool COND, typename Type, typename... Args>
-inline auto
-make_if(Args &&...args)
-{
-  if constexpr (COND)
-    return Type(std::forward<Args>(args)...);
-  else
-    return std::monostate{};
-}
-
 template<bool DATA, bool LATENCY>
 inline void
 do_call_loop(std::stop_token st, auto client)
 {
-  auto bytes = make_if<DATA, Data>(*opt_data, 0xc7);
+  auto bytes = make_if<DATA, Data>(opt_data.value_or(0), 0xc7);
   auto ls = make_if<LATENCY, LatencyStats<>>();
   auto start = make_if<LATENCY, fastclock::time_point>();
   uint64_t ctr = 0;

@@ -95,13 +95,15 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
   GenReadBuffer() noexcept = default;
   GenReadBuffer(GenReadBuffer &&) noexcept = delete;
 
+  size_t nbuffered() const noexcept { return stop_ - start_; }
+
   ssize_t operator()(int fd, void *buf, size_t len)
   {
     if (len == 0)
       return 0;
     assert(len <= PTRDIFF_MAX);
 
-    if (size_t buflen = stop_ - start_) {
+    if (size_t buflen = nbuffered()) {
       size_t n = std::min(len, buflen);
       memcpy(buf, m_.data() + start_, n);
       start_ += n;
@@ -160,28 +162,29 @@ private:
   class Service {
   public:
     [[nodiscard]] Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
-      : wb_(wb), cp_(cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+      : wb_(&wb), cp_(cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
     {}
     Errno go();
 
   private:
-    WriteBuffer &wb_;
+    WriteBuffer *wb_;
     CoroPoll &cp_;
     BorrowedFd fd_;
     std::unique_lock<std::mutex> lk_;
+    std::shared_ptr<WriteBuffer> wbref_;
 
     Service(Service &&) noexcept = default;
     bool work_needed()
     {
-      if (wb_.want_write_)
+      if (wb_->want_write_)
         return true;
       lk_.unlock();
-      return wb_.want_write_ && lk_.try_lock();
+      return wb_->want_write_ && lk_.try_lock();
     }
     BufVec get_work()
     {
-      wb_.want_write_ = false;
-      return wb_.writer_.exchange({});
+      wb_->want_write_ = false;
+      return wb_->writer_.exchange({});
     }
     Errno write(BufVec &work);
     static Detached worker(Service self, BufVec work);
@@ -385,9 +388,11 @@ public:
   // Read len bytes from fd and append them to *out.  If full is true,
   // will only read less than n bytes if there is an EOF.  Otherwise,
   // if full is false, it will return however many bytes it got from
-  // the first successful call to read.
+  // the first successful call to read.  If sync is true, then will
+  // flush any delayed writes when the read buffer is empty.
   Async<std::expected<size_t, Errno>> read(BorrowedFd fd, Buf *out, size_t len,
-                                           bool full = true SLOC_PARM);
+                                           bool full = true,
+                                           bool sync = false SLOC_PARM);
 
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
@@ -398,12 +403,19 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
 
-  // Write data to fd, but return immediately.  Returns EINVAL if the
-  // file descriptor is poisoned, but otherwise doesn't guarantee to
-  // return an error if the write fails, as the write could happen
-  // after it returns.  Unlike write, it is safe to call this function
-  // concurrently; the writes will be sequenced one after the other.
-  Errno bgwrite(BorrowedFd fd, Buf data);
+  // Asynchronous write.  Writes data to fd, but returns immediately
+  // if some or all of the data will continue to be written in the
+  // background.  Returns EINVAL if the file descriptor is poisoned,
+  // but otherwise doesn't guarantee to return an error if the write
+  // fails, as the write could happen after it returns.  Unlike write,
+  // it is safe to call this function concurrently; the writes will be
+  // sequenced one after the other.
+  Errno awrite(BorrowedFd fd, Buf data);
+
+  // Delayed write will enqueue data but not flush it until the next
+  // write or unbuffered sread.  Like dwrite, multiple threads can
+  // call this function simultaneously.
+  Errno dwrite(BorrowedFd fd, Buf data);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.

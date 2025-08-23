@@ -1,11 +1,11 @@
 
 #include <cerrno>
+#include <csignal>
 
 #include <fcntl.h>
 #include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
@@ -35,7 +35,7 @@ WriteBuffer::Service::write(BufVec &work)
 Errno
 WriteBuffer::Service::go()
 {
-  wb_.want_write_ = true;
+  wb_->want_write_ = true;
   if (!lk_.try_lock())
     return 0;
   BufVec work = get_work();
@@ -44,6 +44,7 @@ WriteBuffer::Service::go()
     return 0;
   if (auto err = write(work))
     return err;
+  wbref_ = wb_->shared_from_this();
   worker(std::move(*this), std::move(work));
   return 0;
 }
@@ -55,7 +56,7 @@ WriteBuffer::Service::worker(Service self, BufVec work)
     while (!work.empty()) {
       co_await self.cp_.write_wait(self.fd_);
       if (self.write(work))
-	co_return;
+        co_return;
     }
 
     if (!self.work_needed())
@@ -71,7 +72,7 @@ CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
   pollthread_ = std::thread(&CoroPoll::loop, this);
   if (ignore_sigpipe) {
     ignore_sigpipe = false;
-    signal(SIGPIPE, SIG_IGN);
+    std::signal(SIGPIPE, SIG_IGN);
   }
 }
 
@@ -93,14 +94,22 @@ CoroPoll::loop()
 }
 
 Async<std::expected<size_t, Errno>>
-CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full SLOC_ARG)
+CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
+               bool sync SLOC_ARG)
 {
   size_t startsize = out->size();
   while (len > 0) {
     read_clear(fd);
-    auto r = get_reader(fd);
+    std::shared_ptr<detail::ReadBuffer> r;
+    std::shared_ptr<detail::WriteBuffer> w;
+    if (sync)
+      std::tie(r, w) = get_rw(fd);
+    else
+      r = get_reader(fd);
     if (!r)
       co_return EBADF;
+    if (sync && len > r->nbuffered())
+      w->flush(*this, fd);
     if (auto res = r->read(fd, out, len)) {
       len -= *res;
       if (*res == 0 || !full)
@@ -136,12 +145,21 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 }
 
 Errno
-CoroPoll::bgwrite(BorrowedFd fd, Buf data)
+CoroPoll::awrite(BorrowedFd fd, Buf data)
 {
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
   return w->write(*this, fd, std::move(data));
+}
+
+Errno
+CoroPoll::dwrite(BorrowedFd fd, Buf data)
+{
+  auto w = get_writer(fd);
+  if (!w)
+    return EBADF;
+  return w->buffer(*this, fd, std::move(data));
 }
 
 Async<std::expected<void, Errno>>
