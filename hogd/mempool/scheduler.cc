@@ -46,8 +46,11 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
       }
     }
   }
+  if (to_send.empty()) {
+    return true;
+  }
 
-  HogAgeResult res = db_client_.dbcoord_get_hog_ages(addresses)();
+  HogAgeResult res = db_client_.dbcoord_get_hog_ages(to_send)();
   if (res.result() != DbResult::DbResultOK) {
     return false;
   }
@@ -167,7 +170,7 @@ Scheduler::cycle_groups(const ContractAddress &account_address)
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
-  update_accounts_helper({account_address});
+  update_accounts({account_address});
 }
 
 void
@@ -196,21 +199,13 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
-  // No need to call [update_accounts_helper({account_address})] because
-  // receiving hogs does not affect the [kHogAgeGroupReceived] group. So in
-  // other words, receiving hogs does not affect the order in which txs are
-  // scheduled.
+  // No need to call [update_accounts({account_address})] because receiving hogs
+  // does not affect the [kHogAgeGroupReceived] group. So in other words,
+  // receiving hogs does not affect the order in which txs are scheduled.
 }
 
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
-{
-  CHECK(read_average_hog_age(accounts, /*force=*/true));
-  update_accounts_helper(accounts);
-}
-
-void
-Scheduler::update_accounts_helper(const x23::Vec<ContractAddress> &accounts)
 {
   for (const auto &account : accounts) {
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];

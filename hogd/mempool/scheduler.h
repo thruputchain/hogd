@@ -100,7 +100,6 @@ private:
     SignedTransaction tx;
   };
 
-  void update_accounts_helper(const x23::Vec<ContractAddress> &accounts);
   void add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                          x23::Vec<SignedTransactionHash> &hashes,
                          x23::Vec<SignedTransaction> &txs);
