@@ -1,5 +1,6 @@
 // -*- C++ -*-
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <functional>
@@ -14,18 +15,21 @@ using std::size_t;
 
 // A heap that gives you a HeapIndex handle you can use to remove
 // arbitrary elements from the heap.  The HeapIndex is updated as
-// things shift around the heap, so that the Heap itself can just be a
-// big array.
-template<typename T, typename Cmp = std::less<T>, size_t Degree = 4>
+// things shift around the heap, allowing the Heap itself to be a big
+// array.
+template<typename T, typename Cmp = std::ranges::less, size_t Degree = 4>
+requires (Degree >= 2)
 class Heap {
+  using value_type = T;
+
 public:
   class HeapIndex {
   public:
-    HeapIndex() = default;
+    HeapIndex() noexcept = default;
 
     // non-moveable, because the Heap maintains a back pointer to the
     // HeapIndex to update it.
-    HeapIndex(HeapIndex &&) = delete;
+    HeapIndex(HeapIndex &&) noexcept = delete;
 
     // True if it corresponds to a valid index that can be removed.
     explicit operator bool() const { return idx_ >= 0; }
@@ -37,9 +41,9 @@ public:
     friend Heap;
   };
 
-  Heap() = default;
-  Heap(Heap &&) = default;
-  Heap &operator=(Heap &&) = default;
+  Heap() noexcept = default;
+  Heap(Heap &&) noexcept = default;
+  Heap &operator=(Heap &&) noexcept = default;
 
   // Insert a new element in the Heap.  If ip is non-NULL, it will be
   // filled in with a HeapIndex that can be used to fetch or remove
@@ -47,31 +51,30 @@ public:
   template<typename U> void insert(U &&u, HeapIndex *ip = nullptr)
   {
     size_t i = elems_.size();
-    elems_.emplace_back(Element{std::forward<U>(u), ip});
+    elems_.emplace_back(std::forward<U>(u), ip);
     if (ip)
       ip->idx_ = i;
     sift_up(i, false);
   }
 
+  size_t size() const noexcept { return elems_.size(); }
   bool empty() const { return elems_.empty(); }
 
-  // True if there are items in the Heap.
-  explicit operator bool() const { return !empty(); }
-
   // Return a reference to the least element in the Heap.
-  T &top() { return elems_.front().t_; }
+  decltype(auto) top(this auto &&self) { return self.elems_.front().t_; }
 
   // Remove the least element from the Heap.
   void pop()
   {
+    assert(!empty());
     HeapIndex *ip = elems_.front().ip_;
     if (elems_.size() > 1) {
       swap(elems_.front(), elems_.back());
-      elems_.resize(elems_.size() - 1);
+      elems_.pop_back();
       sift_down(0);
     }
     else
-      elems_.resize(0);
+      elems_.pop_back();
     if (ip)
       ip->idx_ = -1;
   }
@@ -85,38 +88,45 @@ public:
   }
 
   // Remove an arbitrary element of the Heap given its HeapIndex
-  void remove(const HeapIndex &ip) { remove_index(ip.idx_); }
-
-  // Access an element in the Heap given its HeapIndex
-  T &operator[](const HeapIndex &ip) { return index(ip.idx_); }
-  const T &operator[](const HeapIndex &ip) const { return index(ip.idx_); }
+  void remove(const HeapIndex &ip)
+  {
+    assert(valid_index(ip));
+    remove_index(ip.idx_);
+  }
 
   // Returns true if the HeapIndex is valid and points to an element
   // in this heap.
   bool valid_index(const HeapIndex &ip) const
   {
-    return ip->idx_ >= 0 && ip->idx_ < elems_.size() &&
-           ip == elems_[ip->idx_].ip_;
+    return ip.idx_ >= 0 && ip.idx_ < elems_.size() &&
+           &ip == elems_[ip.idx_].ip_;
   }
 
   // Methods below here mostly for debugging/printing heaps
 
+  // Access an element in the Heap given its HeapIndex
+  decltype(auto) operator[](this auto &&self, const HeapIndex &ip)
+  {
+    assert(self.valid_index(ip));
+    return self.index(ip.idx_);
+  }
+
+  auto view(this auto &&self)
+  {
+    return self.elems_ | std::views::transform(&Element::t_);
+  }
+
+  // Access element at numeric index
+  decltype(auto) index(this auto &&self, size_t i) { return self.elems_[i].t_; }
+
   // Remove an element by numeric index
   void remove_index(size_t i)
   {
-    assert(i < elems_.size());
     sift_up(i, true);
     pop();
   }
 
-  auto view() { return elems_ | std::views::transform(&Element::t_); }
-  auto view() const { return elems_ | std::views::transform(&Element::t_); }
-
-  size_t size() const { return elems_.size(); }
-  T &index(size_t i) { return elems_.at(i).t_; }
-  const T &index(size_t i) const { return elems_.at(i).t_; }
-
-  void check()
+  void check() noexcept
   {
 #ifndef NDEBUG
     for (size_t i = 1; i < elems_.size(); ++i) {
@@ -166,8 +176,8 @@ private:
   // until it becomes the root or, if all_the_way is false, until it
   // is not smaller than its parent.  If all_the_way is false, this
   // function is also sometimes called "decrease-key."  If all_the_way
-  // is true, this function is like decrease-key as if you decreased
-  // the key to negative infinity.
+  // is true, this function behaves like decrease-key where node i's
+  // key is negative infinity.
   void sift_up(size_t i, bool all_the_way)
   {
     while (i != 0) {
