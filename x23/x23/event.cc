@@ -108,14 +108,20 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
       r = get_reader(fd);
     if (!r)
       co_return EBADF;
+    Defer flush;
     if (sync && len > r->nbuffered())
-      w->flush(*this, fd);
+      flush.reset([this, &w, &fd] { w->flush(*this, fd); });
     if (auto res = r->read(fd, out, len)) {
       len -= *res;
       if (*res == 0 || !full)
         break;
     }
     else if (res.error() == EAGAIN) {
+      if (sync) {
+        w->waiting_for_read_ = true;
+        // flush now before going to sleep
+        flush.reset([&w] { w->waiting_for_read_ = false; });
+      }
       if (Errno err = co_await read_wait(fd))
         co_return err;
     }
@@ -159,7 +165,11 @@ CoroPoll::dwrite(BorrowedFd fd, Buf data)
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
-  return w->buffer(*this, fd, std::move(data));
+  if (Errno err = w->buffer(*this, fd, std::move(data)))
+    return err;
+  if (w->waiting_for_read_)
+    return w->flush(*this, fd);
+  return 0;
 }
 
 Async<std::expected<void, Errno>>

@@ -135,6 +135,10 @@ using ReadBuffer = GenReadBuffer<0x10000>;
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
   static constexpr size_t kFlushThreshold = ReadBuffer::kStructSize;
 
+  // This is true if we are waiting for a read, in which case don't
+  // buffer writes.
+  std::atomic_bool waiting_for_read_{false};
+
   Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf)
   {
     writer_->append(std::move(buf));
@@ -155,9 +159,9 @@ struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
   }
 
 private:
+  std::atomic_bool want_write_{false};
   std::mutex service_lock_;
   MVar<BufVec> writer_;
-  std::atomic_bool want_write_{false};
 
   class Service {
   public:
