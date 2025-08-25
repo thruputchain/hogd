@@ -9,6 +9,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -239,7 +240,7 @@ DatabaseTest::wait_for_deletion(std::string_view path)
       return;
 
     using namespace std::chrono_literals;
-    std::this_thread::sleep_for(10ms);
+    std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
   }
 
   FAIL() << "file did not get deleted as expected: " << path;
@@ -619,7 +620,7 @@ TEST_F(DatabaseTest, RecoverSkipsUncommittedLSNs)
   {
     ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
     ASSERT_TRUE(f);
-    auto len = f->lseek(0, SEEK_END);
+    auto len = f->lseek(0, SEEK_END); // NOLINT(misc-include-cleaner)
     ASSERT_TRUE(len);
     auto r = f->ftruncate(*len - (sizeof(ItemHeader) * 2));
     ASSERT_TRUE(r);
