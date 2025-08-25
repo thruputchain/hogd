@@ -454,8 +454,10 @@ BufferedReader::read_slowpath(std::span<std::byte> dst)
 {
   // try to read from the buffer first
   size_t n = read_from_buffer(dst);
-  if (n == dst.size())
+  if (n == dst.size()) {
+    off_ += n;
     return n;
+  }
 
   // optimization: can read to dst directly if large enough
   dst = dst.subspan(n);
@@ -463,6 +465,7 @@ BufferedReader::read_slowpath(std::span<std::byte> dst)
     ErrnoStatus<size_t> ret = in_->read(dst);
     if (!ret)
       return ret.error();
+    off_ += (n + *ret);
     return n + *ret;
   }
 
@@ -471,7 +474,10 @@ BufferedReader::read_slowpath(std::span<std::byte> dst)
   ErrnoStatus<void> ret = refill();
   if (!ret)
     return ret.error();
-  return n + read_from_buffer(dst);
+
+  size_t m = read_from_buffer(dst);
+  off_ += (n + m);
+  return n + m;
 }
 
 ErrnoStatus<std::string>
@@ -499,6 +505,7 @@ BufferedReader::read_string(char delim)
     if (delim_pos) {
       append(pos_.first(*delim_pos - 1));
       pos_ = pos_.subspan(*delim_pos);
+      off_ += *delim_pos;
       break;
     }
 
@@ -518,15 +525,20 @@ BufferedReader::skip(size_t n)
     pos_ = pos_.subspan(s);
     left_to_skip -= s;
 
-    if (left_to_skip == 0)
+    if (left_to_skip == 0) {
+      off_ += n;
       return n;
+    }
 
     ErrnoStatus<void> ret = refill();
     if (!ret)
       return ret.error();
 
-    if (pos_.empty())
-      return n - left_to_skip;
+    if (pos_.empty()) {
+      size_t read = n - left_to_skip;
+      off_ += read;
+      return read;
+    }
   }
 }
 

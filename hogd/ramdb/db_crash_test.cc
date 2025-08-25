@@ -58,7 +58,7 @@ constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{30};
 
 constexpr bool kOverlapPutsWithSnapshot = true;
 constexpr bool kRemoveAllFilesAtStart = false;
-constexpr bool kDumpMetrics = true;
+constexpr bool kDumpMetrics = false;
 constexpr bool kNoFork = false;
 
 // number of incremental snapshots before next full snapshot
