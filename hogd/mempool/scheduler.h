@@ -42,14 +42,15 @@ public:
                              uint128_xdr num_received,
                              BlockHeight current_block);
 
-  // TODO(jhumphri): I should rework the code to expose [update_accounts_helper]
-  // rather than [update_accounts]. The latter function should not exist as I
-  // cannot think of a situation where we would want to blindly overwrite the
-  // cache with the contents of the database.
-  // In the tests, we should instead use [get_cached_hog_age] to change hog
-  // amounts and then call [update_accounts_helper].
+  // Reorders txs in the runqueue and adds/removes txs from the runqueue based
+  // on the number of hogs and hog ages for an account. Note that this function
+  // assumes [cached_hogs_[account]] contains this information for [account], so
+  // before calling this function, [cached_hogs_[account]] must be updated.
   void update_accounts(const x23::Vec<ContractAddress> &accounts);
 
+  // Chooses txs to schedule in the next block. [block_size] is the maximum
+  // number of txs that will be included in the next block, though fewer txs
+  // than [block_size] may be included.
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(size_t block_size);
 
@@ -93,24 +94,52 @@ public:
   bool write_average_hog_age(const ContractAddressBatch &addresses);
 
 private:
+  // We use this type to store information about a tx in the runqueue.
   struct TxInfo {
+    // The average age of hogs in the account that submitted this tx. This age
+    // dictates the scheduling priority of the tx.
     BlockHeight age;
+    // The account that submitted the tx.
     ContractAddress account;
+    // The hash of the tx.
     SignedTransactionHash tx_hash;
+    // The tx itself.
     SignedTransaction tx;
   };
 
+  // Helper function for [schedule()]. Removes txs from the runqueue. Note that
+  // removing txs from the runqueue is a bit cumbersome because we maintain
+  // several data structures to make it easy to look up txs with various key
+  // types.
   void add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                          x23::Vec<SignedTransactionHash> &hashes,
                          x23::Vec<SignedTransaction> &txs);
 
+  // The RPC client that the scheduler uses to talk to the database. The
+  // scheduler uses this to read/write the number of hogs and hog ages for
+  // accounts.
   db_client_t &db_client_;
+
+  // Caches the number of hogs and hog ages for an account so that the scheduler
+  // does not need to make as many RPC calls to the database.
+  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
+
+  // Runqueue data structures. We maintain several data structures to make it
+  // easy to order the runqueue and look up txs with several key types.
+
+  // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
+  // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
       account_to_tx_;
+  // Maps an average hog age to a set of txs submitted by accounts with that
+  // average hog age. The scheduler uses this map to find the txs with the
+  // largest hog age as those txs are scheduled with the highest priority.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
-
-  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
+  // Holds all txs that cannot be scheduled, typically because an account does
+  // not have enough hogs. Maps an account to its stranded txs. This makes it
+  // easy to look up which stranded txs correspond to an account, since we will
+  // want to know this once the number of hogs owned by an account changes.
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>> stranded_;
 };
 

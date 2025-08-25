@@ -116,6 +116,7 @@ TEST(Mempool, ValidateBatch)
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
 
+  // TODO(jhumphri): Error is here? Maybe not enough hogs?
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -169,6 +170,9 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
+
+// TODO(jhumphri): Do a test that tries to validate a tx that was not included
+// in the nomination.
 
 TEST(Mempool, ValidateBatchMissingTx)
 {
