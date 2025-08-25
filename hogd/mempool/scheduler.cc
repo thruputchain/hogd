@@ -277,7 +277,6 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
     if (account_to_tx_[i.account].empty()) {
       CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
     }
-    // CHECK_EQ(hash_to_tx_.erase(i.tx_hash), 1UL);
     it = info.erase(it);
   }
 }
@@ -295,14 +294,14 @@ Scheduler::schedule(size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
     if (info.size() <= num_remaining) {
       num_scheduled += info.size();
-      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
-      // [account_to_tx_], and [age_to_tx_].
+      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
+      // [age_to_tx_].
       add_txs_from_info(info, info.size(), hashes, txs);
     }
     else {
       num_scheduled += num_remaining;
-      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
-      // [account_to_tx_], and [age_to_tx_].
+      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
+      // [age_to_tx_].
       add_txs_from_info(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
@@ -364,10 +363,15 @@ Scheduler::find_and_remove_vetted_txs(const Nomination &nomination,
                    .nondeterministic_proposal_data =
                        nominated_tx.nondeterministic_proposal_data});
 
-    // We access [it] below before calling [hash_to_tx_.erase()] to avoid
-    // accessing an invalidated iterator.
-    CHECK_EQ(account_to_tx_[it->second.account].erase(&it->second), 1UL);
-    CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+    // If this if statement is true, then the tx is on the runqueue. Otherwise,
+    // it is stranded. We need to remove it from the correct data structures
+    // accordingly.
+    if (account_to_tx_[it->second.account].erase(&it->second) == 1UL) {
+      CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+    }
+    else {
+      CHECK_EQ(stranded_[it->second.account].erase(&it->second), 1UL);
+    }
   }
   return true;
 }

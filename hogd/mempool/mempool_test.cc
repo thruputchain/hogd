@@ -177,7 +177,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 TEST(Mempool, ValidateBatchMissingTx)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  SignedTransactionBatch txs = generate_txs(fib_client, /*num_txs=*/5);
 
   SchedulerNominationResult res_nominate;
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
