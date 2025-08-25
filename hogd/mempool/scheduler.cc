@@ -46,8 +46,11 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
       }
     }
   }
+  if (to_send.empty()) {
+    return true;
+  }
 
-  HogAgeResult res = db_client_.dbcoord_get_hog_ages(addresses)();
+  HogAgeResult res = db_client_.dbcoord_get_hog_ages(to_send)();
   if (res.result() != DbResult::DbResultOK) {
     return false;
   }
@@ -55,6 +58,14 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     cached_hogs_[age.address] = age;
   }
   return true;
+}
+
+HogAge &
+Scheduler::get_cached_hog_age(const ContractAddress &address)
+{
+  auto it = cached_hogs_.find(address);
+  CHECK(it != cached_hogs_.end());
+  return it->second;
 }
 
 bool
@@ -114,7 +125,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 }
 
 void
-Scheduler::update_groups(const ContractAddress &account_address)
+Scheduler::cycle_groups(const ContractAddress &account_address)
 {
   CHECK(read_average_hog_age({account_address}, /*force=*/true));
   const HogAge &averages = cached_hogs_[account_address];
@@ -159,7 +170,7 @@ Scheduler::update_groups(const ContractAddress &account_address)
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
-  update_accounts_helper({account_address});
+  update_accounts({account_address});
 }
 
 void
@@ -188,21 +199,13 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
-  // No need to call [update_accounts_helper({account_address})] because
-  // receiving hogs does not affect the [kHogAgeGroupReceived] group. So in
-  // other words, receiving hogs does not affect the order in which txs are
-  // scheduled.
+  // No need to call [update_accounts({account_address})] because receiving hogs
+  // does not affect the [kHogAgeGroupReceived] group. So in other words,
+  // receiving hogs does not affect the order in which txs are scheduled.
 }
 
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
-{
-  CHECK(read_average_hog_age(accounts, /*force=*/true));
-  update_accounts_helper(accounts);
-}
-
-void
-Scheduler::update_accounts_helper(const x23::Vec<ContractAddress> &accounts)
 {
   for (const auto &account : accounts) {
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
@@ -274,7 +277,6 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
     if (account_to_tx_[i.account].empty()) {
       CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
     }
-    // CHECK_EQ(hash_to_tx_.erase(i.tx_hash), 1UL);
     it = info.erase(it);
   }
 }
@@ -292,14 +294,14 @@ Scheduler::schedule(size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
     if (info.size() <= num_remaining) {
       num_scheduled += info.size();
-      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
-      // [account_to_tx_], and [age_to_tx_].
+      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
+      // [age_to_tx_].
       add_txs_from_info(info, info.size(), hashes, txs);
     }
     else {
       num_scheduled += num_remaining;
-      // [add_txs_from_info] removes the hashes from [hash_to_tx_],
-      // [account_to_tx_], and [age_to_tx_].
+      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
+      // [age_to_tx_].
       add_txs_from_info(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
@@ -361,10 +363,15 @@ Scheduler::find_and_remove_vetted_txs(const Nomination &nomination,
                    .nondeterministic_proposal_data =
                        nominated_tx.nondeterministic_proposal_data});
 
-    // We access [it] below before calling [hash_to_tx_.erase()] to avoid
-    // accessing an invalidated iterator.
-    CHECK_EQ(account_to_tx_[it->second.account].erase(&it->second), 1UL);
-    CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+    // If this if statement is true, then the tx is on the runqueue. Otherwise,
+    // it is stranded. We need to remove it from the correct data structures
+    // accordingly.
+    if (account_to_tx_[it->second.account].erase(&it->second) == 1UL) {
+      CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+    }
+    else {
+      CHECK_EQ(stranded_[it->second.account].erase(&it->second), 1UL);
+    }
   }
   return true;
 }

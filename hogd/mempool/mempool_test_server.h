@@ -90,7 +90,7 @@ public:
 
       db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
       db_coordinator_server_->start_server(/*port=*/0);
-      coordinator_db_port_ = db_coordinator_server_->port();
+      db_coordinator_port_ = db_coordinator_server_->port();
     }
 
     {
@@ -157,7 +157,7 @@ public:
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
   uint16_t coordinator_port() const { return coordinator_port_; }
-  uint16_t coordinator_db_port() const { return coordinator_db_port_; }
+  uint16_t db_coordinator_port() const { return db_coordinator_port_; }
   uint16_t executor_port() const { return executor_port_; }
 
 private:
@@ -209,7 +209,7 @@ private:
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
   std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
-  uint16_t coordinator_db_port_;
+  uint16_t db_coordinator_port_;
 };
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
@@ -270,7 +270,7 @@ create_clients(const MempoolTestServer &server)
   auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
   db_client_t db_client = [&] -> db_client_t {
     auto fd = db_cp->tcpconnect(MempoolTestServer::kAddress,
-                                std::to_string(server.coordinator_db_port()))();
+                                std::to_string(server.db_coordinator_port()))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to db server");
     }
