@@ -187,7 +187,7 @@ Scheduler::dump_runqueue() const
 {
   // TODO(jhumphri): Improve this.
   for (const auto &[height, tx_infos] : age_to_tx_) {
-    printf("runqueue age %zu, num txs %zu\n", height, tx_infos.size());
+    std::println("runqueue age {}, num txs {}", height, tx_infos.size());
   }
 }
 
@@ -347,7 +347,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
     const BlockHeight already_scheduled_age =
         age.average_ages[kHogAgeGroupAlreadyScheduled];
 
-    bool empty = !from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+    bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
     age.num_hogs[kHogAgeGroupAlreadyScheduled] =
         to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
     if (empty) {
