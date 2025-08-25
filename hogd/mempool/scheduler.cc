@@ -316,6 +316,31 @@ void
 Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes)
 {
   for (const SignedTransactionHash &hash : hashes) {
+    const TxInfo &info = hash_to_tx_[hash];
+    HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
+
+    const uint128_xdr to_schedule_hogs =
+        to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
+    const BlockHeight to_schedule_age =
+        age.average_ages[kHogAgeGroupToSchedule];
+
+    const uint128_xdr already_scheduled_hogs =
+        age.num_hogs[kHogAgeGroupAlreadyScheduled];
+    const BlockHeight already_scheduled_age =
+        age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+    age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+        to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
+    {
+      // See comment above for [div_round_up()].
+      uint128_xdr numerator =
+          to_xdr((from_xdr(to_schedule_hogs) * to_schedule_age) +
+                 (from_xdr(already_scheduled_hogs) * already_scheduled_age));
+      uint128_xdr denominator =
+          to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
+      age.average_ages[kHogAgeGroupToSchedule] =
+          from_xdr(div_round_up(numerator, denominator));
+    }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
   }
 }
