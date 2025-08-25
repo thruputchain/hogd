@@ -11,7 +11,7 @@ template<is_xdr_type X0, is_bytevec Out = std::string>
 Out
 show(const X0 &x, size_t indent = 0, Out ret = {})
 {
-  auto go = []<is_xdr_type X>(this auto &&go, is_bytevec auto *out, const X &x,
+  auto go = []<is_xdr_type X>(this auto &&go, Out *out, const X &x,
                               size_t indent) -> void {
     auto opengroup = [&indent, out](const char *delims) {
       *out += delims[0];
@@ -52,6 +52,18 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
         go(out, *x, indent);
       else
         uformat_to(out, "NULL");
+    }
+    else if constexpr (is_template_instance<X, std::tuple>) {
+      *out += '(';
+      [&]<size_t... I>(std::index_sequence<I...>) {
+        auto doarg = [&]<size_t N> {
+	  go(out, get<N>(x), indent + 1);
+          if constexpr (N + 1 < sizeof...(I))
+            *out += ',';
+        };
+	((doarg.template operator()<I>()), ...);
+      }(std::make_index_sequence<std::tuple_size_v<X>>{});
+      *out += ')';
     }
     else if constexpr (std::formattable<X, char>)
       uformat_to(out, "{}", x);

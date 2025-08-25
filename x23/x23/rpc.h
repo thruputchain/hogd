@@ -171,12 +171,14 @@ private:
       if constexpr (!is_awaitable<dispatch_t>) {
         if constexpr (returns_void) {
           dispatch(argbytes);
-          return MaybeAsync<Buf>{std::in_place_type<Buf>, make_record(rmsg)};
+          d_.logger_.template log_server<ProcMeta>(rmsg);
+          return MaybeAsync{make_record(rmsg)};
         }
-        else
-          return MaybeAsync<Buf>{std::in_place_type<Buf>,
-                                 make_record<return_type>(rmsg,
-                                                          dispatch(argbytes))};
+        else {
+          return_type res = dispatch(argbytes);
+          d_.logger_.template log_server<ProcMeta>(rmsg, res);
+          return MaybeAsync{make_record(rmsg, res)};
+        }
       }
       else {
         auto awaitable = dispatch(argbytes);
@@ -184,12 +186,14 @@ private:
         if (awaiter.await_ready()) {
           if constexpr (returns_void) {
             awaiter.await_resume();
-            return MaybeAsync<Buf>{std::in_place_type<Buf>, make_record(rmsg)};
+            d_.logger_.template log_server<ProcMeta>(rmsg);
+            return MaybeAsync{make_record(rmsg)};
           }
-          else
-            return MaybeAsync<Buf>{
-                std::in_place_type<Buf>,
-                make_record<return_type>(rmsg, awaiter.await_resume())};
+          else {
+            return_type res = awaiter.await_resume();
+            d_.logger_.template log_server<ProcMeta>(rmsg, res);
+            return MaybeAsync{make_record(rmsg, res)};
+          }
         }
 
         return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
