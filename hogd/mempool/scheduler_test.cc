@@ -118,7 +118,7 @@ TEST(Scheduler, Single)
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestServer::kAccountAddresses[0]);
 
-  scheduler.mark_txs_executed({sha256(txs[0])});
+  scheduler.mark_txs_executed({sha256(txs[0])}, /*block=*/1);
   // Check that the correct number of hogs was deducted.
   const HogAge &age =
       scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
@@ -176,7 +176,7 @@ TEST(Scheduler, TxFailed)
   }
 
   // Check that [mark_txs_executed()] does not change the number of hogs.
-  scheduler.mark_txs_executed({sha256(txs[0])});
+  scheduler.mark_txs_executed({sha256(txs[0])}, /*block=*/1);
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 }
@@ -539,7 +539,7 @@ TEST(Scheduler, Fairness)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
-    scheduler.mark_txs_executed(scheduled_hashes);
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
     for (const ContractAddress &account :
          MempoolTestServer::kAccountAddresses) {
       scheduler.cycle_groups(account);
@@ -549,6 +549,69 @@ TEST(Scheduler, Fairness)
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
     EXPECT_EQ(tx_counts[address], (i + 1) * kNumRounds);
+  }
+}
+
+TEST(Scheduler, FairnessAcrossBlocks)
+{
+  constexpr size_t kNumRounds = 100;
+
+  std::vector<fib_client_t> fib_clients;
+  std::vector<SignedTransactionBatch> txs;
+  for (const ContractAddress &address : MempoolTestServer::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+    // We create enough txs for each account such that each account could fill
+    // all blocks with txs. In other words, an account always have txs to
+    // schedule. This is important for ensuring that when we see a certain
+    // throughput of txs for a given account, this throughput resulted solely
+    // from the scheduling policy rather than a lack of txs to schedule.
+    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  //
+  // Account 0: Age 3 and 5 billion hogs.
+  // Account 1: Age 2 and 10 billion hogs.
+  // Account 2: Age 1 and 15 billion hogs.
+  // Account 3: Age 0 and 20 billion hogs.
+  //
+  // Thus, there are 50 billion hogs in total across the four accounts.
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    server.set_hogs(MempoolTestServer::kAccountAddresses[i],
+                    /*group=*/kHogAgeGroupToSchedule,
+                    /*age=*/MempoolTestServer::kAccountAddresses.size() - i - 1,
+                    /*num_hogs=*/5'000'000'000 * (i + 1));
+  }
+  for (const SignedTransactionBatch &tx : txs) {
+    scheduler.add_vetted_txs(tx);
+  }
+
+  std::unordered_map<ContractAddress, size_t> tx_counts;
+  for (size_t i = 0; i < kNumRounds; i++) {
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_size=*/1);
+    for (const SignedTransaction &tx : scheduled) {
+      tx_counts[tx.tx.invocation.invoked_address]++;
+    }
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
+    for (const ContractAddress &account :
+         MempoolTestServer::kAccountAddresses) {
+      scheduler.cycle_groups(account);
+    }
+  }
+
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
+    // TODO(jhumphri): Calculate this in a better way.
+    size_t target = (i + 1) * 10;
+
+    constexpr size_t kErrorBound = 4;
+    EXPECT_LE(tx_counts[address], target + kErrorBound);
+    EXPECT_GE(tx_counts[address], target - kErrorBound);
   }
 }
 

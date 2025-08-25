@@ -127,13 +127,18 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 void
 Scheduler::cycle_groups(const ContractAddress &account_address)
 {
-  CHECK(read_average_hog_age({account_address}, /*force=*/true));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages;
   new_averages.address = averages.address;
 
-  const uint128_xdr to_schedule_hogs =
-      averages.num_hogs[kHogAgeGroupToSchedule];
+  // We need to add up all of the hogs reserved by txs sitting in the runqueue.
+  uint128_t reserved_hogs = 0;
+  for (const TxInfo *info : account_to_tx_[account_address]) {
+    reserved_hogs += info->tx.tx.invocation.gas_limit;
+  }
+
+  const uint128_xdr to_schedule_hogs = to_xdr(
+      reserved_hogs + from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
   const BlockHeight to_schedule_age =
       averages.average_ages[kHogAgeGroupToSchedule];
 
@@ -148,7 +153,7 @@ Scheduler::cycle_groups(const ContractAddress &account_address)
   // Update [kGroupToSchedule].
   new_averages.num_hogs[kHogAgeGroupToSchedule] =
       to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
-  {
+  if (from_xdr(to_schedule_hogs)) {
     // See comment above for [div_round_up()].
     uint128_xdr numerator =
         to_xdr((from_xdr(to_schedule_hogs) * to_schedule_age) +
@@ -157,6 +162,9 @@ Scheduler::cycle_groups(const ContractAddress &account_address)
         to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
     new_averages.average_ages[kHogAgeGroupToSchedule] =
         from_xdr(div_round_up(numerator, denominator));
+  }
+  else {
+    new_averages.average_ages[kHogAgeGroupToSchedule] = already_scheduled_age;
   }
 
   // Update [kGroupAlreadyScheduled].
@@ -170,7 +178,17 @@ Scheduler::cycle_groups(const ContractAddress &account_address)
 
   cached_hogs_[account_address] = new_averages;
   CHECK(write_average_hog_age({account_address}));
+
   update_accounts({account_address});
+}
+
+void
+Scheduler::dump_runqueue() const
+{
+  // TODO(jhumphri): Improve this.
+  for (const auto &[height, tx_infos] : age_to_tx_) {
+    printf("runqueue age %zu, num txs %zu\n", height, tx_infos.size());
+  }
 }
 
 void
@@ -198,7 +216,6 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   }
 
   cached_hogs_[account_address] = new_averages;
-  CHECK(write_average_hog_age({account_address}));
   // No need to call [update_accounts({account_address})] because receiving hogs
   // does not affect the [kHogAgeGroupReceived] group. So in other words,
   // receiving hogs does not affect the order in which txs are scheduled.
@@ -246,6 +263,7 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
         cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
             from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
             info->tx.tx.invocation.gas_limit);
+        info->age = cached_hogs_[account].average_ages[kHogAgeGroupToSchedule];
         CHECK(account_to_tx_[account].insert(info).second);
         CHECK(age_to_tx_[info->age].insert(info).second);
       }
@@ -313,7 +331,8 @@ Scheduler::schedule(size_t block_size)
 }
 
 void
-Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes)
+Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                             BlockHeight block)
 {
   for (const SignedTransactionHash &hash : hashes) {
     const TxInfo &info = hash_to_tx_[hash];
@@ -321,24 +340,27 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes)
 
     const uint128_xdr to_schedule_hogs =
         to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
-    const BlockHeight to_schedule_age =
-        age.average_ages[kHogAgeGroupToSchedule];
+    const BlockHeight to_schedule_age = block;
 
     const uint128_xdr already_scheduled_hogs =
         age.num_hogs[kHogAgeGroupAlreadyScheduled];
     const BlockHeight already_scheduled_age =
         age.average_ages[kHogAgeGroupAlreadyScheduled];
 
+    bool empty = !from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]);
     age.num_hogs[kHogAgeGroupAlreadyScheduled] =
         to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
-    {
+    if (empty) {
+      age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
+    }
+    else {
       // See comment above for [div_round_up()].
       uint128_xdr numerator =
           to_xdr((from_xdr(to_schedule_hogs) * to_schedule_age) +
                  (from_xdr(already_scheduled_hogs) * already_scheduled_age));
       uint128_xdr denominator =
           to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
-      age.average_ages[kHogAgeGroupToSchedule] =
+      age.average_ages[kHogAgeGroupAlreadyScheduled] =
           from_xdr(div_round_up(numerator, denominator));
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);

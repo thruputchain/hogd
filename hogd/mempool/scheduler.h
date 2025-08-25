@@ -57,7 +57,8 @@ public:
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed*. This method just removes the remaining tx state
   // from the scheduler, so we need to call this to prevent a memory leak.
-  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes);
+  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                         BlockHeight block);
 
   // Call this method when txs failed to execute *as part of a block that this
   // node proposed*. This method adds the hogs consumed by the tx back to the
@@ -92,6 +93,9 @@ public:
   bool read_average_hog_age(const ContractAddressBatch &addresses, bool force);
   HogAge &get_cached_hog_age(const ContractAddress &address);
   bool write_average_hog_age(const ContractAddressBatch &addresses);
+
+  // Debug.
+  void dump_runqueue() const;
 
 private:
   // We use this type to store information about a tx in the runqueue.

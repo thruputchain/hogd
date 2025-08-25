@@ -212,7 +212,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   for (size_t i = 0; i < statuses.size(); i++) {
     if (statuses[i]) {
-      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]});
+      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]},
+                                   nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
@@ -315,7 +316,8 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  scheduler_.mark_txs_executed(nomination.transaction_hashes);
+  scheduler_.mark_txs_executed(nomination.transaction_hashes,
+                               nomination.block_height);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
 
