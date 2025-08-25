@@ -296,8 +296,6 @@ TEST(Scheduler, NotEnoughHogs)
   age.average_ages[kHogAgeGroupToSchedule] = 1;
   age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
-  printf("here %zu\n",
-         (uint64_t)from_xdr(age.num_hogs[kHogAgeGroupToSchedule]));
 
   scheduler.add_vetted_txs({txs[0]});
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
