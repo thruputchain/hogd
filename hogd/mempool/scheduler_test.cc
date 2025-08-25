@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "db_coord.hh"

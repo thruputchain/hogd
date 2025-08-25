@@ -10,6 +10,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include <print>
 #include <unordered_set>
 #include <utility>
 
