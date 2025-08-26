@@ -823,7 +823,6 @@ gen_hh(vector<Definition> *defs)
 
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <compare>
 #include <concepts>
@@ -833,10 +832,11 @@ gen_hh(vector<Definition> *defs)
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <x23/format.h>
-#include <x23/vec.h>
 #include <x23/utility.h>
+#include <x23/vec.h>
 #include <x23/x23.h>
 
 )");
