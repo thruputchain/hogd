@@ -674,13 +674,11 @@ using void_variant =
 // result from non-coroutine code.  However, MaybeAsync doesn't need
 // dynamic memory allocation in the event that you produce it with a
 // simple return value.
-template<typename T, is_awaitable Awaitable = Async<T>,
-         typename Promise = std::coroutine_traits<Awaitable>::promise_type>
+template<typename T, is_awaitable Awaitable = Async<T>>
 struct MaybeAsync : void_variant<Awaitable, T> {
   using super = void_variant<Awaitable, T>;
   using value_type = T;
   using awaitable_type = Awaitable;
-  using promise_type = Promise;
 
   using super::super;
   template<std::same_as<T> U = T> requires std::is_void_v<U>
@@ -690,44 +688,55 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   // Pass through any function call operators on async_type
   template<typename... Args>
   decltype(auto) operator()(Args &&...args)
-      noexcept(noexcept((*async())(std::declval<Args>()...)))
+      noexcept(noexcept((*asyncp())(std::declval<Args>()...)))
   {
-    return (*async())(std::forward<Args>(args)...);
+    auto *a = asyncp();
+    assert(a);
+    return (*a)(std::forward<Args>(args)...);
   }
 
-  bool await_ready() noexcept(noexcept(promise()->await_ready()))
+  bool await_ready() noexcept(noexcept(awaiter().await_ready()))
   {
-    if (auto *p = promise())
-      return p->await_ready();
-    return true;
+    if (has_value())
+      return true;
+    return awaiter().await_ready();
   }
-  auto await_suspend(auto h) noexcept { return promise()->await_suspend(h); }
-  T await_resume() noexcept(noexcept(promise()->await_resume()))
+  auto await_suspend(auto h) noexcept { return awaiter().await_suspend(h); }
+  T await_resume() noexcept(noexcept(awaiter().await_resume()))
   {
-    if (auto *p = promise())
-      return p->await_resume();
-    return xval();
+    if (has_value())
+      return xval();
+    return awaiter().await_resume();
   }
 
+  bool has_value() const noexcept { return this->index() == 1; }
+
+private:
   T xval() noexcept
   {
     if constexpr (!std::is_void_v<T>)
       return std::move(get<1>(*this));
     else
-      assert(this->index() == 1);
+      assert(has_value());
   }
-  Async<T> *async() noexcept { return get_if<0>(this); }
-  Async<T>::promise_type *promise() noexcept
+  awaitable_type *asyncp() noexcept { return get_if<0>(this); }
+  decltype(auto) awaiter() noexcept
   {
-    if (auto *a = async())
-      return &a->operator co_await();
-    return nullptr;
+    return detail::get_awaiter(*asyncp());
   }
 };
 template<typename T> requires (!is_awaitable<T>)
 MaybeAsync(T) -> MaybeAsync<T>;
 template<is_awaitable A> requires requires { typename detail::resume_type<A>; }
 MaybeAsync(A) -> MaybeAsync<detail::resume_type<A>, A>;
+
+} // namespace x23
+
+template<typename T, typename A, typename... Args>
+struct std::coroutine_traits<x23::MaybeAsync<T, A>, Args...>
+  : std::coroutine_traits<A, Args...> {};
+
+namespace x23 {
 
 // Generate an Async and matching CoroCB.  This is for use in
 // low-level non-coroutine functions that want to return an Async for
