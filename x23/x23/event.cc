@@ -97,6 +97,8 @@ Async<std::expected<size_t, Errno>>
 CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
                bool sync SLOC_ARG)
 {
+  if (stop_requested())
+    co_return Errno{EBADF};
   size_t startsize = out->size();
   while (len > 0) {
     read_clear(fd);
@@ -107,7 +109,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
     else
       r = get_reader(fd);
     if (!r)
-      co_return EBADF;
+      co_return Errno{EBADF};
     Defer flush;
     if (sync && len > r->nbuffered())
       flush.reset([this, &w, &fd] { w->flush(*this, fd); });

@@ -246,8 +246,6 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
-  // std::println("reset({})", fd.get());
-
   auto fdp = getfd(fd);
   fdp->buf_clear();
   setmode(fdp, FdState::Mode::kFree);

@@ -55,14 +55,16 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     }
     else if constexpr (is_template_instance<X, std::tuple>) {
       *out += '(';
-      [&]<size_t... I>(std::index_sequence<I...>) {
-        auto doarg = [&]<size_t N> {
-	  go(out, get<N>(x), indent + 1);
-          if constexpr (N + 1 < sizeof...(I))
-            *out += ',';
-        };
-	((doarg.template operator()<I>()), ...);
-      }(std::make_index_sequence<std::tuple_size_v<X>>{});
+      if constexpr (std::tuple_size_v<X>) {
+        [&]<size_t... I>(std::index_sequence<I...>) {
+          auto doarg = [&]<size_t N> {
+            go(out, get<N>(x), indent + 1);
+            if constexpr (N + 1 < sizeof...(I))
+              *out += ',';
+          };
+          ((doarg.template operator()<I>()), ...);
+        }(std::make_index_sequence<std::tuple_size_v<X>>{});
+      }
       *out += ')';
     }
     else if constexpr (std::formattable<X, char>)
