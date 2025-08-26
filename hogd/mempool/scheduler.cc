@@ -85,6 +85,22 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
 }
 
 void
+Scheduler::write_cache()
+{
+  for (auto &[account, age] : cached_hogs_) {
+    const uint128_xdr starting_balance = age.num_hogs[kHogAgeGroupToSchedule];
+    size_t delta = 0;
+    for (TxInfo *info : account_to_tx_[account]) {
+      delta += info->tx.tx.invocation.gas_limit;
+    }
+    age.num_hogs[kHogAgeGroupToSchedule] =
+        to_xdr(delta + from_xdr(starting_balance));
+    CHECK(write_average_hog_age({account}));
+    age.num_hogs[kHogAgeGroupToSchedule] = starting_balance;
+  }
+}
+
+void
 Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 {
   // TODO(jhumphri): Optimize this with coroutines.

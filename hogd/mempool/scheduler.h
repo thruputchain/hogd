@@ -15,6 +15,8 @@ class Scheduler {
 public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
+  ~Scheduler() { write_cache(); }
+
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
   // them.
@@ -60,10 +62,9 @@ public:
   void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                          BlockHeight block);
 
-  // Call this method when txs failed to execute *as part of a block that this
-  // node proposed*. This method adds the hogs consumed by the tx back to the
-  // account and removes the remaining tx state from the scheduler. The txs are
-  // then returned by the method.
+  // Call this method when txs failed to execute. This method adds the hogs
+  // consumed by the tx back to the account and removes the remaining tx state
+  // from the scheduler. The txs are then returned by the method.
   //
   // Note: I initially thought it made sense to have this method add the txs
   // back to the runqueue. However, txs may have failed due to irrecoverable
@@ -112,6 +113,19 @@ private:
     // The tx itself.
     SignedTransaction tx;
   };
+
+  // Writes the contents of [cached_hogs_] back to the database.
+  //
+  // Note that the scheduler removes hogs from the [kHogAgeGroupToSchedule]
+  // group when a tx is added to the runqueue, *not* when the tx executes.
+  // However, we want the [kHogAgeGroupToSchedule] group we write to hogdb to
+  // contain these hogs. Thus, this method adds the deducted hogs back to the
+  // [kHogAgeGroupToSchedule] group for each account in [cached_hogs_], then
+  // writes [cached_hogs_] to hogdb, and then deducts the hogs again from
+  // [cached_hogs_]. So [cached_hogs_] is the same both before and after this
+  // method calls, and the [kHogAgeGroupToSchedule] group written to hogdb
+  // contains the correct number of hogs.
+  void write_cache();
 
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain
