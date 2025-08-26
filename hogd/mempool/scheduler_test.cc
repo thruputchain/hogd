@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "db_coord.hh"
@@ -86,7 +87,7 @@ TEST(Scheduler, AddVettedTx)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
@@ -98,9 +99,9 @@ TEST(Scheduler, AddVettedTxDuplicate)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
   // Now add the transaction a second time.
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
 }
 
 TEST(Scheduler, Single)
@@ -112,16 +113,28 @@ TEST(Scheduler, Single)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestServer::kAccountAddresses[0]);
 
+  scheduler.mark_txs_executed({sha256(txs[0])}, /*block=*/1);
   // Check that the correct number of hogs was deducted.
-  HogAge age =
+  const HogAge &age =
       scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+
+  // Check that the correct number of hogs was added to the
+  // [kHogAgeGroupAlreadyScheduled] group.
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+            5'000'000'000);
+  // Due to rounding, the age of the [kHogAgeGroupAlreadyScheduled] will be
+  // either equal to that of the [kHogAgeGroupToSchedule] or one less.
+  EXPECT_LE(age.average_ages[kHogAgeGroupAlreadyScheduled],
+            age.average_ages[kHogAgeGroupToSchedule]);
+  EXPECT_GE(age.average_ages[kHogAgeGroupAlreadyScheduled],
+            age.average_ages[kHogAgeGroupToSchedule] - 1);
 }
 
 TEST(Scheduler, TxFailed)
@@ -134,7 +147,7 @@ TEST(Scheduler, TxFailed)
   Scheduler &scheduler = clients.interface->scheduler();
 
   {
-    scheduler.add_vetted_txs({txs[0]});
+    scheduler.add_txs({txs[0]});
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -153,7 +166,7 @@ TEST(Scheduler, TxFailed)
 
   // Check that the correct number of hogs was deducted again.
   {
-    scheduler.add_vetted_txs({txs[0]});
+    scheduler.add_txs({txs[0]});
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -164,7 +177,7 @@ TEST(Scheduler, TxFailed)
   }
 
   // Check that [mark_txs_executed()] does not change the number of hogs.
-  scheduler.mark_txs_executed({sha256(txs[0])});
+  scheduler.mark_txs_executed({sha256(txs[0])}, /*block=*/1);
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 }
@@ -194,7 +207,7 @@ TEST(Scheduler, MultipleOneBlock)
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 * kBlockSize);
-  scheduler.add_vetted_txs(txs);
+  scheduler.add_txs(txs);
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), kBlockSize);
   for (const SignedTransaction &signed_tx : scheduled) {
@@ -218,7 +231,7 @@ TEST(Scheduler, MultipleMultipleBlocks)
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 * kBlockSize * kNumBlocks);
-  scheduler.add_vetted_txs(txs);
+  scheduler.add_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
@@ -252,7 +265,7 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
                       (kBlockSize * kNumBlocks + kRemainder));
-  scheduler.add_vetted_txs(txs);
+  scheduler.add_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
@@ -297,7 +310,7 @@ TEST(Scheduler, NotEnoughHogs)
   age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
 
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
   // anyway to test that it is a no-op.
   scheduler.update_accounts({MempoolTestServer::kAccountAddresses[0]});
@@ -314,7 +327,7 @@ TEST(Scheduler, NotEnoughHogsAfterAdded)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
   // Setting the account's hogs to 0 *after* adding the tx to the scheduler
   // above.
   HogAge &age =
@@ -338,7 +351,7 @@ TEST(Scheduler, TwoAccounts)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  scheduler.add_vetted_txs({txs_a[0], txs_b[0]});
+  scheduler.add_txs({txs_a[0], txs_b[0]});
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), 2);
   EXPECT_TRUE(txs_a[0] == scheduled[0] || txs_a[0] == scheduled[1]);
@@ -359,7 +372,7 @@ TEST(Scheduler, MultipleAccounts)
   Scheduler &scheduler = clients.interface->scheduler();
 
   for (const SignedTransactionBatch &tx : txs) {
-    scheduler.add_vetted_txs({tx[0]});
+    scheduler.add_txs({tx[0]});
   }
   const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), MempoolTestServer::kAccountAddresses.size());
@@ -376,28 +389,29 @@ TEST(Scheduler, UpdateGroupsBasic)
 
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1, /*num_hogs=*/0);
-  server.set_hogs(MempoolTestServer::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupAlreadyScheduled, /*age=*/10,
-                  /*num_hogs=*/5'000'000'000 * 5);
-  scheduler.add_vetted_txs({txs[0]});
+  scheduler.add_txs({txs[0]});
   {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 
-  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
-  // Check that the correct number of hogs was moved into
-  // [kHogAgeGroupToSchedule] and that the correct number of hogs was deducted
-  // for the tx.
-  HogAge age =
+  // Add enough hogs to the [kHogAgeGroupAlreadyScheduled] group.
+  HogAge &age =
       scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 4);
+  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(static_cast<uint128_t>(5'000'000'000 * 5));
+  age.average_ages[kHogAgeGroupAlreadyScheduled] = 10;
+  scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
 
   {
     const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
+    EXPECT_EQ(age.num_hogs[kHogAgeGroupToSchedule],
+              to_xdr(static_cast<uint128_t>(5'000'000'000 * 4)));
+    EXPECT_EQ(age.num_hogs[kHogAgeGroupAlreadyScheduled],
+              to_xdr(static_cast<uint128_t>(0)));
   }
 }
 
@@ -482,6 +496,200 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 }
+
+TEST(Scheduler, Fairness)
+{
+  constexpr size_t kNumRounds = 100;
+
+  std::vector<fib_client_t> fib_clients;
+  std::vector<SignedTransactionBatch> txs;
+  for (const ContractAddress &address : MempoolTestServer::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+    // We create enough txs for each account such that each account could fill
+    // all blocks with txs. In other words, an account always have txs to
+    // schedule. This is important for ensuring that when we see a certain
+    // throughput of txs for a given account, this throughput resulted solely
+    // from the scheduling policy rather than a lack of txs to schedule.
+    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  //
+  // Account 0: Age 3 and 5 billion hogs.
+  // Account 1: Age 2 and 10 billion hogs.
+  // Account 2: Age 1 and 15 billion hogs.
+  // Account 3: Age 0 and 20 billion hogs.
+  //
+  // Thus, there are 50 billion hogs in total across the four accounts.
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    server.set_hogs(MempoolTestServer::kAccountAddresses[i],
+                    /*group=*/kHogAgeGroupToSchedule,
+                    /*age=*/MempoolTestServer::kAccountAddresses.size() - i - 1,
+                    /*num_hogs=*/5'000'000'000 * (i + 1));
+  }
+  for (const SignedTransactionBatch &tx : txs) {
+    scheduler.add_txs(tx);
+  }
+
+  std::unordered_map<ContractAddress, size_t> tx_counts;
+  for (size_t i = 0; i < kNumRounds; i++) {
+    const auto &[scheduled_hashes, scheduled] = scheduler.schedule(kBlockSize);
+    for (const SignedTransaction &tx : scheduled) {
+      tx_counts[tx.tx.invocation.invoked_address]++;
+    }
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
+    for (const ContractAddress &account :
+         MempoolTestServer::kAccountAddresses) {
+      scheduler.cycle_groups(account);
+    }
+  }
+
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
+    EXPECT_EQ(tx_counts[address], (i + 1) * kNumRounds);
+  }
+}
+
+TEST(Scheduler, FairnessAcrossBlocks)
+{
+  constexpr size_t kNumRounds = 100;
+
+  std::vector<fib_client_t> fib_clients;
+  std::vector<SignedTransactionBatch> txs;
+  for (const ContractAddress &address : MempoolTestServer::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+    // We create enough txs for each account such that each account could fill
+    // all blocks with txs. In other words, an account always have txs to
+    // schedule. This is important for ensuring that when we see a certain
+    // throughput of txs for a given account, this throughput resulted solely
+    // from the scheduling policy rather than a lack of txs to schedule.
+    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  //
+  // Account 0: Age 3 and 5 billion hogs.
+  // Account 1: Age 2 and 10 billion hogs.
+  // Account 2: Age 1 and 15 billion hogs.
+  // Account 3: Age 0 and 20 billion hogs.
+  //
+  // Thus, there are 50 billion hogs in total across the four accounts.
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    server.set_hogs(MempoolTestServer::kAccountAddresses[i],
+                    /*group=*/kHogAgeGroupToSchedule,
+                    /*age=*/MempoolTestServer::kAccountAddresses.size() - i - 1,
+                    /*num_hogs=*/5'000'000'000 * (i + 1));
+  }
+  for (const SignedTransactionBatch &tx : txs) {
+    scheduler.add_txs(tx);
+  }
+
+  std::unordered_map<ContractAddress, size_t> tx_counts;
+  for (size_t i = 0; i < kNumRounds; i++) {
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_size=*/1);
+    for (const SignedTransaction &tx : scheduled) {
+      tx_counts[tx.tx.invocation.invoked_address]++;
+    }
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
+    for (const ContractAddress &account :
+         MempoolTestServer::kAccountAddresses) {
+      scheduler.cycle_groups(account);
+    }
+  }
+
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
+    // TODO(jhumphri): Calculate this in a better way.
+    size_t target = (i + 1) * 10;
+
+    constexpr size_t kErrorBound = 4;
+    EXPECT_LE(tx_counts[address], target + kErrorBound);
+    EXPECT_GE(tx_counts[address], target - kErrorBound);
+  }
+}
+
+TEST(Scheduler, YoungHogStarvation)
+{
+  constexpr size_t kNumRounds = 100;
+
+  std::vector<fib_client_t> fib_clients;
+  std::vector<SignedTransactionBatch> txs;
+  for (const ContractAddress &address : MempoolTestServer::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+    // We create enough txs for each account such that each account could fill
+    // all blocks with txs. In other words, an account always have txs to
+    // schedule. This is important for ensuring that when we see a certain
+    // throughput of txs for a given account, this throughput resulted solely
+    // from the scheduling policy rather than a lack of txs to schedule.
+    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  //
+  // Account 0: Age 0 and (5 billion * kNumRounds) hogs.
+  // Account 1: Age 1 and 5 billion hogs.
+  // Account 2: Age 0 and 0 hogs.
+  // Account 3: Age 0 and 0 hogs.
+  //
+  // Thus, there are 505 billion hogs in total across the four accounts.
+  server.set_hogs(MempoolTestServer::kAccountAddresses[0],
+                  /*group=*/kHogAgeGroupToSchedule,
+                  /*age=*/0,
+                  /*num_hogs=*/5'000'000'000 * kNumRounds);
+  server.set_hogs(MempoolTestServer::kAccountAddresses[1],
+                  /*group=*/kHogAgeGroupToSchedule,
+                  /*age=*/1,
+                  /*num_hogs=*/5'000'000'000);
+  server.set_hogs(MempoolTestServer::kAccountAddresses[2],
+                  /*group=*/kHogAgeGroupToSchedule,
+                  /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(MempoolTestServer::kAccountAddresses[3],
+                  /*group=*/kHogAgeGroupToSchedule,
+                  /*age=*/0,
+                  /*num_hogs=*/0);
+  for (const SignedTransactionBatch &tx : txs) {
+    scheduler.add_txs(tx);
+  }
+
+  std::unordered_map<ContractAddress, size_t> tx_counts;
+  for (size_t i = 0; i < kNumRounds; i++) {
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_size=*/1);
+    for (const SignedTransaction &tx : scheduled) {
+      tx_counts[tx.tx.invocation.invoked_address]++;
+    }
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
+  }
+  // All txs handled should have been submitted by account 0.
+  EXPECT_EQ(tx_counts.size(), 1);
+  EXPECT_EQ(tx_counts[MempoolTestServer::kAccountAddresses[0]], kNumRounds);
+
+  {
+    // The next tx scheduled should have been submitted by account 1.
+    const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/1);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+              MempoolTestServer::kAccountAddresses[1]);
+  }
+}
+
+// TODO(jhumphri): Test that [cycle_groups()] is automatically called when
+// needed. We should ensure that the new averages are being computed properly in
+// [cycle_if_needed()].
 
 } // namespace hogd
 

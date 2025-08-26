@@ -170,9 +170,6 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
-// TODO(jhumphri): Do a test that tries to validate a tx that was not included
-// in the nomination.
-
 TEST(Mempool, ValidateBatchMissingTx)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);

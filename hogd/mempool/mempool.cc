@@ -35,7 +35,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted. This vetting logic will include the authentication logic from
   // Geoff's proposal.
-  scheduler_.add_vetted_txs(batch);
+  scheduler_.add_txs(batch);
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
@@ -43,7 +43,7 @@ x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
-  scheduler_.add_vetted_txs(batch);
+  scheduler_.add_txs(batch);
   co_return;
 }
 
@@ -212,12 +212,13 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   for (size_t i = 0; i < statuses.size(); i++) {
     if (statuses[i]) {
-      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]});
+      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]},
+                                   nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
       scheduler_.mark_txs_failed({nomination.transaction_hashes[i]});
-      scheduler_.add_vetted_txs({txs[i]});
+      scheduler_.add_txs({txs[i]});
     }
   }
 
@@ -283,17 +284,28 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
-  if (!scheduler_.find_and_remove_vetted_txs(nomination, txs)) {
-    co_await finish_block(block_id);
-    co_await abandon_snapshot(block_id);
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+  {
+    x23::Vec<SignedTransaction> signed_txs;
+    if (!scheduler_.find_and_remove_from_runqueue(nomination.transaction_hashes,
+                                                  signed_txs)) {
+      co_await finish_block(block_id);
+      co_await abandon_snapshot(block_id);
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+    }
+    CHECK_EQ(signed_txs.size(), nomination.transaction_nominations.size());
+    for (size_t i = 0; i < signed_txs.size(); i++) {
+      txs.push_back({.signed_tx = signed_txs[i],
+                     .nondeterministic_proposal_data =
+                         nomination.transaction_nominations[i]
+                             .nondeterministic_proposal_data});
+    }
   }
   CHECK(!txs.empty());
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
         scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_vetted_txs(reenqueue);
+    scheduler_.add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -302,12 +314,12 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   }
 
   // Verify the block hash. It is safe to directly use
-  // [nomination.transaction_hashes] here because we already checked above that
-  // all of these hashes correspond to vetted txs.
+  // [nomination.transaction_hashes] here because we already checked above
+  // that all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     SignedTransactionBatch reenqueue =
         scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_vetted_txs(reenqueue);
+    scheduler_.add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -315,7 +327,8 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  scheduler_.mark_txs_executed(nomination.transaction_hashes);
+  scheduler_.mark_txs_executed(nomination.transaction_hashes,
+                               nomination.block_height);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
 
