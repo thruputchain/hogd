@@ -16,6 +16,13 @@ class Scheduler {
 public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
+  // Destructors cannot throw exceptions, though the destructor below calls
+  // [write_cache()], which is capable of throwing an exception (due to the
+  // [CHECK()]). We need to catch and squash this exception in the destructor so
+  // that the destructor itself cannot throw an exception.
+  //
+  // We know that the CHECK will never fail. Thus, in the event of an exception,
+  // we just print an error message to [stderr] and take no further action.
   ~Scheduler()
   {
     try {
