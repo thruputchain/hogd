@@ -15,6 +15,7 @@ target_link_libraries(
   hogd
   merkle
   rpc
+  genesis
 )
 
 # Build the backend database (hogdb) executable

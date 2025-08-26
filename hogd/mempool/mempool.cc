@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <future>
 #include <span>
+#include <tuple>
 #include <vector>
 
 #include "db_coord.hh"
@@ -16,7 +17,6 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/crypto/crypto.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -33,10 +33,9 @@ x23::Async<void>
 Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
 {
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
-  // vetted.
-  for (const SignedTransaction &tx : batch) {
-    vetted_txs_[sha256(tx)] = tx;
-  }
+  // vetted. This vetting logic will include the authentication logic from
+  // Geoff's proposal.
+  scheduler_.add_vetted_txs(batch);
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
@@ -44,34 +43,8 @@ x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
-  for (const SignedTransaction &tx : batch) {
-    vetted_txs_[sha256(tx)] = tx;
-  }
+  scheduler_.add_vetted_txs(batch);
   co_return;
-}
-
-bool
-Mempool::find_vetted_txs(const Nomination &nomination,
-                         x23::Vec<ProposedTransaction> &ret)
-{
-  CHECK_EQ(nomination.transaction_hashes.size(),
-           nomination.transaction_nominations.size());
-
-  ret.clear();
-  for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
-    const SignedTransactionHash &hash = nomination.transaction_hashes[i];
-    const NominatedTransaction &nominated_tx =
-        nomination.transaction_nominations[i];
-
-    auto it = vetted_txs_.find(hash);
-    if (it == vetted_txs_.end()) {
-      return false;
-    }
-    ret.push_back({.signed_tx = it->second,
-                   .nondeterministic_proposal_data =
-                       nominated_tx.nondeterministic_proposal_data});
-  }
-  return true;
 }
 
 x23::Async<bool>
@@ -159,11 +132,14 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
   return trie.get_root_hash();
 }
 
-x23::Async<bool>
+x23::Async<x23::Vec<bool>>
 Mempool::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
+  x23::Vec<bool> ret;
+  ret.reserve(txs.size());
+
   ExecProposeBatchResult res =
       co_await exec_client_.executorcoord_propose_batch(block_id, txs);
   for (const ExecProposeResult &result : res) {
@@ -171,19 +147,19 @@ Mempool::propose_batch(
     case ExecResult::ExecResultTxDeterministicError:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
+      ret.push_back(true);
       break;
     case ExecResult::ExecResultOK:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+      ret.push_back(true);
       break;
     default:
-      // TODO(jhumphri): Some of the other txs may have succeeded. Do we need
-      // to undo them?
-      co_return false;
+      ret.push_back(false);
       break;
     }
   }
-  co_return true;
+  co_return ret;
 }
 
 x23::Async<bool>
@@ -223,25 +199,26 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
-  txs.reserve(kMaxBlockSize);
-  auto it = vetted_txs_.begin();
-  for (size_t i = 0; i < kMaxBlockSize && it != vetted_txs_.end(); i++) {
-    nomination.transaction_hashes.push_back(it->first);
-    txs.push_back(it->second);
-    it++;
-  }
-
-  if (txs.empty()) {
+  std::tie(nomination.transaction_hashes, txs) =
+      scheduler_.schedule(kMaxBlockSize);
+  if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  else if (!co_await propose_batch(block_id, txs,
-                                   nomination.transaction_nominations)) {
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+  x23::Vec<bool> statuses =
+      co_await propose_batch(block_id, txs, nomination.transaction_nominations);
+  for (size_t i = 0; i < statuses.size(); i++) {
+    if (statuses[i]) {
+      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]});
+    }
+    else {
+      // TODO(jhumphri): Need to do anything here?
+      scheduler_.mark_txs_failed({nomination.transaction_hashes[i]});
+      scheduler_.add_vetted_txs({txs[i]});
+    }
   }
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
@@ -278,6 +255,14 @@ Mempool::open_validation_block(BlockID block_id)
 x23::Async<SchedulerValidationResult>
 Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
 {
+  // TODO(jhumphri): Need to ensure that the node that proposed the block is
+  // following the expected scheduling policy.
+  if (nomination.transaction_nominations.empty()) {
+    // Empty nomination.
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
@@ -298,39 +283,39 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
-  txs.reserve(nomination.transaction_nominations.size());
-  if (!find_vetted_txs(nomination, txs)) {
+  if (!scheduler_.find_and_remove_vetted_txs(nomination, txs)) {
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
-  if (nomination.transaction_nominations.empty()) {
-    CHECK(txs.empty());
-    // Empty nomination.
+  CHECK(!txs.empty());
+  if (!co_await validate_batch(block_id, txs)) {
+    SignedTransactionBatch reenqueue =
+        scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    scheduler_.add_vetted_txs(reenqueue);
+
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-  else {
-    CHECK(!txs.empty());
-    if (!co_await validate_batch(block_id, txs)) {
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
-    }
   }
 
   // Verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above that
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
+    SignedTransactionBatch reenqueue =
+        scheduler_.mark_txs_failed(nomination.transaction_hashes);
+    scheduler_.add_vetted_txs(reenqueue);
+
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
+  scheduler_.mark_txs_executed(nomination.transaction_hashes);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
 

@@ -22,6 +22,7 @@ target_include_directories(
 
 target_link_libraries(
   test_ffi
+  precompiles
   runtime
   db_interface
 )

@@ -12,7 +12,9 @@
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "scheduler.h"
 #include "transaction.hh"
+#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
@@ -26,19 +28,10 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  using coord_client_t =
-      CoordScheduler1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  using db_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  using exec_client_t =
-      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   Mempool(coord_client_t &&coord_client, db_client_t &&db_client,
           exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)), db_client_(std::move(db_client)),
-      exec_client_(std::move(exec_client))
+      exec_client_(std::move(exec_client)), scheduler_(db_client_)
   {}
 
   // Disable copy and move.
@@ -46,6 +39,8 @@ public:
   Mempool &operator=(const Mempool &) = delete;
   Mempool(Mempool &&) = delete;
   Mempool &operator=(Mempool &&) = delete;
+
+  Scheduler &scheduler() { return scheduler_; }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 
@@ -92,9 +87,6 @@ private:
     return ns.count();
   }
 
-  bool find_vetted_txs(const Nomination &nomination,
-                       x23::Vec<ProposedTransaction> &ret);
-
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
                                    BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
@@ -104,7 +96,7 @@ private:
   static SHA256Hash
   get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
 
-  x23::Async<bool>
+  x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
 
@@ -119,9 +111,8 @@ private:
   db_client_t db_client_;
   exec_client_t exec_client_;
 
-  // TODO(jhumphri): Make the mempool work with multiple threads. e.g., we will
-  // need to synchronize accesses to [vetted_txs_].
-  std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
+  // TODO(jhumphri): Make the mempool work with multiple threads.
+  Scheduler scheduler_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };

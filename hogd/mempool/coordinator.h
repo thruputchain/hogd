@@ -10,6 +10,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
+#include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 

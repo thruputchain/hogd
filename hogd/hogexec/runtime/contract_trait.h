@@ -22,7 +22,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "serialize_calldata.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
@@ -106,9 +106,6 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
     }
   }
 
-  constexpr static SerializationFormat kSerializationFormat =
-      get_format_or_default();
-
   // the type of the i'th exported function,
   // (ordered by their listing in ContractTrait::kExportNames)
   template<size_t I>
@@ -145,12 +142,21 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
-  template<StringLiteral Name>
-  constexpr static ContractEntrypointID entrypoint()
+  constexpr static SerializationFormat kSerializationFormat =
+      get_format_or_default();
+
+  template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
-    return sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                     ContractTrait::kVersion,
-                                     kExportIndex<kLookupIndex<Name>>);
+
+    auto entrypoint =
+        sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                  ContractTrait::kVersion,
+                                  kExportIndex<kLookupIndex<Name>>);
+    if constexpr (requires { ContractTrait::kEntrypoints; }) {
+      assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
+             sdk_method_id(entrypoint));
+    }
+    return entrypoint;
   }
 
   template<StringLiteral Name, typename... Args>
@@ -202,7 +208,7 @@ public:
           if (!out.has_value()) {
             return SyscallError{SyscallErrorCode::kReturnParseError};
           }
-          return *out;
+          return return_type::make_err(*out);
         }
         // ok type
         auto out = Serializer<kSerializationFormat>::template deserialize<
@@ -210,7 +216,7 @@ public:
         if (!out.has_value()) {
           return SyscallError{SyscallErrorCode::kReturnParseError};
         }
-        return *out;
+        return return_type::make_ok(*out);
       }
       else {
 

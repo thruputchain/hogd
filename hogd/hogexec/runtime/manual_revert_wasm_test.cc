@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -15,9 +17,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -45,7 +45,7 @@ protected:
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
     // Load and deploy the manual_revert_test contract
-    auto contract = test::load_test_contract("manual_revert_test.wasm");
+    auto contract = hogd::load_contract("manual_revert_test.wasm");
     contract_addr_ = make_contract_address(0);
     write_contract(contract);
     write_deployment(contract_addr_, sha256(*contract));
@@ -113,7 +113,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -197,7 +197,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -267,7 +267,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -341,7 +341,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -413,7 +413,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -486,7 +486,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -545,7 +545,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =

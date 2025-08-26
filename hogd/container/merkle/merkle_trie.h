@@ -463,7 +463,7 @@ private:
 // can look at any other nodes. This leads to performance degradation.
 //
 // [MerkleTriePrefix] removes this contention. It creates a root "node", where
-// each of the child point to a different [MerkleTrie]. This root "node" is
+// each of the children point to a different [MerkleTrie]. This root "node" is
 // never modified, so there is no need to acquire a reader lock to access it.
 // Each [MerkleTrie] represents a prefix of one hex digit. For example, the
 // [MerkleTrie] that is child [0xa] holds all keys that start with [0xa].

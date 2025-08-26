@@ -44,16 +44,16 @@ public:
   };
 
   // Sets the function pointer and context that a mocked contract calls into.
-  void set_trampoline(uint32_t contract, ForeignEntryPoint entry_point,
+  void set_trampoline(int32_t contract, ForeignEntryPoint entry_point,
                       void *foreign_context);
 
-  bool has_mock_contract(uint32_t id) const
+  bool has_mock_contract(int32_t id) const
   {
     return mocked_contracts_.contains(id);
   }
 
 private:
-  std::map<uint32_t, MockContract> mocked_contracts_;
+  std::map<int32_t, MockContract> mocked_contracts_;
   std::shared_ptr<RuntimeContext> base_context_;
 };
 

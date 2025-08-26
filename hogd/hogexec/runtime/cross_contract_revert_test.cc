@@ -144,7 +144,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =
@@ -350,7 +350,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   contract_map.emplace(2, std::move(contract_c));
@@ -489,7 +489,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =

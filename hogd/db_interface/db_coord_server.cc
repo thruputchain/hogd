@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -85,6 +86,13 @@ DbCoordServer::start_server(uint16_t port_number)
   }(cp_, this, std::move(lfd));
 
   return port_number;
+}
+
+x23::Async<DbResult>
+DbCoordServer::dbcoord_load_genesis_block(GenesisBlock const &genesis_block)
+{
+  block_manager_->initialize_genesis_block(genesis_block);
+  co_return DbResult::DbResultOK;
 }
 
 } // namespace hogd

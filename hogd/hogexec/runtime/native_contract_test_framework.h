@@ -14,6 +14,7 @@
 
 #include "contract.hh"
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -251,7 +252,7 @@ public:
     return *r;
   }
 
-  static auto make_native_contract(uint32_t contract_id)
+  static auto make_native_contract(int32_t contract_id)
   {
     auto contract = std::make_shared<Contract>(ContractType::kNative);
     contract->native_contract_id() = contract_id;
@@ -334,6 +335,8 @@ public:
     return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
                                        allocate_txid());
   }
+
+  void run_genesis_initialization(GenesisBlock const &genesis_block);
 
 private:
   void initialize(BlockExecutionMode mode)

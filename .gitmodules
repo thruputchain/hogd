@@ -19,8 +19,8 @@
 [submodule "external/bcs-cpp"]
 	path = external/bcs-cpp
 	url = git@github.com:groundhogchain/bcs-cpp.git
-[submodule "test_contracts/integration_test_contracts"]
-	path = test_contracts/integration_test_contracts
+[submodule "built_contracts/integration_test_contracts"]
+	path = built_contracts/integration_test_contracts
 	url = git@github.com:groundhogchain/integration_test_contracts.git
 [submodule "external/model-checker"]
 	path = external/model-checker
