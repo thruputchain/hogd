@@ -34,6 +34,7 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 {
   uint128_t numerator = (num_hogs_a * age_a) + (num_hogs_b * age_b);
   uint128_t denominator = num_hogs_a + num_hogs_b;
+  CHECK_GT(denominator, 0UL);
   return div_round_up(numerator, denominator);
 }
 
@@ -175,15 +176,14 @@ Scheduler::cycle_if_needed(const SignedTransaction &tx)
 
     bool already_scheduled_average_older = false;
     bool combined_averages_older = false;
-    const BlockHeight combined_age =
-        compute_average_age(already_scheduled, already_scheduled_age, received,
-                            received_age) > to_schedule_age;
 
     if (already_scheduled > 0) {
       already_scheduled_average_older =
           (already_scheduled_age > to_schedule_age);
       combined_averages_older =
-          (received > 0) && combined_age > to_schedule_age;
+          (received > 0) &&
+          (compute_average_age(already_scheduled, already_scheduled_age,
+                               received, received_age) > to_schedule_age);
     }
     else {
       combined_averages_older =
@@ -275,6 +275,10 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
+  if (!from_xdr(num_received)) {
+    return;
+  }
+
   CHECK(read_average_hog_age({account_address}, /*force=*/false));
   const HogAge &averages = cached_hogs_[account_address];
   HogAge new_averages = averages;
@@ -286,6 +290,9 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
       to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
   {
     // See comment above for [div_round_up()].
+    //
+    // Note that [compute_average_age()] will never divide by 0 because we check
+    // at the top of this function that [num_received] is not 0.
     new_averages.average_ages[kHogAgeGroupReceived] =
         compute_average_age(from_xdr(received_hogs), received_age,
                             from_xdr(num_received), current_block);
