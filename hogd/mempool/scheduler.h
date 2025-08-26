@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <map>
 #include <unordered_set>
 
@@ -15,7 +16,18 @@ class Scheduler {
 public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
-  ~Scheduler() { write_cache(); }
+  ~Scheduler()
+  {
+    try {
+      write_cache();
+    } catch (const std::exception &e) {
+      std::cerr << "[Scheduler::~Scheduler] Exception in write_cache(): "
+                << e.what() << '\n';
+    } catch (...) {
+      std::cerr << "[Scheduler::~Scheduler] Unknown exception in write_cache()"
+                << '\n';
+    }
+  }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
