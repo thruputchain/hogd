@@ -74,19 +74,21 @@ public:
   SignedTransactionBatch
   mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
 
-  // Finds the txs specified in [nomination] and removes their state from the
-  // scheduler. This is used when validating a block as the txs have supposedly
-  // been committed to a block already, so we do not want to schedule the txs.
-  // But the validator still needs to get the tx state because it needs to
+  // Finds the txs specified in [hashes] and removes them from the runqueue.
+  // This is used when validating a block as the txs have supposedly been
+  // committed to a block already, so we do not want to schedule the txs. But
+  // the validator still needs to get the tx state because it needs to
   // re-execute the txs to verify the block.
   //
-  // This method fills in [ret] with [ProposedTransactions] to verify. This
-  // method included the nondeterministic proposal data for each tx in [ret].
+  // This method fills in [ret] with the [SignedTransaction]s to verify.
   //
-  // TODO(jhumphri): I do not like this method signature. The parameter types
-  // are too tied to the mempool rather than the scheduler.
-  bool find_and_remove_vetted_txs(const Nomination &nomination,
-                                  x23::Vec<ProposedTransaction> &ret);
+  // Note that this method removes the txs from the runqueue, but it does not
+  // remove their state entirely from the scheduler. Specifically, information
+  // about the txs is still held in [hash_to_tx_]. The caller needs to
+  // ultimately call [mark_txs_executed()] to remove this state.
+  bool
+  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
+                                x23::Vec<SignedTransaction> &ret);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

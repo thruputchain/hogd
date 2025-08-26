@@ -284,11 +284,22 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
-  if (!scheduler_.find_and_remove_vetted_txs(nomination, txs)) {
-    co_await finish_block(block_id);
-    co_await abandon_snapshot(block_id);
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+  {
+    x23::Vec<SignedTransaction> signed_txs;
+    if (!scheduler_.find_and_remove_from_runqueue(nomination.transaction_hashes,
+                                                  signed_txs)) {
+      co_await finish_block(block_id);
+      co_await abandon_snapshot(block_id);
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+    }
+    CHECK_EQ(signed_txs.size(), nomination.transaction_nominations.size());
+    for (size_t i = 0; i < signed_txs.size(); i++) {
+      txs.push_back({.signed_tx = signed_txs[i],
+                     .nondeterministic_proposal_data =
+                         nomination.transaction_nominations[i]
+                             .nondeterministic_proposal_data});
+    }
   }
   CHECK(!txs.empty());
   if (!co_await validate_batch(block_id, txs)) {
@@ -303,8 +314,8 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   }
 
   // Verify the block hash. It is safe to directly use
-  // [nomination.transaction_hashes] here because we already checked above that
-  // all of these hashes correspond to vetted txs.
+  // [nomination.transaction_hashes] here because we already checked above
+  // that all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     SignedTransactionBatch reenqueue =
         scheduler_.mark_txs_failed(nomination.transaction_hashes);

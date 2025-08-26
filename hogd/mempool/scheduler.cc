@@ -391,28 +391,29 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
 }
 
 bool
-Scheduler::find_and_remove_vetted_txs(const Nomination &nomination,
-                                      x23::Vec<ProposedTransaction> &ret)
+Scheduler::find_and_remove_from_runqueue(
+    const x23::Vec<SignedTransactionHash> &hashes,
+    x23::Vec<SignedTransaction> &ret)
 {
-  CHECK_EQ(nomination.transaction_hashes.size(),
-           nomination.transaction_nominations.size());
-
-  ret.clear();
-  for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
-    const SignedTransactionHash &hash = nomination.transaction_hashes[i];
-    const NominatedTransaction &nominated_tx =
-        nomination.transaction_nominations[i];
-
-    auto it = hash_to_tx_.find(hash);
-    if (it == hash_to_tx_.end()) {
+  // Check that we have a transaction for each hash. In the second for loop
+  // below, we remove txs from the runqueue, so we want to make sure that we
+  // will not return an error code in the middle of that loop. Otherwise, we
+  // would need to add the txs back to the runqueue, which is needlessly
+  // complex.
+  for (const SignedTransactionHash &hash : hashes) {
+    if (!hash_to_tx_.contains(hash)) {
       return false;
     }
-    ret.push_back({.signed_tx = it->second.tx,
-                   .nondeterministic_proposal_data =
-                       nominated_tx.nondeterministic_proposal_data});
+  }
 
-    // If this if statement is true, then the tx is on the runqueue. Otherwise,
-    // it is stranded. We need to remove it from the correct data structures
+  ret.clear();
+  for (const SignedTransactionHash &hash : hashes) {
+    auto it = hash_to_tx_.find(hash);
+    CHECK(it != hash_to_tx_.end());
+    ret.push_back(it->second.tx);
+
+    // When the if statement is true, the tx is on the runqueue. Otherwise, it
+    // is stranded. We need to remove it from the correct data structures
     // accordingly.
     if (account_to_tx_[it->second.account].erase(&it->second) == 1UL) {
       CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
