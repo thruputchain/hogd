@@ -39,22 +39,13 @@ public:
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
   // them.
-  void add_vetted_txs(const SignedTransactionBatch &txs);
-
-  // Moves the hogs between groups as specified by the scheduling protocol.
-  // Specifically:
-  // 1. Hogs in the [kHogAgeGroupAlreadyScheduled] group are moved to the
-  // [kHogAgeGroupToSchedule] group.
-  // 2. Then, hogs in the [kHogAgeGroupReceived] group are moved to the
-  // [kHogAgeGroupAlreadyScheduled] group.
-  // So this has the visual effect of:
-  //     [kHogAgeGroupReceived]
-  // --> [kHogAgeGroupAlreadyScheduled]
-  // --> [kHogAgeGroupToSchedule].
   //
-  // Note that the average ages of these groups change when hogs are moved
-  // between them.
-  void cycle_groups(const ContractAddress &account_address);
+  // This method will cycle the groups for an account if doing so gives the
+  // account an advantage in scheduling. This happens when (1) cycling increases
+  // the average age of the [kHogAgeGroupToSchedule] group or (2) the
+  // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
+  // tx but cycling will add enough hogs to this group to schedule it.
+  void add_txs(const SignedTransactionBatch &txs);
 
   // Call this method when account [account_address] receives [num_received]
   // hogs from another account in block [current_block]. This method adds the
@@ -112,9 +103,25 @@ public:
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
+
   bool read_average_hog_age(const ContractAddressBatch &addresses, bool force);
   HogAge &get_cached_hog_age(const ContractAddress &address);
   bool write_average_hog_age(const ContractAddressBatch &addresses);
+
+  // Moves the hogs between groups as specified by the scheduling protocol.
+  // Specifically:
+  // 1. Hogs in the [kHogAgeGroupAlreadyScheduled] group are moved to the
+  // [kHogAgeGroupToSchedule] group.
+  // 2. Then, hogs in the [kHogAgeGroupReceived] group are moved to the
+  // [kHogAgeGroupAlreadyScheduled] group.
+  // So this has the visual effect of:
+  //     [kHogAgeGroupReceived]
+  // --> [kHogAgeGroupAlreadyScheduled]
+  // --> [kHogAgeGroupToSchedule].
+  //
+  // Note that the average ages of these groups change when hogs are moved
+  // between them.
+  void cycle_groups(const ContractAddress &account);
 
   // Debug.
   void dump_runqueue() const;
@@ -145,6 +152,14 @@ private:
   // method calls, and the [kHogAgeGroupToSchedule] group written to hogdb
   // contains the correct number of hogs.
   void write_cache();
+
+  // This method will cycle the groups for the account that submitted [tx] if
+  // doing so gives the account an advantage in scheduling. This happens when
+  // (1) cycling increases the average age of the [kHogAgeGroupToSchedule] group
+  // or (2) the [kHogAgeGroupToSchedule] group does not have enough hogs to
+  // schedule [tx] but cycling will add enough hogs to this group to schedule
+  // it.
+  void cycle_if_needed(const SignedTransaction &tx);
 
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain

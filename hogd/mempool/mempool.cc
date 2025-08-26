@@ -35,7 +35,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted. This vetting logic will include the authentication logic from
   // Geoff's proposal.
-  scheduler_.add_vetted_txs(batch);
+  scheduler_.add_txs(batch);
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
@@ -43,7 +43,7 @@ x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
-  scheduler_.add_vetted_txs(batch);
+  scheduler_.add_txs(batch);
   co_return;
 }
 
@@ -218,7 +218,7 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     else {
       // TODO(jhumphri): Need to do anything here?
       scheduler_.mark_txs_failed({nomination.transaction_hashes[i]});
-      scheduler_.add_vetted_txs({txs[i]});
+      scheduler_.add_txs({txs[i]});
     }
   }
 
@@ -305,7 +305,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
         scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_vetted_txs(reenqueue);
+    scheduler_.add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -319,7 +319,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     SignedTransactionBatch reenqueue =
         scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_vetted_txs(reenqueue);
+    scheduler_.add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
