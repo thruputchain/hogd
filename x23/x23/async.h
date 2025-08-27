@@ -720,10 +720,7 @@ private:
       assert(has_value());
   }
   awaitable_type *asyncp() noexcept { return get_if<0>(this); }
-  decltype(auto) awaiter() noexcept
-  {
-    return detail::get_awaiter(*asyncp());
-  }
+  decltype(auto) awaiter() noexcept { return detail::get_awaiter(*asyncp()); }
 };
 template<typename T> requires (!is_awaitable<T>)
 MaybeAsync(T) -> MaybeAsync<T>;
