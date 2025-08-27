@@ -172,12 +172,13 @@ private:
         if constexpr (returns_void) {
           dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg);
-          return MaybeAsync{make_record(rmsg)};
+          // Note explicit <Buf> required to avoid ICE in gcc14
+          return MaybeAsync<Buf>{make_record(rmsg)};
         }
         else {
           return_type res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
-          return MaybeAsync{make_record(rmsg, res)};
+          return MaybeAsync<Buf>{make_record(rmsg, res)};
         }
       }
       else {
@@ -187,12 +188,12 @@ private:
           if constexpr (returns_void) {
             awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg);
-            return MaybeAsync{make_record(rmsg)};
+            return MaybeAsync<Buf>{make_record(rmsg)};
           }
           else {
             return_type res = awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg, res);
-            return MaybeAsync{make_record(rmsg, res)};
+            return MaybeAsync<Buf>{make_record(rmsg, res)};
           }
         }
 
