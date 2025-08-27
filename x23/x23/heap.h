@@ -98,7 +98,7 @@ public:
   // in this heap.
   bool valid_index(const HeapIndex &ip) const
   {
-    return ip.idx_ >= 0 && ip.idx_ < elems_.size() &&
+    return ip.idx_ >= 0 && size_t(ip.idx_) < elems_.size() &&
            &ip == elems_[ip.idx_].ip_;
   }
 
