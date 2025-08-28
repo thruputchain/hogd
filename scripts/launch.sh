@@ -1,6 +1,25 @@
 #!/bin/bash
 
 CHUCKD_BINARY=~/go/bin/chuckd
+HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
+HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
+
+set -Eeuo pipefail
+
+# Kill the whole process group on exit or when interrupted.
+cleanup() {
+  status=$?                                # remember why we’re exiting
+  trap - EXIT INT TERM                     # prevent re-entry
+  # Send SIGTERM to *entire* process group (children + grandchildren)
+  kill -TERM -0 2>/dev/null || true        # no-op: touches PG, helps set $? on some shells
+  kill -TERM -- -$$ 2>/dev/null || true    # polite stop
+  # Give them a moment to exit gracefully
+  sleep 1
+  # Anything stubborn gets SIGKILL
+  kill -KILL -- -$$ 2>/dev/null || true
+  exit $status
+}
+trap cleanup EXIT INT TERM
 
 if [ ! -x "$CHUCKD_BINARY" ]; then
   # Tell [go install] where the groundhog private repositories are.
@@ -14,8 +33,14 @@ if [ ! -x "$CHUCKD_BINARY" ]; then
   go install github.com/groundhogchain/chuckd/chuckd@latest
 fi
 
-# Execute chuckd.
-"$CHUCKD_BINARY" help
+# Start chuckd.
+"$CHUCKD_BINARY" -l info bench loadgen &
+
+# Start hogdb.
+"$HOGDB_BINARY" /tmp/hogdb 1000000 &
+
+# Start hogexec.
+"$HOGEXEC_BINARY" &
 
 # TODO(jhumphri): Launch the coordinator for the mempool.
 # TODO(jhumphri): Launch the coordinator for the executor.
@@ -23,3 +48,11 @@ fi
 # TODO(jhumphri): Launch the executor.
 # TODO(jhumphri): Launch the database that the mempool accesses.
 # TODO(jhumphri): Launch the database that the executor accesses.
+
+pids=($(jobs -pr))
+for pid in "${pids[@]}"; do
+  if ! wait "$pid"; then
+    # Causes EXIT trap to run, which kills the rest.
+    exit 1
+  fi
+done
