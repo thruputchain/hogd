@@ -34,7 +34,7 @@ Async<std::expected<std::uint32_t, Errno>>
 RpcStreamImpl::read_uint(SLOC_ARG0)
 {
   Buf b;
-  if (co_await co_await cp_->read(fd_, &b, 4) != 4)
+  if (co_await co_await cp_->read(fd_, &b, 4, true, true) != 4)
     co_return Errno{ENOMSG};
   co_return getbe<std::uint32_t>(b.data());
 }
@@ -50,7 +50,7 @@ RpcStreamImpl::read_record(SLOC_ARG0)
     len &= 0x7fffffff;
     if (b.size() + len > max_record_size)
       co_return Errno{ENOMSG};
-    if (co_await co_await cp_->read(fd_, &b, len) != len)
+    if (co_await co_await cp_->read(fd_, &b, len, true, true) != len)
       co_return Errno{ENOMSG};
   }
   co_return b;
@@ -102,8 +102,17 @@ RpcStreamImpl::reader(SLOC_ARG0)
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
-      if (RpcService *s = srvmap_.lookup(msg, &res))
-        cp_->bgwrite(fd_, co_await s->serve(msg, b.subspan(hdrbytes)));
+      if (RpcService *s = srvmap_.lookup(msg, &res)) {
+        auto awaitable = s->serve(msg, b.subspan(hdrbytes));
+        // Only spawn another coroutine if result not already available
+        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        if (awaiter.await_ready())
+          cp_->dwrite(fd_, awaiter.await_resume());
+        else
+          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+            self->cp_->dwrite(self->fd_, co_await awaitable);
+          }(*this, std::move(awaitable));
+      }
       else
         send_msg(res);
     }

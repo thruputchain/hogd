@@ -61,6 +61,16 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   return f.writer();
 }
 
+std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+CoroPollImpl::get_rw(BorrowedFd fd)
+{
+  auto s = state_.take();
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
+    return {nullptr, nullptr};
+  return {f.reader(), f.writer()};
+}
+
 void
 CoroPollImpl::check(int timeout)
 {

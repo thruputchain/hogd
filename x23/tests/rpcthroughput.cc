@@ -85,11 +85,11 @@ struct Server {
   RefPtr<Listener> l_;
   Server(RefPtr<Listener> l) : l_(std::move(l)) {}
 
-  Async<void> null() { co_return; }
+  void null() {}
 
-  Async<Data> echo(Data arg) { co_return arg; }
+  Data echo(Data arg) { return arg; }
 };
-static_assert(is_blank_rpc_v1<Server *, Async>);
+static_assert(is_blank_rpc_v1<Server *, MaybeAsync>);
 
 CpTp::Vec
 CpTp::make_vec(size_t nthreads, size_t ncptp)
@@ -115,7 +115,7 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
     //    std::println("accepted fd {} TCP port {} from {}", *s,
     //                 get_port(self->addr_), HostPort(ss));
     make_rpc_stream(self->cps_.get(*s), *s)
-        .server(std::make_unique<Server>(self));
+        .server(std::make_unique<Server>(self), blank_rpc_v1{});
   }
   std::println("server stopping");
 }
@@ -161,7 +161,7 @@ do_client(int port, const char *server)
 
   using DiRef = RefPtr<DestroyInhibit>;
 
-  auto make_client = [&](DiRef dir, unsigned ncoros) -> Detached {
+  auto make_client = [&]<bool DATA>(DiRef dir, unsigned ncoros) -> Detached {
     UniqueFd fd{socket(server_addr.ss_family, SOCK_STREAM, 0)};
     if (!fd) {
       std::println(stderr, "socket: {}", Errno{});
@@ -175,41 +175,32 @@ do_client(int port, const char *server)
     // std::println("connected fd {} TCP port {} to {}", fd.get(),
     // 		 get_port(local_addr(fd)), HostPort(server_addr));
     auto &cp = cps.get(fd);
-    auto c = make_rpc_stream(cp, fd.release()).template client<blank_rpc_v1>();
+    auto c = make_rpc_stream(cp, fd.release()).client(blank_rpc_v1{});
 
-    if (opt_data) {
-      for (unsigned i = 0; i < ncoros; ++i)
-        [](DiRef dir, auto c, std::atomic_int &count) -> Detached {
-          Data bytes(size_t(*opt_data), std::uint8_t(0xc5));
-          try {
-            for (;;) {
+    for (unsigned i = 0; i < ncoros; ++i)
+      [](DiRef dir, auto c, std::atomic_int &count) -> Detached {
+        auto bytes = make_if<DATA, Data>(opt_data.value_or(0), uint8_t(0xc5));
+        try {
+          for (;;) {
+            if constexpr (DATA)
               co_await c.echo(bytes);
-              ++count;
-            }
-          } catch (const XdrException &e) {
-            // std::println("Excpetion: {}", e.what());
-          }
-          co_return;
-        }(dir, c, count);
-    }
-    else
-      for (unsigned i = 0; i < ncoros; ++i)
-        [](DiRef dir, auto c, std::atomic_int &count) -> Detached {
-          try {
-            for (;;) {
+            else
               co_await c.null();
-              ++count;
-            }
-          } catch (const XdrException &e) {
-            // std::println("Excpetion: {}", e.what());
+            ++count;
           }
-          co_return;
-        }(dir, c, count);
+        } catch (const XdrException &e) {
+          // std::println("Excpetion: {}", e.what());
+        }
+        co_return;
+      }(dir, c, count);
   };
 
   DestroyInhibit inh;
   for (int i = opt_connections; i > 0; --i)
-    make_client(inh, opt_async_rpcs_per_thread);
+    if (opt_data)
+      make_client.template operator()<true>(inh, opt_async_rpcs_per_thread);
+    else
+      make_client.template operator()<false>(inh, opt_async_rpcs_per_thread);
 
   // Warm up for 100 msec
   poll(nullptr, 0, 100);

@@ -99,25 +99,12 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual Async<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
+  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
   }
 };
-
-template<typename R> requires (!std::is_void_v<R>)
-inline Async<R>
-void_to_empty(Async<R> a)
-{
-  return a;
-}
-inline auto
-void_to_empty(Async<void> a)
-{
-  return MapAwait{.func = [] { return std::array<std::uint8_t, 0>{}; },
-                  .awaitable = std::move(a)};
-}
 
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
          typename... ExtraArgs>
@@ -134,76 +121,167 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  Async<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
+  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
            msg.body.cbody().prog == program() &&
            msg.body.cbody().vers == version());
-    return with_proc_meta<version_meta, Async<Buf>>(msg.body.cbody().proc,
-                                                    Executor{*this, msg,
-                                                             argdata});
+    return with_proc_meta<version_meta, MaybeAsync<Buf>>(
+        msg.body.cbody().proc, [&]<typename ProcMeta>() -> MaybeAsync<Buf> {
+          if constexpr (std::is_void_v<ProcMeta>)
+            return proc_unavail(msg);
+          else
+            return ProcHandler<ProcMeta>{*this, msg}(argdata);
+        });
   }
 
 private:
-  struct Executor {
-    struct RpcDispatcher &d_;
-    const rpc_msg &callmsg_;
-    const BufView argbytes_;
+  Buf proc_unavail(const rpc_msg &callmsg)
+  {
+    using enum accept_stat;
+    rpc_msg err{.xid = callmsg.xid};
+    msg_set_reply_stat(&err, PROC_UNAVAIL);
+    logger_.template log_server<VersMeta>(callmsg);
+    logger_.template log_server<VersMeta>(err);
+    return make_record(err);
+  }
 
-    template<std::same_as<void>>
-    Async<Buf> operator()(this Executor self SLOC_PARM)
-    {
-      using enum accept_stat;
-      rpc_msg err{.xid = self.callmsg_.xid};
-      msg_set_reply_stat(&err, PROC_UNAVAIL);
-      self.d_.logger_.template log_server<VersMeta>(self.callmsg_);
-      self.d_.logger_.template log_server<VersMeta>(err);
-      co_return make_record(err);
+  template<typename ProcMeta> struct ProcHandler {
+    using arg_type = ProcMeta::arg_type;
+    using return_type = ProcMeta::return_type;
+
+    RpcDispatcher &d_;
+    uint32_t xid_;
+    const rpc_msg *callmsg_{};
+
+    ProcHandler(RpcDispatcher &d, const rpc_msg &callmsg)
+      : d_(d), xid_(callmsg.xid), callmsg_(&callmsg)
+    {}
+
+    using enum accept_stat;
+
+    MaybeAsync<Buf> operator()(BufView argbytes)
+    try {
+      constexpr bool returns_void = std::is_void_v<return_type>;
+      using dispatch_t = decltype(dispatch(argbytes));
+      rpc_msg rmsg{.xid = xid_};
+      msg_set_reply_stat(&rmsg, SUCCESS);
+
+      if constexpr (!is_awaitable<dispatch_t>) {
+        if constexpr (returns_void) {
+          dispatch(argbytes);
+          d_.logger_.template log_server<ProcMeta>(rmsg);
+          // Note explicit <Buf> required to avoid ICE in gcc14
+          return MaybeAsync<Buf>{make_record(rmsg)};
+        }
+        else {
+          return_type res = dispatch(argbytes);
+          d_.logger_.template log_server<ProcMeta>(rmsg, res);
+          return MaybeAsync<Buf>{make_record(rmsg, res)};
+        }
+      }
+      else {
+        auto awaitable = dispatch(argbytes);
+        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        if (awaiter.await_ready()) {
+          if constexpr (returns_void) {
+            awaiter.await_resume();
+            d_.logger_.template log_server<ProcMeta>(rmsg);
+            return MaybeAsync<Buf>{make_record(rmsg)};
+          }
+          else {
+            return_type res = awaiter.await_resume();
+            d_.logger_.template log_server<ProcMeta>(rmsg, res);
+            return MaybeAsync<Buf>{make_record(rmsg, res)};
+          }
+        }
+
+        return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
+                               [](ProcHandler self /* copy */,
+                                  auto awaitable) noexcept -> Async<Buf> {
+                                 try {
+                                   rpc_msg rmsg{.xid = self.xid_};
+                                   msg_set_reply_stat(&rmsg, SUCCESS);
+                                   if constexpr (returns_void) {
+                                     co_await awaitable;
+                                     co_return make_record(rmsg);
+                                   }
+                                   else
+                                     co_return make_record<return_type>(
+                                         rmsg, co_await awaitable);
+                                 } catch (const std::exception &e) {
+                                   co_return self.error(e);
+                                 }
+                               }(*this, std::move(awaitable))};
+      }
+    } catch (std::exception &e) {
+      return error(e);
     }
-    template<typename ProcMeta>
-    Async<Buf> operator()(this Executor self SLOC_PARM)
+
+    decltype(auto) dispatch(BufView argbytes)
     {
-      using enum accept_stat;
-      typename ProcMeta::arg_type args;
-      rpc_msg rmsg{.xid = self.callmsg_.xid};
+      return std::apply(
+          [&](auto &...ea) {
+            return ProcMeta::dispatch(*d_.impl_, args(argbytes), ea...);
+          },
+          d_.ea_);
+    }
+
+    arg_type args(BufView argbytes)
+    {
+      arg_type args;
+      deserialize(&args, argbytes);
+      d_.logger_.template log_server<ProcMeta>(*callmsg_, args);
+      // callmsg_ non-null is used to detect that an exception was
+      // thrown during deserialization of arguments.  Also, if we
+      // suspend a coroutine, callmsg_ will no longer be valid anyway.
+      callmsg_ = nullptr;
+      return args;
+    }
+
+    Buf result(const typename ProcMeta::return_wire_type &res) const noexcept
+    {
+      rpc_msg rmsg{.xid = xid_};
+      msg_set_reply_stat(&rmsg, SUCCESS);
+      d_.logger_.template log_server<ProcMeta>(rmsg, res);
       try {
-        deserialize(&args, self.argbytes_);
-      } catch (const XdrException &e) {
+        return make_record(rmsg, res);
+      } catch (const std::exception &e) {
+        return error(e);
+      }
+    }
+    Buf result() const noexcept
+    {
+      return reply(typename ProcMeta::return_wire_type{});
+    }
+    Buf error(const std::exception &e) const
+    {
+      rpc_msg rmsg{.xid = xid_};
+      if (callmsg_) {
         msg_set_reply_stat(&rmsg, GARBAGE_ARGS);
         if constexpr (!std::same_as<Logger, RpcNoLogger>) {
-          self.d_.logger_.template log_server<ProcMeta>(self.callmsg_);
-          self.d_.logger_.template log_server<ProcMeta>(
+          d_.logger_.template log_server<ProcMeta>(*callmsg_);
+          d_.logger_.template log_server<ProcMeta>(
               rmsg, uformat(" deserialization error: {}", e.what()));
         }
-        co_return make_record(rmsg);
       }
-      self.d_.logger_.template log_server<ProcMeta>(self.callmsg_, args);
-      try {
-        auto res = co_await void_to_empty(std::apply(
-            [&](auto &...ea) {
-              return ProcMeta::dispatch(*self.d_.impl_, args, ea...);
-            },
-            self.d_.ea_));
-        msg_set_reply_stat(&rmsg, SUCCESS);
-        self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
-        co_return make_record(rmsg, res);
-      } catch (const std::exception &e) {
+      else {
         msg_set_reply_stat(&rmsg, SYSTEM_ERR);
         std::println(stderr, "{}::{}: {}", ProcMeta::version_meta::version_name,
                      ProcMeta::proc_name, e.what());
         if constexpr (!std::same_as<Logger, RpcNoLogger>)
-          self.d_.logger_.template log_server<ProcMeta>(rmsg,
-                                                        uformat(" {}",
-                                                                e.what()));
-        co_return make_record(rmsg);
+          d_.logger_.template log_server<ProcMeta>(rmsg,
+                                                   uformat(" {}", e.what()));
       }
+      return make_record(rmsg);
     }
   };
 };
 
 template<typename T, typename VersMeta, typename... ExtraArgs>
-concept implements_async_rpc = implements_rpc<T, VersMeta, Async, ExtraArgs...>;
+concept implements_async_rpc =
+    implements_rpc<T, VersMeta, MaybeAsync, ExtraArgs...>;
 
 namespace detail {
 class RpcStreamImpl : public RefCount {
@@ -233,7 +311,7 @@ private:
 
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {
-    cp_->bgwrite(fd_, make_record(msg, x...));
+    cp_->awrite(fd_, make_record(msg, x...));
   }
 
   Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
@@ -268,7 +346,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     putbe(record.data() + 4, msg.xid = gen_call_xid(a));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
-    cp_->bgwrite(fd_, std::move(record));
+    cp_->awrite(fd_, std::move(record));
 
     Buf rbuf = co_await a;
     BufView rv = rbuf.subspan(deserialize_from(&msg, rbuf));

@@ -32,9 +32,13 @@
 // Set to 1 if you can't call consteval functions from inside if consteval
 #cmakedefine01 HAVE_BROKEN_P2564R3
 
+// Set to 1 unless the compiler generates internal compiler errors
+// compiling the coro trace code.
+#cmakedefine01 X23_CORO_SLOCK_OK
+
 // Define to 1 to enable tracing of coroutine flow (when
 // x23::CoroTrace::enable is true), 0 to disable, or leave undefined
-// to use !defined(NDEBUG)
+// to use !defined(NDEBUG) && X23_CORO_SLOCK_OK
 #cmakedefine X23_CORO_TRACE @X23_CORO_TRACE@
 
 // Define to 1 if you have the abi::__cxa_demangle function

@@ -9,6 +9,7 @@
 #include <new>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -157,6 +158,18 @@ struct FlagSet {
     return FlagSet{e} & s;
   }
 };
+
+// Make an object of type Type if Cond is true.  Otherwise return an
+// empty tuple.
+template<bool Cond, typename Type, typename... Args>
+constexpr auto
+make_if(Args &&...args)
+{
+  if constexpr (Cond)
+    return Type(std::forward<Args>(args)...);
+  else
+    return std::tuple<>{};
+}
 
 // Basically std::invocable<F, Args...> except if Args... is the
 // single type void, then checks std::invocable<F>.
