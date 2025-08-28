@@ -40,7 +40,7 @@ fi
 "$HOGDB_BINARY" /tmp/hogdb 1000000 &
 
 # Start hogexec.
-"$HOGEXEC_BINARY" &
+"$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
 
 # TODO(jhumphri): Launch the coordinator for the mempool.
 # TODO(jhumphri): Launch the coordinator for the executor.
