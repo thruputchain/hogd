@@ -28,6 +28,8 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -38,7 +40,8 @@ constexpr uint16_t kCoordServerPort = 8080;
 constexpr uint16_t kExecServerPort = 8081;
 
 int
-hogdb_init(std::string_view path, size_t ram_bytes)
+hogdb_init(std::string_view path, size_t ram_bytes,
+           const std::string *coordinator_addr)
 {
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -86,6 +89,34 @@ hogdb_init(std::string_view path, size_t ram_bytes)
     return EXIT_FAILURE;
   }
 
+  x23::ThreadPool x23_pool(/*poll_threads=*/1);
+  x23::CoroPoll cp(x23_pool);
+  if (coordinator_addr) {
+    x23::HostPort host_port;
+    if (!host_port.parse(*coordinator_addr)) {
+      throw std::runtime_error(
+          std::format("Invalid coordinator address: {}", *coordinator_addr));
+    }
+    const std::string host = {host_port.host.begin(), host_port.host.end()};
+    const std::string port = {host_port.port.begin(), host_port.port.end()};
+
+    auto fd = cp.tcpconnect(host, port)();
+    if (!fd) {
+      return EXIT_FAILURE;
+    }
+
+    auto client_config = x23::rpc_stream_logged(cp, *fd);
+    while (true) {
+      auto client =
+          std::make_optional(client_config.template client<Coordinator1>());
+      if (!client) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        continue;
+      }
+      IntroShardResult res = client->coordinator_intro_shard(self_card_)();
+    }
+  }
+
   // block forever
   info("hogdb initialization complete.");
   std::promise<void>().get_future().wait();
@@ -106,11 +137,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hogdb!");
 
   if (argc < 3) {
-    std::println("usage: [db_path] [ram_bytes]");
+    std::println("usage: db_path ram_bytes [coordinator_ip:port]");
     return EXIT_FAILURE;
   }
 
   std::string path = argv[1];
   size_t ram_bytes = std::stoul(argv[2], nullptr, 0);
-  return hogd::hogdb_init(path, ram_bytes);
+
+  const std::string coordinator_addr_raw = argv[3];
+  const std::string *coordinator_addr =
+      (argc < 4) ? nullptr : &coordinator_addr_raw;
+
+  return hogd::hogdb_init(path, ram_bytes, coordinator_addr);
 };
