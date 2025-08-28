@@ -105,7 +105,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogdb!");
 
-  if (argc < 2) {
+  if (argc < 3) {
     std::println("usage: [db_path] [ram_bytes]");
     return EXIT_FAILURE;
   }
