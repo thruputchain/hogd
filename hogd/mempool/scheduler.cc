@@ -17,17 +17,6 @@
 namespace hogd {
 namespace {
 
-// When doing division, we introduce imprecision into our calculations. Thus, we
-// always round the result up to avoid benefitting the account. This helps to
-// ensure that users are not incentivized to waste network storage or compute,
-// such as by spreading HOGs among multiple accounts.
-uint128_t
-div_round_up(uint128_t numerator, uint128_t denominator)
-{
-  // TODO(jhumphri): How to handle divide by 0?
-  return (numerator / denominator) + ((numerator % denominator) ? 1 : 0);
-}
-
 BlockHeight
 compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
                     uint128_t num_hogs_b, BlockHeight age_b)
@@ -35,7 +24,12 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
   uint128_t numerator = (num_hogs_a * age_a) + (num_hogs_b * age_b);
   uint128_t denominator = num_hogs_a + num_hogs_b;
   CHECK_GT(denominator, 0UL);
-  return div_round_up(numerator, denominator);
+  // When doing division, we introduce imprecision into our calculations. Thus,
+  // we always round the result down (i.e., we do integer division) to avoid
+  // benefitting the account. This helps to ensure that users are not
+  // incentivized to waste network storage or compute, such as by spreading HOGs
+  // among multiple accounts.
+  return numerator / denominator;
 }
 
 } // namespace
@@ -236,7 +230,7 @@ Scheduler::cycle_groups(const ContractAddress &account)
   new_averages.num_hogs[kHogAgeGroupToSchedule] =
       to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
   if (from_xdr(to_schedule_hogs)) {
-    // See comment above for [div_round_up()].
+    // See comment above for [compute_average_age()].
     new_averages.average_ages[kHogAgeGroupToSchedule] =
         compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
                             from_xdr(already_scheduled_hogs),
@@ -289,7 +283,7 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   new_averages.num_hogs[kHogAgeGroupReceived] =
       to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
   {
-    // See comment above for [div_round_up()].
+    // See comment above for [compute_average_age()].
     //
     // Note that [compute_average_age()] will never divide by 0 because we check
     // at the top of this function that [num_received] is not 0.
@@ -437,7 +431,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
       age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
     }
     else {
-      // See comment above for [div_round_up()].
+      // See comment above for [compute_average_age()].
       age.average_ages[kHogAgeGroupAlreadyScheduled] =
           compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
                               from_xdr(already_scheduled_hogs),
