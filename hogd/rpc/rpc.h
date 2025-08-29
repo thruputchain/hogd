@@ -43,8 +43,8 @@ namespace rpc_detail {
 
 class ClientFlow {
 public:
-  ClientFlow(File &&socket)
-    : socket_(std::move(socket)),
+  ClientFlow(Socket &&sock)
+    : socket_(std::move(sock)),
       sender_([this](const std::stop_token &stoken) { send_worker(stoken); }),
       receiver_(
           [this](const std::stop_token &stoken) { receive_worker(stoken); })
@@ -66,7 +66,7 @@ private:
   std::queue<Request> requests_;
   std::queue<Completion> completions_;
 
-  File socket_;
+  Socket socket_;
   std::jthread sender_;
   std::jthread receiver_;
 
@@ -143,7 +143,7 @@ public:
   static ErrnoStatus<std::shared_ptr<RPCServer>> create(uint16_t port,
                                                         RPCHandler handler);
 
-  RPCServer(uint16_t port, RPCHandler handler, File &&listener)
+  RPCServer(uint16_t port, RPCHandler handler, Socket &&listener)
     : port_(port), listener_(std::move(listener)), handler_(std::move(handler))
   {}
   ~RPCServer() = default;
@@ -164,25 +164,25 @@ private:
   const uint16_t port_;
   std::mutex lock_;
   bool closing_{false};
-  File listener_;
-  std::vector<File *> workers_;
+  Socket listener_;
+  std::vector<Socket *> workers_;
 
   alignas(kCacheLineSize) RPCHandler handler_;
 
-  bool register_worker(File &f)
+  bool register_worker(Socket &sock)
   {
     std::scoped_lock guard(lock_);
     if (closing_)
       return false;
-    workers_.push_back(&f);
+    workers_.push_back(&sock);
     return true;
   }
 
-  void unregister_worker(File &f)
+  void unregister_worker(Socket &sock)
   {
     std::scoped_lock guard(lock_);
     for (size_t i = 0; i < workers_.size(); ++i) {
-      if (workers_[i] != &f)
+      if (workers_[i] != &sock)
         continue;
 
       workers_[i] = workers_.back();
@@ -191,7 +191,7 @@ private:
     }
   }
 
-  static void connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
+  static void connection_worker(std::shared_ptr<RPCServer> ref, Socket &&sock,
                                 const RPCHandler &handler);
 };
 

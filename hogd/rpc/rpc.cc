@@ -1,6 +1,4 @@
 // rpc.cc - a high-performance RPC framework that focuses on adaptive batching
-//
-// TODO(abelay): create a Socket class as a cleanup.
 
 #include "hogd/rpc/rpc.h"
 
@@ -42,97 +40,6 @@ namespace hogd {
 
 namespace {
 
-template<typename Result, typename T>
-ErrnoStatus<Result>
-make_errno_status(T ret)
-{
-  // first check for error.
-  if (ret == -1)
-    return Errno{};
-
-  // otherwise return the result type.
-  assert(ret >= 0);
-  if constexpr (std::is_integral_v<Result>) {
-    return static_cast<Result>(ret);
-  }
-  else if (std::is_void_v<Result>) {
-    assert(ret == 0);
-    return {};
-  }
-  else {
-    static_assert("unsupported result type");
-  }
-}
-
-inline ErrnoStatus<int>
-sys_socket(int domain, int type, int protocol)
-{
-  return make_errno_status<int>(socket(domain, type, protocol));
-}
-
-inline ErrnoStatus<void>
-sys_connect(int sockfd, const sockaddr_in &addr)
-{
-  return make_errno_status<void>(
-      connect(sockfd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)));
-}
-
-inline ErrnoStatus<int>
-sys_accept(int sockfd, sockaddr_in *addr)
-{
-  if (!addr)
-    return make_errno_status<int>(accept(sockfd, nullptr, nullptr));
-  socklen_t len; // NOLINT(misc-include-cleaner)
-  return make_errno_status<int>(
-      accept(sockfd, reinterpret_cast<sockaddr *>(addr), &len));
-}
-
-inline ErrnoStatus<void>
-sys_bind(int sockfd, const sockaddr_in &addr)
-{
-  return make_errno_status<void>(
-      bind(sockfd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)));
-}
-
-inline ErrnoStatus<void>
-sys_listen(int sockfd, int backlog)
-{
-  return make_errno_status<void>(listen(sockfd, backlog));
-}
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-inline ErrnoStatus<void>
-sys_setsockopt(int sockfd, int level, int option_name, const T &value)
-{
-  return make_errno_status<void>(
-      setsockopt(sockfd, level, option_name,
-                 reinterpret_cast<const void *>(&value), sizeof(value)));
-}
-
-inline ErrnoStatus<void>
-sys_shutdown(int sockfd, int how)
-{
-  return make_errno_status<void>(shutdown(sockfd, how));
-}
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-inline ErrnoStatus<void>
-sys_getsockname(int sockfd, T &val)
-{
-  socklen_t len = sizeof(val);
-  return make_errno_status<void>(
-      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
-}
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-inline ErrnoStatus<void>
-sys_getpeername(int sockfd, T &val)
-{
-  socklen_t len = sizeof(val);
-  return make_errno_status<void>(
-      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
-}
-
 inline ErrnoStatus<size_t>
 read_size(BufferedReader &r)
 {
@@ -161,7 +68,7 @@ namespace rpc_detail {
 
 ClientFlow::~ClientFlow()
 {
-  if (ErrnoStatus<void> ret = sys_shutdown(socket_.get_fd(), SHUT_RDWR); !ret)
+  if (ErrnoStatus<void> ret = socket_.shutdown(SHUT_RDWR); !ret)
     error("could not shutdown socket: {}", ret.error());
 }
 
@@ -302,21 +209,28 @@ RPCClient::dial(std::string_view addr, int flows)
   saddr.sin_addr.s_addr = inet_addr(std::string(args[0]).c_str());
   saddr.sin_port = htons(*port);
 
+  info("dialing {}", addr);
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flow_tbl;
   flow_tbl.reserve(flows);
   for (int i = 0; i < flows; ++i) {
-    ErrnoStatus<int> fd = sys_socket(AF_INET, SOCK_STREAM, 0);
-    if (!fd)
-      return fd.error();
+    ErrnoStatus<Socket> sock = Socket::socket(AF_INET, SOCK_STREAM, 0);
+    if (!sock)
+      return sock.error();
+    info("made socket");
 
-    ErrnoStatus<void> ret = sys_connect(*fd, saddr);
+    ErrnoStatus<void> ret = sock->connect(saddr);
+    if (!ret) {
+      info("error {}", ret.error());
+      return ret.error();
+    }
+    info("made connect");
+
+    ret = sock->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();
-
-    ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
-    if (!ret)
-      return ret.error();
-    flow_tbl.emplace_back(std::make_unique<rpc_detail::ClientFlow>(File(*fd)));
+    info("set option");
+    flow_tbl.emplace_back(
+        std::make_unique<rpc_detail::ClientFlow>(std::move(*sock)));
   }
 
   info("rpc client connected to {} with {} flows", addr, flows);
@@ -343,53 +257,60 @@ ErrnoStatus<std::shared_ptr<RPCServer>>
 RPCServer::create(uint16_t port, RPCHandler handler)
 {
   // create the listener socket.
-  ErrnoStatus<int> accept_fd = sys_socket(AF_INET, SOCK_STREAM, 0);
-  if (!accept_fd)
-    return accept_fd.error();
-  ErrnoStatus<void> ret =
-      sys_setsockopt(*accept_fd, SOL_SOCKET, SO_REUSEPORT, 1); // NOLINT
+  ErrnoStatus<Socket> sock = Socket::socket(AF_INET, SOCK_STREAM, 0);
+  if (!sock)
+    return sock.error();
+  // NOLINTNEXTLINE
+  ErrnoStatus<void> ret = sock->setsockopt(SOL_SOCKET, SO_REUSEPORT, 1);
   if (!ret)
     return ret.error();
 
   // bind the address to the socket.
   sockaddr_in saddr;
   saddr.sin_family = AF_INET;
-  saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+  saddr.sin_addr.s_addr = INADDR_ANY;
   saddr.sin_port = htons(port);
-  ret = sys_bind(*accept_fd, saddr);
+  ret = sock->bind(saddr);
   if (!ret)
     return ret.error();
 
   // retrieve the port number if it was assigned automatically.
   if (port == 0) {
-    ErrnoStatus<void> ret = sys_getsockname(*accept_fd, saddr);
+    ret = sock->getsockname(saddr);
     if (!ret)
       return ret.error();
+    info("nested port {}", saddr.sin_port);
     port = ntohs(saddr.sin_port);
   }
+  info("port is {}!!!!!!!!!!!!!!! {}", port, reinterpret_cast<void *>(&saddr));
 
   // enable listening.
   constexpr int kAcceptBacklog = 1024;
-  ret = sys_listen(*accept_fd, kAcceptBacklog);
+  ret = sock->listen(kAcceptBacklog);
   if (!ret)
     return ret.error();
+  info("passing off fd {}", sock->get_fd());
 
   return std::make_shared<RPCServer>(port, std::move(handler),
-                                     File(*accept_fd));
+                                     std::move(*sock));
 }
 
 ErrnoStatus<void>
 RPCServer::listen()
 {
+  info("listen fd {}", listener_.get_fd());
   while (true) {
-    ErrnoStatus<int> fd = sys_accept(listener_.get_fd(), nullptr);
-    if (!fd)
-      return fd.error();
-    ErrnoStatus<void> ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
+    ErrnoStatus<Socket> sock = listener_.accept(nullptr);
+    info("listen on fd {} did {}", listener_.get_fd(), sock.error());
+    if (!sock)
+      return sock.error();
+    info("accepted sock");
+    ErrnoStatus<void> ret = sock->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();
-    std::jthread([this, fd = *fd, h = handler_] {
-      RPCServer::connection_worker(shared_from_this(), File(fd), std::move(h));
+    std::jthread([this, sock = std::move(*sock), h = handler_] mutable {
+      RPCServer::connection_worker(shared_from_this(), std::move(sock),
+                                   std::move(h));
     }).detach();
   }
 
@@ -397,27 +318,27 @@ RPCServer::listen()
 }
 
 void
-RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
+RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, Socket &&sock,
                              const RPCHandler &handler)
 {
-  BufferedReader r(socket);
-  BufferedWriter w(socket);
+  BufferedReader r(sock);
+  BufferedWriter w(sock);
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
   std::string peer = "unknown";
 
   sockaddr_storage addr;
-  if (!sys_getpeername(socket.get_fd(), addr)) {
+  if (!sock.getpeername(addr)) {
     error("could not get socket name: {}", errno);
   }
   else {
     peer = x23::show_addr(addr);
   }
 
-  if (!ref->register_worker(socket))
+  if (!ref->register_worker(sock))
     return; // already closing server
-  Defer d([&ref, &socket] { ref->unregister_worker(socket); });
+  Defer d([&ref, &sock] { ref->unregister_worker(sock); });
 
   while (true) {
     // read available requests.
@@ -475,16 +396,15 @@ RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
   closing_ = true;
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
-      !ret) {
+  if (ErrnoStatus<void> ret = listener_.shutdown(SHUT_RDWR); !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
   // mac compat: call close() on the listener fd
   if (ErrnoStatus<void> ret = listener_.close(); !ret)
     error("could not close listener socket: {}", ret.error());
 
-  for (File *f : workers_) {
-    if (ErrnoStatus<void> ret = sys_shutdown(f->get_fd(), SHUT_RD); !ret)
+  for (Socket *sock : workers_) {
+    if (ErrnoStatus<void> ret = sock->shutdown(SHUT_RD); !ret)
       error("could not shutdown worker socket: {}", ret.error());
   }
 }

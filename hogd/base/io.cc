@@ -4,6 +4,8 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -145,6 +147,72 @@ get_tmp_dir()
   return "/tmp/";
 }
 
+inline ErrnoStatus<int>
+sys_socket(int domain, int type, int protocol)
+{
+  return make_errno_status<int>(socket(domain, type, protocol));
+}
+
+inline ErrnoStatus<void>
+sys_connect(int sockfd, const sockaddr_in &addr)
+{
+  return make_errno_status<void>(
+      connect(sockfd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)));
+}
+
+inline ErrnoStatus<void>
+sys_bind(int sockfd, const sockaddr_in &addr)
+{
+  info("bind {} {} {}", sockfd, reinterpret_cast<const void *>(&addr), sizeof(addr));
+  return make_errno_status<void>(
+      bind(sockfd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)));
+}
+
+inline ErrnoStatus<void>
+sys_listen(int sockfd, int backlog)
+{
+  return make_errno_status<void>(listen(sockfd, backlog));
+}
+
+inline ErrnoStatus<int>
+sys_accept(int sockfd, sockaddr_in *addr)
+{
+  if (!addr)
+    return make_errno_status<int>(accept(sockfd, nullptr, nullptr));
+  socklen_t len = sizeof(*addr); // NOLINT(misc-include-cleaner)
+  return make_errno_status<int>(
+      accept(sockfd, reinterpret_cast<sockaddr *>(addr), &len));
+}
+
+inline ErrnoStatus<void>
+sys_shutdown(int sockfd, int how)
+{
+  return make_errno_status<void>(shutdown(sockfd, how));
+}
+
+inline ErrnoStatus<void>
+sys_setsockopt(int sockfd, int level, int option_name, const void *val,
+               size_t len)
+{
+  return make_errno_status<void>(
+      setsockopt(sockfd, level, option_name, val, len));
+}
+
+inline ErrnoStatus<void>
+sys_getsockname(int sockfd, void *val, socklen_t len)
+{
+  info("getsockname {} {} {}", sockfd, val, len);
+  return make_errno_status<void>(
+      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
+inline ErrnoStatus<void>
+sys_getpeername(int sockfd, void *val, socklen_t len)
+{
+  return make_errno_status<void>(
+      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
 } // namespace
 
 ErrnoStatus<File>
@@ -221,6 +289,67 @@ File::close()
 
   fd_ = kInvalidFD;
   return {};
+}
+
+ErrnoStatus<Socket>
+Socket::socket(int domain, int type, int protocol)
+{
+  return sys_socket(domain, type, protocol).transform([](int fd) {
+    info("made socket at fd {}", fd);
+    return Socket(fd);
+  });
+}
+
+ErrnoStatus<void>
+Socket::connect(const sockaddr_in &addr)
+{
+  info("connect {}", get_fd());
+  return sys_connect(get_fd(), addr);
+}
+
+ErrnoStatus<void>
+Socket::bind(const sockaddr_in &addr)
+{
+  return sys_bind(get_fd(), addr);
+}
+
+ErrnoStatus<void>
+Socket::listen(int backlog)
+{
+  return sys_listen(get_fd(), backlog);
+}
+
+ErrnoStatus<Socket>
+Socket::accept(sockaddr_in *addr)
+{
+  return sys_accept(get_fd(), addr).transform([](int fd) {
+    return Socket(fd);
+  });
+}
+
+ErrnoStatus<void>
+Socket::shutdown(int how)
+{
+  return sys_shutdown(get_fd(), how);
+}
+
+ErrnoStatus<void>
+Socket::raw_setsockopt(int level, int option_name, const void *val, size_t len)
+{
+  info("setsockopt {} {} {} {}", level, option_name, val, len);
+  return sys_setsockopt(get_fd(), level, option_name, val, len);
+}
+
+ErrnoStatus<void>
+Socket::raw_getsockname(void *val, size_t len)
+{
+  return sys_getsockname(get_fd(), val, len);
+}
+
+ErrnoStatus<void>
+Socket::raw_getpeername(void *val, size_t len)
+{
+  return sys_getpeername(get_fd(), val, len);
 }
 
 ErrnoStatus<Directory>
