@@ -45,6 +45,30 @@ target_include_directories(
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
+  payments_bench
+  payments_bench.cc
+)
+target_link_libraries(
+  payments_bench
+  hogd
+  protocol
+  runtime
+  exec_interface
+  db_interface
+  hogdb
+  contract_loader
+  loadgen
+)
+
+target_include_directories(
+  payments_bench
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+set_property(TARGET payments_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
   bench_server
   bench_server.cc
 )
