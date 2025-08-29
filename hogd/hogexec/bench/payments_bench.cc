@@ -164,7 +164,6 @@ void
 run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
               int num_exec_threads, uint32_t num_txs_per_rep, size_t num_reps)
 {
-
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
   assert((total_work_txs.size() % num_reps) == 0);
@@ -225,7 +224,9 @@ void
 run_payments_bench(uint32_t exec_port, uint32_t coord_port,
                    uint32_t num_accounts)
 {
-  uint32_t num_total_txs = (10000 * 10) * 16;
+  // This is wayyy to slow if we generate and sign all the txs up front.
+  // For now, we just reuse the transactions from one rep to the next.
+  uint32_t num_total_txs = (10000 * 10);
   BenchmarkState bs(num_accounts);
   auto work_txs = bs.initialize(exec_port, coord_port, num_total_txs);
   size_t offset = 0;
@@ -237,7 +238,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  10000 * 10),
                   nthread, 10000, 10);
-    offset += 10000 * 10;
+    //offset += 10000 * 10;
   }
   // weak scaling
   for (auto nthread : {1, 4, 16, 32, 64, 128, 256, 512}) {
@@ -246,7 +247,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  10000 * 10),
                   nthread, 10000, 10);
-    offset += 10000 * 10;
+    //offset += 10000 * 10;
   }
 }
 } // namespace

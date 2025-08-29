@@ -87,7 +87,7 @@ generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
     Calldata internal_calldata = x23::serialize(
         erc20_address, erc20_meta::entrypoint<"mint">(), GasAmount{1'000'000},
         erc20_meta::make_calldata<"mint">(wallet_addresses[i],
-                                          to_xdr(uint128_t{1'000'000})));
+                                          to_xdr(uint128_t{1'000'000'000})));
 
     auto tx = SignedTransaction{
         .tx =
@@ -125,7 +125,7 @@ generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
   for (size_t i = 0; i < config.num_txs; ++i) {
     auto [sender, receiver] = make_account_pair();
 
-    uint128_t amount = 1000;
+    uint128_t amount = 10;
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata =
