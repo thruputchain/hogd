@@ -89,6 +89,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     return EXIT_FAILURE;
   }
 
+  // TODO(jhumphri): Check this and clean it up.
   x23::ThreadPool x23_pool(/*poll_threads=*/1);
   x23::CoroPoll cp(x23_pool);
   if (coordinator_addr) {
@@ -113,7 +114,16 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         continue;
       }
-      IntroShardResult res = client->coordinator_intro_shard(self_card_)();
+
+      const std::string address =
+          "127.0.0.1:" + std::to_string(kCoordServerPort);
+      ShardCard card{.protocol = "blah",
+                     .upid = {},
+                     .block_height = 0,
+                     .shard_count = 1,
+                     .address = address.c_str()};
+      client->coordinator_intro_shard(card)();
+      break;
     }
   }
 
@@ -144,7 +154,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string path = argv[1];
   size_t ram_bytes = std::stoul(argv[2], nullptr, 0);
 
-  const std::string coordinator_addr_raw = argv[3];
+  const std::string coordinator_addr_raw = (argc < 4) ? "" : argv[3];
   const std::string *coordinator_addr =
       (argc < 4) ? nullptr : &coordinator_addr_raw;
 

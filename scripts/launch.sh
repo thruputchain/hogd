@@ -37,7 +37,7 @@ fi
 "$CHUCKD_BINARY" -l info bench loadgen &
 
 # Start hogdb.
-"$HOGDB_BINARY" /tmp/hogdb 1000000 &
+"$HOGDB_BINARY" /tmp/hogdb 1000000 127.0.0.1:7888 &
 
 # Start hogexec.
 "$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
