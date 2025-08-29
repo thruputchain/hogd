@@ -1,12 +1,7 @@
 #pragma once
 
-#include <cstdio>
 #include <memory>
-#include <span>
-#include <stdexcept>
-#include <string>
 #include <string_view>
-#include <utility>
 
 #include "contract.hh"
 

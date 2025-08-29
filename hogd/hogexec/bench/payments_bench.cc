@@ -2,7 +2,6 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <cstdint>
 #include <cstdlib>
 #include <future>
 #include <memory>
@@ -13,15 +12,11 @@
 #include <string>
 #include <vector>
 
-#include "built_contracts/contract_loader.h"
 #include "db_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -31,10 +26,10 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -42,10 +37,10 @@ namespace {
 
 struct BenchmarkState {
 
+  BenchmarkState(uint32_t num_accounts) : num_accounts_(num_accounts) {}
+
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
-
-  BenchmarkState(uint32_t num_accounts) : num_accounts_(num_accounts) {}
 
   const uint32_t num_accounts_;
 

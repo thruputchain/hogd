@@ -105,6 +105,7 @@ function(add_contract_header target_name)
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
         -o ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h
         -n ${target_name}
+        -w ${target_name}.wasm
         ${extra_includes}
     DEPENDS 
       ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
@@ -126,7 +127,7 @@ function(add_types_xdr target_name)
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
         cargo +nightly run
         --features spec
-        #--locked
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_types

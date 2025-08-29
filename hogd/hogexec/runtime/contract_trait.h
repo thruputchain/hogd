@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "built_contracts/contract_loader.h"
 #include "serialize_calldata.h"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -144,6 +145,10 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
 public:
   constexpr static SerializationFormat kSerializationFormat =
       get_format_or_default();
+
+  constexpr static auto load_wasm() requires requires { { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>; } {
+    return load_contract(ContractTrait::kWasmFile);
+  }
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {

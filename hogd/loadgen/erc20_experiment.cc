@@ -33,14 +33,13 @@ make_nonce(uint64_t value)
 LoadgenStatus<LoadgenSuccessResult>
 generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
 {
-
-  auto erc20_contract = load_contract("itc_erc20.wasm");
-  auto wallet_contract = load_contract("simple_wallet.wasm");
-  assert(erc20_contract);
-  assert(wallet_contract);
-
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
+
+  auto erc20_contract = erc20_meta::load_wasm();
+  auto wallet_contract = wallet_meta::load_wasm();
+  assert(erc20_contract);
+  assert(wallet_contract);
 
   const ContractAddress owner_address =
       GenesisBlockLoader::calculate_deployed_address(sha256(*wallet_contract),
