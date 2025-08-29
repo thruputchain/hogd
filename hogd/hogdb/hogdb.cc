@@ -104,7 +104,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
 
   // TODO(jhumphri): Check this and clean it up.
-  x23::ThreadPool x23_pool(/*poll_threads=*/1);
+  x23::ThreadPool x23_pool(/*nthreads=*/1);
   x23::CoroPoll cp(x23_pool);
   if (coordinator_addr) {
     x23::HostPort host_port;
