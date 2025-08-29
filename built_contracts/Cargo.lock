@@ -631,6 +631,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "txs_roundtrip"
+version = "0.1.0"
+dependencies = [
+ "sdk",
+ "serde",
+ "txs_roundtrip",
+ "xdr_common",
+ "xdrs",
+]
+
+[[package]]
 name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
