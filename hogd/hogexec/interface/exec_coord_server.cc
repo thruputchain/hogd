@@ -8,7 +8,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -67,13 +66,12 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 }
 
 void
-ExecCoordServer::init_from_coord(std::string_view coord_addr,
-                                 const LocalMockDB *mock_db)
+ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
 {
   x23::HostPort host_port;
-  if (!host_port.parse(coord_addr)) {
+  if (!host_port.parse(self_card_.address)) {
     throw std::runtime_error(
-        std::format("Invalid coord address: {}", coord_addr));
+        std::format("Invalid coord address: {}", self_card_.address));
   }
 
   std::string host = {host_port.host.begin(), host_port.host.end()};

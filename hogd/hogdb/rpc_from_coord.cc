@@ -17,7 +17,9 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 
+#include "nomination.hh"
 #include "rpc_types.hh"
+#include "shard.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
@@ -282,6 +284,45 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
 uint16_t
 HogDBCoordServer::port()
+{
+  std::unique_lock lk(mtx_);
+  cv_.wait(lk, [this] { return port_.has_value(); });
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return port_.value();
+}
+
+void
+HogDBShardServer::start_server(uint16_t port)
+{
+  {
+    auto lfd = x23::tcplisten(port);
+    if (!lfd) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+
+    std::lock_guard lock(mtx_);
+    port_ = get_port(lfd.get());
+    cv_.notify_all();
+
+    [](x23::CoroPoll &cp, HogDBShardServer *server,
+       x23::UniqueFd lfd) -> x23::Detached {
+      co_await cp.pool_.bg();
+      while (auto c = co_await cp.accept(lfd)) {
+        x23::rpc_stream_logged(cp, *c).server(server);
+      }
+    }(cp_, this, std::move(lfd));
+  }
+}
+
+x23::Async<ShardResult>
+HogDBShardServer::shard_restore(BlockHeight height)
+{
+  co_return ShardResult::ShardOK;
+}
+
+uint16_t
+HogDBShardServer::port()
 {
   std::unique_lock lk(mtx_);
   cv_.wait(lk, [this] { return port_.has_value(); });
