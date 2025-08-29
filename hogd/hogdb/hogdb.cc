@@ -1,18 +1,24 @@
 // hogdb.cc - handles initialization for hogdb
 
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <format>
 #include <future>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 // TODO(abelay): there is apparently a header dependency problem inside x23
 // where x23/vec.h cannot be included first.  These generated headers are not
 // needed, but included as a hack to avoid it.
+#include "coord.hh"
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/merkle.h"
@@ -28,8 +34,10 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 

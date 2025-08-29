@@ -92,7 +92,7 @@ public:
   void start_server(uint16_t port);
 
   static x23::Async<void> shard_null() { co_return; }
-  x23::Async<ShardResult> shard_restore(BlockHeight height);
+  static x23::Async<ShardResult> shard_restore(BlockHeight height);
 
   uint16_t port();
 
