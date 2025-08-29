@@ -100,7 +100,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     else {
       output_return_buffer_len = 0;
     }
-
     return {invoke_res.value(), gas_amount};
   }
   // Invocation encountered some error

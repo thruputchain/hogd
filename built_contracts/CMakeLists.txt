@@ -154,6 +154,7 @@ endfunction()
 add_wasm_contract(fibonacci)
 add_wasm_contract(fibonacci_call)
 add_wasm_contract(cxs_roundtrip)
+add_wasm_contract(txs_roundtrip)
 add_wasm_contract(read_only_test)
 add_wasm_contract(manual_revert_test)
 add_wasm_contract(manual_revert_caller)
@@ -164,14 +165,23 @@ add_types_xdr(itc_erc20)
 add_wasm_contract(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
 
 add_xdr_rs(
-	roundtrip_rs 
+	cxs_roundtrip_rs 
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
-	./integration_test_contracts/cxs_roundtrip/roundtrip.x)
+	./integration_test_contracts/xdr/roundtrip.x)
+
+add_xdr_rs(
+	txs_roundtrip_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src
+	./integration_test_contracts/xdr/roundtrip.x)
 
 add_xdr(roundtrip_hh
-  ./integration_test_contracts/cxs_roundtrip/roundtrip.x
+  ./integration_test_contracts/xdr/roundtrip.x
 )
 
-add_dependencies(cxs_roundtrip_wasm roundtrip_rs)
-add_dependencies(cxs_roundtrip_spec_json roundtrip_rs)
+add_dependencies(cxs_roundtrip_wasm cxs_roundtrip_rs)
+add_dependencies(cxs_roundtrip_spec_json cxs_roundtrip_rs)
+
+add_dependencies(txs_roundtrip_wasm txs_roundtrip_rs)
+add_dependencies(txs_roundtrip_spec_json txs_roundtrip_rs)
+
 add_dependencies(all_wasm_contracts roundtrip_hh)

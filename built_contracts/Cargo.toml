@@ -5,6 +5,7 @@ members = [
     "integration_test_contracts/simple_wallet",
     "integration_test_contracts/fibonacci",
     "integration_test_contracts/cxs_roundtrip",
+    "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/read_only_test",
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/manual_revert_test",
