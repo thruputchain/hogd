@@ -170,7 +170,7 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   assert((total_work_txs.size() % num_reps) == 0);
   assert(num_txs_per_rep == total_work_txs.size() / num_reps);
 
-  for (int nrep = 0; nrep < num_reps; nrep++) {
+  for (size_t nrep = 0U; nrep < num_reps; nrep++) {
     info("bench rep {} for {} txs (accts {}) on {} threads", nrep,
          num_txs_per_rep, bs.num_accounts_, num_exec_threads);
     auto work_txs =
