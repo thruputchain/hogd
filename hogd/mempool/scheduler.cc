@@ -305,6 +305,7 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
     // Handle existing txs in the runqueue.
+    // TODO(jhumphri): Optimize this. It is currently O(N^2).
     for (auto it = infos.begin(); it != infos.end();) {
       TxInfo *info = *it;
       const HogAge &averages = cached_hogs_[account];

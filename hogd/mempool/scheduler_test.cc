@@ -556,7 +556,8 @@ TEST(Scheduler, Fairness)
 
 TEST(Scheduler, FairnessAcrossBlocks)
 {
-  constexpr size_t kNumRounds = 100;
+  constexpr size_t kNumRounds = 400;
+  static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;
   std::vector<SignedTransactionBatch> txs;
@@ -576,16 +577,16 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   // Sets the age and hogs for all accounts. Each account has this age and hogs:
   //
-  // Account 0: Age 3 and 5 billion hogs.
-  // Account 1: Age 2 and 10 billion hogs.
-  // Account 2: Age 1 and 15 billion hogs.
-  // Account 3: Age 0 and 20 billion hogs.
+  // Account 0: Age 0 and 5 billion hogs.  (Will get 10% of the throughput.)
+  // Account 1: Age 0 and 10 billion hogs. (Will get 20% of the throughput.)
+  // Account 2: Age 0 and 15 billion hogs. (Will get 30% of the throughput.)
+  // Account 3: Age 0 and 20 billion hogs. (Will get 40% of the throughput.)
   //
   // Thus, there are 50 billion hogs in total across the four accounts.
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
     server.set_hogs(MempoolTestServer::kAccountAddresses[i],
                     /*group=*/kHogAgeGroupToSchedule,
-                    /*age=*/MempoolTestServer::kAccountAddresses.size() - i - 1,
+                    /*age=*/0,
                     /*num_hogs=*/5'000'000'000 * (i + 1));
   }
   for (const SignedTransactionBatch &tx : txs) {
@@ -608,10 +609,24 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
-    // TODO(jhumphri): Calculate this in a better way.
-    size_t target = (i + 1) * 10;
+    printf("%zu, ", tx_counts[address]);
+    const HogAge &age = scheduler.get_cached_hog_age(address);
+    printf("to age %zu, already age %zu\n",
+           age.average_ages[kHogAgeGroupToSchedule],
+           age.average_ages[kHogAgeGroupAlreadyScheduled]);
+  }
 
-    constexpr size_t kErrorBound = 4;
+  for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
+    const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
+    // TODO(jhumphri): Calculate this in a better way.
+    size_t target = (i + 1) * (kNumRounds / 10);
+
+    // TODO(jhumphri): If two accounts have equal priority, our scheduling
+    // algorithm allows one of the accounts to potentially have all of its txs
+    // processed before any are processed from the other account. Maybe we can
+    // make this more fair by choosing randomly among all of the txs with the
+    // same priority?
+    constexpr size_t kErrorBound = 7;
     EXPECT_LE(tx_counts[address], target + kErrorBound);
     EXPECT_GE(tx_counts[address], target - kErrorBound);
   }
