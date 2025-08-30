@@ -360,6 +360,8 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                              x23::Vec<SignedTransactionHash> &hashes,
                              x23::Vec<SignedTransaction> &txs)
 {
+  // TODO(jhumphri): Make this more efficient by having [age_to_tx_] use vectors
+  // as values rather than unordered_sets.
   std::vector<TxInfo *> v(info.begin(), info.end());
 
   std::random_device rd;
