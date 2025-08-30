@@ -72,7 +72,7 @@ public:
   x23::Async<DbResult>
   dbcoord_load_genesis_block(GenesisBlock const &genesis_block);
 
-  x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height)
+  static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height)
   {
     co_return DbShardResult::ShardOK;
   }
