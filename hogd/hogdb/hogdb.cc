@@ -45,8 +45,7 @@ namespace {
 
 // port numbers used by servers hosted inside hogdb.
 constexpr uint16_t kCoordServerPort = 8080;
-constexpr uint16_t kShardServerPort = 8081;
-constexpr uint16_t kExecServerPort = 8082;
+constexpr uint16_t kExecServerPort = 8081;
 
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
@@ -89,11 +88,6 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   HogDBCoordServer coord_server(ctx);
   coord_server.start_server(kCoordServerPort);
 
-  // start the shard server.
-  info("starting shard server.");
-  HogDBShardServer shard_server;
-  shard_server.start_server(kShardServerPort);
-
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
@@ -130,7 +124,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       }
 
       const std::string address =
-          "127.0.0.1:" + std::to_string(kShardServerPort);
+          "127.0.0.1:" + std::to_string(kCoordServerPort);
       ShardCard card{.protocol = "blah",
                      .upid = {},
                      .block_height = 0,
