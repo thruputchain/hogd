@@ -365,7 +365,7 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
   std::random_device rd;
   std::mt19937 g(rd());
   std::shuffle(v.begin(), v.end(), g);
-  for (size_t idx = 0; idx < info.size(); idx++) {
+  for (size_t idx = 0; idx < v.size(); idx++) {
     if (num-- == 0) {
       break;
     }
@@ -381,7 +381,7 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
     if (account_to_tx_[i.account].empty()) {
       CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
     }
-    info.erase(v[idx]);
+    CHECK_EQ(info.erase(v[idx]), 1UL);
   }
 }
 
