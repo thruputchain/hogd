@@ -10,7 +10,6 @@
 #include "genesis.hh"
 #include "nomination.hh"
 #include "rpc_types.hh"
-#include "shard.hh"
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -66,6 +65,8 @@ public:
 
   x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock genesis_block);
 
+  static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height);
+
   uint16_t port();
 
 private:
@@ -80,32 +81,6 @@ private:
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
 };
-
 static_assert(is_DbCoord1<HogDBCoordServer *, x23::Async>);
-
-class HogDBShardServer {
-public:
-  using rpc_service = Shard1;
-
-  explicit HogDBShardServer() = default;
-
-  void start_server(uint16_t port);
-
-  static x23::Async<void> shard_null() { co_return; }
-  static x23::Async<ShardResult> shard_restore(BlockHeight height);
-
-  uint16_t port();
-
-private:
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-  std::atomic<bool> is_initialized_ = false;
-
-  // protect port_ during initialization
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::optional<uint16_t> port_;
-};
 
 } // namespace hogd
