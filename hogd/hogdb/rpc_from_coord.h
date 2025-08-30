@@ -65,7 +65,7 @@ public:
 
   x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock genesis_block);
 
-  x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height);
+  static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height);
 
   uint16_t port();
 
