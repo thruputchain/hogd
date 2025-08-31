@@ -69,6 +69,46 @@ TEST_P(ERC20ExperimentTest, Basic)
   }
 }
 
+TEST_P(ERC20ExperimentTest, ManyAccounts)
+{
+  auto result = generate_erc20_payments_experiment(ERC20PaymentsConfig{
+      .num_txs = 10000,
+      .num_accounts = 1000,
+  });
+
+  ASSERT_TRUE(result.has_value());
+
+  run_genesis_initialization(result.value().genesis_block);
+
+  for (auto &init_block : result.value().initialization_txs) {
+    for (auto &tx : init_block) {
+      auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+      auto invoke_res = handler.root_invoke();
+      ASSERT_TRUE(invoke_res.is_root_success());
+      auto res = handler.try_commit_transaction();
+      ASSERT_TRUE(res.has_value());
+      ASSERT_TRUE(*res);
+    }
+
+    advance_block();
+  }
+
+  std::optional<GasAmount> gas_used;
+
+  for (auto &tx : result.value().work_txs) {
+    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto invoke_res = handler.root_invoke();
+    ASSERT_TRUE(invoke_res.is_root_success());
+    auto res = handler.try_commit_transaction();
+    ASSERT_TRUE(res.has_value());
+    ASSERT_TRUE(*res);
+    if (!gas_used) {
+      gas_used = invoke_res.gas_consumed_;
+    }
+    ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(ERC20ExperimentTest, ERC20ExperimentTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),

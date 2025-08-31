@@ -238,7 +238,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  10000 * 10),
                   nthread, 10000, 10);
-    //offset += 10000 * 10;
+    // offset += 10000 * 10;
   }
   // weak scaling
   for (auto nthread : {1, 4, 16, 32, 64, 128, 256, 512}) {
@@ -247,7 +247,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  10000 * 10),
                   nthread, 10000, 10);
-    //offset += 10000 * 10;
+    // offset += 10000 * 10;
   }
 }
 } // namespace

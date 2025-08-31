@@ -45,9 +45,11 @@ generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
                                                      make_nonce(0));
 
   GenesisBlockBuilder builder;
-  builder.add_initial_config(
-      erc20_contract, make_nonce(0), erc20_meta::entrypoint<"initialize">(),
-      erc20_meta::make_calldata<"initialize">(owner_address), 1'000'000);
+  builder.add_initial_config(erc20_contract, make_nonce(0),
+                             erc20_meta::entrypoint<"initialize">(),
+                             erc20_meta::make_calldata<"initialize">(
+                                 owner_address),
+                             int128_t{1'000'000} * config.num_accounts);
   const auto erc20_address =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
