@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
 #include "contract.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
@@ -144,6 +145,13 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
 public:
   constexpr static SerializationFormat kSerializationFormat =
       get_format_or_default();
+
+  constexpr static auto load_wasm() requires requires {
+    { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>;
+  }
+  {
+    return load_contract(ContractTrait::kWasmFile);
+  }
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {

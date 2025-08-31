@@ -6,7 +6,7 @@ import sys
 import os
 import re
 
-def generate_header(json_file, output_file=None, namespace=None, extra_includes=None):
+def generate_header(json_file, output_file=None, namespace=None, extra_includes=None, wasm_file=None):
     """Generate a C++ header file from a JSON contract spec."""
     
     with open(json_file, 'r') as f:
@@ -57,6 +57,8 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
 
     namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
     namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
+
+    wasm_str = f"constexpr static std::string_view kWasmFile = \"{wasm_file}\";" if wasm_file else ""
     
     if extra_includes:
         extra_includes_str = '\n'.join(f"#include \"{include}\"" for include in extra_includes)
@@ -89,6 +91,7 @@ using namespace hogd;
 struct {interface_name} {{
     constexpr static std::string_view kTraitName = "{interface_name}";
     constexpr static std::string_view kVersion = "{version}";
+    {wasm_str}
 
     // Specify serialization format, if non-default, with a line like the below.
     // constexpr static std::string_view kSerializationFormat = "txs";
@@ -181,6 +184,12 @@ Examples:
     )
 
     parser.add_argument(
+        '-w', '--wasm',
+        dest='wasm_file',
+        help='WASM file to include in the generated header'
+    )
+
+    parser.add_argument(
         '-i', '--include',
         dest='extra_includes',
         action='append',
@@ -194,7 +203,7 @@ Examples:
         sys.exit(1)
     
     try:
-        generate_header(args.json_spec_file, args.output_file, args.namespace, args.extra_includes)
+        generate_header(args.json_spec_file, args.output_file, args.namespace, args.extra_includes, args.wasm_file)
     except Exception as e:
         print(f"Error generating header: {e}", file=sys.stderr)
         sys.exit(1)

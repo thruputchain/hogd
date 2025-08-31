@@ -24,6 +24,7 @@ add_executable(
   loadgen_tests
   erc20_experiment_tests.cc
 )
+gtest_discover_tests(loadgen_tests)
 
 target_link_libraries(
   loadgen_tests
@@ -32,5 +33,3 @@ target_link_libraries(
   precompiles
   gtest
 )
-
-
