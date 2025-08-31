@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <future>
 #include <memory>
@@ -226,7 +227,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
-  uint32_t num_total_txs = (10000 * 10);
+  uint32_t num_total_txs = (51200 * 10);
   BenchmarkState bs(num_accounts);
   auto work_txs = bs.initialize(exec_port, coord_port, num_total_txs);
   size_t offset = 0;
@@ -246,7 +247,7 @@ run_payments_bench(uint32_t exec_port, uint32_t coord_port,
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  10000 * 10),
-                  nthread, 10000, 10);
+                  nthread, 100 * nthread, 10);
     // offset += 10000 * 10;
   }
 }
@@ -297,5 +298,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   hogd::run_payments_bench(*exec_port, *coord_port, *num_accounts);
+  std::fflush(stdout);
   return 0;
 }
