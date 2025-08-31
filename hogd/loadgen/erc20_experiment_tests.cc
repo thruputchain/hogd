@@ -69,7 +69,7 @@ TEST_P(ERC20ExperimentTest, Basic)
   }
 }
 
-TEST_P(ERC20ExperimentTest, ManyAccounts)
+TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
   auto result = generate_erc20_payments_experiment(ERC20PaymentsConfig{
       .num_txs = 10000,

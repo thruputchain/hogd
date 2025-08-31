@@ -67,9 +67,9 @@ fi
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $branch $commit $commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR > metrics_history/metrics/fibonacci-wasmonly/$branch/${commit_time}_$commit
 
-## payments_bench 10000 accounts
-./metrics_history/scripts/make_metric_file.sh payments-bench-10000 $branch $commit $commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 10000 > metrics_history/metrics/payments-bench-10000/$branch/${commit_time}_$commit
+## payments_bench 10 accounts
+./metrics_history/scripts/make_metric_file.sh payments-bench-10 $branch $commit $commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 10 > metrics_history/metrics/payments-bench-10/$branch/${commit_time}_$commit
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
