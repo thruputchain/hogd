@@ -449,7 +449,7 @@ struct Deserializer {
     constexpr std::array masks{swaple(0), swaple(0xffffff), swaple(0xffff),
                                swaple(0xff)};
     if (reinterpret_cast<const uint32_t *>(p)[-1] & masks[rem]) [[unlikely]]
-      throw XdrBadInput("padding bytes are not zero deserializing XDR");
+      raise("padding bytes are not zero deserializing XDR");
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &x)
   {
@@ -478,8 +478,8 @@ struct Deserializer {
   {
     uint32_t size = get32<Safe>();
     if (size > x.max_size()) [[unlikely]]
-      throw XdrBadInput("length {} exceeds maximum deserializing {}", size,
-                        xdr_type_name<X>());
+      raise("length {} exceeds maximum deserializing {}", size,
+            xdr_type_name<X>());
     size_t rem = size % 4;
     if (rem == 0) {
       if constexpr (Safe)
@@ -555,9 +555,19 @@ struct Deserializer {
     auto d = static_cast<typename ops::discriminant_type>(get32<Safe>());
     union_set_discriminant(x, d);
     if (ops::index(x) == -1) [[unlikely]]
-      throw XdrBadInput("Bad discriminant {} deserializing {}", get<0>(x),
-                        ops::meta::type_name);
+      raise("Bad discriminant {} deserializing {}", get<0>(x),
+            ops::meta::type_name);
     union_visit_arm([this](auto &x) { this->go<Safe>(x); }, x);
+  }
+
+  template<typename... Args>
+  [[noreturn]] void raise(std::format_string<Args...> fmt, Args &&...args) const
+  {
+    // If we went beyond the buffer end, we will have read garbage, so
+    // preferentially throw an input too short error.
+    check();
+    std::string msg = std::vformat(fmt.get(), std::make_format_args(args...));
+    throw XdrBadInput{std::move(msg)};
   }
 };
 
