@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 
@@ -109,7 +108,6 @@ public:
   Socket &operator=(Socket &&s) noexcept
   {
     File::operator=(std::move(s));
-    info("socket fd after move is {}", get_fd());
     return *this;
   }
   Socket(const Socket &s) = delete;
@@ -136,7 +134,6 @@ public:
   template<typename T> requires std::is_trivially_copyable_v<T>
   ErrnoStatus<void> getsockname(T &val)
   {
-    info("getsockname ptr {} len {}", reinterpret_cast<void *>(&val), sizeof(val));
     return raw_getsockname(reinterpret_cast<void *>(&val), sizeof(val));
   }
   // getpeername returns the address of the connected client.

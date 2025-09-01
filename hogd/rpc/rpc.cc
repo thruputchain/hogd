@@ -209,26 +209,20 @@ RPCClient::dial(std::string_view addr, int flows)
   saddr.sin_addr.s_addr = inet_addr(std::string(args[0]).c_str());
   saddr.sin_port = htons(*port);
 
-  info("dialing {}", addr);
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flow_tbl;
   flow_tbl.reserve(flows);
   for (int i = 0; i < flows; ++i) {
     ErrnoStatus<Socket> sock = Socket::socket(AF_INET, SOCK_STREAM, 0);
     if (!sock)
       return sock.error();
-    info("made socket");
 
     ErrnoStatus<void> ret = sock->connect(saddr);
-    if (!ret) {
-      info("error {}", ret.error());
+    if (!ret)
       return ret.error();
-    }
-    info("made connect");
 
     ret = sock->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();
-    info("set option");
     flow_tbl.emplace_back(
         std::make_unique<rpc_detail::ClientFlow>(std::move(*sock)));
   }
@@ -279,17 +273,14 @@ RPCServer::create(uint16_t port, RPCHandler handler)
     ret = sock->getsockname(saddr);
     if (!ret)
       return ret.error();
-    info("nested port {}", saddr.sin_port);
-    port = ntohs(saddr.sin_port);
+    port = ntohs(read_once(saddr.sin_port));
   }
-  info("port is {}!!!!!!!!!!!!!!! {}", port, reinterpret_cast<void *>(&saddr));
 
   // enable listening.
   constexpr int kAcceptBacklog = 1024;
   ret = sock->listen(kAcceptBacklog);
   if (!ret)
     return ret.error();
-  info("passing off fd {}", sock->get_fd());
 
   return std::make_shared<RPCServer>(port, std::move(handler),
                                      std::move(*sock));
@@ -298,13 +289,10 @@ RPCServer::create(uint16_t port, RPCHandler handler)
 ErrnoStatus<void>
 RPCServer::listen()
 {
-  info("listen fd {}", listener_.get_fd());
   while (true) {
     ErrnoStatus<Socket> sock = listener_.accept(nullptr);
-    info("listen on fd {} did {}", listener_.get_fd(), sock.error());
     if (!sock)
       return sock.error();
-    info("accepted sock");
     ErrnoStatus<void> ret = sock->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();

@@ -163,7 +163,6 @@ sys_connect(int sockfd, const sockaddr_in &addr)
 inline ErrnoStatus<void>
 sys_bind(int sockfd, const sockaddr_in &addr)
 {
-  info("bind {} {} {}", sockfd, reinterpret_cast<const void *>(&addr), sizeof(addr));
   return make_errno_status<void>(
       bind(sockfd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)));
 }
@@ -201,16 +200,15 @@ sys_setsockopt(int sockfd, int level, int option_name, const void *val,
 inline ErrnoStatus<void>
 sys_getsockname(int sockfd, void *val, socklen_t len)
 {
-  info("getsockname {} {} {}", sockfd, val, len);
   return make_errno_status<void>(
-      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+      getsockname(sockfd, reinterpret_cast<sockaddr *>(val), &len));
 }
 
 inline ErrnoStatus<void>
 sys_getpeername(int sockfd, void *val, socklen_t len)
 {
   return make_errno_status<void>(
-      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+      getpeername(sockfd, reinterpret_cast<sockaddr *>(val), &len));
 }
 
 } // namespace
@@ -295,7 +293,6 @@ ErrnoStatus<Socket>
 Socket::socket(int domain, int type, int protocol)
 {
   return sys_socket(domain, type, protocol).transform([](int fd) {
-    info("made socket at fd {}", fd);
     return Socket(fd);
   });
 }
@@ -303,7 +300,6 @@ Socket::socket(int domain, int type, int protocol)
 ErrnoStatus<void>
 Socket::connect(const sockaddr_in &addr)
 {
-  info("connect {}", get_fd());
   return sys_connect(get_fd(), addr);
 }
 
@@ -336,7 +332,6 @@ Socket::shutdown(int how)
 ErrnoStatus<void>
 Socket::raw_setsockopt(int level, int option_name, const void *val, size_t len)
 {
-  info("setsockopt {} {} {} {}", level, option_name, val, len);
   return sys_setsockopt(get_fd(), level, option_name, val, len);
 }
 
