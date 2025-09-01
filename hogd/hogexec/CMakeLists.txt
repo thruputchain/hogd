@@ -4,6 +4,7 @@ add_subdirectory(runtime)
 add_subdirectory(runtime_trampoline)
 add_subdirectory(interface)
 add_subdirectory(bench)
+add_subdirectory(precompiles)
 
 # Build the frontend executor (hogexec) executable
 add_executable(
@@ -12,6 +13,8 @@ add_executable(
 )
 target_link_libraries(
   hogexec
+  exec_interface
   hogd
   runtime
+  precompiles
 )

@@ -140,10 +140,22 @@ struct BufVec {
   size_t skip_{};
 
   bool empty() const noexcept { return bufs_.empty(); }
+  size_t nbytes() const noexcept
+  {
+    size_t ret = -skip_;
+    for (const auto &b : bufs_)
+      ret += b.size();
+    return ret;
+  }
   void clear()
   {
     bufs_.clear();
     skip_ = 0;
+  }
+  void swap(BufVec &other) noexcept
+  {
+    bufs_.swap(other.bufs_);
+    std::swap(skip_, other.skip_);
   }
 
   void append(BufView b, size_t offset = 0)
@@ -264,7 +276,7 @@ struct BufVec {
       requires requires { append(std::forward<Buf>(buf)); }
   {
     if (empty()) {
-      size_t n = ::write(fd.get(), buf.data(), buf.size());
+      auto n = ::write(fd.get(), buf.data(), buf.size());
       if (n < 0) {
         if (errno != EAGAIN) {
           Errno ret;

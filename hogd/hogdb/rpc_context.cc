@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_context.h"
 
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -16,7 +17,9 @@ RPCContext::open_block_tx(BlockTXID bid)
 {
   // create the block tx.
   std::scoped_lock g(lock_);
-  auto [it, inserted] = block_txes_.emplace(bid, get_db());
+  auto [it, inserted] =
+      block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
+                          std::forward_as_tuple(get_db(), get_trie()));
   if (!inserted)
     return HogDBError(HogDBCode::kExists);
   return &(it->second);

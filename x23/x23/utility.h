@@ -5,9 +5,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <new>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -29,7 +31,9 @@ using std::uint64_t;
 using std::uint8_t;
 using std::uintptr_t;
 
-// FORWARD(arg) is just std::forward<decltype(arg)>(arg), which
+using std::declval;
+
+// FORWARD(arg) is like std::forward<decltype(arg)>(arg), which
 // creates an expression whose type corresponds to the type with which
 // variable arg was declared--rvalue reference if arg is an rvalue
 // reference, lvalue reference otherwise.
@@ -46,7 +50,7 @@ using std::uintptr_t;
 #define __FORWARD_APPLY_IGNORE(x) __FORWARD_IGNORE(x)
 #define __FORWARD_PARENTHESIZED_TO_COMMA(x) ,
 #define FORWARD(arg)                                                           \
-  ::std::forward<decltype(arg)>(arg)                                           \
+  static_cast<decltype(arg) &&>(arg)                                           \
       __FORWARD_APPLY_IGNORE(__FORWARD_PARENTHESIZED_TO_COMMA arg)
 
 // Types T and U differ only in reference and const/volatile
@@ -95,7 +99,7 @@ template<typename T, template<typename...> typename Tmpl>
 concept is_template_instance = decltype(Multilambda{
     []<typename... U>(const Tmpl<U...> &) { return std::true_type{}; },
     [](const auto &) { return std::false_type{}; },
-}(std::declval<T>()))::value;
+}(declval<T>()))::value;
 
 namespace detail {
 template<size_t N, typename T0, typename... T> requires (N <= sizeof...(T))
@@ -154,6 +158,71 @@ struct FlagSet {
     return FlagSet{e} & s;
   }
 };
+
+// Make an object of type Type if Cond is true.  Otherwise return an
+// empty tuple.
+template<bool Cond, typename Type, typename... Args>
+constexpr auto
+make_if(Args &&...args)
+{
+  if constexpr (Cond)
+    return Type(std::forward<Args>(args)...);
+  else
+    return std::tuple<>{};
+}
+
+// Basically std::invocable<F, Args...> except if Args... is the
+// single type void, then checks std::invocable<F>.
+template<typename F, typename... Args>
+concept void_invocable =
+    std::invocable<F, Args...> ||
+    (sizeof...(Args) == 1 && (std::same_as<void, Args> && ...) &&
+     std::invocable<F>);
+
+// void_invocable and noexcept
+template<typename F, typename... Args>
+concept noexcept_invocable = void_invocable<F, Args...> && [] {
+  if constexpr (sizeof...(Args) == 1 && (std::same_as<void, Args> && ...))
+    return noexcept(std::invoke(std::declval<F>()));
+  else
+    return noexcept(std::invoke(std::declval<F>(), std::declval<Args>()...));
+}();
+
+// Return the result of f2(f1(args...)) unless f1 returns void, in
+// which case invoke f1(args...) and then return the result of f2().
+template<typename F2, typename F1, typename... Args>
+requires (!std::is_void_v<std::invoke_result_t<F1, Args...>>) &&
+         std::invocable<F2, std::invoke_result_t<F1, Args...>>
+inline decltype(auto)
+compose(F2 &&f2, F1 &&f1, Args &&...args)
+    noexcept(noexcept(std::invoke(std::forward<F2>(f2),
+                                  std::invoke(std::forward<F1>(f1),
+                                              std::forward<Args>(args)...))))
+{
+  return std::invoke(std::forward<F2>(f2),
+                     std::invoke(std::forward<F1>(f1),
+                                 std::forward<Args>(args)...));
+}
+template<typename F2, typename F1, typename... Args>
+requires std::is_void_v<std::invoke_result_t<F1, Args...>> && std::invocable<F2>
+inline decltype(auto)
+compose(F2 &&f2, F1 &&f1, Args &&...args)
+    noexcept(noexcept(std::invoke(std::forward<F1>(f1),
+                                  std::forward<Args>(args)...)) &&
+             noexcept(std::invoke(std::forward<F2>(f2))))
+{
+  std::invoke(std::forward<F1>(f1), std::forward<Args>(args)...);
+  return std::invoke(std::forward<F2>(f2));
+}
+
+template<typename F2, typename F1, typename... Args>
+concept can_compose =
+    requires { compose(declval<F2>(), declval<F1>(), declval<Args>()...); };
+
+template<typename F2, typename F1, typename... Args>
+concept can_compose_noexcept =
+    can_compose<F2, F1, Args...> &&
+    noexcept(compose(declval<F2>(), declval<F1>(), declval<Args>()...));
 
 enum class CallableCategory {
   kFunction = 1 << 1,

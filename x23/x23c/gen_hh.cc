@@ -163,18 +163,32 @@ concept is_{0} =)",
                         vers.id);
     Join andand(" &&");
     for (const auto &proc : vers.procs) {
-      top_ += std::format(
-          R"({0}
+      if (proc.return_type == "void"s)
+        top_ += std::format(
+            R"({0}
+  (requires(Server __s, ExtraArgs...ea) {{
+     {{ __s->{1}({2}{3}ea...) }}
+       -> std::convertible_to<RetTrans<void>>;
+   }} || std::convertible_to<std::monostate, RetTrans<void>>))",
+            andand.get(), proc.id,
+            join(proc.arg_types | std::views::transform(map_type) |
+                     std::views::transform(
+                         [](const string t) { return t + "{}"; }),
+                 ", "),
+            proc.arg_types.empty() ? "" : ", ");
+      else
+        top_ += std::format(
+            R"({0}
   requires(Server __s, ExtraArgs...ea) {{
     {{ __s->{2}({3}{4}ea...) }}
-      -> std::same_as<RetTrans<{1}>>;
+      -> std::convertible_to<RetTrans<{1}>>;
   }})",
-          andand.get(), map_type(proc.return_type), proc.id,
-          join(proc.arg_types | std::views::transform(map_type) |
-                   std::views::transform(
-                       [](const string t) { return t + "{}"; }),
-               ", "),
-          proc.arg_types.empty() ? "" : ", ");
+            andand.get(), map_type(proc.return_type), proc.id,
+            join(proc.arg_types | std::views::transform(map_type) |
+                     std::views::transform(
+                         [](const string t) { return t + "{}"; }),
+                 ", "),
+            proc.arg_types.empty() ? "" : ", ");
     }
     top_ += ";\n";
 
@@ -226,7 +240,7 @@ concept is_{0} =)",
     using return_wire_type = {7};
     template<typename Server, typename ...ExtraArgs>
     static decltype(auto)
-    dispatch(Server &&server, arg_type &args, ExtraArgs &&...ea) {{
+    dispatch(Server &&server, arg_type &&args, ExtraArgs &&...ea) {{
       {5}
     }}
 }};
@@ -809,7 +823,22 @@ gen_hh(vector<Definition> *defs)
 
 #pragma once
 
+#include <array>
+#include <compare>
+#include <concepts>
+#include <cstdint>
+#include <cstddef>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+#include <x23/format.h>
+#include <x23/utility.h>
+#include <x23/vec.h>
 #include <x23/x23.h>
+
 )");
   gs.process(*defs);
   return gs.top_ + R"(

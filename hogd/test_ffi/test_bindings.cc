@@ -15,7 +15,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -93,7 +93,7 @@ close_runtime_context(void *context) noexcept
 }
 
 bool
-register_new_contract(void *context, uint32_t mock_contract_id,
+register_new_contract(void *context, int32_t mock_contract_id,
                       ForeignEntryPoint entry_point,
                       void *foreign_context) noexcept
 {
@@ -253,7 +253,7 @@ close_runtime_context(void *context)
   hogd::close_runtime_context(context);
 }
 int
-register_new_contract(void *context, uint32_t mock_contract_id,
+register_new_contract(void *context, int32_t mock_contract_id,
                       ForeignEntryPoint entry_point, void *foreign_context)
 {
   return (hogd::register_new_contract(context, mock_contract_id, entry_point,

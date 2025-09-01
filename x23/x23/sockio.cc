@@ -1,4 +1,5 @@
 
+#include <cassert>
 #include <system_error>
 
 #include <arpa/inet.h>
@@ -7,6 +8,8 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
+#include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/sockio.h"
 
 namespace x23 {
@@ -87,8 +90,8 @@ tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
   if (prep_fd)
     prep_fd(fd.get());
-  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), sizeof(ss)) ==
-      -1)
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss),
+              sockaddr_len(ss)) == -1)
     Errno{}.raise("connect({})", HostPort(ss));
   return fd;
 }
@@ -134,7 +137,7 @@ show_ipaddr(const sockaddr_storage &ss)
     Str ret;
     ret.resize_uninitialized(AF == AF_INET ? INET_ADDRSTRLEN
                                            : INET6_ADDRSTRLEN);
-    if (!inet_ntop(AF_INET, in, ret.data(), ret.size()))
+    if (!inet_ntop(AF, in, ret.data(), ret.size()))
       Errno{}.raise("inet_ntop(family {})", AF);
     ret.resize(ret.find('\0'));
     return ret;

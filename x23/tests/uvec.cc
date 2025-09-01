@@ -30,7 +30,7 @@ constexpr size_t test_constexpr = [] {
 
 static_assert(test_constexpr == 8);
 
-#endif // HAVE_P2564R3
+#endif // !BROKEN_P2564R3
 
 template<typename T>
 inline bool

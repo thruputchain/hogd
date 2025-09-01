@@ -14,6 +14,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -27,12 +28,25 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
+
+namespace {
+template<StorageItemRPCFlags... Flags>
+constexpr bool
+validate_flags(StorageItemRPCFlagSet flags)
+{
+  constexpr StorageItemRPCFlagSet kAllowedFlags =
+      (0 | ... | std::to_underlying(Flags));
+  return (flags & kAllowedFlags) == flags;
+}
+} // namespace
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
@@ -59,9 +73,7 @@ SystemCallHandler::SystemCallHandler(
     execution_mode_data_(std::move(execution_mode_data)),
     snapshot_cache_(snapshot_cache)
 {
-  if (!runtime_context_) {
-    runtime_context_ = make_hogexec_context();
-  }
+  assert(runtime_context_);
 }
 
 void
@@ -129,7 +141,10 @@ SystemCallHandler::root_invoke()
   auto handle_root_host_fn_status =
       [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
     if (status.has_value()) {
-      return (status.value() == SyscallErrorCode::kNone)
+      // TODO(geoff): Consider whether we want to have "frame reverted" on the
+      // root frame as a "transaction failed" or "transaction succeeded"
+      return (status.value() == SyscallErrorCode::kNone ||
+              status.value() == SyscallErrorCode::kFrameReverted)
                  ? InvokeStatus<void>{}
                  : InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
@@ -276,6 +291,8 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {
+    trace("Error resolving runtime for address: {}, error {}",
+          x23::show(address), runtime.error());
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
   if (!runtime.value()) {
@@ -303,9 +320,17 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     // the local scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
-  cumulative_result += finish_status.value();
+  auto [frame_result, manually_reverted] = finish_status.value();
+  cumulative_result += frame_result;
 
-  return cumulative_result.to_host_fn_result();
+  auto out = cumulative_result.to_host_fn_result();
+  if (out.first.has_value() && out.first.value() == SyscallErrorCode::kNone) {
+    if (manually_reverted) {
+      out.first = SyscallErrorCode::kFrameReverted;
+    }
+  }
+
+  return out;
 }
 
 void
@@ -607,13 +632,18 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
+                                 StorageItemRPCFlagSet flags)
 {
   assert(!is_read_only());
 
+  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(flags)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  return item_view->set(DeletedItem{});
+  return item_view->set(DeletedItem{}, flags);
 }
 
 namespace {

@@ -48,9 +48,22 @@ else
 fi
 
 # Put metrics to run here
-./metrics_history/scripts/make_metric_file.sh fibonacci-codesize $branch $commit $commit_time
-./scripts/metrics/fibonacci_codesize.sh $BUILD_DIR > metrics_history/metrics/fibonacci-codesize/$branch/${commit_time}_$commit
 
+# Codesize metrics
+## fibonaci.wasm
+./metrics_history/scripts/make_metric_file.sh fibonacci-codesize $branch $commit $commit_time
+./scripts/metrics/codesize.sh $BUILD_DIR fibonacci > metrics_history/metrics/fibonacci-codesize/$branch/${commit_time}_$commit
+
+## itc_erc20.wasm
+./metrics_history/scripts/make_metric_file.sh erc20-codesize $branch $commit $commit_time
+./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 > metrics_history/metrics/erc20-codesize/$branch/${commit_time}_$commit
+
+## initial_token_claim.wasm
+./metrics_history/scripts/make_metric_file.sh initial_token_claim-codesize $branch $commit $commit_time
+./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim > metrics_history/metrics/initial_token_claim-codesize/$branch/${commit_time}_$commit
+
+# Performance metrics
+## mass fibonacci.wasm calls
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $branch $commit $commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR > metrics_history/metrics/fibonacci-wasmonly/$branch/${commit_time}_$commit
 

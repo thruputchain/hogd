@@ -5,6 +5,7 @@
 #include <concepts>
 #include <condition_variable>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
 #include <x23/cleanup.h>
@@ -118,6 +119,14 @@ public:
   //
   //    auto v = mvar.with([](auto &t) { return t.field1 + t.field2; });
   Ptr operator->() { return *this; }
+
+  value_type exchange(value_type v)
+      noexcept(std::is_nothrow_move_assignable_v<value_type> &&
+               std::is_nothrow_move_constructible_v<value_type>)
+  {
+    std::lock_guard _g(m_);
+    return std::exchange(t_, std::move(v));
+  }
 
   // Invoke a callable with a reference to the object protected by the
   // MVar, while holding the lock for the duration of the call.

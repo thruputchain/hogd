@@ -2,12 +2,15 @@
 
 #include <atomic>
 #include <cassert>
-#include <concepts>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <print>
 #include <span>
 #include <stdexcept>
+#include <stop_token>
 #include <string_view>
 #include <sys/socket.h>
 #include <thread>
@@ -26,13 +29,17 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/rpc_common.h"
+#include "x23/cleanup.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
 // Core logic handler for the db rpc server.
 class SyncDBExecutorServer {
 public:
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+
   explicit SyncDBExecutorServer(BlockManager *block_manager)
     : block_manager_(block_manager)
   {
@@ -102,6 +109,7 @@ public:
   ~RPCDbExecutorServer()
   {
     stopped_.store(true, std::memory_order_relaxed);
+    server_listener_.request_stop();
     rpc_server_->stop();
   }
 
@@ -112,6 +120,53 @@ private:
   std::shared_ptr<RPCServer> rpc_server_;
   std::jthread server_listener_;
   std::atomic<bool> stopped_ = false;
+};
+
+class SrpcDbExecutorServer {
+public:
+  explicit SrpcDbExecutorServer(BlockManager *block_manager, uint16_t port)
+    : sync_server_(block_manager)
+  {
+    lfd_ = x23::stcplisten(port);
+    if (!lfd_) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+    port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+    server_listener_ = std::jthread([this](std::stop_token &&stop) {
+      while (!stop.stop_requested()) {
+
+        sockaddr_storage ss;
+        socklen_t sslen = sizeof(ss);
+        x23::UniqueFd fd{
+            accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+        if (!fd) {
+          std::println(stderr, "accept: {}", Errno{});
+        }
+        else {
+          x23::srpc_stream_logged(fd.release())->server(&sync_server_);
+        }
+      }
+    });
+  }
+
+  uint16_t port() const { return port_number_; }
+
+  ~SrpcDbExecutorServer()
+  {
+    shutdown(lfd_.get(), SHUT_RDWR);
+    server_listener_.request_stop();
+    lfd_.reset();
+  }
+
+private:
+  uint16_t port_number_ = 0;
+
+  SyncDBExecutorServer sync_server_;
+  std::jthread server_listener_;
+
+  x23::UniqueFd lfd_;
 };
 
 } // namespace hogd

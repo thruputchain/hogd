@@ -1,42 +1,43 @@
-#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <cstdint>
 #include <memory>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/fibonacci_call.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "test_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class CrossCallTests : public ::testing::Test,
+class CrossCallTests : public ::testing::TestWithParam<TestDB>,
                        public NativeContractTestFramework {
 public:
-  CrossCallTests() : NativeContractTestFramework(false) {}
+  CrossCallTests()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
   {
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-    auto fibonacci_contract = test::load_test_contract("fibonacci.wasm");
-    auto fibonacci_caller_contract =
-        test::load_test_contract("fibonacci_call.wasm");
+    auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
+    auto fibonacci_caller_contract = hogd::load_contract("fibonacci_call.wasm");
 
-    in_memory_db_.write_contract(sha256(*fibonacci_contract),
-                                 fibonacci_contract);
-    in_memory_db_.write_contract(sha256(*fibonacci_caller_contract),
-                                 fibonacci_caller_contract);
-    in_memory_db_.write_deployment(fibonacci_contract_address_,
-                                   sha256(*fibonacci_contract));
-    in_memory_db_.write_deployment(fibonacci_caller_contract_address_,
-                                   sha256(*fibonacci_caller_contract));
+    write_contract(fibonacci_contract);
+    write_contract(fibonacci_caller_contract);
+    write_deployment(fibonacci_contract_address_, sha256(*fibonacci_contract));
+    write_deployment(fibonacci_caller_contract_address_,
+                     sha256(*fibonacci_caller_contract));
 
     setup_grant_storage_token(fibonacci_contract_address_, 1'000'000'000);
     setup_grant_storage_token(fibonacci_caller_contract_address_,
@@ -49,8 +50,10 @@ protected:
   const ContractAddress fibonacci_caller_contract_address_ =
       make_contract_address(1);
 
-  ContractTraitClient<FibonacciCaller> fibonacci_caller_client_ =
-      ContractTraitClient<FibonacciCaller>(fibonacci_caller_contract_address_);
+  ContractTraitClient<fibonacci_call::FibonacciCaller>
+      fibonacci_caller_client_ =
+          ContractTraitClient<fibonacci_call::FibonacciCaller>(
+              fibonacci_caller_contract_address_);
 
   void initialize_fibonacci_caller()
   {
@@ -72,7 +75,7 @@ protected:
   }
 };
 
-TEST_F(CrossCallTests, CrossCallNoGasLimit)
+TEST_P(CrossCallTests, CrossCallNoGasLimit)
 {
 
   initialize_fibonacci_caller();
@@ -111,7 +114,7 @@ TEST_F(CrossCallTests, CrossCallNoGasLimit)
   }
 }
 
-TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
+TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
 {
   initialize_fibonacci_caller();
 
@@ -131,7 +134,7 @@ TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
   }
 }
 
-TEST_F(CrossCallTests, LowOverallGasPropagates)
+TEST_P(CrossCallTests, LowOverallGasPropagates)
 {
   initialize_fibonacci_caller();
 
@@ -149,7 +152,7 @@ TEST_F(CrossCallTests, LowOverallGasPropagates)
   }
 }
 
-TEST_F(CrossCallTests, ExpectOutOfGas)
+TEST_P(CrossCallTests, ExpectOutOfGas)
 {
   initialize_fibonacci_caller();
 
@@ -193,5 +196,10 @@ TEST_F(CrossCallTests, ExpectOutOfGas)
 
   ASSERT_EQ(gas_consumed_1 + 10, gas_consumed_2);
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, CrossCallTests,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -98,11 +97,9 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
 
   for (auto const &[addrkey, item_view] : modified_items_) {
-    auto delta = item_view.get_delta();
+    auto [delta, flags] = item_view.get_delta();
     if (delta) {
-      // TODO(geoff): exclusive write flag not implemented yet
-      db_proxy.add_delta(addrkey, *delta,
-                         std::to_underlying(StorageItemRPCFlags::kStorageNone));
+      db_proxy.add_delta(addrkey, *delta, flags);
     }
   }
 
@@ -123,7 +120,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
   frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
 }
 
-SystemStatus<InvokeResult>
+SystemStatus<std::pair<InvokeResult, bool>>
 InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data)
 {
@@ -183,6 +180,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     }
   }
 
+  bool manually_reverted = frame_stack_.back().should_revert();
+
   if (frame_result.should_frame_revert()) {
     frame_stack_.pop_back();
 
@@ -190,7 +189,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       frame_stack_.back().commit_failed_child_frame();
     }
 
-    return frame_result;
+    return {{frame_result, manually_reverted}};
   }
 
   // commit child invocation frame successfully
@@ -218,7 +217,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   frame_stack_.pop_back();
 
-  return frame_result;
+  return {{frame_result, manually_reverted}};
 }
 
 std::optional<ContractAddress>

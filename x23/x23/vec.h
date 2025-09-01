@@ -39,7 +39,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -62,6 +61,7 @@
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/typename.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
@@ -613,7 +613,12 @@ public:
                                                   b.end());
   }
   friend constexpr bool operator==(const Vec &a, const Vec &b)
-      requires requires(const value_type v) { v == v; }
+  // Commenting this requires clause because gcc sometimes rejects it
+  // with a defaulted operator== (as employed by x23c).  E.g.,:
+  //
+  //   bool operator==(const &value_type, const &value_type) = default;
+  //
+  // requires requires(const value_type v) { v == v; }
   {
     return std::equal(a.begin(), a.end(), b.begin(), b.end());
   }

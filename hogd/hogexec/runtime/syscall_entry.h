@@ -2,7 +2,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 
 namespace hogd {
 

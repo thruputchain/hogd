@@ -10,8 +10,9 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
-#include "storage_lock.hh"
+#include "storage_lock.hh" // NOLINT(misc-include-cleaner)
 #include "types.hh"
 
 namespace hogd {
@@ -107,6 +108,8 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
       std::to_underlying(StorageItemRPCFlags::kStorageNone));
 
   if (!new_lock) {
+    // No need to manually revert the lock on addrkey acquired above;
+    // if this fails then the entire subtransaction will be reverted.
     return false;
   }
 
@@ -125,12 +128,34 @@ BlockState::commit_transaction(TransactionID txid)
 
   for (auto const &[addr, entry] : deltas) {
     auto const &[delta, lock] = entry;
+    int128_t released_amount = 0;
     if (delta) {
-      storage_view_.commit_storage_delta(addr, *delta, lock);
+      released_amount = storage_view_.commit_storage_delta(addr, *delta, lock);
     }
     else {
       storage_view_.revert_storage_lock(addr, lock.lock_);
+      released_amount = lock.locked_tokens_;
     }
+    if (addr.key.key_type() ==
+        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+      // no storage cost paid for this key
+      continue;
+    }
+
+    assert(released_amount >= 0);
+    auto cost_addrkey = AddressAndKey{
+        .address = addr.address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+    StorageDelta cost_release_delta(
+        StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+    cost_release_delta.nnint_add() = to_xdr(released_amount);
+
+    auto r = storage_view_.try_reserve_storage_delta(
+        cost_addrkey, cost_release_delta, StorageLock(StorageLockType::kNone),
+        std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    assert(r.has_value());
+    storage_view_.commit_storage_delta(cost_addrkey, cost_release_delta, *r);
   }
   tx_manager_.increment_closed();
 }

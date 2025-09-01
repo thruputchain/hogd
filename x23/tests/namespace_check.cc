@@ -1,7 +1,8 @@
 
 #include "tests/xdr_namespace_test2.hh"
 
-#include "tests/xdr_namespace_test3.hh"
+// keep to ensure that this file compiles
+#include "tests/xdr_namespace_test3.hh" // IWYU pragma: keep
 
 using namespace xdr_namespace_test_2;
 

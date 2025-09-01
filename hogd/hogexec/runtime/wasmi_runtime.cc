@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -14,6 +15,7 @@
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -41,6 +43,8 @@ WasmiContext::make_new_runtime(Contract const &contract, SHA256Hash const &hash,
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   if (contract.contract_type() != ContractType::kWasmi) {
+    warn("Attempt made to access a non-wasmi contract from WasmiContext: {}",
+         contract.contract_type());
     return nullptr;
   }
 
@@ -103,6 +107,8 @@ WasmiRuntime::invoke_internal(std::string_view method_name)
                    method_name.size());
 
   InvokeErrorCode wasmi_error{res.error};
+  trace("Wasmi Invoke Result: {}",
+        x23::show(static_cast<InvokeErrorCode>(res.error)));
   if (wasmi_error != InvokeErrorCode::kInvokeNone) {
     return InvokeError{wasmi_error};
   }
@@ -144,6 +150,16 @@ WasmiModuleCache::~WasmiModuleCache()
   if (wasmi_module_cache_ptr_ != nullptr) {
     free_wasmi_module_cache(wasmi_module_cache_ptr_);
   }
+}
+
+void
+WasmiModuleCache::test_reset_cache(size_t capacity)
+{
+  assert(capacity > 0);
+  if (wasmi_module_cache_ptr_ != nullptr) {
+    free_wasmi_module_cache(wasmi_module_cache_ptr_);
+  }
+  wasmi_module_cache_ptr_ = new_wasmi_module_cache(capacity);
 }
 
 } // namespace hogd

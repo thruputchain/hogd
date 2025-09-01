@@ -7,7 +7,6 @@
 #include <print>
 #include <span>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
@@ -426,9 +425,10 @@ Node *
 MerkleTrie::find_node(const Key &k)
 {
   size_t idx = 0;
+  size_t branch_depth;
   Node *existing_key = nullptr;
-  Node *branch =
-      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx,
+                                           existing_key, branch_depth);
   if (branch != existing_key) {
     branch->rw_lock.unlock();
   }
@@ -440,6 +440,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
                           bool update)
 {
   size_t idx;
+  size_t branch_depth;
   Node *existing_key;
   Node *branch;
   Node *to_hash = nullptr;
@@ -451,7 +452,8 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
     idx = 0;
     existing_key = nullptr;
 
-    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key,
+                                       branch_depth);
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
       if (update) {
@@ -461,10 +463,12 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         }
         if (branch != existing_key) {
           branch->rw_lock.unlock();
+          branch_depth++;
         }
         existing_key->value_hash = sha256(obj);
         // [generate_hashes_from()] unlocks the node locks we currently hold.
-        generate_hashes_from(existing_key, /*locked_through=*/existing_key);
+        generate_hashes_from(existing_key, /*locked_through=*/existing_key,
+                             branch_depth);
         return true;
       }
       unlock_both(*branch, *existing_key);
@@ -552,7 +556,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
 
   size_.fetch_add(1, std::memory_order_relaxed);
   // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash, /*locked_through=*/branch);
+  generate_hashes_from(to_hash, /*locked_through=*/branch, branch_depth);
   return true;
 }
 
@@ -893,7 +897,8 @@ MerkleTrie::will_remove_branch(const Node *branch, size_t num_children)
 bool
 MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
                               Node *&locked_through, size_t &num_children,
-                              std::byte &remaining_child_hex)
+                              std::byte &remaining_child_hex,
+                              size_t &locked_through_depth)
 {
   if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
     // We need to try again. We are moving down the trie so we cannot block on
@@ -938,6 +943,7 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     // We can block on acquiring the writer lock when moving up the trie.
     branch->parent->rw_lock.lock_writer();
     locked_through = branch->parent;
+    locked_through_depth--;
 
     if (branch->parent->type != Node::Type::kBranch) {
       // The parent is not a branch, so we need to lock the grandparent.
@@ -947,6 +953,9 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
 
       branch->parent->parent->rw_lock.lock_writer();
       locked_through = branch->parent->parent;
+      // We already subtracted 1 from [locked_through_depth] above, so we
+      // subtract 1 again to subtract 2 in total.
+      locked_through_depth--;
     }
   }
   return true;
@@ -956,6 +965,7 @@ bool
 MerkleTrie::remove(const Key &k)
 {
   size_t idx;
+  size_t branch_depth;
   Node *existing_key;
   Node *branch;
   size_t num_children;
@@ -966,7 +976,8 @@ MerkleTrie::remove(const Key &k)
     idx = 0;
     existing_key = nullptr;
 
-    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key,
+                                       branch_depth);
     if (!existing_key) {
       // [k] does not exist in the trie, so we cannot remove it.
       branch->rw_lock.unlock();
@@ -976,7 +987,7 @@ MerkleTrie::remove(const Key &k)
     CHECK_EQ(branch->type, Node::Type::kBranch);
 
     if (remove_grab_locks(branch, existing_key, locked_through, num_children,
-                          remaining_child_hex)) {
+                          remaining_child_hex, branch_depth)) {
       break;
     }
   }
@@ -1027,7 +1038,7 @@ MerkleTrie::remove(const Key &k)
   size_.fetch_sub(1, std::memory_order_relaxed);
   CHECK_PTR(to_hash);
   // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash, locked_through);
+  generate_hashes_from(to_hash, locked_through, branch_depth);
   return true;
 }
 
@@ -1162,134 +1173,10 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
 }
 
 // static
-template<typename NodeType>
-void
-MerkleTrie::walk(
-    NodeType *root, const HexArray &root_prefix,
-    const std::function<void(const HexArray &, NodeType &, NodeType *)> &f)
-{
-  static_assert(std::is_same_v<NodeType, Node> ||
-                    std::is_same_v<NodeType, const Node>,
-                "[NodeType] must be [Node] or [const Node].");
-
-  // We perform a post-order traversal iteratively. We use iteration rather than
-  // recursion to avoid exceeding the stack size when traversing deep tries.
-
-  // We use this type along with the data structures below to track where we are
-  // in the trie.
-  struct CheckInfo {
-    // The node we are currently looking at.
-    NodeType *node;
-    // The parent of this node.
-    NodeType *parent;
-    // The path that maps to this node.
-    HexArray path;
-    // This is only relevant for branch and extension nodes. When we first
-    // encounter these nodes in an iterative loop, we cannot *immediately*
-    // "visit" them (i.e., execute [f] on them)--we need to visit all of their
-    // children first.
-    //
-    // A branch or extension node will be left in the stack until all of its
-    // children have been visited. When this node pushes one of its children
-    // onto the stack, the node waits until the child is popped off the stack
-    // before pushing the next child. Thus, the node will not enqueue the next
-    // child until a subsequent iteration, and thus we need to track this child
-    // so that the node knows which child to push at that point.
-    //
-    // We use [next_child_to_visit] to track which child should be pushed next
-    // for [node].
-    size_t next_child_to_visit;
-  };
-
-  std::stack<CheckInfo> path;
-  // Push the root node onto the stack.
-  path.push(CheckInfo{.node = root,
-                      .parent = nullptr,
-                      .path = root_prefix,
-                      .next_child_to_visit = 0});
-
-  while (!path.empty()) {
-    CheckInfo &info = path.top();
-
-    if (!info.node) {
-      path.pop();
-      continue;
-    }
-
-    switch (info.node->type) {
-    case Node::Type::kBranch:
-      CHECK_LE(info.next_child_to_visit, info.node->child.size());
-      if (info.next_child_to_visit == info.node->child.size()) {
-        // We have visited all of the branch's children, so now we can "visit"
-        // (i.e., call [f] on) the branch.
-        f(info.path, *info.node, info.parent);
-      }
-      else {
-        // Visit the next child.
-
-        // Append the branch path we are taking to [info.path] so that it holds
-        // the path to the child. For example, if [info.next_child_to_visit] is
-        // 0x3, then we know we will next visit the child at index 0x3, so we
-        // append 0x3 to [info.path].
-        info.path.append(std::byte(info.next_child_to_visit));
-        path.push({.node = info.node->child[info.next_child_to_visit],
-                   .parent = info.node,
-                   .path = info.path,
-                   .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the branch node.
-        info.path.remove_from_back(1);
-        info.next_child_to_visit++;
-        continue;
-      }
-      break;
-    case Node::Type::kExtension:
-      // An extension node always has exactly one child. It is not possible for
-      // an extension node to have no children.
-      CHECK_LE(info.next_child_to_visit, 1UL);
-      if (info.next_child_to_visit == 1) {
-        // We have visited the extension node's one child, so now we can visit
-        // the extension node.
-        f(info.path, *info.node, info.parent);
-      }
-      else {
-        // Append the extension node's path to [info.path] so that [info.path]
-        // holds the path to the child when we push the child.
-        info.path.append(info.node->path);
-        path.push({.node = info.node->child[0],
-                   .parent = info.node,
-                   .path = info.path,
-                   .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the extension
-        // node.
-        info.path.remove_from_back(info.node->path.size());
-        info.next_child_to_visit++;
-        continue;
-      }
-      break;
-    case Node::Type::kLeaf:
-      // A leaf node has no children, so we can visit a leaf immediately upon
-      // encountering it.
-      CHECK_EQ(info.next_child_to_visit, 0UL);
-
-      // Append the leaf's path to [info.path] so that the full path is passed
-      // to [f].
-      info.path.append(info.node->path);
-      NodeType &n = *info.node;
-      f(info.path, n, info.parent);
-      // No need to remove the portion of the path we just appended above
-      // because we pop the leaf anyway below, so we do not access the leaf
-      // after this point.
-      break;
-    }
-
-    path.pop();
-  }
-}
-
-// static
 Node *
 MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                      size_t &idx, Node *&existing_key)
+                                      size_t &idx, Node *&existing_key,
+                                      size_t &branch_depth)
 {
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
@@ -1298,6 +1185,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   const size_t original_idx = idx;
 
   Node *prev_root = nullptr;
+  branch_depth = 0;
   while (true) {
     if (!root->rw_lock.try_lock_reader()) {
       // We are conflicting with a writer that is moving up the trie, so try
@@ -1309,6 +1197,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       root = original_root;
       prev_root = nullptr;
       idx = original_idx;
+      branch_depth = 0;
       continue;
     }
 
@@ -1336,6 +1225,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
         // continue searching. We add 1 to [idx] since the branch corresponds to
         // one hex digit in the path.
         idx++;
+        branch_depth++;
         prev_root = root;
         root = next;
         continue;
@@ -1352,6 +1242,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       if (idx + root->path.size() <= path.size() &&
           path.get_subarray(idx, idx + root->path.size()) == root->path) {
         idx += root->path.size();
+        branch_depth++;
         CHECK_PTR(root->child[0]);
         if (prev_root) {
           prev_root->rw_lock.unlock();
@@ -1367,6 +1258,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       // subtract 1 from [idx] since the branch corresponds to one hex digit in
       // the path.
       idx--;
+      branch_depth--;
       root->rw_lock.unlock();
       return prev_root;
       break;
@@ -1383,6 +1275,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       // subtract 1 from [idx] since the branch corresponds to one hex digit in
       // the path.
       idx--;
+      branch_depth--;
       return prev_root;
       break;
     default:
@@ -1397,7 +1290,8 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 }
 
 void
-MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
+MerkleTrie::generate_hashes_from(Node *n, Node *locked_through,
+                                 size_t locked_through_depth) const
 {
   // We hold the writer locks for [n] and the nodes above it up through and
   // including [locked_through].
@@ -1445,11 +1339,15 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
     }
 
     if (!locked) {
-      if (n->parent == &root_ || n->parent->parent == &root_) {
-        // Do not rehash the root or the level below it.
+      if (locked_through_depth <= kNoHashDepth) {
+        // Do not rehash the nodes that have a depth less than or equal to
+        // [kNoHashDepth].
         n->rw_lock.unlock();
         return;
       }
+      CHECK_GT(locked_through_depth, 0UL);
+      locked_through_depth--;
+
       n->parent->rw_lock.lock_reader();
     }
 
@@ -1489,12 +1387,11 @@ MerkleTrie::generate_top_level_hashes()
   // We do not hold any locks for these nodes. It only makes sense to call this
   // function when there are no other threads mutating the trie. Otherwise, even
   // before this function returns the hashes we recompute here will be stale.
-  for (Node *child : root_.child) {
-    if (child) {
-      child->hash = child->compute_node_hash();
-    }
-  }
-  root_.hash = root_.compute_node_hash();
+  HexArray prefix;
+  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+    node.hash = node.compute_node_hash();
+  };
+  walk<Node>(&root_, prefix, f, /*max_depth=*/kNoHashDepth);
 }
 
 void

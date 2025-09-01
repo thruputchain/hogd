@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "genesis.hh"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -41,6 +42,8 @@ public:
   bool add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
 
   const StorageCostModel cost_model_;
+
+  void initialize_genesis_block(GenesisBlock const &config);
 
 private:
   // One block.
@@ -91,6 +94,7 @@ private:
   std::vector<std::shared_ptr<BlockState>> remove_subtree(BlockID root);
 
   std::shared_mutex mtx_;
+  bool initialized_genesis_ = false;
   // Always contains at least one entry: the most recently committed block.
   std::unordered_map<BlockID, Block> block_cache_;
   BlockID last_committed_id_;

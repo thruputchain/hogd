@@ -20,7 +20,6 @@ add_library(runtime_objects OBJECT
   item_view.cc
   native_runtime.cc
   multiplexed_context.cc
-  preset_native_token.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
@@ -47,10 +46,25 @@ target_link_libraries(
 
 add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
+add_library(runtime_test_lib
+  native_contract_test_framework.cc
+)
+
+target_link_libraries(
+  runtime_test_lib
+  runtime
+  db_interface
+  hogdb
+  GTest::gtest
+)
+
 add_library(runtime_test_objects OBJECT
+  contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc
+  direct_bytestring_test.cc
+  direct_nnint_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
@@ -120,11 +134,16 @@ target_include_directories(
 
 target_link_libraries(
   runtime_test
+  precompiles
   runtime
+  runtime_test_lib
   runtime_test_util
   db_interface
+  hogdb
   storage_cost
   model_checker
+  contract_loader
+  genesis
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)
@@ -163,6 +182,11 @@ wat2wasm_target(
   test_instantiate_unexported_memory_wasm
   wat/test_instantiate_unexported_memory.wat
   ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_unexported_memory.wasm
+)
+
+add_dependencies(
+  runtime_test_objects
+  all_wasm_headers
 )
 
 add_dependencies(

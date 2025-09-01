@@ -1,41 +1,42 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/cxs_roundtrip.h"
+#include "built_contracts/roundtrip.hh"
+#include "built_contracts/txs_roundtrip.h"
 #include "contract.hh"
-#include "ffi_enums.hh"
-#include "hogd/base/types.h"
-#include "hogd/config.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/multiplexed_context.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "transaction.hh"
-
-#if ENABLE_TEST_CONTRACTS
-
-#include <memory>
-#include <unordered_map>
-
 #include "contract_error.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
-#include "test_contracts/roundtrip.hh"
+#include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
-class SerializeRoundtripTest : public testing::Test,
+class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                public NativeContractTestFramework {
 public:
-  SerializeRoundtripTest() : NativeContractTestFramework(false) {}
+  SerializeRoundtripTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -49,8 +50,8 @@ protected:
          [this](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::Foo foo{0xABCD};
-           roundtrip_test<"roundtrip_foo">(foo, handler, client_, success);
+           ::cxs_test::Foo foo{0xABCD};
+           roundtrip_test<"roundtrip_foo">(foo, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -61,8 +62,8 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::senum senum{::test::senum::SE_POSITIVE};
-           roundtrip_test<"roundtrip_senum">(senum, handler, client_, success);
+           ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
+           roundtrip_test<"roundtrip_senum">(senum, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -72,22 +73,19 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::sunion sunion{::test::senum::SE_POSITIVE};
+           ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
            sunion.pos() = 5;
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
-                                              success);
+           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
-           sunion.d(static_cast<::test::senum>(0)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
-                                              success);
+           sunion.d(static_cast<::cxs_test::senum>(0)); // default case
+           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
-           sunion.d(static_cast<::test::senum>(1000)); // default case
-           roundtrip_test<"roundtrip_sunion">(sunion, handler, client_,
-                                              success);
+           sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
+           roundtrip_test<"roundtrip_sunion">(sunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -98,31 +96,31 @@ protected:
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
            int32_t value = -1;
-           roundtrip_test<"roundtrip_i32">(value, handler, client_, success);
+           roundtrip_test<"roundtrip_i32">(value, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = 1;
-           roundtrip_test<"roundtrip_i32">(value, handler, client_, success);
+           roundtrip_test<"roundtrip_i32">(value, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = 0;
-           roundtrip_test<"roundtrip_i32">(value, handler, client_, success);
+           roundtrip_test<"roundtrip_i32">(value, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = std::numeric_limits<int32_t>::max();
-           roundtrip_test<"roundtrip_i32">(value, handler, client_, success);
+           roundtrip_test<"roundtrip_i32">(value, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
            value = std::numeric_limits<int32_t>::min();
-           roundtrip_test<"roundtrip_i32">(value, handler, client_, success);
+           roundtrip_test<"roundtrip_i32">(value, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -133,10 +131,9 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::sunion_no_void sunion{::test::senum::SE_NEGATIVE};
+           ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
            sunion.neg() = true;
-           roundtrip_test<"roundtrip_sunion_no_void">(sunion, handler, client_,
-                                                      success);
+           roundtrip_test<"roundtrip_sunion_no_void">(sunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -146,24 +143,21 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::uunion uunion(1);
+           ::cxs_test::uunion uunion(1);
            uunion.one() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, client_,
-                                              success);
+           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion.d(2);
            uunion.two() = true;
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, client_,
-                                              success);
+           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion.d(4);
            uunion.four() = "hello";
-           roundtrip_test<"roundtrip_uunion">(uunion, handler, client_,
-                                              success);
+           roundtrip_test<"roundtrip_uunion">(uunion, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -174,17 +168,17 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::uunion_bool uunion_bool{true};
+           ::cxs_test::uunion_bool uunion_bool{true};
            uunion_bool.one() = false;
            roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, handler,
-                                                   client_, success);
+                                                   success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
            uunion_bool.d(false);
            uunion_bool.two() = true;
            roundtrip_test<"roundtrip_uunion_bool">(uunion_bool, handler,
-                                                   client_, success);
+                                                   success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -194,12 +188,12 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-           ::test::test_recursive test_recursive;
+           ::cxs_test::test_recursive test_recursive;
 
            // empty
            test_recursive.elem = "hello";
            roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      client_, success);
+                                                      success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -208,7 +202,7 @@ protected:
            test_recursive.next.emplace();
            test_recursive.next->elem = "world";
            roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      client_, success);
+                                                      success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -218,7 +212,7 @@ protected:
            test_recursive.nextvec.emplace_back();
            test_recursive.nextvec.back().elem = "goodbye";
            roundtrip_test<"roundtrip_test_recursive">(test_recursive, handler,
-                                                      client_, success);
+                                                      success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -232,7 +226,7 @@ protected:
 
            // Test ErrorXDR - Caller branch
            hogd::ErrorXDR error_caller(hogd::ErrorType::kErrorTypeCaller);
-           roundtrip_test<"roundtrip_error_xdr">(error_caller, handler, client_,
+           roundtrip_test<"roundtrip_error_xdr">(error_caller, handler,
                                                  success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -244,7 +238,7 @@ protected:
            error_contract_custom.contract_err().error_type(
                hogd::ContractErrorType::kContractErrorTypeCustom);
            roundtrip_test<"roundtrip_error_xdr">(error_contract_custom, handler,
-                                                 client_, success);
+                                                 success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -256,7 +250,7 @@ protected:
                hogd::ContractErrorType::kContractErrorTypeSyscall);
            error_contract_syscall.contract_err().syscall_err() = 42;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_syscall,
-                                                 handler, client_, success);
+                                                 handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -271,7 +265,7 @@ protected:
            error_contract_storage.contract_err().storage_err().syscall_err() =
                123;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_storage,
-                                                 handler, client_, success);
+                                                 handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -287,8 +281,7 @@ protected:
            hogd::ContractErrorXDR contract_error_custom(
                hogd::ContractErrorType::kContractErrorTypeCustom);
            roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_custom,
-                                                          handler, client_,
-                                                          success);
+                                                          handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -298,7 +291,7 @@ protected:
                hogd::ContractErrorType::kContractErrorTypeSyscall);
            contract_error_syscall.syscall_err() = 99;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_syscall, handler, client_, success);
+               contract_error_syscall, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -310,7 +303,7 @@ protected:
                hogd::StorageErrorType::kStorageErrorTypeSyscall);
            contract_error_storage_syscall.storage_err().syscall_err() = 456;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_syscall, handler, client_, success);
+               contract_error_storage_syscall, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -321,7 +314,7 @@ protected:
            contract_error_storage_serialization.storage_err().error_type(
                hogd::StorageErrorType::kStorageErrorTypeSerialization);
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_serialization, handler, client_, success);
+               contract_error_storage_serialization, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -338,7 +331,7 @@ protected:
                .index_out_of_bounds_err()
                .access = 1500;
            roundtrip_test<"roundtrip_contract_error_xdr">(
-               contract_error_storage_index, handler, client_, success);
+               contract_error_storage_index, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -355,8 +348,7 @@ protected:
                hogd::StorageErrorType::kStorageErrorTypeSyscall);
            storage_err_syscall.syscall_err() = 789;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_syscall,
-                                                       handler, client_,
-                                                       success);
+                                                       handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -365,7 +357,7 @@ protected:
            hogd::StorageErrXDR storage_err_serialization(
                hogd::StorageErrorType::kStorageErrorTypeSerialization);
            roundtrip_test<"roundtrip_storage_err_xdr">(
-               storage_err_serialization, handler, client_, success);
+               storage_err_serialization, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -376,8 +368,7 @@ protected:
            storage_err_index.index_out_of_bounds_err().len = 2000;
            storage_err_index.index_out_of_bounds_err().access = 2500;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_index,
-                                                       handler, client_,
-                                                       success);
+                                                       handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -388,21 +379,13 @@ protected:
          [&](SystemCallHandler &handler,
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
-
-           // Test Result<i32> - Ok branch
-           hogd::Result<int32_t> result_ok(false); // false means Ok
-           result_ok.value() = 42;
-           roundtrip_test<"roundtrip_result_xdr">(result_ok, handler, client_,
-                                                  success);
+           x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
+           roundtrip_test<"roundtrip_opaque_vector">(vec, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
 
-           // Test Result<i32> - Err branch
-           hogd::Result<int32_t> result_err(true); // true means Err
-           result_err.err() = hogd::ErrorXDR(hogd::ErrorType::kErrorTypeCaller);
-           roundtrip_test<"roundtrip_result_xdr">(result_err, handler, client_,
-                                                  success);
+           roundtrip_test<"roundtrip_opaque_slice">(vec, handler, success);
            if (!success) {
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }
@@ -412,12 +395,17 @@ protected:
 
     });
 
-    auto contract = test::load_test_contract("cxs_roundtrip.wasm");
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(cxs_contract_addr_, sha256(*contract));
+    auto cxs_contract = hogd::load_contract("cxs_roundtrip.wasm");
+    write_contract(cxs_contract);
+    write_deployment(cxs_contract_addr_, sha256(*cxs_contract));
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    auto txs_contract = hogd::load_contract("txs_roundtrip.wasm");
+    write_contract(txs_contract);
+    write_deployment(txs_contract_addr_, sha256(*txs_contract));
+    setup_grant_storage_token(txs_contract_addr_, 1'000'000'000);
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -425,10 +413,8 @@ protected:
 
     // deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr_,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr_, sha256(*native_contract_xdr));
 
     multiplexed_context_ = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -436,38 +422,57 @@ protected:
             {ContractType::kWasmi, wasm_runtime_context_}});
   }
 
-  using cxs_client_t = ContractTraitClient<CxsRoundtrip>;
+  using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;
+  using txs_client_t = ContractTraitClient<txs_roundtrip::TxsRoundtrip>;
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   template<StringLiteral MethodName, typename T>
-  void roundtrip_test(T const &value, SystemCallHandler &handler,
-                      cxs_client_t &client, bool &success)
+  void roundtrip_test(T const &value, SystemCallHandler &handler, bool &success)
   {
     success = false;
-    auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
-    ASSERT_TRUE(calldata.has_value());
-    auto [res, _gas] = client.invoke<MethodName>(handler, *calldata);
-    ASSERT_TRUE(res.has_value());
-    ASSERT_TRUE(res.value().has_value());
-    auto return_buf = res.value().value();
-    auto roundtrip_value =
-        Serializer<SerializationFormat::kCxs>::deserialize<T>(
-            std::as_bytes(std::span(return_buf)));
-    ASSERT_TRUE(roundtrip_value.has_value());
-    ASSERT_EQ(roundtrip_value.value(), value);
+    {
+      // CXS
+      auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
+      ASSERT_TRUE(calldata.has_value());
+      auto [res, _gas] = cxs_client_.invoke<MethodName>(handler, *calldata);
+      ASSERT_TRUE(res.has_value());
+      ASSERT_TRUE(res.value().has_value());
+      auto return_buf = res.value().value();
+      auto roundtrip_value =
+          Serializer<SerializationFormat::kCxs>::deserialize<T>(
+              std::as_bytes(std::span(return_buf)));
+      ASSERT_TRUE(roundtrip_value.has_value());
+      ASSERT_EQ(roundtrip_value.value(), value);
+    }
+    {
+      // TXS
+      auto calldata = Serializer<SerializationFormat::kTxs>::serialize(value);
+      ASSERT_TRUE(calldata.has_value());
+      auto [res, _gas] = txs_client_.invoke<MethodName>(handler, *calldata);
+      ASSERT_TRUE(res.has_value());
+      ASSERT_TRUE(res.value().has_value());
+      auto return_buf = res.value().value();
+      auto roundtrip_value =
+          Serializer<SerializationFormat::kTxs>::deserialize<T>(
+              std::as_bytes(std::span(return_buf)));
+      ASSERT_TRUE(roundtrip_value.has_value());
+      ASSERT_EQ(roundtrip_value.value(), value);
+    }
     success = true;
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
   const ContractAddress cxs_contract_addr_ = make_contract_address(0);
-  const ContractAddress native_contract_addr_ = make_contract_address(1);
-  cxs_client_t client_ = cxs_client_t(cxs_contract_addr_);
+  const ContractAddress txs_contract_addr_ = make_contract_address(1);
+  const ContractAddress native_contract_addr_ = make_contract_address(2);
+  cxs_client_t cxs_client_ = cxs_client_t(cxs_contract_addr_);
+  txs_client_t txs_client_ = txs_client_t(txs_contract_addr_);
   std::shared_ptr<MultiplexedContext> multiplexed_context_;
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripFoo)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -486,7 +491,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripFoo)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSenum)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -505,7 +510,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSenum)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunion)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -524,7 +529,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunion)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripI32)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -543,7 +548,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripI32)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunionNoVoid)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -562,7 +567,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunionNoVoid)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunion)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -581,7 +586,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunion)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -600,7 +605,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -619,7 +624,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripErrorXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -638,7 +643,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripContractErrorXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -657,7 +662,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripStorageErrXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -676,7 +681,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
+TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -694,8 +699,11 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 }
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 } // namespace hogd
-
-#endif

@@ -1,14 +1,20 @@
 
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <new>
 #include <print>
 
 #include <fcntl.h>
 #include <getopt.h>
+#include <set>
 #include <stdio.h>
+#include <string>
+#include <sys/fcntl.h>
+#include <unistd.h>
 
 #include "x23/cleanup.h"
+#include "x23/config.h"
 #include "x23/err.h"
 #include "x23c/defs.h"
 #include "x23c/parse.hh"
@@ -124,10 +130,18 @@ usage(bool error)
                R"(usage: {0:} [OPTIONS] [-o FILE] file.x
   --help       print usage and exit
   --strict     fail if there are any warnings
-  --version    print version and exit)",
+  --version    print version and exit
+  --rust       generate rust code
+  --recursive_type <typename>  generate (rust) code for a recursive type)",
                progname.string());
   exit(error ? 2 : 0);
 }
+
+// In our code, we should use the kRustBoxPtr comment to indicate that a type
+// should be wrapped in a Box<T> in rust.  However, for generating code
+// for xdr we do not control (i.e. stellar's) we cannot add those annotations,
+// and so need the --recursive_type option to indicate which types are
+// recursive.
 
 int
 main(int argc, char **argv)
@@ -138,6 +152,7 @@ main(int argc, char **argv)
   std::filesystem::path outfile;
 
   bool rust_module = false;
+  std::set<std::string> recursive_types;
 
   int optind;
   for (optind = 1; optind < argc; ++optind) {
@@ -170,6 +185,14 @@ main(int argc, char **argv)
         }
         outfile = argv[optind];
       }
+    }
+    else if (opt == "--recursive_type") {
+      ++optind;
+      if (optind >= argc) {
+        std::println(stderr, "missing recursive type name");
+        exit(2);
+      }
+      recursive_types.insert(argv[optind]);
     }
     else {
       std::println(stderr, "invalid option {}", opt);
@@ -216,7 +239,7 @@ main(int argc, char **argv)
   std::string res;
 
   if (rust_module) {
-    res = gen_rs(&ctx.defs);
+    res = gen_rs(&ctx.defs, recursive_types);
   }
   else {
     res = gen_hh(&ctx.defs);

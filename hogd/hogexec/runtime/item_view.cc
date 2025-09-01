@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "hogd/base/types.h"
@@ -12,8 +13,9 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -48,14 +50,15 @@ make_nnint128_add(int128_t add)
 
 } // namespace
 
-std::optional<StorageDelta>
+std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
 ItemView::get_delta() const
 {
-  return std::visit(
-      [](auto const &v) -> std::optional<StorageDelta> {
-        return v.get_delta();
-      },
-      delta_args_);
+  return {std::visit(
+              [](auto const &v) -> std::optional<StorageDelta> {
+                return v.get_delta();
+              },
+              delta_args_),
+          flags_};
 }
 
 StorageDelta

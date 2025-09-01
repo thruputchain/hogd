@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/read_only_test.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -16,37 +18,40 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "syscall.hh"
-#include "test_contracts/integration_test_contracts/read_only_test/read_only_test.h"
+#include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class ReadOnlyTestRunner : public ::testing::Test,
+class ReadOnlyTestRunner : public ::testing::TestWithParam<TestDB>,
                            public NativeContractTestFramework {
 public:
-  ReadOnlyTestRunner() : NativeContractTestFramework(false) {}
+  ReadOnlyTestRunner()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
   {
-    in_memory_db_.write_contract(sha256(*contract_), contract_);
-    in_memory_db_.write_deployment(contract_addr_, sha256(*contract_));
+    write_contract(contract_);
+    write_deployment(contract_addr_, sha256(*contract_));
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_ =
       make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   std::shared_ptr<Contract> contract_ =
-      test::load_test_contract("read_only_test.wasm");
+      hogd::load_contract("read_only_test.wasm");
   ContractAddress const contract_addr_ = make_contract_address(0);
-  using read_only_test_client_t = ContractTraitClient<ReadOnlyTest>;
+  using read_only_test_client_t =
+      ContractTraitClient<read_only_test::ReadOnlyTest>;
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
 };
 
-TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
+TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
 {
 
   auto native_contract = std::make_unique<NativeContract>(
@@ -79,7 +84,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto native_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -91,10 +96,8 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
 
   auto native_contract_addr = make_contract_address(1);
   auto native_contract_xdr = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {
@@ -140,7 +143,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
   }
 }
 
-TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
+TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
 {
   auto native_contract_addr = make_contract_address(1);
   auto native_contract = std::make_unique<NativeContract>(
@@ -185,7 +188,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto native_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -196,10 +199,8 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
           {ContractType::kNative, native_context}});
 
   auto native_contract_xdr = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {
@@ -222,5 +223,10 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
     ASSERT_TRUE(*commit_res);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTestRunner,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

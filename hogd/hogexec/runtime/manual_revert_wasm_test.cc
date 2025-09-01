@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -15,8 +17,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "test_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -30,10 +31,13 @@
 
 namespace hogd {
 
-class ManualRevertWasmTest : public ::testing::Test,
+class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest() : NativeContractTestFramework(false) {}
+  ManualRevertWasmTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -41,10 +45,10 @@ protected:
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
     // Load and deploy the manual_revert_test contract
-    auto contract = test::load_test_contract("manual_revert_test.wasm");
+    auto contract = hogd::load_contract("manual_revert_test.wasm");
     contract_addr_ = make_contract_address(0);
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(contract_addr_, sha256(*contract));
+    write_contract(contract);
+    write_deployment(contract_addr_, sha256(*contract));
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
@@ -65,7 +69,7 @@ protected:
 // false)
 // - Ensures the transaction commits successfully despite the revert
 //
-TEST_F(ManualRevertWasmTest, BasicManualRevert)
+TEST_P(ManualRevertWasmTest, BasicManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -82,6 +86,12 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
              if (!res.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             // if (res.value().error().code() !=
+             // SyscallErrorCode::kFrameReverted) {
+             //   ADD_FAILURE() << "Function call should have succeeded and
+             //   reverted"; return
+             //   InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             // }
              if (!res.value().has_value()) {
                ADD_FAILURE() << "Function call should have succeeded";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -103,7 +113,7 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -112,10 +122,8 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -152,7 +160,7 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
 // - This validates that the manual revert behavior is intentional, not a side
 // effect
 //
-TEST_F(ManualRevertWasmTest, BasicNoRevert)
+TEST_P(ManualRevertWasmTest, BasicNoRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -189,7 +197,7 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -198,10 +206,8 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -236,7 +242,7 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
 // - Ensures the outer method can handle the reverted inner call
 // - Validates that the SDK properly handles nested Result::Err scenarios
 //
-TEST_F(ManualRevertWasmTest, NestedManualRevert)
+TEST_P(ManualRevertWasmTest, NestedManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -261,7 +267,7 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -270,10 +276,8 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -309,7 +313,7 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
 // - Error type 0 (no error) succeeds normally without revert
 // - Validates the end-to-end flow: SDK error → Returnable trait → manual revert
 //
-TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
+TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -337,7 +341,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -346,10 +350,8 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -388,7 +390,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
 // - Transaction succeeds normally
 // - This serves as a control to confirm error types 1-4 behavior is intentional
 //
-TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
+TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -411,7 +413,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -420,10 +422,8 @@ TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -459,7 +459,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
 // - Validates that manual revert properly handles multiple storage operations
 // - Confirms end-to-end storage revert functionality through WASM
 //
-TEST_F(ManualRevertWasmTest, StorageManualRevert)
+TEST_P(ManualRevertWasmTest, StorageManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -486,7 +486,7 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -495,10 +495,8 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -547,7 +545,7 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
                return {};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
@@ -556,10 +554,8 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -586,5 +582,10 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
         << "Storage no revert transaction should commit successfully";
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertWasmTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

@@ -6,10 +6,13 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -17,17 +20,19 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class FibonacciTest : public ::testing::Test,
+class FibonacciTest : public ::testing::TestWithParam<TestDB>,
                       public NativeContractTestFramework {
 public:
-  FibonacciTest() : NativeContractTestFramework(false) {}
+  FibonacciTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -37,6 +42,8 @@ protected:
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
+
   // An amount of gas that suffices for correct tests, but means that if there's
   // another calldata parsing error, we'll run out of gas and error out quickly
   // instead of trying to compute an absurdly high fibonacci.
@@ -44,15 +51,14 @@ protected:
 };
 
 // Simple test for sdk, to verify that calls actually happen.
-TEST_F(FibonacciTest, FibonacciCalls)
+TEST_P(FibonacciTest, FibonacciCalls)
 {
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -69,15 +75,14 @@ TEST_F(FibonacciTest, FibonacciCalls)
   }
 }
 
-TEST_F(FibonacciTest, FibonacciGasLimit)
+TEST_P(FibonacciTest, FibonacciGasLimit)
 {
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
   {
@@ -95,37 +100,36 @@ TEST_F(FibonacciTest, FibonacciGasLimit)
 }
 
 // Test whether the output of the fibonacci contract is correct.
-TEST_F(FibonacciTest, FibonacciCorrectness)
+TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto fib_contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(fib_contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
-
-  using fib_client_t = ContractTraitClient<Fibonacci>;
 
   NativeContractBuilder builder;
 
-  builder.add(0,
-              [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
-                                  uint32_t expect) -> InvokeStatus<void> {
-                fib_client_t client(fib_contract_addr);
-                auto [decoded, _gas] =
-                    client.template invoke<"fibonacci">(handler, input);
-                if (!decoded.has_value() || !decoded.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                if (decoded.value().value() != expect) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
+                          uint32_t expect) -> InvokeStatus<void> {
+        fib_client_t client(fib_contract_addr);
+        auto [decoded, _gas] =
+            client.template invoke<"fibonacci">(handler, input);
+        if (!decoded.has_value() || !decoded.value().has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (decoded.value().value() != expect) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =
@@ -134,10 +138,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   // deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -197,5 +199,10 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, FibonacciTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

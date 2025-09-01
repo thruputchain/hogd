@@ -30,21 +30,11 @@ RpcStreamImpl::fail()
     cb(Buf{});
 }
 
-Detached
-RpcStreamImpl::write_record(Buf b SLOC_ARG)
-{
-  if (ss_.stop_requested())
-    co_return;
-  auto _r = shared_from_this();
-  if (!ss_.stop_requested())
-    co_await cp_->bgwrite(fd_, b);
-}
-
 Async<std::expected<std::uint32_t, Errno>>
 RpcStreamImpl::read_uint(SLOC_ARG0)
 {
   Buf b;
-  if (co_await co_await cp_->read(fd_, &b, 4) != 4)
+  if (co_await co_await cp_->read(fd_, &b, 4, true, true) != 4)
     co_return Errno{ENOMSG};
   co_return getbe<std::uint32_t>(b.data());
 }
@@ -60,7 +50,7 @@ RpcStreamImpl::read_record(SLOC_ARG0)
     len &= 0x7fffffff;
     if (b.size() + len > max_record_size)
       co_return Errno{ENOMSG};
-    if (co_await co_await cp_->read(fd_, &b, len) != len)
+    if (co_await co_await cp_->read(fd_, &b, len, true, true) != len)
       co_return Errno{ENOMSG};
   }
   co_return b;
@@ -83,7 +73,7 @@ Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
-  auto _r = shared_from_this();
+  RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
   while (!ss_.stop_requested()) {
     if (auto r = co_await read_record(); !r) {
@@ -110,23 +100,23 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs.reset();
       cb(std::move(b));
     }
-    else if (msg.body.mtype() == CALL)
-      serve_call(msg, b.subspan(hdrbytes));
+    else if (msg.body.mtype() == CALL) {
+      rpc_msg res;
+      if (RpcService *s = srvmap_.lookup(msg, &res)) {
+        auto awaitable = s->serve(msg, b.subspan(hdrbytes));
+        // Only spawn another coroutine if result not already available
+        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        if (awaiter.await_ready())
+          cp_->dwrite(fd_, awaiter.await_resume());
+        else
+          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+            self->cp_->dwrite(self->fd_, co_await awaitable);
+          }(*this, std::move(awaitable));
+      }
+      else
+        send_msg(res);
+    }
   }
-}
-
-Detached
-RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
-{
-  auto _r = shared_from_this();
-  rpc_msg res;
-  if (RpcService *s = srvmap_.lookup(call, &res)) {
-    Buf resp = co_await s->serve(call, args);
-    write_record(resp);
-  }
-  else
-    send_msg(res);
-  co_return;
 }
 
 } // namespace x23::detail

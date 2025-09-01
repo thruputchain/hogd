@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
@@ -201,7 +203,7 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 }
 
 HogDBStatus<void>
-BlockTX::commit()
+BlockTX::commit(WorkerPool &pool)
 {
   std::mutex lock;
   HogDBStatus<void> ret;
@@ -209,12 +211,13 @@ BlockTX::commit()
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLock &> v) {
-        HogDBStatus<void> tmp = v.second.change.commit(db_, v.first);
+        HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
         }
-      });
+      },
+      kDefaultParallelRangeWidth, pool);
 
   // write address balances.
   addr_balance_locks_.for_each_parallel(
@@ -226,6 +229,8 @@ BlockTX::commit()
           ret = tmp;
         }
       });
+
+  trie_.generate_top_level_hashes();
 
   return ret;
 }

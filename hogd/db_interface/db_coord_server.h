@@ -1,12 +1,16 @@
 #pragma once
 
 #include <cassert>
+#include <optional>
 
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
+#include "hogd/genesis/genesis_block.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
@@ -25,6 +29,7 @@ public:
   }
 
   // Start the server on the specified port
+  // Returns the port number that the server is listening on
   uint16_t start_server(uint16_t port_number);
 
   static x23::Async<void> dbcoord_null() { co_return; }
@@ -52,6 +57,20 @@ public:
     co_return DbTipResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
+
+  static x23::Async<HogAgeResult>
+  dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
+  {
+    co_return HogAgeResult(DbResult::DbResultError);
+  }
+
+  static x23::Async<DbResult> dbcoord_write_hog_ages(const HogAgeBatch &ages)
+  {
+    co_return DbResult::DbResultError;
+  }
+
+  x23::Async<DbResult>
+  dbcoord_load_genesis_block(GenesisBlock const &genesis_block);
 
 private:
   BlockManager *block_manager_;

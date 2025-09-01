@@ -11,7 +11,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -19,8 +18,8 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/mockdb/in_memory_database.h"
-#include "syscall.hh"
+#include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -38,10 +37,13 @@
 
 namespace hogd {
 
-class CrossContractRevertTest : public ::testing::Test,
+class CrossContractRevertTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
 public:
-  CrossContractRevertTest() : NativeContractTestFramework(false) {}
+  CrossContractRevertTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -56,7 +58,7 @@ public:
 // - Contract A's state changes persist
 // - Transaction succeeds despite B's revert
 //
-TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
+TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -92,7 +94,7 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -142,7 +144,7 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =
@@ -151,10 +153,11 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
+
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 
@@ -201,7 +204,7 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
 // - Contract A receives B's return data
 // - Only Contract A's state persists
 //
-TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
+TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -242,7 +245,7 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -291,7 +294,7 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -347,7 +350,7 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   contract_map.emplace(2, std::move(contract_c));
@@ -358,12 +361,12 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
   auto contract_c_obj = make_native_contract(2);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_contract(sha256(*contract_c_obj), contract_c_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
-  in_memory_db_.write_deployment(contract_c_addr, sha256(*contract_c_obj));
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_contract(contract_c_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_deployment(contract_c_addr, sha256(*contract_c_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
   setup_grant_storage_token(contract_c_addr, 1'000'000'000);
@@ -413,7 +416,7 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
 // Scenario: Contract A calls Contract B, Contract B reverts with return data.
 // This is a simpler version of the basic test to ensure the pattern works.
 //
-TEST_F(CrossContractRevertTest, RevertWithReturnData)
+TEST_P(CrossContractRevertTest, RevertWithReturnData)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -448,7 +451,7 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -486,7 +489,7 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =
@@ -495,10 +498,10 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 
@@ -531,5 +534,10 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, CrossContractRevertTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

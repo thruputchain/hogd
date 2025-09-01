@@ -48,9 +48,11 @@
 #include <thread>
 
 #include <x23/cleanup.h>
+#include <x23/cpumap.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
+#include <x23/sockio.h>
 #include <x23/uiobuf.h>
 #include <x23/vec.h>
 
@@ -95,7 +97,7 @@ public:
     stop();
   }
 
-  void go();
+  void go(const CpuSet *cpus = nullptr);
   void stop() noexcept;
 
 protected:
@@ -136,9 +138,9 @@ private:
   std::thread read_thread_;
   std::thread write_thread_;
 
-  void read_worker() noexcept;
+  void read_worker(const CpuSet *) noexcept;
   void input(BufView) noexcept;
-  void write_worker(RefPtr<SRpcFd>) noexcept;
+  void write_worker(const CpuSet *, RefPtr<SRpcFd>) noexcept;
   void write_ready() noexcept
   {
     if (!write_ready_.exchange(true))
@@ -222,7 +224,7 @@ private:
         auto res = detail::void_to_0tuple([&] {
           return std::apply(
               [&](auto &...ea) {
-                return ProcMeta::dispatch(*d_.impl_, args, ea...);
+                return ProcMeta::dispatch(*d_.impl_, std::move(args), ea...);
               },
               d_.ea_);
         });
@@ -248,6 +250,7 @@ concept implements_srpc =
 
 template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   using super = SRpcFd;
+  static constexpr bool kAllowRefPtrConversion = true;
 
   Logger logger_;
 
@@ -257,7 +260,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
   template<typename Server,
            typename VersMeta = typename std::remove_cvref_t<
-               decltype(*std::declval<Server>())>::rpc_service,
+               decltype(*declval<Server>())>::rpc_service,
            typename... ExtraArgs>
   requires implements_srpc<Server, VersMeta, ExtraArgs...>
   SRpcStream &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
@@ -277,8 +280,6 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
   using ClientRef = RefPtr<SRpcStream>;
 
-  ClientRef get_ref() { return *this; }
-
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta = {})
@@ -288,9 +289,11 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
   struct Configurator {
     SRpcStream *s_;
+    const CpuSet *cpus_{};
     Configurator(SRpcStream *s) : s_(s) {}
+    void set_affinity(const CpuSet *cpus) { cpus_ = cpus; }
     SRpcStream *operator->() const { return s_; }
-    ~Configurator() { s_->go(); }
+    ~Configurator() { s_->go(cpus_); }
   };
 
   template<typename ProcMeta>
@@ -321,8 +324,10 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
             if (!res.empty())
               throw XdrBadInput("Received bytes for void result");
           }
-          else
+          else {
             deserialize(&ret.value(), res);
+            logger_.template log_client<ProcMeta>(*msg, ret.value());
+          }
         } catch (XdrBadInput &e) {
           if (logging)
             logger_.template log_client<ProcMeta>(
@@ -353,5 +358,48 @@ srpc_stream_logged(int fd, int logfd = RpcLogger::default_logfd)
 {
   return new SRpcStream<RpcLogger>(UniqueFd{fd}, RpcLogger(fd, logfd));
 }
+
+template<typename Logger>
+struct SRpcMulticlient : RefCount, PerCpuSet<RefPtr<SRpcStream<Logger>>> {
+  using super1 = RefCount;
+  using super2 = PerCpuSet<RefPtr<SRpcStream<Logger>>>;
+  using ClientRef = RefPtr<SRpcMulticlient>;
+
+  template<typename VersMeta>
+  requires requires { typename VersMeta::template client<ClientRef>; }
+  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  {
+    return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
+  }
+
+  template<typename ProcMeta>
+  ProcMeta::return_type send_call(const is_xdr_type auto &...args)
+  {
+    return this->lookup()->template send_call<ProcMeta>(args...);
+  }
+
+  static ClientRef make(const struct sockaddr_storage &ss,
+                        const CpuMap &map = *llc_map,
+                        int logfd = RpcLogger::default_logfd)
+  {
+    return *new SRpcMulticlient(ss, map, logfd);
+  }
+
+protected:
+  SRpcMulticlient(const struct sockaddr_storage &ss, const CpuMap &map,
+                  int logfd)
+    : super2(map)
+  {
+    super2::populate(
+        [&ss, logfd](const CpuSet &set) -> SRpcStream<Logger>::ClientRef {
+          int fd = tcpconnect(ss).release();
+          set_nodelay(fd);
+          typename super2::value_type ret =
+              *new SRpcStream<Logger>(UniqueFd{fd}, Logger{fd, logfd});
+          ret->go(&set);
+          return ret;
+        });
+  }
+};
 
 } // namespace x23

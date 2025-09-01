@@ -5,12 +5,13 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <functional>
-
 #include <format>
+#include <functional>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <sstream>
+#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
@@ -185,6 +186,20 @@ public:
   void generate_top_level_hashes();
 
 private:
+  // Any nodes at a depth less than or equal to [kNoHashDepth] are *not* hashed
+  // on any insert/update/remove operation on the trie. They are only hashed
+  // when [generate_top_level_hashes()] or [generate_all_hashes()] are called.
+  //
+  // The nodes in the topmost layers of the trie (i.e., the layers with the
+  // lowest depths relative to the root node, which has a depth of 0) are
+  // typically under heavy contention. By not hashing these nodes on every
+  // insert/update/remove operation, we significantly reduce contention and thus
+  // improve end-to-end performance. We do need to call
+  // [generate_top_level_hashes()] when we are done with all operations, but the
+  // overhead of this is much smaller than hashing these nodes on all
+  // operations.
+  static constexpr size_t kNoHashDepth = 3;
+
   // Returns a string representation of [node] and all nodes under it in the
   // trie.
   static std::string string_from_node(const Node &node);
@@ -224,6 +239,8 @@ private:
   // topmost node we acquired a lock for. [num_children] is the number of
   // children nodes of [branch]. [remaining_child_hex] is the hex digit of child
   // that will remain (if any) after the remove operation.
+  // [locked_through_depth] is the depth of the topmost node that is locked
+  // (i.e., the node with the lowest depth that is locked).
   // We do not need to pass [num_children] and [remaining_child_hex] back to the
   // calling function per se because the parent function can compute these
   // itself. However, [remove_grab_locks] needs to compute them in order to
@@ -234,7 +251,8 @@ private:
   // false. Otherwise it returns true.
   bool remove_grab_locks(Node *branch, Node *existing_key,
                          Node *&locked_through, size_t &num_children,
-                         std::byte &remaining_child_hex);
+                         std::byte &remaining_child_hex,
+                         size_t &locked_through_depth);
 
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
@@ -243,7 +261,9 @@ private:
                              std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
-  // [prefix], calling [f] on each node.
+  // [prefix], calling [f] on each node. Does not traverse nodes with a depth
+  // larger than [max_depth]. If [max_depth] is [std::nullopt], then this method
+  // traverses the entire trie.
   //
   // A post-order traversal visits all of the children of a node before visiting
   // the node itself. This is useful when regenerating all of the node hashes in
@@ -253,10 +273,143 @@ private:
   template<typename NodeType>
   static void
   walk(NodeType *root, const HexArray &prefix,
-       const std::function<void(const HexArray &, NodeType &, NodeType *)> &f);
+       const std::function<void(const HexArray &, NodeType &, NodeType *)> &f,
+       std::optional<size_t> max_depth = std::nullopt)
+  {
+    static_assert(std::is_same_v<NodeType, Node> ||
+                      std::is_same_v<NodeType, const Node>,
+                  "[NodeType] must be [Node] or [const Node].");
+
+    // We perform a post-order traversal iteratively. We use iteration rather
+    // than recursion to avoid exceeding the stack size when traversing deep
+    // tries.
+
+    // We use this type along with the data structures below to track where we
+    // are in the trie.
+    struct CheckInfo {
+      // The node we are currently looking at.
+      NodeType *node;
+      // The parent of this node.
+      NodeType *parent;
+      // The path that maps to this node.
+      HexArray path;
+      // This is only relevant for branch and extension nodes. When we first
+      // encounter these nodes in an iterative loop, we cannot *immediately*
+      // "visit" them (i.e., execute [f] on them)--we need to visit all of their
+      // children first.
+      //
+      // A branch or extension node will be left in the stack until all of its
+      // children have been visited. When this node pushes one of its children
+      // onto the stack, the node waits until the child is popped off the stack
+      // before pushing the next child. Thus, the node will not enqueue the next
+      // child until a subsequent iteration, and thus we need to track this
+      // child so that the node knows which child to push at that point.
+      //
+      // We use [next_child_to_visit] to track which child should be pushed next
+      // for [node].
+      size_t next_child_to_visit;
+      size_t depth;
+    };
+
+    std::stack<CheckInfo> path;
+    // Push the root node onto the stack.
+    path.push(CheckInfo{.node = root,
+                        .parent = nullptr,
+                        .path = prefix,
+                        .next_child_to_visit = 0});
+
+    while (!path.empty()) {
+      CheckInfo &info = path.top();
+
+      if (!info.node) {
+        path.pop();
+        continue;
+      }
+
+      switch (info.node->type) {
+      case Node::Type::kBranch:
+        CHECK_LE(info.next_child_to_visit, info.node->child.size());
+        if (info.next_child_to_visit == info.node->child.size() ||
+            (max_depth && info.depth == max_depth.value())) {
+          // We have visited all of the branch's children, so now we can "visit"
+          // (i.e., call [f] on) the branch. Or, we have reached the maximum
+          // depth we want to visit of the trie, so we now visit the extension
+          // node because we do not want to visit its children.
+          f(info.path, *info.node, info.parent);
+        }
+        else {
+          // Visit the next child.
+
+          // Append the branch path we are taking to [info.path] so that it
+          // holds the path to the child. For example, if
+          // [info.next_child_to_visit] is 0x3, then we know we will next visit
+          // the child at index 0x3, so we append 0x3 to [info.path].
+          info.path.append(std::byte(info.next_child_to_visit));
+          path.push({.node = info.node->child[info.next_child_to_visit],
+                     .parent = info.node,
+                     .path = info.path,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          // Now change [info.path] back to holding the path to the branch node.
+          info.path.remove_from_back(1);
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kExtension:
+        // An extension node always has exactly one child. It is not possible
+        // for an extension node to have no children.
+        CHECK_LE(info.next_child_to_visit, 1UL);
+        if (info.next_child_to_visit == 1 ||
+            (max_depth && info.depth == max_depth.value())) {
+          // We have visited the extension node's one child, so now we can visit
+          // the extension node. Or, we have reached the maximum depth we want
+          // to visit of the trie, so we now visit the extension node because we
+          // do not want to visit its children.
+          f(info.path, *info.node, info.parent);
+        }
+        else {
+          // Append the extension node's path to [info.path] so that [info.path]
+          // holds the path to the child when we push the child.
+          info.path.append(info.node->path);
+          path.push({.node = info.node->child[0],
+                     .parent = info.node,
+                     .path = info.path,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          // Now change [info.path] back to holding the path to the extension
+          // node.
+          info.path.remove_from_back(info.node->path.size());
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kLeaf:
+        // A leaf node has no children, so we can visit a leaf immediately upon
+        // encountering it.
+        CHECK_EQ(info.next_child_to_visit, 0UL);
+        if (max_depth) {
+          CHECK_LE(info.depth, max_depth.value());
+        }
+
+        // Append the leaf's path to [info.path] so that the full path is passed
+        // to [f].
+        info.path.append(info.node->path);
+        NodeType &n = *info.node;
+        f(info.path, n, info.parent);
+        // No need to remove the portion of the path we just appended above
+        // because we pop the leaf anyway below, so we do not access the leaf
+        // after this point.
+        break;
+      }
+
+      path.pop();
+    }
+  }
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
+  // [branch_depth] is the depth of the returned branch.
   //
   // If a node for [path] already exists in the trie, [existing_key] is set to
   // the node. Thus, since a KV pair can only be placed in a branch or a leaf,
@@ -266,7 +419,8 @@ private:
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                         size_t &idx, Node *&existing_key);
+                                         size_t &idx, Node *&existing_key,
+                                         size_t &branch_depth);
 
   // Computes and writes the hash for [node] only if
   // [should_hash_nodes_on_each_op_] is true.
@@ -274,7 +428,8 @@ private:
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  void generate_hashes_from(Node *n, Node *locked_through) const;
+  void generate_hashes_from(Node *n, Node *locked_through,
+                            size_t locked_through_depth) const;
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root);
@@ -308,7 +463,7 @@ private:
 // can look at any other nodes. This leads to performance degradation.
 //
 // [MerkleTriePrefix] removes this contention. It creates a root "node", where
-// each of the child point to a different [MerkleTrie]. This root "node" is
+// each of the children point to a different [MerkleTrie]. This root "node" is
 // never modified, so there is no need to acquire a reader lock to access it.
 // Each [MerkleTrie] represents a prefix of one hex digit. For example, the
 // [MerkleTrie] that is child [0xa] holds all keys that start with [0xa].

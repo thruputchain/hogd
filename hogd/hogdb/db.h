@@ -4,18 +4,25 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <span>
 #include <utility>
 
+#include "db_coord.hh"
 #include "hogd/base/bits.h"
+#include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
+#include "nomination.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -89,13 +96,45 @@ enum {
 
 namespace detail {
 
+constexpr char kAddressKeyPrefix = 'A';
+// Address suffixes.
+constexpr char kAddressBalanceSuffix = 'A';
+constexpr char kAddressHogAgeSuffix = 'B';
+constexpr char kAddressWasmHashSuffix = 'C';
+
+inline HogAge
+hog_age_cpu_to_le(HogAge average)
+{
+  for (hogd::uint128_xdr &n : average.num_hogs) {
+    n = hogd::xdr_cpu_to_le(n);
+  }
+  for (BlockHeight &a : average.average_ages) {
+    a = hogd::cpu_to_le(a);
+  }
+  return average;
+}
+
+inline HogAge
+hog_age_le_to_cpu(HogAge average)
+{
+  for (hogd::uint128_xdr &n : average.num_hogs) {
+    n = hogd::xdr_le_to_cpu(n);
+  }
+  for (BlockHeight &a : average.average_ages) {
+    a = hogd::le_to_cpu(a);
+  }
+  return average;
+}
+
+constexpr char kCodeKeyPrefix = 'C';
+
 constexpr auto
 make_address_key(const Address &addr, char c)
 {
   std::array<uint8_t, kAddressSize + 2> ret;
   std::ranges::copy(addr.as_bytes(),
                     std::begin(std::as_writable_bytes(std::span(ret))) + 2);
-  ret[0] = 'A';
+  ret[0] = kAddressKeyPrefix;
   ret[1] = c;
   return ret;
 }
@@ -105,7 +144,7 @@ make_code_key(const SHA256Hash &hash)
 {
   std::array<uint8_t, hash.size() + 1> ret;
   std::ranges::copy(hash, std::begin(std::span(ret)) + 1);
-  ret[0] = 'C';
+  ret[0] = kCodeKeyPrefix;
   return ret;
 }
 
@@ -119,7 +158,7 @@ inline HogDBStatus<int128_t>
 read_address_balance(HogDatabase &db, const Address &addr)
 {
   int128_t val;
-  auto key = detail::make_address_key(addr, 'B');
+  auto key = detail::make_address_key(addr, detail::kAddressBalanceSuffix);
   HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
                                          kNNInt128, writable_byte_view(val));
   if (!ret)
@@ -130,16 +169,37 @@ read_address_balance(HogDatabase &db, const Address &addr)
 inline HogDBStatus<void>
 write_address_balance(HogDatabase &db, const Address &addr, int128_t val)
 {
-  auto key = detail::make_address_key(addr, 'B');
+  auto key = detail::make_address_key(addr, detail::kAddressBalanceSuffix);
   return db.put(std::as_bytes(std::span(key)), kNNInt128,
                 byte_view(cpu_to_le(val)));
+}
+
+inline HogDBStatus<HogAge>
+read_address_average_hog_age(HogDatabase &db, const Address &addr)
+{
+  HogAge val;
+  auto key = detail::make_address_key(addr, detail::kAddressHogAgeSuffix);
+  HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)), kBytes,
+                                         writable_byte_view(val));
+  if (!ret)
+    return ret.error();
+  return detail::hog_age_le_to_cpu(val);
+}
+
+inline HogDBStatus<void>
+write_address_average_hog_age(HogDatabase &db, const HogAge &val)
+{
+  auto key =
+      detail::make_address_key(val.address, detail::kAddressHogAgeSuffix);
+  return db.put(std::as_bytes(std::span(key)), kBytes,
+                byte_view(detail::hog_age_cpu_to_le(val)));
 }
 
 inline HogDBStatus<SHA256Hash>
 read_address_wasm_hash(HogDatabase &db, const Address &addr)
 {
   SHA256Hash val;
-  auto key = detail::make_address_key(addr, 'C');
+  auto key = detail::make_address_key(addr, detail::kAddressWasmHashSuffix);
   HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
                                          kSHA256Hash, writable_byte_view(val));
   if (!ret)
@@ -151,7 +211,7 @@ inline HogDBStatus<void>
 write_address_wasm_hash(HogDatabase &db, const Address &addr,
                         const SHA256Hash &hash)
 {
-  auto key = detail::make_address_key(addr, 'C');
+  auto key = detail::make_address_key(addr, detail::kAddressWasmHashSuffix);
   return db.put(std::as_bytes(std::span(key)), kSHA256Hash, byte_view(hash));
 }
 
@@ -182,6 +242,12 @@ inline HogDBStatus<size_t>
 get_item_size(HogDatabase &db, const ItemKey &key)
 {
   return db.get_size(key.as_bytes());
+}
+
+inline HogDBStatus<int8_t>
+get_item_type(HogDatabase &db, const ItemKey &key)
+{
+  return db.get_type(key.as_bytes());
 }
 
 inline HogDBStatus<void>

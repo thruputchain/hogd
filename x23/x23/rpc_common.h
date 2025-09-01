@@ -81,8 +81,9 @@ msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
 
 std::string msg_show_stat(const rpc_msg &msg);
 
+template<is_xdr_type... X>
 Buf
-make_record(const rpc_msg &msg, const is_xdr_type auto &...x)
+make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
   assert(ret.size() <= 0x80000003UZ);

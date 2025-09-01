@@ -10,7 +10,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -18,22 +17,26 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/mockdb/in_memory_database.h"
-#include "syscall.hh"
+#include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
-class RevertTest : public ::testing::Test, public NativeContractTestFramework {
+class RevertTest : public ::testing::TestWithParam<TestDB>,
+                   public NativeContractTestFramework {
 public:
-  RevertTest() : NativeContractTestFramework(false) {}
+  RevertTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Check on how a root frame reverts,
 // when the reverting frame is the root frame.
-TEST_F(RevertTest, RootFrameReverts)
+TEST_P(RevertTest, RootFrameReverts)
 {
   // Native contract with one method.  The method performs a bytestring write,
   // and then the contract reverts.
@@ -69,15 +72,15 @@ TEST_F(RevertTest, RootFrameReverts)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke the contract method
@@ -110,14 +113,15 @@ TEST_F(RevertTest, RootFrameReverts)
 
 // Check on how nested frames revert,
 // when the reverting frame is not the root frame.
-TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
+TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 {
-  // Native contract with two methods.  The first method performs a try_invoke
+  // Native contract with four methods.  The first method performs a try_invoke
   // on the second method.  The second method performs a try_invoke on the
   // third, and then reverts.  The third method performs a bytestring write,
   // then performs a try_invoke on the fourth method, and then returns success.
   // The fourth method performs a bytestring write, and then returns success.
   // returns success.
+  //
   // Test should check that the contract executes successfully, and the
   // transaction commits successfully, but neither of the bytestrings are
   // written.
@@ -150,7 +154,7 @@ TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -240,15 +244,15 @@ TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke method 0
@@ -283,5 +287,10 @@ TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
   ASSERT_FALSE(data_item2_opt.has_value());
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, RevertTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

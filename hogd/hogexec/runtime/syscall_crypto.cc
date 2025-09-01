@@ -1,3 +1,4 @@
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <concepts>
@@ -11,7 +12,7 @@
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -52,6 +53,7 @@ syscall_VerifySignature_inner(int32_t scheme,
     if (!ed25519_verify(public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         signature.subspan<0, sizeof(Ed25519Signature)>(),
                         message)) {
+      trace("Signature verification failed");
       return {SyscallErrorCode::kInvalidSyscallInput, 0};
     }
     return {SyscallErrorCode::kNone, 0};

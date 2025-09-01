@@ -3,6 +3,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -11,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
@@ -120,26 +123,6 @@ InvokeTX::read_change(const ItemKey &key) const
 
   const std::vector<ItemVersion> &v = it->second;
   return &v.back().change;
-}
-
-inline HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
-{
-  return request_change(key, NNInt128{base, delta});
-}
-
-inline HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
-{
-  return hogd::read_nnint128(block_.get_db(), key)
-      .and_then([this, key, delta](int128_t base) {
-        return request_change(key, NNInt128{base, delta});
-      })
-      .or_else([this, key, delta](HogDBError err) -> HogDBStatus<void> {
-        if (err == HogDBCode::kNotFound)
-          return request_change(key, NNInt128{0, delta});
-        return err;
-      });
 }
 
 inline HogDBStatus<void>

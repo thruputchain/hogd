@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 
 namespace hogd {

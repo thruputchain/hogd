@@ -1,21 +1,23 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
-#include <memory>
+#include <cstdio>
+#include <cstdlib>
 #include <span>
-#include <string_view>
+#include <stop_token>
+#include <sys/socket.h>
 #include <thread>
-#include <utility>
 
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -27,7 +29,10 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/rpc/rpc.h"
+#include "x23/cleanup.h"
+#include "x23/serialize.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -46,16 +51,17 @@ to_rpc_error(HogDBStatus<void> ret)
     return RPCError::kRPCNotFound;
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
-    return RPCError::kRPCTransactionFailed;
-  default:
     return RPCError::kRPCStorageWriteFailed;
+  default:
+    return RPCError::kRPCTransactionFailed;
   }
 }
 
 ItemKey
 make_item_key(const AddressAndKey &addr)
 {
-  if (addr.key.key_type() == StorageKeyType::kStorageKeyTypeContractData)
+  if (addr.key.key_type() ==
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
     return ItemKey(addr.address, {}, true);
   return ItemKey(addr.address, addr.key.contract_data_key());
 }
@@ -71,21 +77,29 @@ to_span(const Bytestring &bs)
 ErrnoStatus<void>
 HogDBExecutorServer::start_server(uint16_t port)
 {
-  ErrnoStatus<std::shared_ptr<RPCServer>> server = RPCServer::create(
-      port,
-      [this](std::span<const std::byte> args,
-             std::string_view peer) -> OwningSpan<const std::byte> {
-        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this,
-                                                                        args,
-                                                                        peer);
-      });
-  if (!server)
-    return server.error();
-  rpc_server_ = std::move(*server);
-  rpc_listener_th_ = std::jthread([this] {
-    if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret)
-      error("Database to executor server listen failed: {}", ret.error());
+  lfd_ = x23::stcplisten(port);
+  if (!lfd_) {
+    perror("listen");
+    exit(EXIT_FAILURE);
+  }
+  port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+  listen_thread_ = std::jthread([this](std::stop_token &&stop) {
+    while (!stop.stop_requested()) {
+
+      sockaddr_storage ss;
+      socklen_t sslen = sizeof(ss);
+      x23::UniqueFd fd{
+          accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+      if (!fd) {
+        info("accept error: {}", Errno{});
+      }
+      else {
+        x23::srpc_stream_logged(fd.release())->server(this);
+      }
+    }
   });
+
   return {};
 }
 
@@ -103,7 +117,7 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_bytes(make_item_key(addrkey), to_span(delta.bytestring())));
   case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint().add_value)));
+                                            from_xdr(delta.nnint_add())));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
                                             from_xdr(delta.nnint().set_value),
@@ -146,7 +160,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
   if (!itx)
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
-
   for (auto const &delta : batch) {
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
@@ -155,7 +168,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
       return err;
     }
   }
-
   return RPCError::kRPCNone;
 }
 
@@ -167,7 +179,8 @@ HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
   if (!itx)
     return RPCError::kRPCBadBlockID;
 
-  itx->release_savepoint(itx->get_savepoint_head() - popcount - 1);
+  itx->rollback_to_savepoint(itx->get_savepoint_head() - popcount);
+
   return RPCError::kRPCNone;
 }
 
@@ -231,10 +244,12 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
                                             Contract const &contract)
 {
   // TODO(abelay): this must be included as part of BlockTX, not just written.
-
-  const auto &wasm = contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const std::byte *>(wasm.data());
-  auto buf = std::span<const std::byte>(cptr, wasm.size());
+  // Currently the only contract types that go through this contract create
+  // workflow are wasmi contracts.
+  assert(contract.contract_type() == ContractType::kWasmi);
+  auto data = x23::serialize(contract);
+  const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+  auto buf = std::span<const std::byte>(cptr, data.size());
   SHA256Hash hash = sha256(buf);
   return to_rpc_error(write_wasm_code(ctx_.get_db(), hash, buf));
 }
@@ -259,15 +274,10 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
 
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const char *>(wasm->data());
-  contract.wasmi_contract().append_range(
-      std::span<const char>(cptr, wasm->size()));
-
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
-  out.contract() = contract;
+
+  x23::deserialize(&out.contract(), *wasm);
   return out;
 }
 

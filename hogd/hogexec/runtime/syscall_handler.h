@@ -19,7 +19,7 @@
 #include "hogd/hogexec/runtime/transaction_stats.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "retrocausal_queue.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -52,7 +52,7 @@ public:
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     ExecutionModeData execution_mode_data,
-                    std::shared_ptr<RuntimeContext> runtime_context = nullptr);
+                    std::shared_ptr<RuntimeContext> runtime_context);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -145,7 +145,8 @@ public:
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
-  delete_object(StorageKeyContractData const &storage_key);
+  delete_object(StorageKeyContractData const &storage_key,
+                StorageItemRPCFlagSet flags);
 
   // === Retrocausal Queue syscalls ===
   SystemStatus<SyscallStatus<void>>

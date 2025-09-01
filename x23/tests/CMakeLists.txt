@@ -27,7 +27,7 @@ add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
 add_x23_test(rpcthroughput)
-add_x23_test(srpcthroughput)
+add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
 
 # flaky tests: prefer timeout failure over stuck CI
@@ -55,7 +55,9 @@ add_x23_gtest(sync)
 add_x23_gtest(uiobuf)
 add_x23_gtest(cxs_serialize_test)
 
+if(GOOGLETEST_PATH)
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+endif()
 
 if(BENCHMARK_PATH)
 add_executable(bench bench.cc)

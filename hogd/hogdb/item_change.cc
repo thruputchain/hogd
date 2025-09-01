@@ -3,22 +3,39 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <span>
 #include <type_traits>
 #include <variant>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
 
 inline HogDBStatus<void>
-NNInt128::commit(HogDatabase &db, const ItemKey &key) const
+NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
+                 const ItemKey &key) const
 {
-  return write_nnint128(db, key, value());
+  int128_t v = value();
+  HogDBStatus<void> ret = write_nnint128(db, key, v);
+  if (ret) {
+    std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
+                                    sizeof(v));
+    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
+    // [trie.insert_or_update()] only fails if we attempt to insert an empty
+    // key.
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kNNInt128,
+                                                    value_span)
+              .has_value());
+  }
+  return ret;
 }
 
 inline bool
@@ -100,15 +117,38 @@ NNInt128::undo_merge(const NNInt128 &nnint)
 }
 
 inline HogDBStatus<void>
-Bytes::commit(HogDatabase &db, const ItemKey &key) const
+Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
-  return write_bytes(db, key, std::as_bytes(std::span(buf_)));
+  std::span<const std::byte> v = std::as_bytes(std::span(buf_));
+  HogDBStatus<void> ret = write_bytes(db, key, v);
+  if (ret) {
+    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
+    // [trie.insert_or_update()] only fails if we attempt to insert an empty
+    // key.
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kBytes, v)
+              .has_value());
+  }
+  return ret;
 }
 
 inline HogDBStatus<void>
-Deletion::commit(HogDatabase &db, const ItemKey &key)
+Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
-  return remove_item(db, key);
+  HogDBStatus<int8_t> type_ret = get_item_type(db, key);
+  if (!type_ret) {
+    return type_ret.error();
+  }
+
+  HogDBStatus<void> remove_ret = remove_item(db, key);
+  if (!remove_ret) {
+    return remove_ret;
+  }
+  // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
+  // will never attempt to remove a key that does not exist. We already checked
+  // above that the key exists when we removed it from the database.
+  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, key, type_ret.value())
+            .has_value());
+  return {};
 }
 
 namespace {
@@ -119,12 +159,12 @@ concept is_monostate = std::same_as<std::decay_t<T>, std::monostate>;
 } // namespace
 
 HogDBStatus<void>
-ItemChange::commit(HogDatabase &db, ItemKey key) const
+ItemChange::commit(HogDatabase &db, MerkleTriePrefix &trie, ItemKey key) const
 {
   return std::visit(
-      [&db, &key](auto &arg) -> HogDBStatus<void> {
+      [&db, &trie, &key](auto &arg) -> HogDBStatus<void> {
         if constexpr (!is_monostate<decltype(arg)>)
-          return arg.commit(db, key);
+          return arg.commit(db, trie, key);
         return {};
       },
       type_);

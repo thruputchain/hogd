@@ -5,11 +5,11 @@
 #include <x23/config.h>
 
 #ifndef X23_CORO_TRACE
-#ifdef NDEBUG
+#if defined(NDEBUG) || !X23_CORO_SLOCK_OK
 #define X23_CORO_TRACE 0
-#else // !NDEBUG
+#else // !NDEBUG && X23_CORO_TRACE
 #define X23_CORO_TRACE 1
-#endif // !NDEBUG
+#endif // !NDEBUG && X23_CORO_TRACE
 #endif // !defined(X23_CORO_TRACE)
 
 #if X23_CORO_TRACE
@@ -31,6 +31,7 @@
 #define SLOC_PARM0 std::source_location sloc = std::source_location::current()
 #define SLOC_PARM , SLOC_PARM0
 #define SLOC_VAR sloc
+#define SLOC_COMMA_VAR , SLOC_VAR
 
 namespace x23 {
 
@@ -156,5 +157,6 @@ inline CoroTrace corotrace;
 #define SLOC_ARG0
 #define SLOC_ARG
 #define SLOC_VAR
+#define SLOC_COMMA_VAR
 
 #endif // !X23_CORO_TRACE

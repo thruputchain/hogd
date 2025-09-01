@@ -11,7 +11,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -19,16 +18,15 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class NNIntAddTest : public ::testing::Test,
+class NNIntAddTest : public ::testing::TestWithParam<TestDB>,
                      public NativeContractTestFramework {
 public:
   NNIntAddTest() : NativeContractTestFramework(false) {}
@@ -58,7 +56,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_F(NNIntAddTest, ReadWriteAddValue)
+TEST_P(NNIntAddTest, ReadWriteAddValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
@@ -94,17 +92,17 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -139,7 +137,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
 
 // Test to assert consistency of behavior with regard to the implementation of
 // add vs set_add.  Each one overwrites the other.
-TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
+TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
@@ -170,23 +168,23 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  in_memory_db_.write_item(
-      make_contract_data_addrkey(contract_addr, "test"),
-      std::make_shared<StorageItemWrapper>(50, get_default_cost_model()));
+  write_item(make_contract_data_addrkey(contract_addr, "test"),
+             std::make_shared<StorageItemWrapper>(50,
+                                                  get_default_cost_model()));
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -216,7 +214,7 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   ASSERT_EQ(from_xdr(nnint_item), 150);
 }
 
-TEST_F(NNIntAddTest, SetAddWithAdd)
+TEST_P(NNIntAddTest, SetAddWithAdd)
 {
   // Create a native contract with two methods.  The first method calls set_add
   // on (0, 200). The second method calls add on (-100). Both methods should
@@ -257,17 +255,17 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -370,5 +368,10 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
   ASSERT_EQ(from_xdr(nnint_item), 200);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(NNIntAddTest, NNIntAddTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

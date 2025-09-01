@@ -48,7 +48,7 @@ private:
   BlockID current_block_id_ = 0;
   InMemoryDatabase db_;
   BlockManager block_manager_;
-  RPCDbExecutorServer executor_server_;
+  SrpcDbExecutorServer executor_server_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;

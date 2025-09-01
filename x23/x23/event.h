@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <stop_token>
 
 #include <sys/socket.h>
@@ -74,7 +75,7 @@ private:
   atomic_shared_ptr<T> t_;
 };
 
-template<std::size_t StructSize = 4096>
+template<std::size_t StructSize>
 struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
   static constexpr size_t kStructSize = StructSize;
   using PosType = std::conditional_t<
@@ -94,13 +95,15 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
   GenReadBuffer() noexcept = default;
   GenReadBuffer(GenReadBuffer &&) noexcept = delete;
 
+  size_t nbuffered() const noexcept { return stop_ - start_; }
+
   ssize_t operator()(int fd, void *buf, size_t len)
   {
     if (len == 0)
       return 0;
     assert(len <= PTRDIFF_MAX);
 
-    if (size_t buflen = stop_ - start_) {
+    if (size_t buflen = nbuffered()) {
       size_t n = std::min(len, buflen);
       memcpy(buf, m_.data() + start_, n);
       start_ += n;
@@ -127,19 +130,69 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
     return x23::read(fd, buf, len, this);
   }
 };
-using ReadBuffer = GenReadBuffer<4096>;
+using ReadBuffer = GenReadBuffer<0x10000>;
 
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
-  CoroLock write_lock_;
-  BufVec writer_;
+  static constexpr size_t kFlushThreshold = ReadBuffer::kStructSize;
 
-  // Returns an error void on success or if the write action has been
-  // deferred.  May return an error if a write fails, but won't if the
-  // buffer is full and a write is already pending.
-  Async<std::expected<void, Errno>> write(CoroPoll &cp, BorrowedFd fd, Buf buf);
+  // This is true if we are waiting for a read, in which case don't
+  // buffer writes.
+  std::atomic_bool waiting_for_read_{false};
+
+  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  {
+    writer_->append(std::move(buf));
+    return flush(cp, fd);
+  }
+  Errno buffer(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  {
+    if (auto bufsz = buf.size(); bufsz < kFlushThreshold)
+      if (auto ptr = writer_.take(); ptr->nbytes() < kFlushThreshold - bufsz) {
+        ptr->append(std::move(buf));
+        return 0;
+      }
+    return write(cp, fd, std::move(buf));
+  }
+  Errno flush(CoroPoll &cp, BorrowedFd fd)
+  {
+    return Service{*this, cp, fd}.go();
+  }
 
 private:
-  Detached service(CoroPoll &cp, BorrowedFd fd);
+  std::atomic_bool want_write_{false};
+  std::mutex service_lock_;
+  MVar<BufVec> writer_;
+
+  class Service {
+  public:
+    [[nodiscard]] Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
+      : wb_(&wb), cp_(cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+    {}
+    Errno go();
+
+  private:
+    WriteBuffer *wb_;
+    CoroPoll &cp_;
+    BorrowedFd fd_;
+    std::unique_lock<std::mutex> lk_;
+    std::shared_ptr<WriteBuffer> wbref_;
+
+    Service(Service &&) noexcept = default;
+    bool work_needed()
+    {
+      if (wb_->want_write_)
+        return true;
+      lk_.unlock();
+      return wb_->want_write_ && lk_.try_lock();
+    }
+    BufVec get_work()
+    {
+      wb_->want_write_ = false;
+      return wb_->writer_.exchange({});
+    }
+    Errno write(BufVec &work);
+    static Detached worker(Service self, BufVec work);
+  };
 };
 
 struct BufHolder {
@@ -218,6 +271,8 @@ protected:
   void wake();
   std::shared_ptr<ReadBuffer> get_reader(BorrowedFd fd);
   std::shared_ptr<WriteBuffer> get_writer(BorrowedFd fd);
+  std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+  get_rw(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
@@ -271,7 +326,7 @@ private:
 
   UniqueFd epollfd_;
 
-  SharedLock resize_lock_{ThreadPool::core_map};
+  SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
@@ -337,9 +392,11 @@ public:
   // Read len bytes from fd and append them to *out.  If full is true,
   // will only read less than n bytes if there is an EOF.  Otherwise,
   // if full is false, it will return however many bytes it got from
-  // the first successful call to read.
+  // the first successful call to read.  If sync is true, then will
+  // flush any delayed writes when the read buffer is empty.
   Async<std::expected<size_t, Errno>> read(BorrowedFd fd, Buf *out, size_t len,
-                                           bool full = true SLOC_PARM);
+                                           bool full = true,
+                                           bool sync = false SLOC_PARM);
 
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
@@ -350,14 +407,19 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
 
-  // Write data to fd, but return immediately.  If there is an issue
-  // with the file descriptor, it might return an error or it might
-  // return void, depending on whether the buffer is clear and it can
-  // immediately attempt the write.  If there is no problem with the
-  // file descriptor, it will always return void.  Unlike write, it is
-  // safe to call this function concurrently; the writes will be
+  // Asynchronous write.  Writes data to fd, but returns immediately
+  // if some or all of the data will continue to be written in the
+  // background.  Returns EINVAL if the file descriptor is poisoned,
+  // but otherwise doesn't guarantee to return an error if the write
+  // fails, as the write could happen after it returns.  Unlike write,
+  // it is safe to call this function concurrently; the writes will be
   // sequenced one after the other.
-  Async<std::expected<void, Errno>> bgwrite(BorrowedFd fd, Buf data SLOC_PARM);
+  Errno awrite(BorrowedFd fd, Buf data);
+
+  // Delayed write will enqueue data but not flush it until the next
+  // write or unbuffered sread.  Like dwrite, multiple threads can
+  // call this function simultaneously.
+  Errno dwrite(BorrowedFd fd, Buf data);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.

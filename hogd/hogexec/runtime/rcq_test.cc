@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
+#include <span>
+#include <unordered_map>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -10,22 +14,26 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/mockdb/in_memory_database.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include <memory>
-#include <span>
-#include <unordered_map>
-#include <utility>
 
 namespace hogd {
 
-class RCQTest : public ::testing::Test, public NativeContractTestFramework {
+class RCQTest : public ::testing::TestWithParam<TestDB>,
+                public NativeContractTestFramework {
 protected:
-  RCQTest() : NativeContractTestFramework(false) {}
+  RCQTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
   void SetUp() override
   {
+    if (GetParam() == TestDB::kHogDB) {
+      GTEST_SKIP() << "Pending hogdb retrocausal queue";
+      return;
+    }
     // Setup native contract
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
@@ -66,14 +74,14 @@ protected:
                }
                return {};
              }}});
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
 
     // mark the contract as existing and deployed within the database
     auto contract_0 = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*contract_0), contract_0);
-    in_memory_db_.write_deployment(contract_address_, sha256(*contract_0));
+    write_contract(contract_0);
+    write_deployment(contract_address_, sha256(*contract_0));
   }
 
   ContractAddress contract_address_{
@@ -81,7 +89,7 @@ protected:
   std::shared_ptr<NativeContext> runtime_context_;
 };
 
-TEST_F(RCQTest, ConsumeFromPastBlock)
+TEST_P(RCQTest, ConsumeFromPastBlock)
 {
   // Creates a native contract with the following methods:
   // 0: Loads the calldata and interprets it as a sequence of uint8_t values.
@@ -190,5 +198,10 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
     ASSERT_TRUE(*r);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

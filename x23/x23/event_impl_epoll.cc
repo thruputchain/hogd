@@ -100,7 +100,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     if (old_mode == kActive) {
       [[maybe_unused]] int err =
           epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
-      assert(err != -1 || errno == EBADF);
+      assert(err != -1 || errno == EBADF || errno == ENOENT);
     }
     unlock.reset();
     docbs(fdp);
@@ -201,6 +201,15 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   return fdp->writer();
 }
 
+std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+CoroPollImpl::get_rw(BorrowedFd fd)
+{
+  auto fdp = getfd(fd);
+  if (fdp->mode() == FdState::kPoisoned)
+    return {nullptr, nullptr};
+  return {fdp->reader(), fdp->writer()};
+}
+
 void
 CoroPollImpl::check(int timeout)
 {
@@ -237,8 +246,6 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
-  // std::println("reset({})", fd.get());
-
   auto fdp = getfd(fd);
   fdp->buf_clear();
   setmode(fdp, FdState::Mode::kFree);

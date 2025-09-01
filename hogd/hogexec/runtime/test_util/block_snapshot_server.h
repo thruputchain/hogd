@@ -1,32 +1,26 @@
 #pragma once
 
+#include <cerrno>
 #include <cstddef>
-#include <memory>
 #include <set>
-#include <span>
-#include <stdexcept>
-#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/log.h"
-#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/db_interface/db_executor_server.h"
-#include "hogd/rpc/rpc.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/mvar.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -38,28 +32,46 @@ namespace hogd {
 // is implemented here.
 class BlockSnapshotServer {
 public:
-  BlockSnapshotServer(BlockID block_id, uint32_t port = 0) : block_id_(block_id)
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+
+  BlockSnapshotServer(BlockID block_id, uint16_t port = 0) : block_id_(block_id)
   {
-    auto res = RPCServer::create(
-        port,
-        [this](std::span<const std::byte> args,
-               std::string_view peer) -> OwningSpan<const std::byte> {
-          return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this,
-                                                                          args,
-                                                                          peer);
-        });
-    if (!res) {
-      throw std::runtime_error("Failed to create RPC server");
+    lfd_ = x23::stcplisten(port);
+    if (!lfd_) {
+      perror("listen");
+      exit(EXIT_FAILURE);
     }
-    rpc_server_ = std::move(*res);
-    server_listener_ = std::jthread([this] {
-      if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret) {
-        error("Database to executor server listen failed: {}", ret.error());
+    port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+    listen_thread_ = std::jthread([this](std::stop_token &&stop) {
+      while (!stop.stop_requested()) {
+
+        sockaddr_storage ss;
+        socklen_t sslen = sizeof(ss);
+        x23::UniqueFd fd{
+            accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+        if (!fd) {
+          if (errno == EINTR)
+            continue;
+          // If the listening socket was closed, accept will fail with
+          // EBADF/EINVAL Break the loop so the thread can exit.
+          if (errno == EBADF || errno == EINVAL)
+            break;
+          std::println(stderr, "accept: {}", Errno{});
+        }
+        else {
+          x23::srpc_stream_logged(fd.release())->server(this);
+        }
       }
     });
   }
 
-  ~BlockSnapshotServer() { rpc_server_->stop(); }
+  ~BlockSnapshotServer()
+  {
+    listen_thread_.request_stop();
+    shutdown(lfd_.get(), SHUT_RDWR);
+    lfd_.reset();
+  }
 
   static void db_snapshot_read_null();
 
@@ -102,11 +114,12 @@ public:
 
   void setup_ban_item(AddressAndKey const &addrkey);
 
-  uint32_t port() const { return rpc_server_->get_port(); }
+  uint16_t port() const { return port_number_; }
 
 private:
-  std::shared_ptr<RPCServer> rpc_server_;
-  std::jthread server_listener_;
+  uint16_t port_number_ = 0;
+  std::jthread listen_thread_;
+  x23::UniqueFd lfd_;
 
   BlockID block_id_;
 
