@@ -79,9 +79,12 @@ Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
+  // Having some extra bytes in the buffer allows us to elide certain
+  // bounds checks in deserialization.
+  constexpr size_t kMinBuf = 512;
   RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
-  b.reserve(1024);     // enough for a header with full-size auth/cred
+  b.reserve(kMinBuf);
   while (!ss_.stop_requested()) {
     if (Errno err = co_await read_record(&b)) {
       fail();
@@ -104,7 +107,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs->xidmap_.erase(it);
       cs.reset();
       cb(std::move(b));
-      b.reserve(1024);
+      b.reserve(kMinBuf);
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
