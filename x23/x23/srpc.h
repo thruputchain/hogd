@@ -15,7 +15,7 @@
 //
 //   UniqueFd fd = x23::tcpconnect(HostPort{"localhost", 1234}.to_addr(true));
 //   auto c = x23::make_rpc_stream(fd.release())->client(blank_rpc_v1{});
-//   c->null();  ;; makes remote procedure call
+//   c->null();  // makes remote procedure call
 //
 // A simple server:
 //
@@ -36,9 +36,7 @@
 // default, if there are any clients, then the stream will be
 // destroyed when the last client reference is destroyed.  If there
 // are no clients, then the server will be destroyed when it reads an
-// EOF or error from the file descriptor.  On a server, you can also
-// get a reference with get_fd(), and then the SRpcStream will be
-// deleted when you drop the reference.
+// EOF or error from the file descriptor.
 
 #pragma once
 
@@ -79,7 +77,7 @@ public:
   // record length, rpc_msg, and arguments.)
   using CallCB = std::function<void(rpc_msg *, BufView)>;
 
-  // Note if you change this, it don't set it larger than 0x7fffffff
+  // Note if you change this, don't set it larger than 0x7fffffff
   // because we don't support chunked messages.
   static inline std::uint32_t default_max_message_size = 0x100'0000;
   size_t max_message_size_;
@@ -101,7 +99,7 @@ public:
   void stop() noexcept;
 
 protected:
-  using Xid = std::uint32_t;
+  using Xid = uint32_t;
 
   virtual ~SRpcFd();
 
