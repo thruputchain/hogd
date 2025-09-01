@@ -580,7 +580,7 @@ deserialize_from(Xout *out, BufViewEnd buf)
   detail::Deserializer d(buf);
   d.go<true>(*out);
   d.check();
-  return d.p - reinterpret_cast<const uint8_t *>(buf.data());
+  return d.p - buf.data();
 }
 
 template<is_xdr_type Xout>

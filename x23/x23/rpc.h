@@ -172,13 +172,12 @@ private:
         if constexpr (returns_void) {
           dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg);
-          // Note explicit <Buf> required to avoid ICE in gcc14
-          return MaybeAsync<Buf>{make_record(rmsg)};
+          return make_record(rmsg);
         }
         else {
           return_type res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
-          return MaybeAsync<Buf>{make_record(rmsg, res)};
+          return make_record(rmsg, res);
         }
       }
       else {
@@ -188,32 +187,32 @@ private:
           if constexpr (returns_void) {
             awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg);
-            return MaybeAsync<Buf>{make_record(rmsg)};
+            return make_record(rmsg);
           }
           else {
             return_type res = awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg, res);
-            return MaybeAsync<Buf>{make_record(rmsg, res)};
+            return make_record(rmsg, res);
           }
         }
 
-        return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
-                               [](ProcHandler self /* copy */,
-                                  auto awaitable) noexcept -> Async<Buf> {
-                                 try {
-                                   rpc_msg rmsg{.xid = self.xid_};
-                                   msg_set_reply_stat(&rmsg, SUCCESS);
-                                   if constexpr (returns_void) {
-                                     co_await awaitable;
-                                     co_return make_record(rmsg);
-                                   }
-                                   else
-                                     co_return make_record<return_type>(
-                                         rmsg, co_await awaitable);
-                                 } catch (const std::exception &e) {
-                                   co_return self.error(e);
-                                 }
-                               }(*this, std::move(awaitable))};
+        // Dispatch returned something awaitable and it's not ready,
+        // so here we actually need to allocate a new coroutine frame.
+        return [](ProcHandler self /* copy *this into coroutine */,
+                  auto awaitable) noexcept -> Async<Buf> {
+          try {
+            rpc_msg rmsg{.xid = self.xid_};
+            msg_set_reply_stat(&rmsg, SUCCESS);
+            if constexpr (returns_void) {
+              co_await awaitable;
+              co_return make_record(rmsg);
+            }
+            else
+              co_return make_record<return_type>(rmsg, co_await awaitable);
+          } catch (const std::exception &e) {
+            co_return self.error(e);
+          }
+        }(*this, std::move(awaitable));
       }
     } catch (std::exception &e) {
       return error(e);
