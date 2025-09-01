@@ -785,25 +785,25 @@ concept is_bytevec = is_bytespan<T> && requires(T t) {
 };
 
 // Simple byte buffer using Vec.
-using Buf = Vec<std::uint8_t>;
+using Buf = Vec<uint8_t>;
 
 // Analogous to std::string_view, but can be initialized from a
 // variety of containers of std::uint8_t or char.
-struct BufView : std::span<const std::uint8_t> {
-  using super = std::span<const std::uint8_t>;
+struct BufView : std::span<const uint8_t> {
+  using super = std::span<const uint8_t>;
   BufView() noexcept : super() {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
   BufView(BS &&s) noexcept
-    : super(reinterpret_cast<const std::uint8_t *>(s.data()), s.size())
+    : super(reinterpret_cast<const uint8_t *>(s.data()), s.size())
   {}
   BufView(const void *buf, size_t len) noexcept
-    : super(static_cast<const std::uint8_t *>(buf), len)
+    : super(static_cast<const uint8_t *>(buf), len)
   {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
   BufView &operator=(BS &&s)
   {
     super::operator=(
-        span{reinterpret_cast<const std::uint8_t *>(s.data()), s.size()});
+        span{reinterpret_cast<const uint8_t *>(s.data()), s.size()});
     return *this;
   }
   std::string_view string_view() const
@@ -878,8 +878,8 @@ public:
                                                     const BoundedStr &b)
   {
     // To make this consistent with char_traits, treat as unsigned.
-    const std::uint8_t *ao = reinterpret_cast<const std::uint8_t *>(a.data()),
-                       *bp = reinterpret_cast<const std::uint8_t *>(b.data());
+    const auto *ao = reinterpret_cast<const uint8_t *>(a.data()),
+               *bp = reinterpret_cast<const uint8_t *>(b.data());
     return std::lexicographical_compare_three_way(ao, ao + a.size(), bp,
                                                   bp + b.size());
   }
@@ -970,7 +970,7 @@ uformat_to(Out *s, std::format_string<Args...> fmt, Args &&...args)
 }
 
 Str
-hexdump(const is_range_of<std::uint8_t> auto &r)
+hexdump(const is_range_of<uint8_t> auto &r)
 {
   Str out;
   constexpr char hexbytes[] = "0123456789abcdef";

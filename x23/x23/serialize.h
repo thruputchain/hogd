@@ -38,7 +38,7 @@ template<std::integral T>
 inline T
 getbe(const void *p)
 {
-  return [p = static_cast<const std::uint8_t *>(p)]<size_t... I>(
+  return [p = static_cast<const uint8_t *>(p)]<size_t... I>(
              std::index_sequence<I...>) -> T {
     return ((T(p[I]) << 8 * (sizeof(T) - I - 1)) | ...);
   }(std::make_index_sequence<sizeof(T)>{});
@@ -50,8 +50,8 @@ template<std::integral T>
 inline void
 putbe(void *p, T val)
 {
-  [val, p = static_cast<std::uint8_t *>(p)]<std::size_t... I>(
-      std::index_sequence<I...>) {
+  [val,
+   p = static_cast<uint8_t *>(p)]<std::size_t... I>(std::index_sequence<I...>) {
     ((p[I] = val >> 8 * (sizeof(T) - I - 1)), ...);
   }(std::make_index_sequence<sizeof(T)>{});
 }
@@ -201,14 +201,14 @@ xdr_size(const X &x)
 
 namespace detail {
 struct Serializer {
-  std::uint8_t *p;
+  uint8_t *p;
 
-  void put32(std::uint32_t v)
+  void put32(uint32_t v)
   {
     putbe(p, v);
     p += 4;
   }
-  void put64(std::uint64_t v)
+  void put64(uint64_t v)
   {
     putbe(p, v);
     p += 8;
@@ -230,14 +230,14 @@ struct Serializer {
   void operator()(is_xdr_cat<XdrCategory::kPrimitive> auto x)
       requires (sizeof(x) == 4)
   {
-    put32(std::bit_cast<std::uint32_t>(x));
+    put32(std::bit_cast<uint32_t>(x));
   }
   void operator()(is_xdr_cat<XdrCategory::kPrimitive> auto x)
       requires (sizeof(x) == 8)
   {
-    put64(std::bit_cast<std::uint64_t>(x));
+    put64(std::bit_cast<uint64_t>(x));
   }
-  void operator()(is_xdr_enum auto e) { put32(std::uint32_t(e)); }
+  void operator()(is_xdr_enum auto e) { put32(uint32_t(e)); }
 
   template<is_xdr_cat<XdrCategory::kOpaqueVec, XdrCategory::kString> X>
   void operator()(const X &s)
@@ -282,7 +282,7 @@ struct Serializer {
       throw XdrBadUnionAccess(
           "Attempt to serialize {} with invalid discrminant {}",
           xdr_meta<X>::type_name, get<0>(u));
-    put32(std::uint32_t(get<0>(u)));
+    put32(uint32_t(get<0>(u)));
     union_visit_arm(*this, u);
   }
 };
@@ -304,19 +304,78 @@ serialize(const is_xdr_type auto &...x)
   return ret;
 }
 
+// This is like a BufView, but where it might be safe to read some
+// number of bytes beyond the end of the buffer to bufend().
+class BufViewEnd : public BufView {
+public:
+  BufViewEnd(const Buf &b) noexcept
+    : BufView(b), bufend_(b.data() + b.capacity())
+  {}
+  BufViewEnd(BufView b) noexcept : BufView(b), bufend_{data() + size()} {}
+  BufViewEnd(BufView b, const uint8_t *be) noexcept : BufView(b), bufend_(be) {}
+  BufViewEnd(BufView b, const Buf &container) noexcept
+    : BufView(b), bufend_(container.data() + container.capacity())
+  {
+#ifndef NDEBUG
+    if (!empty()) {
+      assert(data() >= container.data());
+      assert(data() + size() <= container.data() + container.size());
+    }
+#endif // !NDEBUG
+  }
+
+  const uint8_t *bufend() const noexcept { return bufend_; }
+
+private:
+  const uint8_t *bufend_;
+};
+
 namespace detail {
 
-struct Deserializer {
-  const std::uint8_t *p;
-  const std::uint8_t *const e;  // end of valid input (might read beyond)
-  const std::uint8_t *const ee; // end of buffer (shouldn't read beyond)
+template<is_xdr_type X, is_xdr_type Y = X> consteval bool xdr_contains();
 
-  Deserializer(BufView bv) noexcept : p(bv.data()), e(p + bv.size()), ee(e) {}
-  Deserializer(const Buf &b) noexcept
-    : p(b.data()), e(p + b.size()), ee(p + b.capacity())
+template<is_xdr_type X, is_xdr_type Y>
+consteval bool
+xdr_contains_non_strict()
+{
+  if constexpr (std::same_as<X, Y>)
+    return true;
+  else
+    return xdr_contains<X, Y>();
+}
+
+template<is_xdr_type X, is_xdr_type Y>
+consteval bool
+xdr_contains()
+{
+  using enum XdrCategory;
+  if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>)
+    return xdr_contains_non_strict<X::value_type, Y>();
+  else if constexpr (is_xdr_cat<X, kStruct>)
+    return []<size_t... I>(std::index_sequence<I...>) {
+      return (xdr_contains_non_strict<std::tuple_element_t<I, X>, Y>() || ...);
+    }(std::make_index_sequence<std::tuple_size_v<X>>{});
+  else if constexpr (is_xdr_cat<X, kUnion>) {
+    using ops = union_ops<X>;
+    return []<size_t... I>(std::index_sequence<I...>) {
+      return (xdr_contains_non_strict<ops::template union_element_t<I>, Y>() ||
+              ...);
+    }(std::make_index_sequence<ops::union_size>{});
+  }
+  else
+    return false;
+}
+
+struct Deserializer {
+  const uint8_t *p;
+  const uint8_t *const e;  // end of valid input (might read beyond)
+  const uint8_t *const ee; // end of buffer (shouldn't read beyond)
+
+  Deserializer(BufViewEnd b) noexcept
+    : Deserializer(b.data(), b.data() + b.size(), b.bufend())
   {}
-  Deserializer(const std::uint8_t *p0, const std::uint8_t *e0,
-               const std::uint8_t *ee0) noexcept
+  Deserializer(const uint8_t *p0, const uint8_t *e0,
+               const uint8_t *ee0) noexcept
     : p(p0), e(e0), ee(ee0)
   {}
 
@@ -346,19 +405,19 @@ struct Deserializer {
       throw XdrBadInput("x23::Deserializer: input too short");
   }
 
-  template<bool Safe> std::uint32_t get32()
+  template<bool Safe> uint32_t get32()
   {
     if constexpr (Safe)
       need(4);
-    auto ret = getbe<std::uint32_t>(p);
+    auto ret = getbe<uint32_t>(p);
     p += 4;
     return ret;
   }
-  template<bool Safe> std::uint64_t get64()
+  template<bool Safe> uint64_t get64()
   {
     if constexpr (Safe)
       need(8);
-    auto ret = getbe<std::uint64_t>(p);
+    auto ret = getbe<uint64_t>(p);
     p += 8;
     return ret;
   }
@@ -374,7 +433,9 @@ struct Deserializer {
   void go(X &x)
   {
     static_assert(sizeof(x) == 4 || sizeof(x) == 8);
-    if constexpr (sizeof(x) == 4)
+    if constexpr (is_xdr_cat<X, XdrCategory::kEnum>)
+      x = static_cast<X>(get32<Safe>());
+    else if constexpr (sizeof(x) == 4)
       x = std::bit_cast<X>(get32<Safe>());
     else
       x = std::bit_cast<X>(get64<Safe>());
@@ -382,13 +443,12 @@ struct Deserializer {
 
   void check_trailing_zeros(size_t rem) const
   {
-    constexpr auto swaple = [](std::uint32_t v) consteval -> std::uint32_t {
+    constexpr auto swaple = [](uint32_t v) consteval -> uint32_t {
       return std::endian::native == std::endian::little ? std::byteswap(v) : v;
     };
     constexpr std::array masks{swaple(0), swaple(0xffffff), swaple(0xffff),
                                swaple(0xff)};
-    if (reinterpret_cast<const std::uint32_t *>(p)[-1] & masks[rem])
-        [[unlikely]]
+    if (reinterpret_cast<const uint32_t *>(p)[-1] & masks[rem]) [[unlikely]]
       throw XdrBadInput("padding bytes are not zero deserializing XDR");
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &x)
@@ -416,7 +476,7 @@ struct Deserializer {
            is_xdr_cat<XdrCategory::kString, XdrCategory::kOpaqueVec> X>
   void go(X &x)
   {
-    std::uint32_t size = get32<Safe>();
+    uint32_t size = get32<Safe>();
     if (size > x.max_size()) [[unlikely]]
       throw XdrBadInput("length {} exceeds maximum deserializing {}", size,
                         xdr_type_name<X>());
@@ -460,8 +520,7 @@ struct Deserializer {
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(
-        std::min<std::uint32_t>(size,
-                                0x10000 / sizeof(typename X::value_type)));
+        std::min<uint32_t>(size, 0x1'0000 / sizeof(typename X::value_type)));
     if (!Safe ||
         unsafe_ok(xdr_size_bounds<typename X::value_type>().zero_to(size)))
       for (size_t i = 0; i < size; ++i) {
@@ -504,19 +563,19 @@ struct Deserializer {
 
 } // namespace detail
 
-template<is_xdr_type Xout, std::convertible_to<BufView> BufType>
+template<is_xdr_type Xout>
 size_t
-deserialize_from(Xout *out, BufType &&buf)
+deserialize_from(Xout *out, BufViewEnd buf)
 {
   detail::Deserializer d(buf);
   d.go<true>(*out);
   d.check();
-  return d.p - reinterpret_cast<const std::uint8_t *>(buf.data());
+  return d.p - reinterpret_cast<const uint8_t *>(buf.data());
 }
 
-template<is_xdr_type Xout, std::convertible_to<BufView> BufType>
+template<is_xdr_type Xout>
 inline void
-deserialize(Xout *out, BufType &&buf)
+deserialize(Xout *out, BufViewEnd buf)
 {
   if (buf.size() % 4)
     throw XdrBadInput("input not multiple of 4 bytes deserializing {}",

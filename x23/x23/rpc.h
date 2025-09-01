@@ -99,7 +99,7 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args) = 0;
+  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd args) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
@@ -121,7 +121,7 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata) override
+  MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd argdata) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
@@ -161,7 +161,7 @@ private:
 
     using enum accept_stat;
 
-    MaybeAsync<Buf> operator()(BufView argbytes)
+    MaybeAsync<Buf> operator()(BufViewEnd argbytes)
     try {
       constexpr bool returns_void = std::is_void_v<return_type>;
       using dispatch_t = decltype(dispatch(argbytes));
@@ -219,7 +219,7 @@ private:
       return error(e);
     }
 
-    decltype(auto) dispatch(BufView argbytes)
+    decltype(auto) dispatch(BufViewEnd argbytes)
     {
       return std::apply(
           [&](auto &...ea) {
@@ -228,7 +228,7 @@ private:
           d_.ea_);
     }
 
-    arg_type args(BufView argbytes)
+    arg_type args(BufViewEnd argbytes)
     {
       arg_type args;
       deserialize(&args, argbytes);
@@ -315,7 +315,7 @@ private:
   }
 
   Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
-  Async<std::expected<Buf, Errno>> read_record(SLOC_PARM0);
+  Async<Errno> read_record(Buf *b SLOC_PARM);
 
   friend class RefCount;
 };
