@@ -196,7 +196,7 @@ public:
           Serializer<kSerializationFormat>::template deserialize<args_type>(
               data);
       if (!out.has_value()) {
-        return SyscallError{SyscallErrorCode::kCalldataParseError};
+        return SyscallError{SyscallErrorCode::kSyscallErrorCodeCalldataParseError};
       }
       return *out;
     }();
@@ -214,7 +214,7 @@ public:
           auto out = Serializer<kSerializationFormat>::template deserialize<
               typename return_type::err_type>(data);
           if (!out.has_value()) {
-            return SyscallError{SyscallErrorCode::kReturnParseError};
+            return SyscallError{SyscallErrorCode::kSyscallErrorCodeReturnParseError};
           }
           return return_type::make_err(*out);
         }
@@ -222,7 +222,7 @@ public:
         auto out = Serializer<kSerializationFormat>::template deserialize<
             typename return_type::ok_type>(data);
         if (!out.has_value()) {
-          return SyscallError{SyscallErrorCode::kReturnParseError};
+          return SyscallError{SyscallErrorCode::kSyscallErrorCodeReturnParseError};
         }
         return return_type::make_ok(*out);
       }
@@ -231,14 +231,14 @@ public:
         // not using the manual revert path
 
         if (manually_reverted) {
-          return SyscallError{SyscallErrorCode::kFrameReverted};
+          return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
         }
 
         auto out =
             Serializer<kSerializationFormat>::template deserialize<return_type>(
                 data);
         if (!out.has_value()) {
-          return SyscallError{SyscallErrorCode::kReturnParseError};
+          return SyscallError{SyscallErrorCode::kSyscallErrorCodeReturnParseError};
         }
         return *out;
       }
@@ -307,8 +307,8 @@ public:
       return std::pair{host_fn_res.error(), res.second};
     }
 
-    if (host_fn_res.value() != SyscallErrorCode::kNone &&
-        host_fn_res.value() != SyscallErrorCode::kFrameReverted) {
+    if (host_fn_res.value() != SyscallErrorCode::kSyscallErrorCodeNone &&
+        host_fn_res.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
       trace("Invoke SyscallStatus error: {}", host_fn_res.value());
       return std::pair{SyscallError{host_fn_res.value()}, res.second};
     }
@@ -325,7 +325,7 @@ public:
     trace("Received return buffer: {}", x23::show(**return_buffer));
 
     bool manually_reverted =
-        host_fn_res.value() == SyscallErrorCode::kFrameReverted;
+        host_fn_res.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted;
 
     auto return_value =
         trait_meta_t::template decode_return<Name>(return_span,

@@ -26,7 +26,7 @@ syscall_GetDeployAddress_inner(
         input_contract_hash);
   }
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -45,7 +45,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   }
   output_deployed_address = *status.value();
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd

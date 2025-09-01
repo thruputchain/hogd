@@ -80,7 +80,7 @@ SyscallStatus<void>
 BytestringItem::validate() const
 {
   if (bytestring_.size() > kBytestringMaxLen)
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 
   return {};
 }
@@ -99,7 +99,7 @@ NNIntItem::validate() const
 
   if (base_value_.value() < 0) {
     // cannot subtract from a value that is already negative
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   if (base_value_.value() >= 0) {
@@ -108,7 +108,7 @@ NNIntItem::validate() const
     if (*base_value_ + add_value_ < 0) {
       // This would be always rejected by the delta handling logic
       // in the storage server.
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
   }
 

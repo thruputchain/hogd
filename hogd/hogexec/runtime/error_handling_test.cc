@@ -51,7 +51,7 @@ throw_bad_alloc(HostCallContext * /*unused*/)
 HostFnStatus<SyscallErrorCode>
 good_call(HostCallContext * /*unused*/)
 {
-  return SyscallErrorCode::kNone;
+  return SyscallErrorCode::kSyscallErrorCodeNone;
 }
 
 HostFnStatus<SyscallErrorCode>
@@ -90,7 +90,7 @@ reentrance(HostCallContext * /*unused*/)
   if (!res.result_.has_value()) {
     return HostFnError{HostFnErrorCode::kHostUnrecoverable};
   }
-  return SyscallErrorCode::kNone;
+  return SyscallErrorCode::kSyscallErrorCodeNone;
 }
 
 } // namespace

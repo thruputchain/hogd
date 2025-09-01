@@ -94,7 +94,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -245,7 +245,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -294,7 +294,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -451,7 +451,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

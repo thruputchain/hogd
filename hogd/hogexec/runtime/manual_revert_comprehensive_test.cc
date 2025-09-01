@@ -178,7 +178,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -524,7 +524,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r2.value() != SyscallErrorCode::kFrameReverted) {
+             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -556,7 +556,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              if (!r3.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (r3.value() != SyscallErrorCode::kFrameReverted) {
+             if (r3.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

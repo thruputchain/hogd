@@ -73,7 +73,7 @@ protected:
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
                if (invoke_res.first) {
-                 return (invoke_res.first.value() == SyscallErrorCode::kNone)
+                 return (invoke_res.first.value() == SyscallErrorCode::kSyscallErrorCodeNone)
                             ? InvokeStatus<void>{}
                             : InvokeError{
                                   InvokeErrorCode::kInvokeDeterministic};
@@ -344,13 +344,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         // add ops shouldn't query db
         auto [r, _gas] =
             syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, 100);
-        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+        if (!r.has_value() || r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
         auto [r2, _gas2] =
             syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, -200);
-        if (!r2.has_value() || r2.value() != SyscallErrorCode::kNone) {
+        if (!r2.has_value() || r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
@@ -370,7 +370,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         int128_t set_value = 100;
         auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, bad_key,
                                                             &set_value, 200);
-        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+        if (!r.has_value() || r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 

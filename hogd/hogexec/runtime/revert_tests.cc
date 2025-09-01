@@ -154,7 +154,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
-             if (r1.value() != SyscallErrorCode::kFrameReverted) {
+             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -191,7 +191,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              // Method 2 should succeed in the try_invoke frame
-             if (r2.value() != SyscallErrorCode::kNone) {
+             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              // Now manually revert this frame, which should undo the locks
@@ -221,7 +221,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              // Method 3 should succeed
-             if (r3.value() != SyscallErrorCode::kNone) {
+             if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

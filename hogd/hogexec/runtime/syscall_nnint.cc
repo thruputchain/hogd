@@ -37,7 +37,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   }
   output_current_add = status.value().value().second;
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -59,7 +59,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd

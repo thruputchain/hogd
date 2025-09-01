@@ -3,6 +3,7 @@
 #include <cassert>
 #include <optional>
 #include <set>
+#include <utility>
 #include <variant>
 
 #include "executor_to_db_rpc.hh"
@@ -120,10 +121,10 @@ public:
   SyscallStatus<void> try_insert(ReplayNonce nonce)
   {
     if (nonce <= metadata_.minimum_threshold) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     if (inserted_nonces_.contains(nonce)) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     [[maybe_unused]] auto [_, inserted] = inserted_nonces_.insert(nonce);
     assert(inserted);
@@ -134,7 +135,7 @@ public:
   SyscallStatus<void> raise_minimum_threshold(ReplayNonce new_threshold)
   {
     if (new_threshold < metadata_.minimum_threshold) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     metadata_.minimum_threshold = new_threshold;
     return {};

@@ -234,7 +234,7 @@ parse_mock(Inputs const &tuple_args)
 }
 
 constexpr static std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-    kFaultResult = {SyscallErrorCode::kFault, kGenericBadSyscallCost};
+    kFaultResult = {SyscallErrorCode::kSyscallErrorCodeFault, kGenericBadSyscallCost};
 
 auto
 arg_to_xdr(auto arg)
@@ -303,7 +303,7 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
       return std::format("Host Error ({})\n", x23::show(status.error().code()));
     }
   }
-  assert(status.value() != SyscallErrorCode::kNone);
+  assert(status.value() != SyscallErrorCode::kSyscallErrorCodeNone);
   return std::format("Syscall Error: {}", x23::show(status.value()));
 }
 
@@ -327,7 +327,7 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
       trace("Syscall {} is not read-only, but called in read-only mode",
             Syscall);
       return {HostFnStatus<SyscallErrorCode>{
-                  SyscallErrorCode::kInvalidSyscallInput},
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
               0};
     }
   }
@@ -364,7 +364,7 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
     bool is_syscall_error =
-        !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
+        !res.first.has_value() || res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
     trace(
         "Syscall {} Output: {}", Syscall,
         is_syscall_error

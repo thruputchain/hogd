@@ -143,8 +143,8 @@ SystemCallHandler::root_invoke()
     if (status.has_value()) {
       // TODO(geoff): Consider whether we want to have "frame reverted" on the
       // root frame as a "transaction failed" or "transaction succeeded"
-      return (status.value() == SyscallErrorCode::kNone ||
-              status.value() == SyscallErrorCode::kFrameReverted)
+      return (status.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
+              status.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)
                  ? InvokeStatus<void>{}
                  : InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
@@ -281,7 +281,7 @@ SystemCallHandler::get_msg_sender() const
   assert(!invocation_frame_stack_.empty());
   auto res = invocation_frame_stack_.get_msg_sender();
   return res.has_value() ? SyscallStatus<ContractAddress>(*res)
-                         : SyscallError{SyscallErrorCode::kIsRootTransaction};
+                         : SyscallError{SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -296,7 +296,7 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
   if (!runtime.value()) {
-    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
+    return std::pair{SyscallErrorCode::kSyscallErrorCodeContractLookupFailed, 0};
   }
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
@@ -324,9 +324,9 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
   cumulative_result += frame_result;
 
   auto out = cumulative_result.to_host_fn_result();
-  if (out.first.has_value() && out.first.value() == SyscallErrorCode::kNone) {
+  if (out.first.has_value() && out.first.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
     if (manually_reverted) {
-      out.first = SyscallErrorCode::kFrameReverted;
+      out.first = SyscallErrorCode::kSyscallErrorCodeFrameReverted;
     }
   }
 
@@ -348,7 +348,7 @@ SystemCallHandler::get_return_buffer() const
   return top_frame.child_return_buffer_.has_value()
              ? SyscallStatus<const ReturnBuffer *>(
                    &(*top_frame.child_return_buffer_))
-             : SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
+             : SyscallError{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
 }
 
 void
@@ -437,7 +437,7 @@ SystemCallHandler::log(std::span<const std::byte> message)
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   invocation_frame_stack_.get_active_frame().log(message);
@@ -478,7 +478,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     if (it == newly_created_contracts_.end()) {
       // cannot find the contract in question, in either snapshot
       // or in local context.
-      return SyscallError{SyscallErrorCode::kContractLookupFailed};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
     }
   }
 
@@ -491,13 +491,13 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return deploy_check_status.error();
   }
   if (*deploy_check_status) {
-    return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
   if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
           .has_value()) {
     // contract has already been deployed in this transaction
-    return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed};
   }
 
   auto &frame = invocation_frame_stack_.get_active_frame();
@@ -529,15 +529,15 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
-      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
     }
     if (*type != ItemViewType::kBytestring) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     return std::as_bytes(std::span(base_item.bytestring()));
   }
 
-  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 SystemStatus<SyscallStatus<void>>
@@ -604,15 +604,15 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
-      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
     }
     if (*type != ItemViewType::kNNInt) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     return {std::make_pair(base_item.nnint(), 0)};
   }
 
-  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 SystemStatus<SyscallStatus<void>>
@@ -638,7 +638,7 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
   assert(!is_read_only());
 
   if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(flags)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -680,7 +680,7 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     }
     return item_view->get<RetrocausalQueueItem>();
   }
-  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 } // namespace
 
@@ -734,7 +734,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (value.has_value()) {
     return value.value();
   }
-  return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
+  return SyscallError{SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
 SystemStatus<SyscallStatus<int128_t>>
@@ -784,7 +784,7 @@ SystemCallHandler::get_native_token_balance(
     return base.error();
   }
   if (integer_add_overflow(*base, balance_item->add_value_)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   int128_t balance = *base + balance_item->add_value_;
@@ -809,7 +809,7 @@ SystemCallHandler::modify_native_token_balance(
   if (auto const *balance_item = item_view->get<NativeTokenBalanceItem>()) {
     auto current_add = balance_item->add_value_;
     if (integer_add_overflow(current_add, transfer_amount)) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     auto new_add = current_add + transfer_amount;
     return item_view->set(NativeTokenBalanceItem(
