@@ -65,7 +65,8 @@ InvokeResult::to_host_fn_result() const
       // Note that that does not mean that the entire transaction is out of gas.
       // The amount of gas consumed will be checked against the parent's gas
       // limit in the syscall_entry
-      return {SyscallErrorCode::kSyscallErrorCodeDeterministicWasm, gas_consumed_};
+      return {SyscallErrorCode::kSyscallErrorCodeDeterministicWasm,
+              gas_consumed_};
     case kInvokeAbortTransaction:
       return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
               gas_consumed_};

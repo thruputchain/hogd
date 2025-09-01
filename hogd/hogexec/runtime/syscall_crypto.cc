@@ -29,7 +29,8 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   if (auto *stats = handler.get_transaction_stats()) {
     stats->sha256_total_bytes_processed += input_buffer.size();
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, SHA256HashCost(input_buffer.size())};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          SHA256HashCost(input_buffer.size())};
 };
 
 // Verifies a cryptographic signature against a message using the provided

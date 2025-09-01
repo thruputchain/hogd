@@ -154,7 +154,8 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
-             if (r1.value() != SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+             if (r1.value() !=
+                 SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

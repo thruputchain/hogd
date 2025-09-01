@@ -108,7 +108,8 @@ NNIntItem::validate() const
     if (*base_value_ + add_value_ < 0) {
       // This would be always rejected by the delta handling logic
       // in the storage server.
-      return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
   }
 

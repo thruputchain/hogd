@@ -234,7 +234,8 @@ parse_mock(Inputs const &tuple_args)
 }
 
 constexpr static std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-    kFaultResult = {SyscallErrorCode::kSyscallErrorCodeFault, kGenericBadSyscallCost};
+    kFaultResult = {SyscallErrorCode::kSyscallErrorCodeFault,
+                    kGenericBadSyscallCost};
 
 auto
 arg_to_xdr(auto arg)
@@ -364,7 +365,8 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
     bool is_syscall_error =
-        !res.first.has_value() || res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+        !res.first.has_value() ||
+        res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
     trace(
         "Syscall {} Output: {}", Syscall,
         is_syscall_error

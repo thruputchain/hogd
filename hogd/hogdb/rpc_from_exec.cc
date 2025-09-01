@@ -15,6 +15,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 

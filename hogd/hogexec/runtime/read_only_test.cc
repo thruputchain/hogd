@@ -168,7 +168,8 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
                  handler.invoke(native_contract_addr, 0, UINT64_MAX, {},
                                 std::to_underlying(
                                     InvokeFlag::kInvokeFlagNone));
-             if (!res.has_value() || res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};
@@ -181,7 +182,8 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
                  handler.invoke(native_contract_addr, 1, UINT64_MAX, {},
                                 std::to_underlying(
                                     InvokeFlag::kInvokeFlagReadOnly));
-             if (!res.has_value() || res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};

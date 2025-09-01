@@ -88,7 +88,8 @@ TEST(MockSyscallTest, IntTypeTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable));
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable));
 
   EXPECT_EQ(out_1, 10);
   EXPECT_EQ(out_2, UINT64_MAX);
@@ -120,7 +121,8 @@ TEST(MockSyscallTest, SpanTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
 
   EXPECT_EQ(out, 0x04030201);
 }

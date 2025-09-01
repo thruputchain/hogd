@@ -91,8 +91,10 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                              calldata, input_flags);
 
   // invocation returned successfully
-  if (invoke_res && (invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
-                     invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
+  if (invoke_res &&
+      (invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
+       invoke_res.value() ==
+           SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
@@ -114,7 +116,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {HostFnError{HostFnErrorCode::kHostExit},
-            static_cast<int32_t>(SyscallErrorCode::kSyscallErrorCodeDeterministicWasm)};
+            static_cast<int32_t>(
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm)};
   }
 
   ReturnBuffer buffer;
