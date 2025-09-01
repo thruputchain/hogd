@@ -23,7 +23,6 @@
 #include <stop_token>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -273,7 +272,7 @@ RPCServer::create(uint16_t port, RPCHandler handler)
     ret = sock->getsockname(saddr);
     if (!ret)
       return ret.error();
-    port = ntohs(read_once(saddr.sin_port));
+    port = ntohs(saddr.sin_port);
   }
 
   // enable listening.
