@@ -29,7 +29,7 @@ syscall_RetrocausalQueueInsert_inner(SystemCallHandler &syscall_handler,
   }
 
   // insertion has been successful
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -55,7 +55,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   std::memcpy(output_queue_entry.data(), queue_entry.data(),
               output_written_len);
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd

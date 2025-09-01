@@ -37,7 +37,7 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  return {{SyscallErrorCode::kNoReturnBufferAvailable}, 0};
+  return {{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable}, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -55,7 +55,7 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  return {{SyscallErrorCode::kStorageKeyNotExist}, 0};
+  return {{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}, 0};
 }
 
 } // namespace
@@ -88,7 +88,8 @@ TEST(MockSyscallTest, IntTypeTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(SyscallErrorCode::kNoReturnBufferAvailable));
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable));
 
   EXPECT_EQ(out_1, 10);
   EXPECT_EQ(out_2, UINT64_MAX);
@@ -120,7 +121,8 @@ TEST(MockSyscallTest, SpanTest)
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
-            std::to_underlying(SyscallErrorCode::kStorageKeyNotExist));
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
 
   EXPECT_EQ(out, 0x04030201);
 }

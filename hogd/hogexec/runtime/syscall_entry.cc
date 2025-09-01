@@ -50,7 +50,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
     if (auto *stats = call_context->syscall_handler->get_transaction_stats()) {
       stats->invalid_syscall_count++;
     }
-    return {SyscallErrorCode::kNoSyscall, kNoSyscallCost};
+    return {SyscallErrorCode::kSyscallErrorCodeNoSyscall, kNoSyscallCost};
   }
 
   static_assert(kSyscallTable.size() < INT32_MAX,

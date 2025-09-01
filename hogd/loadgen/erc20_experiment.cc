@@ -7,7 +7,6 @@
 
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet.h"
-#include "contract_loader.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -33,23 +32,24 @@ make_nonce(uint64_t value)
 LoadgenStatus<LoadgenSuccessResult>
 generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
 {
-
-  auto erc20_contract = load_contract("itc_erc20.wasm");
-  auto wallet_contract = load_contract("simple_wallet.wasm");
-  assert(erc20_contract);
-  assert(wallet_contract);
-
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
+
+  auto erc20_contract = erc20_meta::load_wasm();
+  auto wallet_contract = wallet_meta::load_wasm();
+  assert(erc20_contract);
+  assert(wallet_contract);
 
   const ContractAddress owner_address =
       GenesisBlockLoader::calculate_deployed_address(sha256(*wallet_contract),
                                                      make_nonce(0));
 
   GenesisBlockBuilder builder;
-  builder.add_initial_config(
-      erc20_contract, make_nonce(0), erc20_meta::entrypoint<"initialize">(),
-      erc20_meta::make_calldata<"initialize">(owner_address), 1'000'000);
+  builder.add_initial_config(erc20_contract, make_nonce(0),
+                             erc20_meta::entrypoint<"initialize">(),
+                             erc20_meta::make_calldata<"initialize">(
+                                 owner_address),
+                             int128_t{1'000'000} * config.num_accounts);
   const auto erc20_address =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
@@ -88,7 +88,7 @@ generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
     Calldata internal_calldata = x23::serialize(
         erc20_address, erc20_meta::entrypoint<"mint">(), GasAmount{1'000'000},
         erc20_meta::make_calldata<"mint">(wallet_addresses[i],
-                                          to_xdr(uint128_t{1'000'000})));
+                                          to_xdr(uint128_t{1'000'000'000})));
 
     auto tx = SignedTransaction{
         .tx =
@@ -126,7 +126,7 @@ generate_erc20_payments_experiment(const ERC20PaymentsConfig &config)
   for (size_t i = 0; i < config.num_txs; ++i) {
     auto [sender, receiver] = make_account_pair();
 
-    uint128_t amount = 1000;
+    uint128_t amount = 10;
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata =

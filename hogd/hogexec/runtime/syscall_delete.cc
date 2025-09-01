@@ -26,7 +26,7 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd

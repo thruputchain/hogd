@@ -100,7 +100,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto [r, _gas] =
                  handler.invoke(native_contract_address, 0, UINT64_MAX, {}, 0);
-             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+             if (!r.has_value() ||
+                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                ADD_FAILURE() << "Invoke 0 did not return success";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -108,7 +109,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              auto [r2, _gas2] =
                  handler.invoke(native_contract_address, 1, UINT64_MAX, {}, 0);
              if (!r2.has_value() ||
-                 r2.value() != SyscallErrorCode::kDeterministicWasm) {
+                 r2.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "Invoke 1 did not return kDeterministicWasm";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -118,7 +120,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
              auto [r3, _gas3] =
                  handler.invoke(native_contract_address, 2, UINT64_MAX, {}, 0);
              if (!r3.has_value() ||
-                 r3.value() != SyscallErrorCode::kDeterministicWasm) {
+                 r3.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
                ADD_FAILURE() << "Invoke 2 did not return out of gas";
                return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
              }

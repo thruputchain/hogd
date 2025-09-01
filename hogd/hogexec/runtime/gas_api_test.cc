@@ -24,7 +24,7 @@ error(HostFnErrorCode const &code)
 HostFnStatus<SyscallErrorCode>
 success()
 {
-  return SyscallErrorCode::kNone;
+  return SyscallErrorCode::kSyscallErrorCodeNone;
 }
 
 auto

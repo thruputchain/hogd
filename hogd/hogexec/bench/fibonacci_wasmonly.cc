@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <future>
 #include <memory>
@@ -364,5 +365,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   hogd::run_fibonacci_client(*exec_port, *coord_port);
+  std::fflush(stdout);
   return 0;
 }

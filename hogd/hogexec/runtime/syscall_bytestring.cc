@@ -34,7 +34,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
               status.value()->data(), output_written_len);
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -52,7 +52,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 
   output_length = status.value()->size();
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -68,7 +68,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 } // namespace hogd
