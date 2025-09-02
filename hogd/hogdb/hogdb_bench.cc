@@ -96,8 +96,12 @@ make_key(size_t addr, size_t item)
 std::unique_ptr<Database>
 open_ramdb(size_t n)
 {
+  // estimate size based on 1 x nnint128 and 1 x account_balance per account
   size_t heap_size =
-      Database::estimate_heap_size(n * 4, sizeof(ItemKey), sizeof(int128_t));
+      Database::estimate_heap_size(n * 2, sizeof(ItemKey), sizeof(int128_t));
+  // heap should be large enough to avoid compaction.
+  heap_size *= 8;
+
   int bucket_order = std::countr_zero(std::bit_floor(n));
   HogDBStatus<std::unique_ptr<Database>> db =
       Database::open(db_path, heap_size, bucket_order)
@@ -281,7 +285,6 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      Benchmark::make_many_to_one_payments_benchmark},
     {"new_storage", "new nnint128's are stored on the ledger",
      Benchmark::make_new_storage_benchmark},
-
 };
 
 } // namespace
