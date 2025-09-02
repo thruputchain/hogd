@@ -9,6 +9,45 @@ set -e
 
 BUILD_DIR=$1
 
+# Global variable to store bench_mode PID
+BENCH_PID=""
+
+# Cleanup function - kills bench_mode.sh if it's running
+cleanup() {
+    if [ -n "$BENCH_PID" ] && kill -0 "$BENCH_PID" 2>/dev/null; then
+        echo "Stopping bench_mode.sh (PID: $BENCH_PID)"
+        kill -INT "$BENCH_PID"
+        wait "$BENCH_PID" 2>/dev/null || true
+    fi
+}
+
+# Set up signal handlers to ensure cleanup on exit
+trap cleanup EXIT
+trap cleanup INT
+trap cleanup TERM
+
+# Get script directory
+SCRIPT_DIR=$(dirname "$0")
+
+echo "Starting bench_mode.sh in background..."
+
+# Start bench_mode.sh in background and capture its PID
+"$SCRIPT_DIR/bench_mode.sh" &
+BENCH_PID=$!
+
+echo "bench_mode.sh started with PID: $BENCH_PID"
+
+# Give it a moment to initialize
+sleep 2
+
+# Check if bench_mode is still running
+if ! kill -0 "$BENCH_PID" 2>/dev/null; then
+    echo "Error: bench_mode.sh failed to start or exited immediately"
+    exit 1
+fi
+
+echo "Running metrics with bench_mode.sh active..."
+
 # Get current branch name
 if [[ -z ${GITHUB_HEAD_REF} ]]; then
     branch=$(git rev-parse --abbrev-ref HEAD)
@@ -63,6 +102,10 @@ fi
 ./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim > metrics_history/metrics/initial_token_claim-codesize/$branch/${commit_time}_$commit
 
 # Performance metrics
+## hogdb_bench
+./metrics_history/scripts/make_metric_file.sh hogdb-bench $branch $commit $commit_time
+./scripts/metrics/hogdb_bench.sh $BUILD_DIR > metrics_history/metrics/hogdb-bench/$branch/${commit_time}_$commit
+
 ## mass fibonacci.wasm calls
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $branch $commit $commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR > metrics_history/metrics/fibonacci-wasmonly/$branch/${commit_time}_$commit
@@ -91,6 +134,9 @@ GIT_COMMITTER_NAME="$committer_name" \
 GIT_COMMITTER_EMAIL="$committer_email" \
 git commit -m "Add metrics for $branch $commit" --author "$committer_name <$committer_email>"
 git push
+
+echo "Metrics completed successfully. Stopping bench_mode.sh..."
+# cleanup() will be called automatically due to EXIT trap
 
 
 
