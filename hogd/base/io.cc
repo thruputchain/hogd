@@ -33,28 +33,6 @@ namespace hogd {
 
 namespace {
 
-template<typename Result, typename T>
-ErrnoStatus<Result>
-make_errno_status(T ret)
-{
-  // first check for error.
-  if (ret == -1)
-    return Errno{};
-
-  // otherwise return the result type.
-  assert(ret >= 0);
-  if constexpr (std::is_integral_v<Result>) {
-    return static_cast<Result>(ret);
-  }
-  else if (std::is_void_v<Result>) {
-    assert(ret == 0);
-    return {};
-  }
-  else {
-    static_assert("unsupported result type");
-  }
-}
-
 inline ErrnoStatus<int>
 sys_open(const std::string &path, int flags)
 {

@@ -33,6 +33,32 @@ using x23::make_error_condition;
 // if (!foo) // handle error
 template<typename T> using ErrnoStatus = std::expected<T, Errno>;
 
+// make_errno_status converts a system call return value into an ErrnoStatus
+// of a given result type. This is useful because many system calls return -1
+// on failure and set errno, or else the return value is the result (e.g.,
+// open() returns an fd number on success).
+template<typename Result, typename T>
+ErrnoStatus<Result>
+make_errno_status(T ret)
+{
+  // first check for error.
+  if (ret == -1)
+    return Errno{};
+
+  // otherwise return the result type.
+  assert(ret >= 0);
+  if constexpr (std::is_integral_v<Result>) {
+    return static_cast<Result>(ret);
+  }
+  else if (std::is_void_v<Result>) {
+    assert(ret == 0);
+    return {};
+  }
+  else {
+    static_assert("unsupported result type");
+  }
+}
+
 // EnumError turns a scoped enumeration into an error class.
 template<typename Enum, std::derived_from<std::error_category> Category>
 requires std::is_scoped_enum_v<Enum>
