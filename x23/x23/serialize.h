@@ -401,17 +401,30 @@ template<typename X>
 concept contains_recursive_xdr =
     is_xdr_type<X> && detail::xdr_contains_recursive<X>();
 
-// The default
-extern size_t x23_deserialization_recursion_limit;
+// Default number of stack frames allowed corresponding to recursive
+// structs and unions.
+extern size_t deserialization_recursion_limit;
 
 namespace detail {
 
-struct Deserializer {
+struct DeserializationRecursionChecker {
+  size_t recursion_limit_ = deserialization_recursion_limit;
+  void recurse(this auto &&self)
+  {
+    if (!self.recursion_limit_) [[unlikely]]
+      self.raise("x23::Deserializer: exceeded recursion limit of {}",
+                 deserialization_recursion_limit);
+    --self.recursion_limit_;
+  }
+};
+
+template<bool CheckRecursion>
+struct Deserializer
+  : public std::conditional_t<CheckRecursion, DeserializationRecursionChecker,
+                              std::monostate> {
   const uint8_t *p;
   const uint8_t *const e;  // end of valid input (might read beyond)
   const uint8_t *const ee; // end of buffer (shouldn't read beyond)
-
-  size_t recursion_limit{x23_deserialization_recursion_limit};
 
   Deserializer(BufViewEnd b) noexcept
     : Deserializer(b.data(), b.data() + b.size(), b.bufend())
@@ -435,14 +448,6 @@ struct Deserializer {
       }
       throw XdrBadInput("x23::Deserializer: input too short");
     }
-  }
-
-  void recurse()
-  {
-    if (!recursion_limit) [[unlikely]]
-      raise("x23::Deserializer: exceeded recursion limit of {}",
-            x23_deserialization_recursion_limit);
-    --recursion_limit;
   }
 
   void need(size_t n) const
@@ -594,8 +599,8 @@ struct Deserializer {
 
   template<bool Safe, is_xdr_struct X> void go(X &x)
   {
-    if constexpr (is_recursive_xdr<X>)
-      recurse();
+    if constexpr (CheckRecursion && is_recursive_xdr<X>)
+      this->recurse();
     if (!Safe || unsafe_ok(xdr_size_bounds<X>()))
       visit_fields([this](auto &x) { this->go<false>(x); }, x);
     else
@@ -603,8 +608,8 @@ struct Deserializer {
   }
   template<bool Safe, is_xdr_union X> void go(X &x)
   {
-    if constexpr (is_recursive_xdr<X>)
-      recurse();
+    if constexpr (CheckRecursion && is_recursive_xdr<X>)
+      this->recurse();
     using ops = union_ops<X>;
     auto d = static_cast<typename ops::discriminant_type>(get32<Safe>());
     union_set_discriminant(x, d);
@@ -631,8 +636,8 @@ template<is_xdr_type Xout>
 size_t
 deserialize_from(Xout *out, BufViewEnd buf)
 {
-  detail::Deserializer d(buf);
-  d.go<true>(*out);
+  detail::Deserializer<contains_recursive_xdr<Xout>> d(buf);
+  d.template go<true>(*out);
   d.check();
   return d.p - buf.data();
 }

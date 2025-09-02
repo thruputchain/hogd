@@ -3,6 +3,6 @@
 
 namespace x23 {
 
-size_t x23_deserialization_recursion_limit = 16;
+size_t deserialization_recursion_limit = 16;
 
 } // namespace x23
