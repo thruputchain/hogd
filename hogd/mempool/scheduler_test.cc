@@ -539,7 +539,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
   static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;
-  std::vector<SignedTransactionBatch> txs;
+  std::unordered_map<ContractAddress, SignedTransactionBatch> txs;
   for (const ContractAddress &address : MempoolTestServer::kAccountAddresses) {
     fib_clients.emplace_back(address);
     // We create enough txs for each account such that each account could fill
@@ -547,7 +547,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+    txs[address] = generate_txs(fib_clients.back(), kBlockSize * kNumRounds);
   }
 
   MempoolTestServer server;
@@ -568,21 +568,35 @@ TEST(Scheduler, FairnessAcrossBlocks)
                     /*age=*/0,
                     /*num_hogs=*/5'000'000'000 * (i + 1));
   }
-  for (const SignedTransactionBatch &tx : txs) {
+  for (const auto &[_, tx] : txs) {
     scheduler.add_txs(tx);
   }
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
+  std::unordered_map<ContractAddress, size_t> last;
+  std::unordered_map<ContractAddress, size_t> deltas;
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] =
         scheduler.schedule(/*block_size=*/1);
+    EXPECT_EQ(scheduled.size(), 1UL);
+    printf("scheduling account %x (delta %zu)\n",
+           scheduled[0].tx.invocation.invoked_address[0],
+           i - last[scheduled[0].tx.invocation.invoked_address]);
+    scheduler.dump_runqueue();
+    printf("----------\n");
+    deltas[scheduled[0].tx.invocation.invoked_address] +=
+        i - last[scheduled[0].tx.invocation.invoked_address];
+    last[scheduled[0].tx.invocation.invoked_address] = i;
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
     scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
     for (const ContractAddress &account :
          MempoolTestServer::kAccountAddresses) {
-      scheduler.cycle_groups(account);
+      // TODO(jhumphri): We need to periodically call [cycle_if_needed()] in the
+      // scheduler so that we can add stranded txs to the runqueue, even if
+      // [add_txs()] is not called again for the account.
+      scheduler.cycle_if_needed(txs[account][0]);
     }
   }
 
@@ -590,9 +604,11 @@ TEST(Scheduler, FairnessAcrossBlocks)
     const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
     printf("%zu, ", tx_counts[address]);
     const HogAge &age = scheduler.get_cached_hog_age(address);
-    printf("to age %zu, already age %zu\n",
+    printf("to age %zu, already age %zu, average delta %f (expected %f)\n",
            age.average_ages[kHogAgeGroupToSchedule],
-           age.average_ages[kHogAgeGroupAlreadyScheduled]);
+           age.average_ages[kHogAgeGroupAlreadyScheduled],
+           deltas[address] / static_cast<double>(tx_counts[address]),
+           10.0 / (i + 1));
   }
 
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
