@@ -129,7 +129,6 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
-    printf("hmm\n");
     cycle_if_needed(tx);
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
@@ -209,7 +208,6 @@ Scheduler::cycle_if_needed(const SignedTransaction &tx)
 void
 Scheduler::cycle_groups(const ContractAddress &account)
 {
-  printf("cycle groups\n");
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages;
   new_averages.address = averages.address;
@@ -440,11 +438,6 @@ Scheduler::schedule(size_t block_size)
         eligible_accounts.push_back(account);
       }
       std::shuffle(eligible_accounts.begin(), eligible_accounts.end(), g);
-      printf("eligible accounts: ");
-      for (ContractAddress a : eligible_accounts) {
-        std::printf("%01x ", a[0]);
-      }
-      printf("\n");
 
       for (size_t i = 0; i < std::min(num_remaining, eligible_accounts.size());
            i++) {
