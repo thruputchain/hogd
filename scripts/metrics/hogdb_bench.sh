@@ -5,7 +5,6 @@ fi
 
 BUILD_DIR=$1
 
-
 #Within the CI runners: the CI working directory is on the local SSD
 CWD=$(pwd)
 
