@@ -10,8 +10,7 @@
 namespace hogd {
 
 std::shared_ptr<ExecutorContext>
-ExecutorStateManager::get_executor_context(
-    BlockID block_id)
+ExecutorStateManager::get_executor_context(BlockID block_id)
 {
   auto active_blocks = active_blocks_.take();
 
@@ -22,8 +21,7 @@ ExecutorStateManager::get_executor_context(
 }
 
 void
-ExecutorStateManager::open_proposal(BlockID new_proposal_id
-                               )
+ExecutorStateManager::open_proposal(BlockID new_proposal_id)
 {
   auto active_blocks = active_blocks_.take();
 
@@ -35,8 +33,7 @@ ExecutorStateManager::open_proposal(BlockID new_proposal_id
   assert(inserted);
 }
 void
-ExecutorStateManager::open_validation(BlockID new_validation_id
-                                        )
+ExecutorStateManager::open_validation(BlockID new_validation_id)
 {
   auto active_blocks = active_blocks_.take();
 

@@ -25,7 +25,8 @@ public:
                        WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
     : self_executor_id_(self_executor_id), cp_(cp),
-      main_worker_pool_(main_worker_pool), rpc_context_(std::move(db_proxy), main_worker_pool_)
+      main_worker_pool_(main_worker_pool),
+      rpc_context_(std::move(db_proxy), main_worker_pool_)
   {}
 
   uint16_t start_server(uint16_t port_number);

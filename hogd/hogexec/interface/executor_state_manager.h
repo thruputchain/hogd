@@ -14,7 +14,8 @@ namespace hogd {
 
 class ExecutorStateManager {
 public:
-  ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy, WorkerPool &main_worker_pool)
+  ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
+                       WorkerPool &main_worker_pool)
     : main_worker_pool_(main_worker_pool), db_proxy_(std::move(db_proxy))
   {}
 

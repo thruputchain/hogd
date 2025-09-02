@@ -5,6 +5,7 @@ add_library(exec_interface_objects OBJECT
   rpc_interface.cc
   rpc_context.cc
 )
+
 target_link_libraries(
   exec_interface_objects
   hogd_interface
