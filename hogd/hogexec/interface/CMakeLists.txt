@@ -3,6 +3,7 @@ add_library(exec_interface_objects OBJECT
   executor_context.cc
   executor_state_manager.cc
   rpc_interface.cc
+  rpc_context.cc
 )
 target_link_libraries(
   exec_interface_objects
