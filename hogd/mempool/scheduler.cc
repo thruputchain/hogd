@@ -129,6 +129,7 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
+    printf("hmm\n");
     cycle_if_needed(tx);
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
@@ -178,15 +179,15 @@ Scheduler::cycle_if_needed(const SignedTransaction &tx)
 
     if (already_scheduled > 0) {
       already_scheduled_average_older =
-          (already_scheduled_age > to_schedule_age);
+          (already_scheduled_age < to_schedule_age);
       combined_averages_older =
           (received > 0) &&
           (compute_average_age(already_scheduled, already_scheduled_age,
-                               received, received_age) > to_schedule_age);
+                               received, received_age) < to_schedule_age);
     }
     else {
       combined_averages_older =
-          (received > 0) && (received_age > to_schedule_age);
+          (received > 0) && (received_age < to_schedule_age);
     }
 
     // We should cycle if either of the following is true:
@@ -208,6 +209,7 @@ Scheduler::cycle_if_needed(const SignedTransaction &tx)
 void
 Scheduler::cycle_groups(const ContractAddress &account)
 {
+  printf("cycle groups\n");
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages;
   new_averages.address = averages.address;
@@ -246,8 +248,15 @@ Scheduler::cycle_groups(const ContractAddress &account)
   }
 
   // Update [kGroupAlreadyScheduled].
-  new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] = received_hogs;
-  new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = received_age;
+  if (from_xdr(received_hogs)) {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] = received_hogs;
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = received_age;
+  }
+  else {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+        to_xdr(static_cast<uint128_t>(0));
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = 0;
+  }
 
   // Update [kGroupReceived].
   new_averages.num_hogs[kHogAgeGroupReceived] =
@@ -407,6 +416,9 @@ Scheduler::schedule(size_t block_size)
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;
 
+  std::random_device rd;
+  std::mt19937 g(rd());
+
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
@@ -419,10 +431,32 @@ Scheduler::schedule(size_t block_size)
       add_txs_from_info(info, info.size(), hashes, txs);
     }
     else {
-      num_scheduled += num_remaining;
-      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
-      // [age_to_tx_].
-      add_txs_from_info(info, num_remaining, hashes, txs);
+      std::unordered_map<ContractAddress, TxInfo *> eligible_accounts_set;
+      for (TxInfo *i : info) {
+        eligible_accounts_set.insert({i->account, i});
+      }
+      std::vector<ContractAddress> eligible_accounts;
+      for (const auto &[account, _] : eligible_accounts_set) {
+        eligible_accounts.push_back(account);
+      }
+      std::shuffle(eligible_accounts.begin(), eligible_accounts.end(), g);
+      printf("eligible accounts: ");
+      for (ContractAddress a : eligible_accounts) {
+        std::printf("%01x ", a[0]);
+      }
+      printf("\n");
+
+      for (size_t i = 0; i < std::min(num_remaining, eligible_accounts.size());
+           i++) {
+        TxInfo *this_info = eligible_accounts_set[eligible_accounts[i]];
+        num_scheduled += 1;
+        // [add_txs_from_info] removes the hashes from [account_to_tx_] and
+        // [age_to_tx_].
+        std::unordered_set<TxInfo *> blah;
+        blah.insert(this_info);
+        add_txs_from_info(blah, 1, hashes, txs);
+        CHECK_EQ(info.erase(this_info), 1UL);
+      }
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
