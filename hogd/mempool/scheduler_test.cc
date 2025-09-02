@@ -318,27 +318,6 @@ TEST(Scheduler, NotEnoughHogs)
   EXPECT_TRUE(scheduled.empty());
 }
 
-TEST(Scheduler, NotEnoughHogsAfterAdded)
-{
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
-
-  MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Scheduler &scheduler = clients.interface->scheduler();
-
-  scheduler.add_txs({txs[0]});
-  // Setting the account's hogs to 0 *after* adding the tx to the scheduler
-  // above.
-  HogAge &age =
-      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
-  age.average_ages[kHogAgeGroupToSchedule] = 1;
-  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-  scheduler.update_accounts({MempoolTestServer::kAccountAddresses[0]});
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
-  EXPECT_TRUE(scheduled.empty());
-}
-
 TEST(Scheduler, TwoAccounts)
 {
   fib_client_t fib_client_a(MempoolTestServer::kAccountAddresses[0]);
@@ -556,7 +535,7 @@ TEST(Scheduler, Fairness)
 
 TEST(Scheduler, FairnessAcrossBlocks)
 {
-  constexpr size_t kNumRounds = 400;
+  constexpr size_t kNumRounds = 1000;
   static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;

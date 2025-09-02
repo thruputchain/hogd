@@ -194,7 +194,9 @@ private:
   // not have enough hogs. Maps an account to its stranded txs. This makes it
   // easy to look up which stranded txs correspond to an account, since we will
   // want to know this once the number of hogs owned by an account changes.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>> stranded_;
+  std::unordered_map<ContractAddress,
+                     std::map<GasAmount, std::unordered_set<TxInfo *>>>
+      stranded_;
 };
 
 } // namespace hogd

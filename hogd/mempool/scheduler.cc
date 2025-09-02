@@ -142,7 +142,9 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     }
     else {
       // Not enough hogs for this tx.
-      CHECK(stranded_[info.account].insert(&it->second).second);
+      CHECK(stranded_[info.account][tx.tx.invocation.gas_limit]
+                .insert(&it->second)
+                .second);
     }
   }
 }
@@ -315,12 +317,10 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 
       CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
       info->age = averages.average_ages[kHogAgeGroupToSchedule];
-      if (info->tx.tx.invocation.gas_limit >
-          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-        it = infos.erase(it);
-        CHECK(stranded_[account].insert(info).second);
-        continue;
-      }
+      // The account must always have enough hogs to schedule the txs that are
+      // already in the runqueue. Otherwise, something has gone wrong.
+      CHECK_LE(info->tx.tx.invocation.gas_limit,
+               from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
       cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
           from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
           info->tx.tx.invocation.gas_limit);
@@ -330,23 +330,34 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 
     // Handle txs that are currently stranded. We may now have enough hogs to
     // add some or all of them to the runqueue.
-    for (auto it = stranded_[account].begin();
-         it != stranded_[account].end();) {
-      TxInfo *info = *it;
-      const HogAge &averages = cached_hogs_[account];
+    HogAge &averages = cached_hogs_[account];
+    for (auto gas_it = stranded_[account].begin();
+         gas_it != stranded_[account].end();) {
+      GasAmount gas_limit = gas_it->first;
+      std::unordered_set<TxInfo *> &infos = gas_it->second;
 
-      if (info->tx.tx.invocation.gas_limit >
-          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-        it++;
-      }
-      else {
-        it = stranded_[account].erase(it);
-        cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
-            from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
-            info->tx.tx.invocation.gas_limit);
-        info->age = cached_hogs_[account].average_ages[kHogAgeGroupToSchedule];
+      for (auto it = infos.begin(); it != infos.end();) {
+        TxInfo *info = *it;
+        CHECK_EQ(gas_limit, info->tx.tx.invocation.gas_limit);
+
+        if (gas_limit > from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+          break;
+        }
+
+        it = stranded_[account][gas_limit].erase(it);
+        averages.num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) -
+                   info->tx.tx.invocation.gas_limit);
+        info->age = averages.average_ages[kHogAgeGroupToSchedule];
         CHECK(account_to_tx_[account].insert(info).second);
         CHECK(age_to_tx_[info->age].insert(info).second);
+      }
+
+      if (infos.empty()) {
+        gas_it = stranded_[account].erase(gas_it);
+      }
+      else {
+        gas_it++;
       }
     }
     if (stranded_[account].empty()) {
@@ -503,7 +514,10 @@ Scheduler::find_and_remove_from_runqueue(
       CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
     }
     else {
-      CHECK_EQ(stranded_[it->second.account].erase(&it->second), 1UL);
+      CHECK_EQ(
+          stranded_[it->second.account][it->second.tx.tx.invocation.gas_limit]
+              .erase(&it->second),
+          1UL);
     }
   }
   return true;
