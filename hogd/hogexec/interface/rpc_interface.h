@@ -7,14 +7,12 @@
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/hogexec/interface/executor_state_manager.h"
+#include "hogd/hogexec/interface/rpc_context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/event.h"
-#include "x23/threadpool.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -27,7 +25,7 @@ public:
                        WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
     : self_executor_id_(self_executor_id), cp_(cp),
-      main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
+      main_worker_pool_(main_worker_pool), rpc_context_(std::move(db_proxy), main_worker_pool_)
   {}
 
   uint16_t start_server(uint16_t port_number);
@@ -77,7 +75,7 @@ private:
   x23::CoroPoll &cp_;
   WorkerPool &main_worker_pool_;
 
-  ExecutorStateManager executor_states_;
+  HogexecRpcContext rpc_context_;
   std::atomic<bool> shutdown_flag_ = false;
 };
 
