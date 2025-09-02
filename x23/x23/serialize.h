@@ -332,44 +332,86 @@ private:
 
 namespace detail {
 
-template<is_xdr_type X, is_xdr_type Y = X> consteval bool xdr_contains();
+// Dummy type representing a set of types
+template<typename... T> struct type_sequence {};
 
-template<is_xdr_type X, is_xdr_type Y>
-consteval bool
-xdr_contains_non_strict()
-{
-  if constexpr (std::same_as<X, Y>)
-    return true;
-  else
-    return xdr_contains<X, Y>();
-}
-
-template<is_xdr_type X, is_xdr_type Y>
-consteval bool
-xdr_contains()
+// Get the types of all fields in a struct or union, or the elements
+// of a vector/array/pointer, represented as a type_sequence.
+template<is_xdr_type X>
+consteval auto
+get_field_types()
 {
   using enum XdrCategory;
   if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>)
-    return xdr_contains_non_strict<X::value_type, Y>();
+    return type_sequence<typename X::value_type>{};
   else if constexpr (is_xdr_cat<X, kStruct>)
     return []<size_t... I>(std::index_sequence<I...>) {
-      return (xdr_contains_non_strict<std::tuple_element_t<I, X>, Y>() || ...);
+      return type_sequence<std::tuple_element_t<I, X>...>{};
     }(std::make_index_sequence<std::tuple_size_v<X>>{});
   else if constexpr (is_xdr_cat<X, kUnion>) {
     using ops = union_ops<X>;
     return []<size_t... I>(std::index_sequence<I...>) {
-      return (xdr_contains_non_strict<ops::template union_element_t<I>, Y>() ||
-              ...);
+      return type_sequence<typename ops::template union_element_t<I>...>{};
     }(std::make_index_sequence<ops::union_size>{});
   }
   else
-    return false;
+    return type_sequence<>{};
 }
+
+// True if an instance of Inner can be found anywhere inside an Outer
+// or, recursively, inside any field of Outer.
+template<is_xdr_type Outer, is_xdr_type Inner = Outer, typename... Stop>
+consteval bool
+xdr_contains()
+{
+  // Prevent infinite recursion
+  if constexpr (is_one_of<Outer, Stop...>)
+    return false;
+  else
+    return []<typename... T>(type_sequence<T...>) {
+      if constexpr (is_one_of<Inner, T...>)
+        return true;
+      else
+        return (xdr_contains<T, Inner, Stop..., Outer>() || ...);
+    }(get_field_types<Outer>());
+}
+
+template<is_xdr_type X, typename... Stop>
+consteval bool
+xdr_contains_recursive()
+{
+  if constexpr (is_one_of<X, Stop...>)
+    return true;
+  else
+    return []<typename... T>(type_sequence<T...>) {
+      return (xdr_contains_recursive<T, Stop..., X>() || ...);
+    }(get_field_types<X>());
+}
+
+} // namespace detail
+
+// True if type X is an XDR struct or union that contains itself
+// recursively.
+template<typename X>
+concept is_recursive_xdr =
+    is_xdr_cat<X, XdrCategory::kStruct, XdrCategory::kUnion> &&
+    detail::xdr_contains<X>();
+
+template<typename X>
+concept contains_recursive_xdr =
+    is_xdr_type<X> && detail::xdr_contains_recursive<X>();
+
+// The default
+extern size_t x23_deserialization_recursion_limit;
+
+namespace detail {
 
 struct Deserializer {
   const uint8_t *p;
   const uint8_t *const e;  // end of valid input (might read beyond)
   const uint8_t *const ee; // end of buffer (shouldn't read beyond)
+
+  size_t recursion_limit{x23_deserialization_recursion_limit};
 
   Deserializer(BufViewEnd b) noexcept
     : Deserializer(b.data(), b.data() + b.size(), b.bufend())
@@ -393,6 +435,14 @@ struct Deserializer {
       }
       throw XdrBadInput("x23::Deserializer: input too short");
     }
+  }
+
+  void recurse()
+  {
+    if (!recursion_limit) [[unlikely]]
+      raise("x23::Deserializer: exceeded recursion limit of {}",
+            x23_deserialization_recursion_limit);
+    --recursion_limit;
   }
 
   void need(size_t n) const
@@ -544,6 +594,8 @@ struct Deserializer {
 
   template<bool Safe, is_xdr_struct X> void go(X &x)
   {
+    if constexpr (is_recursive_xdr<X>)
+      recurse();
     if (!Safe || unsafe_ok(xdr_size_bounds<X>()))
       visit_fields([this](auto &x) { this->go<false>(x); }, x);
     else
@@ -551,6 +603,8 @@ struct Deserializer {
   }
   template<bool Safe, is_xdr_union X> void go(X &x)
   {
+    if constexpr (is_recursive_xdr<X>)
+      recurse();
     using ops = union_ops<X>;
     auto d = static_cast<typename ops::discriminant_type>(get32<Safe>());
     union_set_discriminant(x, d);
