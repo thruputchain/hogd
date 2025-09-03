@@ -14,7 +14,6 @@ target_link_libraries(
   ramdb
   hogd
   merkle
-  rpc
   genesis
 )
 

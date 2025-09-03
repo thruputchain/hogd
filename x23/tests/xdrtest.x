@@ -37,6 +37,10 @@ struct test_recursive {
   test_recursive nextvec<>;
 };
 
+struct contains_recursive {
+  test_recursive t;
+};
+
 struct fix_4 {
   int i;
 };

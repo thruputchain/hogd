@@ -99,7 +99,7 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args) = 0;
+  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd args) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
@@ -121,7 +121,7 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata) override
+  MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd argdata) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
@@ -161,7 +161,7 @@ private:
 
     using enum accept_stat;
 
-    MaybeAsync<Buf> operator()(BufView argbytes)
+    MaybeAsync<Buf> operator()(BufViewEnd argbytes)
     try {
       constexpr bool returns_void = std::is_void_v<return_type>;
       using dispatch_t = decltype(dispatch(argbytes));
@@ -172,13 +172,12 @@ private:
         if constexpr (returns_void) {
           dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg);
-          // Note explicit <Buf> required to avoid ICE in gcc14
-          return MaybeAsync<Buf>{make_record(rmsg)};
+          return make_record(rmsg);
         }
         else {
           return_type res = dispatch(argbytes);
           d_.logger_.template log_server<ProcMeta>(rmsg, res);
-          return MaybeAsync<Buf>{make_record(rmsg, res)};
+          return make_record(rmsg, res);
         }
       }
       else {
@@ -188,38 +187,38 @@ private:
           if constexpr (returns_void) {
             awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg);
-            return MaybeAsync<Buf>{make_record(rmsg)};
+            return make_record(rmsg);
           }
           else {
             return_type res = awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg, res);
-            return MaybeAsync<Buf>{make_record(rmsg, res)};
+            return make_record(rmsg, res);
           }
         }
 
-        return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
-                               [](ProcHandler self /* copy */,
-                                  auto awaitable) noexcept -> Async<Buf> {
-                                 try {
-                                   rpc_msg rmsg{.xid = self.xid_};
-                                   msg_set_reply_stat(&rmsg, SUCCESS);
-                                   if constexpr (returns_void) {
-                                     co_await awaitable;
-                                     co_return make_record(rmsg);
-                                   }
-                                   else
-                                     co_return make_record<return_type>(
-                                         rmsg, co_await awaitable);
-                                 } catch (const std::exception &e) {
-                                   co_return self.error(e);
-                                 }
-                               }(*this, std::move(awaitable))};
+        // Dispatch returned something awaitable and it's not ready,
+        // so here we actually need to allocate a new coroutine frame.
+        return [](ProcHandler self /* copy *this into coroutine */,
+                  auto awaitable) noexcept -> Async<Buf> {
+          try {
+            rpc_msg rmsg{.xid = self.xid_};
+            msg_set_reply_stat(&rmsg, SUCCESS);
+            if constexpr (returns_void) {
+              co_await awaitable;
+              co_return make_record(rmsg);
+            }
+            else
+              co_return make_record<return_type>(rmsg, co_await awaitable);
+          } catch (const std::exception &e) {
+            co_return self.error(e);
+          }
+        }(*this, std::move(awaitable));
       }
     } catch (std::exception &e) {
       return error(e);
     }
 
-    decltype(auto) dispatch(BufView argbytes)
+    decltype(auto) dispatch(BufViewEnd argbytes)
     {
       return std::apply(
           [&](auto &...ea) {
@@ -228,7 +227,7 @@ private:
           d_.ea_);
     }
 
-    arg_type args(BufView argbytes)
+    arg_type args(BufViewEnd argbytes)
     {
       arg_type args;
       deserialize(&args, argbytes);
@@ -315,7 +314,7 @@ private:
   }
 
   Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
-  Async<std::expected<Buf, Errno>> read_record(SLOC_PARM0);
+  Async<Errno> read_record(Buf *b SLOC_PARM);
 
   friend class RefCount;
 };

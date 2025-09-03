@@ -71,3 +71,30 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     * clang-format
     * flake8 (for python)
     * clippy (for rust)
+
+## Update instructions
+
+To update to the latest version in the upstream git repository, do the
+following:
+
+1. Update the main git repository:
+
+    * `git pull`
+
+2. Update all submodules
+
+    * `git submodule update --init --recursive`
+
+    Alternatively, put the following in `$HOME/.gitconfig`:
+
+    ```
+    [alias]
+        sup = submodule update --init --recursive
+    ```
+    Then you can abbreviate the above command as
+
+    * `git sup`
+
+3. Update all the rust git repositories managed by cargo
+
+    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly update)`

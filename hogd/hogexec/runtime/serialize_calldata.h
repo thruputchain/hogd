@@ -85,7 +85,7 @@ template<> struct Serializer<SerializationFormat::kTxs> {
   {
     auto args = std::tuple<std::remove_cvref_t<Args>...>{};
     try {
-      x23::deserialize(&args, data);
+      x23::deserialize(&args, x23::BufView{data});
     } catch (const x23::XdrBadInput &e) {
       trace("TXS Deserialize failed: {}", e.what());
       return std::nullopt;
