@@ -73,10 +73,11 @@ struct BenchmarkState {
           client_config.template client<DbCoord1>());
     }();
 
-    auto result = generate_erc20_payments_experiment(ERC20PaymentsConfig{
-        .num_txs = num_txs,
-        .num_accounts = num_accounts_,
-    });
+    auto result = ERC20ExperimentState(ERC20PaymentsConfig{
+                                           .num_txs = num_txs,
+                                           .num_accounts = num_accounts_,
+                                       })
+                      .generate_experiment();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
     }

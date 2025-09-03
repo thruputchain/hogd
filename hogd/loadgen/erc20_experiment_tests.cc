@@ -31,11 +31,11 @@ protected:
 
 TEST_P(ERC20ExperimentTest, Basic)
 {
-  auto result = generate_erc20_payments_experiment(ERC20PaymentsConfig{
+  auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_txs = 100,
       .num_accounts = 10,
   });
-
+  auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_block);
@@ -71,11 +71,11 @@ TEST_P(ERC20ExperimentTest, Basic)
 
 TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
-  auto result = generate_erc20_payments_experiment(ERC20PaymentsConfig{
+  auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_txs = 10000,
       .num_accounts = 1000,
   });
-
+  auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_block);
