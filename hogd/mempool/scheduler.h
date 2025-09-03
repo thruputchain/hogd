@@ -127,7 +127,7 @@ public:
   // doing so gives the account an advantage in scheduling. This happens when
   // (1) cycling increases the average age of the [kHogAgeGroupToSchedule] group
   // or (2) the [kHogAgeGroupToSchedule] group does not have enough hogs to
-  // schedule any txs.
+  // schedule a tx with a gas limit of [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Debug.
