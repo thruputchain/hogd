@@ -372,33 +372,56 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 }
 
 void
-Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
+Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info,
                              x23::Vec<SignedTransactionHash> &hashes,
                              x23::Vec<SignedTransaction> &txs)
 {
-  // TODO(jhumphri): Make this more efficient by having [age_to_tx_] use vectors
-  // as values rather than unordered_sets.
-  std::vector<TxInfo *> v(info.begin(), info.end());
-
-  std::random_device rd;
-  std::mt19937 g(rd());
-  std::shuffle(v.begin(), v.end(), g);
-  for (TxInfo *i : v) {
-    if (num-- == 0) {
-      break;
-    }
+  for (auto it = info.begin(); it != info.end();) {
+    TxInfo *i = *it;
 
     hashes.push_back(i->tx_hash);
     txs.push_back(i->tx);
-
-    CHECK_EQ(account_to_tx_[i->account].count(i), 1UL);
-    CHECK_EQ(hash_to_tx_.count(i->tx_hash), 1UL);
 
     CHECK_EQ(account_to_tx_[i->account].erase(i), 1UL);
     if (account_to_tx_[i->account].empty()) {
       CHECK_EQ(account_to_tx_.erase(i->account), 1UL);
     }
-    CHECK_EQ(info.erase(i), 1UL);
+    it = info.erase(it);
+  }
+}
+
+void
+Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
+                          x23::Vec<SignedTransactionHash> &hashes,
+                          x23::Vec<SignedTransaction> &txs)
+{
+  while (num) {
+    std::unordered_map<ContractAddress, TxInfo *> account_set;
+    for (TxInfo *i : info) {
+      account_set.insert({i->account, i});
+    }
+
+    std::vector<TxInfo *> to_schedule;
+    to_schedule.reserve(account_set.size());
+    for (const auto &[_, tx] : account_set) {
+      to_schedule.push_back(tx);
+    }
+
+    {
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(to_schedule.begin(), to_schedule.end(), g);
+    }
+
+    size_t num_iterations = std::min(num, to_schedule.size());
+    for (size_t i = 0; i < num_iterations; i++) {
+      TxInfo *this_info = to_schedule[i];
+      std::unordered_set<TxInfo *> blah;
+      blah.insert(this_info);
+      add_txs_from_info(blah, hashes, txs);
+      CHECK_EQ(info.erase(this_info), 1UL);
+      num--;
+    }
   }
 }
 
@@ -408,43 +431,22 @@ Scheduler::schedule(size_t block_size)
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;
 
-  std::random_device rd;
-  std::mt19937 g(rd());
-
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
 
     auto &[average_age, info] = *age_to_tx_.begin();
     if (info.size() <= num_remaining) {
+      // We can fit all of the txs in [info] in the block, so we add all of
+      // them.
       num_scheduled += info.size();
-      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
-      // [age_to_tx_].
-      add_txs_from_info(info, info.size(), hashes, txs);
+      add_txs_from_info(info, hashes, txs);
     }
     else {
-      std::unordered_map<ContractAddress, TxInfo *> eligible_accounts_set;
-      for (TxInfo *i : info) {
-        eligible_accounts_set.insert({i->account, i});
-      }
-      std::vector<ContractAddress> eligible_accounts;
-      eligible_accounts.reserve(eligible_accounts_set.size());
-      for (const auto &[account, _] : eligible_accounts_set) {
-        eligible_accounts.push_back(account);
-      }
-      std::shuffle(eligible_accounts.begin(), eligible_accounts.end(), g);
-
-      for (size_t i = 0; i < std::min(num_remaining, eligible_accounts.size());
-           i++) {
-        TxInfo *this_info = eligible_accounts_set[eligible_accounts[i]];
-        num_scheduled += 1;
-        // [add_txs_from_info] removes the hashes from [account_to_tx_] and
-        // [age_to_tx_].
-        std::unordered_set<TxInfo *> blah;
-        blah.insert(this_info);
-        add_txs_from_info(blah, 1, hashes, txs);
-        CHECK_EQ(info.erase(this_info), 1UL);
-      }
+      // We can only fit some of the txs in [info] in the block, so we need to
+      // choose a subset of [info] to schedule.
+      get_txs_subset(info, num_remaining, hashes, txs);
+      num_scheduled += num_remaining;
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);

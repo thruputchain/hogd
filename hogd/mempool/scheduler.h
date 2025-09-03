@@ -165,9 +165,13 @@ private:
   // removing txs from the runqueue is a bit cumbersome because we maintain
   // several data structures to make it easy to look up txs with various key
   // types.
-  void add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
+  void add_txs_from_info(std::unordered_set<TxInfo *> &info,
                          x23::Vec<SignedTransactionHash> &hashes,
                          x23::Vec<SignedTransaction> &txs);
+
+  void get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
+                      x23::Vec<SignedTransactionHash> &hashes,
+                      x23::Vec<SignedTransaction> &txs);
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
