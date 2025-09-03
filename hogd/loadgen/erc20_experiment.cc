@@ -116,66 +116,13 @@ ERC20ExperimentState::generate_experiment()
     };
     mint_txs.push_back(tx);
   }
-  /*
-    // make work txs
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
-
-    auto make_account_pair = [&]() {
-      auto i = dist(gen);
-      auto j = i;
-      while (j == i) {
-        j = dist(gen);
-      }
-      return std::make_pair(i, j);
-    };
-
-    x23::Vec<SignedTransaction> work_txs;
-    work_txs.reserve(config_.num_txs);
-    for (size_t i = 0; i < config_.num_txs; ++i) {
-      auto [sender, receiver] = make_account_pair();
-
-      uint128_t amount = 10;
-
-      // has to match the deserialized objects in simple_wallet::do_action
-      Calldata internal_calldata =
-          x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
-                         GasAmount{1'000'000},
-                         erc20_meta::make_calldata<"transfer">(
-                             wallets_[receiver].address, to_xdr(amount)));
-
-      auto tx = SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      {
-                          .invoked_address = wallets_[sender].address,
-                          .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                          .gas_limit = GasAmount{1'000'000},
-                          .calldata = wallet_meta::make_calldata<"do_action">(
-                              ed25519_sign(wallets_[sender].secret_key,
-                                           internal_calldata),
-                              internal_calldata),
-                      },
-              },
-      };
-
-      work_txs.push_back(tx);
-    } */
 
   x23::Vec<SignedTransaction> unfurl_txs;
   unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
 
-  auto work_txs = extend_experiment(config_.num_txs);
-  if (!work_txs) {
-    return {LoadgenError{work_txs.error().code()}};
-  }
-
   return {LoadgenSuccessResult{
       .genesis_block = builder.build(),
       .initialization_txs = {std::move(unfurl_txs), std::move(mint_txs)},
-      .work_txs = std::move(work_txs.value().work_txs),
   }};
 }
 
