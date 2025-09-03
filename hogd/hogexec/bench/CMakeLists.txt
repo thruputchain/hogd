@@ -1,27 +1,4 @@
 add_executable(
-  fibonacci_bench
-  fibonacci_bench.cc
-)
-target_link_libraries(
-  fibonacci_bench
-  hogd
-  protocol
-  runtime
-  exec_interface
-  db_interface
-  contract_loader
-  benchmark::benchmark
-)
-
-target_include_directories(
-  fibonacci_bench
-  PRIVATE
-  ${CMAKE_BINARY_DIR}
-)
-
-set_property(TARGET fibonacci_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-
-add_executable(
   fibonacci_wasmonly
   fibonacci_wasmonly.cc
 )

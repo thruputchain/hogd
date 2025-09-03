@@ -32,7 +32,7 @@ target_link_libraries(
 
 # Additional libraries that are not included by default (i.e., in hogd library)
 add_subdirectory(ramdb)
-add_subdirectory(rpc)
+# add_subdirectory(rpc)
 
 # Finally, build the hogdb, hogexec, and coord executables
 add_subdirectory(hogdb)

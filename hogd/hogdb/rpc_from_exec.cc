@@ -277,7 +277,7 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
 
-  x23::deserialize(&out.contract(), *wasm);
+  x23::deserialize(&out.contract(), x23::BufView{*wasm});
   return out;
 }
 
