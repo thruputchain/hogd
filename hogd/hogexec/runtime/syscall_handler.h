@@ -7,6 +7,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -19,6 +20,8 @@
 #include "hogd/hogexec/runtime/transaction_stats.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -207,6 +210,10 @@ private:
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
+
+  BlockExecutionMode get_block_execution_mode() const {
+    return std::holds_alternative<ProposalModeData>(execution_mode_data_) ? BlockExecutionMode::kBlockExecutionModeProposal : BlockExecutionMode::kBlockExecutionModeValidation;
+  }
 };
 
 } // namespace hogd
