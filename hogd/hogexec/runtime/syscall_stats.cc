@@ -22,9 +22,9 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler & /*unused*/,
   switch (input_statistic) {
   case TransactionStatistic::kTxStatGasRemaining:
     output_result = remaining_gas.gas_amount_;
-    return {SyscallErrorCode::kNone, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
   default:
-    return {SyscallErrorCode::kInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 };
 

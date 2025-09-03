@@ -1,3 +1,4 @@
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <concepts>
@@ -28,7 +29,8 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   if (auto *stats = handler.get_transaction_stats()) {
     stats->sha256_total_bytes_processed += input_buffer.size();
   }
-  return {SyscallErrorCode::kNone, SHA256HashCost(input_buffer.size())};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          SHA256HashCost(input_buffer.size())};
 };
 
 // Verifies a cryptographic signature against a message using the provided
@@ -47,16 +49,17 @@ syscall_VerifySignature_inner(int32_t scheme,
   case CryptographicScheme::Ed25519:
     if (public_key.size() != sizeof(Ed25519PublicKey) ||
         signature.size() != sizeof(Ed25519Signature)) {
-      return {SyscallErrorCode::kInvalidSyscallInput, 0};
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
     }
     if (!ed25519_verify(public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         signature.subspan<0, sizeof(Ed25519Signature)>(),
                         message)) {
-      return {SyscallErrorCode::kInvalidSyscallInput, 0};
+      trace("Signature verification failed");
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
     }
-    return {SyscallErrorCode::kNone, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
   default:
-    return {SyscallErrorCode::kInvalidSyscallInput, 0};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 }
 

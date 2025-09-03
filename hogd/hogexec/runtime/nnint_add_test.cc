@@ -66,7 +66,8 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
              auto key = make_storage_key("test");
              auto [r, _gas] =
                  syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 200);
-             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+             if (!r.has_value() ||
+                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -78,7 +79,8 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
 
              auto [r3, _gas3] =
                  syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 300);
-             if (!r3.has_value() || r3.value() != SyscallErrorCode::kNone) {
+             if (!r3.has_value() ||
+                 r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -149,13 +151,15 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
              auto [res, _gas] =
                  syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
                                                     300);
-             if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              auto [res2, _gas2] =
                  syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 100);
-             if (!res2.has_value() || res2.value() != SyscallErrorCode::kNone) {
+             if (!res2.has_value() ||
+                 res2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -237,7 +241,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
              auto [r, _gas] =
                  syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
                                                     200);
-             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+             if (!r.has_value() ||
+                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};
@@ -248,7 +253,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
              auto key = make_storage_key("test");
              auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, key,
                                                                  nullptr, -100);
-             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+             if (!r.has_value() ||
+                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};

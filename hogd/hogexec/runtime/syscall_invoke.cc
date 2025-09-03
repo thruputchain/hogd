@@ -28,7 +28,7 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   }
 
   output_sender = *status;
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
@@ -36,7 +36,7 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address)
 {
   output_address = syscall_handler.get_current_address();
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -44,7 +44,7 @@ syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash)
 {
   output_source_tx_hash = syscall_handler.get_source_tx_hash();
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -52,7 +52,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len)
 {
   output_len = syscall_handler.get_calldata().size();
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -66,7 +66,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
               calldata.data(), output_written_len);
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -91,8 +91,10 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                              calldata, input_flags);
 
   // invocation returned successfully
-  if (invoke_res && (invoke_res.value() == SyscallErrorCode::kNone ||
-                     invoke_res.value() == SyscallErrorCode::kFrameReverted)) {
+  if (invoke_res &&
+      (invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeNone ||
+       invoke_res.value() ==
+           SyscallErrorCode::kSyscallErrorCodeFrameReverted)) {
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
@@ -100,7 +102,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     else {
       output_return_buffer_len = 0;
     }
-
     return {invoke_res.value(), gas_amount};
   }
   // Invocation encountered some error
@@ -115,7 +116,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {HostFnError{HostFnErrorCode::kHostExit},
-            static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
+            static_cast<int32_t>(
+                SyscallErrorCode::kSyscallErrorCodeDeterministicWasm)};
   }
 
   ReturnBuffer buffer;
@@ -142,7 +144,7 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   std::memcpy(output_buffer.data(), (*status)->data(), write_len);
   output_written_len = write_len;
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>

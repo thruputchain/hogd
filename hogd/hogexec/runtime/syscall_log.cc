@@ -25,7 +25,7 @@ syscall_Log_inner(SystemCallHandler &syscall_handler,
         std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
                          input_buffer.size()));
 
-  return {SyscallErrorCode::kNone, 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
 } // namespace hogd

@@ -2,9 +2,10 @@
 
 #include <chrono>
 #include <filesystem>
+#include <immintrin.h>
 #include <string>
 
-#include "log.h"
+#include "hogd/base/log.h"
 
 namespace hogd {
 
@@ -19,7 +20,9 @@ private:
   static std::string create_tmp_directory()
   {
     std::string dir = "/tmp/" + time_string_with_ns();
-    CHECK(std::filesystem::create_directory(dir));
+    while (!std::filesystem::create_directory(dir)) {
+      _mm_pause();
+    }
     return dir;
   }
 

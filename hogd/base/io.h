@@ -19,9 +19,11 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+
+// forward declaration
+struct sockaddr_in; // NOLINT
 
 namespace hogd {
 
@@ -35,7 +37,7 @@ inline constexpr mode_t kDefaultMode = (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 // used to track uninitialized File.
 inline constexpr int kInvalidFD = -1;
 
-// File wraps a UNIX file.
+// File wraps a UNIX file descriptor.
 class File {
 public:
   // open opens a file at the specified path.
@@ -91,6 +93,62 @@ has_extension(std::string_view filename, std::string_view ext)
   size_t pos = filename.find_last_of('.');
   return pos != std::string_view::npos && filename.substr(pos + 1) == ext;
 }
+
+// Socket wraps a UNIX socket file descriptor.
+class Socket : public File {
+public:
+  // socket creates a new socket.
+  static ErrnoStatus<Socket> socket(int domain, int type, int protocol);
+
+  Socket() = default;
+  explicit Socket(int fd) : File(fd) {}
+
+  // Enable move; disable copy.
+  Socket(Socket &&s) noexcept : File(std::move(s)) {}
+  Socket &operator=(Socket &&s) noexcept
+  {
+    File::operator=(std::move(s));
+    return *this;
+  }
+  Socket(const Socket &s) = delete;
+  Socket &operator=(const Socket &s) = delete;
+
+  // connect initiates a connection to addr.
+  ErrnoStatus<void> connect(const sockaddr_in &addr);
+  // bind attaches addr to the socket.
+  ErrnoStatus<void> bind(const sockaddr_in &addr);
+  // listen prepares the socket to accept incoming connections.
+  ErrnoStatus<void> listen(int backlog);
+  // accept creates a new socket for an incoming connection when it arrives.
+  ErrnoStatus<Socket> accept(sockaddr_in *addr);
+  // shutdown tears down the socket's connection.
+  ErrnoStatus<void> shutdown(int how);
+  // setsockopt configures an option for the socket.
+  template<typename T> requires std::is_trivially_copyable_v<T>
+  ErrnoStatus<void> setsockopt(int level, int option_name, const T &val)
+  {
+    return raw_setsockopt(level, option_name,
+                          reinterpret_cast<const void *>(&val), sizeof(val));
+  }
+  // getsockname returns the address bound to the socket.
+  template<typename T> requires std::is_trivially_copyable_v<T>
+  ErrnoStatus<void> getsockname(T &val)
+  {
+    return raw_getsockname(reinterpret_cast<void *>(&val), sizeof(val));
+  }
+  // getpeername returns the address of the connected client.
+  template<typename T> requires std::is_trivially_copyable_v<T>
+  ErrnoStatus<void> getpeername(T &val)
+  {
+    return raw_getpeername(reinterpret_cast<void *>(&val), sizeof(val));
+  }
+
+private:
+  ErrnoStatus<void> raw_setsockopt(int level, int option_name, const void *val,
+                                   size_t len);
+  ErrnoStatus<void> raw_getsockname(void *val, size_t len);
+  ErrnoStatus<void> raw_getpeername(void *val, size_t len);
+};
 
 // Directory wraps a UNIX directory.
 //

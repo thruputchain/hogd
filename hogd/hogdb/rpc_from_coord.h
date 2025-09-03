@@ -65,6 +65,8 @@ public:
 
   x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock genesis_block);
 
+  static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height);
+
   uint16_t port();
 
 private:
@@ -79,7 +81,6 @@ private:
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
 };
-
 static_assert(is_DbCoord1<HogDBCoordServer *, x23::Async>);
 
 } // namespace hogd

@@ -121,9 +121,7 @@ public:
 
     {
       LocalMockDB db_identifier{.read_port_number_ = executor_db_port_};
-      executor_coord_server_.init_from_coord(
-          x23::HostPort(kAddress.c_str(), coordinator_port_).show(),
-          &db_identifier);
+      executor_coord_server_.init_from_coord(&db_identifier);
       executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
     }
   }

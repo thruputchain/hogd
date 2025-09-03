@@ -63,9 +63,17 @@ fi
 ./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim > metrics_history/metrics/initial_token_claim-codesize/$branch/${commit_time}_$commit
 
 # Performance metrics
+## hogdb_bench
+./metrics_history/scripts/make_metric_file.sh hogdb-bench $branch $commit $commit_time
+./scripts/metrics/hogdb_bench.sh $BUILD_DIR > metrics_history/metrics/hogdb-bench/$branch/${commit_time}_$commit
+
 ## mass fibonacci.wasm calls
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $branch $commit $commit_time
 ./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR > metrics_history/metrics/fibonacci-wasmonly/$branch/${commit_time}_$commit
+
+## payments_bench 10 accounts
+./metrics_history/scripts/make_metric_file.sh payments-bench-10 $branch $commit $commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 10 > metrics_history/metrics/payments-bench-10/$branch/${commit_time}_$commit
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
@@ -87,6 +95,7 @@ GIT_COMMITTER_NAME="$committer_name" \
 GIT_COMMITTER_EMAIL="$committer_email" \
 git commit -m "Add metrics for $branch $commit" --author "$committer_name <$committer_email>"
 git push
+
 
 
 

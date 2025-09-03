@@ -17,6 +17,7 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 
+#include "nomination.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -141,27 +142,6 @@ HogDBCoordServer::dbcoord_write_hog_ages(const HogAgeBatch &ages)
 }
 
 namespace {
-template<typename Result, typename T>
-ErrnoStatus<Result>
-make_errno_status(T ret)
-{
-  // first check for error.
-  if (ret == -1)
-    return Errno{};
-
-  // otherwise return the result type.
-  assert(ret >= 0);
-  if constexpr (std::is_integral_v<Result>) {
-    return static_cast<Result>(ret);
-  }
-  else if (std::is_void_v<Result>) {
-    assert(ret == 0);
-    return {};
-  }
-  else {
-    static_assert("unsupported result type");
-  }
-}
 
 template<typename T> requires std::is_trivially_copyable_v<T>
 inline ErrnoStatus<void>
@@ -182,6 +162,7 @@ get_port(int fd)
     throw std::runtime_error("Failed to get socket name");
   return ntohs(saddr.sin_port);
 }
+
 } // namespace
 
 void
@@ -278,6 +259,12 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   ctx_.close_block_tx(0);
 
   co_return DbResult::DbResultOK;
+}
+
+x23::Async<DbShardResult>
+HogDBCoordServer::dbcoord_shard_restore(BlockHeight height)
+{
+  co_return DbShardResult::ShardOK;
 }
 
 uint16_t

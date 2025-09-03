@@ -1,18 +1,24 @@
 // hogdb.cc - handles initialization for hogdb
 
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <format>
 #include <future>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 // TODO(abelay): there is apparently a header dependency problem inside x23
 // where x23/vec.h cannot be included first.  These generated headers are not
 // needed, but included as a hack to avoid it.
+#include "coord.hh"
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/merkle.h"
@@ -28,6 +34,10 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -38,7 +48,8 @@ constexpr uint16_t kCoordServerPort = 8080;
 constexpr uint16_t kExecServerPort = 8081;
 
 int
-hogdb_init(std::string_view path, size_t ram_bytes)
+hogdb_init(std::string_view path, size_t ram_bytes,
+           const std::string *coordinator_addr)
 {
   // check the database's integrity and find the highest valid LSN.
   DBStatus<uint64_t> lsn = Database::check(path, ram_bytes);
@@ -86,6 +97,44 @@ hogdb_init(std::string_view path, size_t ram_bytes)
     return EXIT_FAILURE;
   }
 
+  // TODO(jhumphri): Check this and clean it up.
+  x23::ThreadPool x23_pool(/*nthreads=*/1);
+  x23::CoroPoll cp(x23_pool);
+  if (coordinator_addr) {
+    x23::HostPort host_port;
+    if (!host_port.parse(*coordinator_addr)) {
+      throw std::runtime_error(
+          std::format("Invalid coordinator address: {}", *coordinator_addr));
+    }
+    const std::string host = {host_port.host.begin(), host_port.host.end()};
+    const std::string port = {host_port.port.begin(), host_port.port.end()};
+
+    auto fd = cp.tcpconnect(host, port)();
+    if (!fd) {
+      return EXIT_FAILURE;
+    }
+
+    auto client_config = x23::rpc_stream_logged(cp, *fd);
+    while (true) {
+      auto client =
+          std::make_optional(client_config.template client<Coordinator1>());
+      if (!client) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        continue;
+      }
+
+      const std::string address =
+          "127.0.0.1:" + std::to_string(kCoordServerPort);
+      ShardCard card{.protocol = "blah",
+                     .upid = {},
+                     .block_height = 0,
+                     .shard_count = 1,
+                     .address = address.c_str()};
+      client->coordinator_intro_shard(card)();
+      break;
+    }
+  }
+
   // block forever
   info("hogdb initialization complete.");
   std::promise<void>().get_future().wait();
@@ -105,12 +154,17 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogdb!");
 
-  if (argc < 2) {
-    std::println("usage: [db_path] [ram_bytes]");
+  if (argc < 3) {
+    std::println("usage: db_path ram_bytes [coordinator_ip:port]");
     return EXIT_FAILURE;
   }
 
   std::string path = argv[1];
   size_t ram_bytes = std::stoul(argv[2], nullptr, 0);
-  return hogd::hogdb_init(path, ram_bytes);
+
+  const std::string coordinator_addr_raw = (argc < 4) ? "" : argv[3];
+  const std::string *coordinator_addr =
+      (argc < 4) ? nullptr : &coordinator_addr_raw;
+
+  return hogd::hogdb_init(path, ram_bytes, coordinator_addr);
 };

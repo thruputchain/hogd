@@ -105,6 +105,7 @@ function(add_contract_header target_name)
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
         -o ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h
         -n ${target_name}
+        -w ${target_name}.wasm
         ${extra_includes}
     DEPENDS 
       ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
@@ -126,7 +127,7 @@ function(add_types_xdr target_name)
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
         cargo +nightly run
         --features spec
-        #--locked
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_types
@@ -154,24 +155,36 @@ endfunction()
 add_wasm_contract(fibonacci)
 add_wasm_contract(fibonacci_call)
 add_wasm_contract(cxs_roundtrip)
+add_wasm_contract(txs_roundtrip)
 add_wasm_contract(read_only_test)
 add_wasm_contract(manual_revert_test)
 add_wasm_contract(manual_revert_caller)
 add_wasm_contract(simple_wallet)
 add_wasm_contract(initial_token_claim)
 
+# TODO(geoff): make a cleaner way to automate dependency tracking on these headers
 add_types_xdr(itc_erc20)
 add_wasm_contract(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+add_dependencies(itc_erc20_header itc_erc20_types_xdr)
 
 add_xdr_rs(
-	roundtrip_rs 
+	cxs_roundtrip_rs 
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
-	./integration_test_contracts/cxs_roundtrip/roundtrip.x)
+	./integration_test_contracts/xdr/roundtrip.x)
+
+add_xdr_rs(
+	txs_roundtrip_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src
+	./integration_test_contracts/xdr/roundtrip.x)
 
 add_xdr(roundtrip_hh
-  ./integration_test_contracts/cxs_roundtrip/roundtrip.x
+  ./integration_test_contracts/xdr/roundtrip.x
 )
 
-add_dependencies(cxs_roundtrip_wasm roundtrip_rs)
-add_dependencies(cxs_roundtrip_spec_json roundtrip_rs)
+add_dependencies(cxs_roundtrip_wasm cxs_roundtrip_rs)
+add_dependencies(cxs_roundtrip_spec_json cxs_roundtrip_rs)
+
+add_dependencies(txs_roundtrip_wasm txs_roundtrip_rs)
+add_dependencies(txs_roundtrip_spec_json txs_roundtrip_rs)
+
 add_dependencies(all_wasm_contracts roundtrip_hh)

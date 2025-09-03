@@ -126,7 +126,7 @@ public:
   // Debug.
   void dump_runqueue() const;
 
-private:
+  // TODO(jhumphri): Make both of these private.
   // We use this type to store information about a tx in the runqueue.
   struct TxInfo {
     // The average age of hogs in the account that submitted this tx. This age
@@ -140,6 +140,11 @@ private:
     SignedTransaction tx;
   };
 
+  // Maps an account to the txs it has submitted.
+  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
+      account_to_tx_;
+
+private:
   // Writes the contents of [cached_hogs_] back to the database.
   //
   // Note that the scheduler removes hogs from the [kHogAgeGroupToSchedule]
@@ -153,13 +158,13 @@ private:
   // contains the correct number of hogs.
   void write_cache();
 
-  // This method will cycle the groups for the account that submitted [tx] if
-  // doing so gives the account an advantage in scheduling. This happens when
-  // (1) cycling increases the average age of the [kHogAgeGroupToSchedule] group
-  // or (2) the [kHogAgeGroupToSchedule] group does not have enough hogs to
-  // schedule [tx] but cycling will add enough hogs to this group to schedule
-  // it.
-  void cycle_if_needed(const SignedTransaction &tx);
+  // This method will cycle the groups for [account] if doing so gives the
+  // account an advantage in scheduling. This happens when (1) cycling increases
+  // the average age of the [kHogAgeGroupToSchedule] group or (2) no txs are
+  // currently on the runqueue for [account] and the [kHogAgeGroupToSchedule]
+  // group does not have enough hogs to schedule a tx with a gas limit of
+  // [gas_limit].
+  void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain
@@ -183,9 +188,6 @@ private:
 
   // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
-  // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
-      account_to_tx_;
   // Maps an average hog age to a set of txs submitted by accounts with that
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
@@ -194,7 +196,9 @@ private:
   // not have enough hogs. Maps an account to its stranded txs. This makes it
   // easy to look up which stranded txs correspond to an account, since we will
   // want to know this once the number of hogs owned by an account changes.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>> stranded_;
+  std::unordered_map<ContractAddress,
+                     std::map<GasAmount, std::unordered_set<TxInfo *>>>
+      stranded_;
 };
 
 } // namespace hogd

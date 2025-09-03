@@ -5,6 +5,7 @@
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
