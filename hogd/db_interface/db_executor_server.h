@@ -81,7 +81,7 @@ private:
 static_assert(is_DatabaseToExecutorInterfaceV1<SyncDBExecutorServer *,
                                                std::type_identity_t>);
 
-#if 0
+#if 0		   // NOLINT
 // Wraps the SyncDBExecutorServer in an RPC server.
 class RPCDbExecutorServer {
 public:
