@@ -661,7 +661,7 @@ TEST(Scheduler, YoungHogStarvation)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+    txs.push_back(generate_txs(fib_clients.back(), kNumRounds * 2));
   }
 
   MempoolTestServer server;
@@ -700,6 +700,7 @@ TEST(Scheduler, YoungHogStarvation)
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] =
         scheduler.schedule(/*block_size=*/1);
+    EXPECT_EQ(scheduled.size(), 1);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
