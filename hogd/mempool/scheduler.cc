@@ -267,7 +267,6 @@ Scheduler::cycle_groups(const ContractAddress &account)
 void
 Scheduler::dump_runqueue() const
 {
-  // TODO(jhumphri): Improve this.
   for (const auto &[height, tx_infos] : age_to_tx_) {
     std::println("runqueue age {}:", height);
     for (const TxInfo *info : tx_infos) {
@@ -317,7 +316,6 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
     // Handle existing txs in the runqueue.
-    // TODO(jhumphri): Optimize this. It is currently O(N^2).
     for (auto it = infos.begin(); it != infos.end();) {
       TxInfo *info = *it;
       const HogAge &averages = cached_hogs_[account];
@@ -520,7 +518,6 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
     txs.push_back(info.tx);
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
   }
-  // TODO(jhumphri): Add a test for this.
   // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
   // for all accounts in [accounts], add any stranded txs to the runqueue if
   // possible.
