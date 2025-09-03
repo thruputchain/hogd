@@ -19,10 +19,10 @@ public:
 private:
   static std::string create_tmp_directory()
   {
-    std::string dir = "/tmp/" + time_string_with_ns();
-    while (!std::filesystem::create_directory(dir)) {
-      _mm_pause();
-    }
+    std::string dir;
+    do {
+      dir = "/tmp/" + time_string_with_ns();
+    } while (!std::filesystem::create_directory(dir));
     return dir;
   }
 

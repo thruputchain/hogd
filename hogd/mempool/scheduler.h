@@ -126,7 +126,7 @@ public:
   // Debug.
   void dump_runqueue() const;
 
-  // TODO(jhumphri): Make both of these private.
+private:
   // We use this type to store information about a tx in the runqueue.
   struct TxInfo {
     // The average age of hogs in the account that submitted this tx. This age
@@ -140,11 +140,6 @@ public:
     SignedTransaction tx;
   };
 
-  // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
-      account_to_tx_;
-
-private:
   // Writes the contents of [cached_hogs_] back to the database.
   //
   // Note that the scheduler removes hogs from the [kHogAgeGroupToSchedule]
@@ -188,6 +183,9 @@ private:
 
   // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
+  // Maps an account to the txs it has submitted.
+  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
+      account_to_tx_;
   // Maps an average hog age to a set of txs submitted by accounts with that
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
