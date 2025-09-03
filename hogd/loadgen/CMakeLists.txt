@@ -33,3 +33,14 @@ target_link_libraries(
   precompiles
   gtest
 )
+
+add_executable(
+  loadgen_server
+  main.cc
+)
+
+target_link_libraries(
+  loadgen_server
+  loadgen
+  hogd
+)
