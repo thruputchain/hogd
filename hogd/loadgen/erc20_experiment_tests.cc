@@ -37,7 +37,7 @@ TEST_P(ERC20ExperimentTest, Basic)
   });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
-  
+
   run_genesis_initialization(result.value().genesis_block);
 
   for (auto &init_block : result.value().initialization_txs) {
