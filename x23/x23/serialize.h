@@ -623,7 +623,6 @@ struct Deserializer
       this->recurse();
     if (!Safe || unsafe_ok(xdr_size_bounds<X>()))
       visit_fields([this](auto &x) { this->go<false>(x); }, x);
-#if 0
     else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
       throw XdrBadInput("x23::Deserializer: input too short");
     else {
@@ -632,10 +631,6 @@ struct Deserializer
         (go<(I < kUF)>(get<I>(x)), ...);
       }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
-#else
-    else
-      visit_fields([this](auto &x) { this->go<true>(x); }, x);
-#endif
   }
   template<bool Safe, is_xdr_union X> void go(X &x)
   {
