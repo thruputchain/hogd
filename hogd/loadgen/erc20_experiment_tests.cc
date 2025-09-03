@@ -32,7 +32,6 @@ protected:
 TEST_P(ERC20ExperimentTest, Basic)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_txs = 100,
       .num_accounts = 10,
   });
   auto result = state->generate_experiment();
@@ -55,7 +54,11 @@ TEST_P(ERC20ExperimentTest, Basic)
 
   std::optional<GasAmount> gas_used;
 
-  for (auto &tx : result.value().work_txs) {
+  auto work_txs = state->extend_experiment(100);
+  ASSERT_TRUE(work_txs.has_value());
+  ASSERT_EQ(work_txs.value().work_txs.size(), 100);
+
+  for (auto &tx : work_txs.value().work_txs) {
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
@@ -72,7 +75,6 @@ TEST_P(ERC20ExperimentTest, Basic)
 TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_txs = 10000,
       .num_accounts = 1000,
   });
   auto result = state->generate_experiment();
@@ -95,7 +97,10 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   std::optional<GasAmount> gas_used;
 
-  for (auto &tx : result.value().work_txs) {
+  auto work_txs = state->extend_experiment(10000);
+  ASSERT_TRUE(work_txs.has_value());
+
+  for (auto &tx : work_txs.value().work_txs) {
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
