@@ -583,11 +583,13 @@ TEST(Scheduler, FairnessAcrossBlocks)
     scheduler.mark_txs_executed(scheduled_hashes, /*block=*/i);
     for (const ContractAddress &account :
          MempoolTestServer::kAccountAddresses) {
-      // TODO(jhumphri): We need to periodically call [cycle_if_needed()] in the
-      // scheduler so that we can add stranded txs to the runqueue, even if
-      // [add_txs()] is not called again for the account.
+      // TODO(jhumphri): The scheduler should be calling [cycle_groups()], not
+      // the client. I think the correct heuristic to use is when
+      // [scheduler.account_to_tx_[account] < block_size]. Since the block size
+      // in this test is 1, we are checking for [empty()] below, but this is the
+      // same thing as checking if [scheduler.account_to_tx_[account] < 1].
       if (scheduler.account_to_tx_[account].empty()) {
-        scheduler.cycle_if_needed(txs[account][0]);
+        scheduler.cycle_groups(account);
       }
     }
   }
@@ -602,7 +604,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
     // processed before any are processed from the other account. Maybe we can
     // make this more fair by choosing randomly among all of the txs with the
     // same priority?
-    constexpr size_t kErrorBound = 7;
+    constexpr size_t kErrorBound = 2;
     EXPECT_LE(tx_counts[address], target + kErrorBound);
     EXPECT_GE(tx_counts[address], target - kErrorBound);
   }

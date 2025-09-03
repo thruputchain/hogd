@@ -123,17 +123,10 @@ public:
   // between them.
   void cycle_groups(const ContractAddress &account);
 
-  // This method will cycle the groups for the account that submitted [tx] if
-  // doing so gives the account an advantage in scheduling. This happens when
-  // (1) cycling increases the average age of the [kHogAgeGroupToSchedule] group
-  // or (2) the [kHogAgeGroupToSchedule] group does not have enough hogs to
-  // schedule [tx] but cycling will add enough hogs to this group to schedule
-  // it.
-  void cycle_if_needed(const SignedTransaction &tx);
-
   // Debug.
   void dump_runqueue() const;
 
+  // TODO(jhumphri): Make both of these private.
   // We use this type to store information about a tx in the runqueue.
   struct TxInfo {
     // The average age of hogs in the account that submitted this tx. This age
@@ -164,6 +157,14 @@ private:
   // method calls, and the [kHogAgeGroupToSchedule] group written to hogdb
   // contains the correct number of hogs.
   void write_cache();
+
+  // This method will cycle the groups for the account that submitted [tx] if
+  // doing so gives the account an advantage in scheduling. This happens when
+  // (1) cycling increases the average age of the [kHogAgeGroupToSchedule] group
+  // or (2) the [kHogAgeGroupToSchedule] group does not have enough hogs to
+  // schedule [tx] but cycling will add enough hogs to this group to schedule
+  // it.
+  void cycle_if_needed(const SignedTransaction &tx);
 
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain

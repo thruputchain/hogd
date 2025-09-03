@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <print>
 #include <random>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_coord.hh"
 #include "exec_coord.hh"
@@ -388,23 +390,22 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
   std::random_device rd;
   std::mt19937 g(rd());
   std::shuffle(v.begin(), v.end(), g);
-  for (size_t idx = 0; idx < v.size(); idx++) {
+  for (TxInfo *i : v) {
     if (num-- == 0) {
       break;
     }
-    TxInfo &i = *v[idx];
 
-    hashes.push_back(i.tx_hash);
-    txs.push_back(i.tx);
+    hashes.push_back(i->tx_hash);
+    txs.push_back(i->tx);
 
-    CHECK_EQ(account_to_tx_[i.account].count(&i), 1UL);
-    CHECK_EQ(hash_to_tx_.count(i.tx_hash), 1UL);
+    CHECK_EQ(account_to_tx_[i->account].count(i), 1UL);
+    CHECK_EQ(hash_to_tx_.count(i->tx_hash), 1UL);
 
-    CHECK_EQ(account_to_tx_[i.account].erase(&i), 1UL);
-    if (account_to_tx_[i.account].empty()) {
-      CHECK_EQ(account_to_tx_.erase(i.account), 1UL);
+    CHECK_EQ(account_to_tx_[i->account].erase(i), 1UL);
+    if (account_to_tx_[i->account].empty()) {
+      CHECK_EQ(account_to_tx_.erase(i->account), 1UL);
     }
-    CHECK_EQ(info.erase(v[idx]), 1UL);
+    CHECK_EQ(info.erase(i), 1UL);
   }
 }
 
@@ -434,6 +435,7 @@ Scheduler::schedule(size_t block_size)
         eligible_accounts_set.insert({i->account, i});
       }
       std::vector<ContractAddress> eligible_accounts;
+      eligible_accounts.reserve(eligible_accounts_set.size());
       for (const auto &[account, _] : eligible_accounts_set) {
         eligible_accounts.push_back(account);
       }
