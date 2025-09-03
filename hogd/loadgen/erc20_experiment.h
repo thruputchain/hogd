@@ -3,6 +3,7 @@
 #include <cassert>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/loadgen/experiment_state.h"
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"

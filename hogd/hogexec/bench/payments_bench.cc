@@ -73,11 +73,10 @@ struct BenchmarkState {
           client_config.template client<DbCoord1>());
     }();
 
-    auto result = ERC20ExperimentState(ERC20PaymentsConfig{
-                                           .num_txs = num_txs,
-                                           .num_accounts = num_accounts_,
-                                       })
-                      .generate_experiment();
+    auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
+        .num_accounts = num_accounts_,
+    });
+    auto result = exp.generate_experiment();
     if (!result.has_value()) {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
     }
@@ -117,7 +116,12 @@ struct BenchmarkState {
       advance_block();
     }
 
-    return result.value().work_txs;
+    auto work_txs = exp.extend_experiment(num_txs);
+    if (!work_txs.has_value()) {
+      throw std::runtime_error("Failed to extend experiment");
+    }
+
+    return work_txs.value().work_txs;
   }
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
