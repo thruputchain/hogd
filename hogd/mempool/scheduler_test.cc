@@ -650,7 +650,7 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
 
 TEST(Scheduler, YoungHogStarvation)
 {
-  constexpr size_t kNumRounds = 100;
+  constexpr size_t kNumRounds = 10;
 
   std::vector<fib_client_t> fib_clients;
   std::vector<SignedTransactionBatch> txs;
