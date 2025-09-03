@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <getopt.h>
 #include <print>
 #include <string>
 #include <unistd.h>
@@ -28,76 +27,73 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
 } // namespace
 
 int
-main(int argc, char *argv[]) noexcept
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  try {
-    // Initialize hogd
-    int ret = hogd::hogd_init(argc, argv);
-    if (ret) {
-      return ret;
-    }
+  // Initialize hogd
+  auto ret = hogd::hogd_init(argc, argv);
+  if (ret) {
+    return ret;
+  }
 
-    const char *progname = argc > 0 ? argv[0] : "loadgen_server";
-    uint16_t port = kDefaultLoadgenPort;
+  const char *progname = argc > 0 ? argv[0] : "loadgen_server";
+  uint16_t port = kDefaultLoadgenPort;
 
-    // Parse command line arguments
-    int opt;
-    while ((opt = getopt(argc, argv, "p:h")) != -1) {
-      switch (opt) {
-      case 'p':
-        try {
-          int parsed_port = std::stoi(optarg);
-          if (parsed_port <= 0 || parsed_port > 65535) {
-            std::println(stderr, "Error: Port must be between 1 and 65535");
-            return EXIT_FAILURE;
-          }
-          port = static_cast<uint16_t>(parsed_port);
-        } catch (const std::exception &e) {
-          std::println(stderr, "Error: Invalid port number '{}'", optarg);
+  // Parse command line arguments
+  int opt;
+  // NOLINTBEGIN(misc-include-cleaner)
+  while ((opt = getopt(argc, argv, "p:h")) != -1) {
+    switch (opt) {
+    case 'p':
+      try {
+        int parsed_port = std::stoi(optarg);
+        if (parsed_port <= 0 || parsed_port > 65535) {
+          std::println(stderr, "Error: Port must be between 1 and 65535");
           return EXIT_FAILURE;
         }
-        break;
-      case 'h':
-        usage(progname, EXIT_SUCCESS);
-        break;
-      default:
-        usage(progname);
-        break;
+        port = static_cast<uint16_t>(parsed_port);
+      } catch (const std::exception &e) {
+        std::println(stderr, "Error: Invalid port number '{}'", optarg);
+        return EXIT_FAILURE;
       }
-    }
-
-    // Check for extra arguments
-    if (optind != argc) {
-      std::println(stderr, "Error: Unexpected extra arguments");
+      break;
+    case 'h':
+      usage(progname, EXIT_SUCCESS);
+      break;
+    default:
       usage(progname);
+      break;
     }
+  }
 
-    hogd::info("Starting loadgen server on port {}", port);
+  // Check for extra arguments
+  if (optind != argc) {
+    std::println(stderr, "Error: Unexpected extra arguments");
+    usage(progname);
+  }
+  // NOLINTEND(misc-include-cleaner)
 
-    // Create and start the loadgen server
-    hogd::LoadgenServer server;
-    auto start_result = server.start_server(port);
-    if (!start_result) {
-      std::println(stderr, "Error: Failed to start server on port {}: {}", port,
-                   start_result.error());
-      return EXIT_FAILURE;
-    }
+  hogd::info("Starting loadgen server on port {}", port);
 
-    uint16_t actual_port = start_result.value();
-    hogd::info("Loadgen server started successfully on port {}", actual_port);
-    std::println("Loadgen server listening on port {}", actual_port);
-    std::println("Press Enter to stop the server...");
-
-    // Wait for user input to stop the server
-    char buf;
-    if (read(STDIN_FILENO, &buf, 1) > 0) {
-      hogd::info("Stopping loadgen server");
-      std::println("Server stopped");
-    }
-
-    return EXIT_SUCCESS;
-  } catch (...) {
-    std::println(stderr, "Error: Unexpected exception occurred");
+  // Create and start the loadgen server
+  hogd::LoadgenServer server;
+  auto start_result = server.start_server(port);
+  if (!start_result) {
+    std::println(stderr, "Error: Failed to start server on port {}: {}", port,
+                 start_result.error());
     return EXIT_FAILURE;
   }
+
+  uint16_t actual_port = start_result.value();
+  hogd::info("Loadgen server started successfully on port {}", actual_port);
+  std::println("Loadgen server listening on port {}", actual_port);
+  std::println("Press Enter to stop the server...");
+
+  // Wait for user input to stop the server
+  char buf;
+  if (read(STDIN_FILENO, &buf, 1) > 0) {
+    hogd::info("Stopping loadgen server");
+    std::println("Server stopped");
+  }
+
+  return EXIT_SUCCESS;
 }
