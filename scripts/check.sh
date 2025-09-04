@@ -29,9 +29,9 @@ mkdir -p "$BUILD_DIR"
 COLOR='\033[1;34m'
 NC='\033[0m'
 
-GCC_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/gcc_errors.log
-GCC_RELEASE_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/gcc_release_errors.log
-LLVM_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/llvm_errors.log
+GCC_ERRORS_LOG=${SCRIPT_DIR}/gcc_errors.log
+GCC_RELEASE_ERRORS_LOG=${SCRIPT_DIR}/gcc_release_errors.log
+LLVM_ERRORS_LOG=${SCRIPT_DIR}/llvm_errors.log
 
 # Optionally perform the second build in parallel, in the background;
 # Much of the CI time is bottlenecked on libsodium's configure step (sequential, low CPU usage)

@@ -11,7 +11,6 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-sdlkfjdsf
 #include <utility>
 
 #include "built_contracts/contract_loader.h"
