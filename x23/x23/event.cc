@@ -44,14 +44,16 @@ WriteBuffer::Service::go()
     return 0;
   if (auto err = write(work))
     return err;
-  wbref_ = wb_->shared_from_this();
-  worker(std::move(*this), std::move(work));
+  if (!work.empty() || work_needed())
+    worker(std::move(*this), std::move(work));
   return 0;
 }
 
 Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
+  std::shared_ptr<WriteBuffer> wbref_(self.wb_->shared_from_this());
+  RefPtr<CoroPoll> cpref_{*self.cp_};
   for (;;) {
     while (!work.empty()) {
       co_await self.cp_->write_wait(self.fd_);

@@ -37,7 +37,7 @@ struct test_recursive {
   test_recursive nextvec<>;
 };
 
-struct contains_recursive {
+struct contains_test_recursive {
   test_recursive t;
 };
 
