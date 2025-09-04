@@ -44,14 +44,16 @@ WriteBuffer::Service::go()
     return 0;
   if (auto err = write(work))
     return err;
-  wbref_ = wb_->shared_from_this();
-  worker(std::move(*this), std::move(work));
+  if (!work.empty() || work_needed())
+    worker(std::move(*this), std::move(work));
   return 0;
 }
 
 Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
+  std::shared_ptr<WriteBuffer> wbref(self.wb_->shared_from_this());
+  // RefPtr<CoroPoll> cpref{*self.cp_};
   for (;;) {
     while (!work.empty()) {
       co_await self.cp_->write_wait(self.fd_);
@@ -97,7 +99,6 @@ Async<std::expected<size_t, Errno>>
 CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
                bool sync SLOC_ARG)
 {
-  RefPtr<CoroPoll> hold{nullptr};
   if (stop_requested())
     co_return Errno{EBADF};
   size_t startsize = out->size();
@@ -120,7 +121,6 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
         break;
     }
     else if (res.error() == EAGAIN) {
-      hold = *this;
       if (sync) {
         w->waiting_for_read_ = true;
         // flush now before going to sleep

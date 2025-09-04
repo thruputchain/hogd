@@ -28,8 +28,8 @@ static_assert(detail::xdr_contains<fix_4, int32_t>());
 static_assert(!is_recursive_xdr<fix_4>);
 static_assert(!is_recursive_xdr<uunion>);
 static_assert(is_recursive_xdr<test_recursive>);
-static_assert(!is_recursive_xdr<contains_recursive>);
-static_assert(contains_recursive_xdr<contains_recursive>);
+static_assert(!is_recursive_xdr<contains_test_recursive>);
+static_assert(contains_recursive_xdr<contains_test_recursive>);
 static_assert(contains_recursive_xdr<test_recursive>);
 static_assert(!contains_recursive_xdr<uunion>);
 

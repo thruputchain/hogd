@@ -182,6 +182,56 @@ TEST(Scheduler, TxFailed)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 }
 
+TEST(Scheduler, TxFailedStrandedEnqueued)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  server.set_hogs(MempoolTestServer::kAccountAddresses[0],
+                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
+                  /*num_hogs=*/5'000'000'000);
+  {
+    scheduler.add_txs({txs[0], txs[1]});
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+              MempoolTestServer::kAccountAddresses[0]);
+  }
+
+  // Check that the correct number of hogs was deducted.
+  HogAge age =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+
+  {
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+  }
+
+  scheduler.mark_txs_failed({sha256(txs[0])});
+  // Check that txs[1] is now enqueued.
+  age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  {
+    const auto &[hashes, _] = scheduler.schedule(kBlockSize);
+    ASSERT_EQ(hashes.size(), 1);
+    EXPECT_EQ(hashes[0], sha256(txs[1]));
+  }
+
+  // Check that [mark_txs_executed()] does not change the number of hogs.
+  scheduler.mark_txs_executed({sha256(txs[1])}, /*block=*/1);
+  age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  {
+    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+  }
+}
+
 TEST(Scheduler, Empty)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
@@ -581,7 +631,6 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
-    // TODO(jhumphri): Calculate this in a better way.
     const size_t target = (i + 1) * (kNumRounds / 10);
     constexpr size_t kErrorBound = 2;
     EXPECT_LE(tx_counts[address], target + kErrorBound);
@@ -640,7 +689,6 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
 
   for (size_t i = 0; i < MempoolTestServer::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestServer::kAccountAddresses[i];
-    // TODO(jhumphri): Calculate this in a better way.
     const size_t target = (i + 1) * (kNumRounds * kBlockSize / 10);
     constexpr size_t kErrorBound = 2;
     EXPECT_LE(tx_counts[address], target + kErrorBound);
@@ -718,10 +766,6 @@ TEST(Scheduler, YoungHogStarvation)
               MempoolTestServer::kAccountAddresses[1]);
   }
 }
-
-// TODO(jhumphri): Test that [cycle_groups()] is automatically called when
-// needed. We should ensure that the new averages are being computed properly in
-// [cycle_if_needed()].
 
 TEST(Scheduler, CycleFromAlreadyScheduled)
 {

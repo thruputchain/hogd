@@ -165,15 +165,18 @@ private:
 
   class Service {
   public:
-    [[nodiscard]] inline Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd);
+    [[nodiscard]]
+    Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
+      : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+    {}
+
     Errno go();
 
   private:
     WriteBuffer *wb_;
-    RefPtr<CoroPoll> cp_;
+    CoroPoll *cp_;
     BorrowedFd fd_;
     std::unique_lock<std::mutex> lk_;
-    std::shared_ptr<WriteBuffer> wbref_;
 
     Service(Service &&) noexcept = default;
     bool work_needed()
@@ -487,11 +490,5 @@ private:
 
   void loop();
 };
-
-// Define this after CoroPoll to get kAllowRefPtrConversion
-inline detail::WriteBuffer::Service::Service(WriteBuffer &wb, CoroPoll &cp,
-                                             BorrowedFd fd)
-  : wb_(&wb), cp_(cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
-{}
 
 } // namespace x23

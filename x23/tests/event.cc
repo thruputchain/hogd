@@ -24,19 +24,27 @@ main()
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == -1)
     Errno{}.raise("socketpair");
 
-  std::jthread j([fd = UniqueFd(fds[0])] {
+  std::binary_semaphore writeok(0);
+  std::binary_semaphore exitok(0);
+
+  std::jthread j([fd = UniqueFd(fds[0]), &writeok] {
+    writeok.acquire();
     for (char c : "hello"s) {
-      usleep(100000);
+      usleep(10000);
       write(fd.get(), &c, 1);
     }
   });
 
   set_nonblock(fds[1]);
-  cp.read(fds[1], &b, 6)([&b](auto res) {
+  cp.read(fds[1], &b, 6)([&b, &exitok](auto res) {
     if (res)
       std::println("Got {} bytes: \"{}\"", *res,
                    std::move(b).reinterpret<Str>());
     else
       std::println("Got error: {}", res.error());
+    exitok.release();
   });
+  writeok.release();
+
+  exitok.acquire();
 }

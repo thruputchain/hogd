@@ -52,7 +52,7 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
       len = *res;
     done = len & 0x80000000;
     len &= 0x7fffffff;
-    if (bp->size() + len > max_record_size)
+    if (bp->size() + len > max_message_size)
       co_return Errno{ENOMSG};
     if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res)
       co_return res.error();
@@ -81,10 +81,11 @@ RpcStreamImpl::reader(SLOC_ARG0)
   using enum msg_type;
   // Having some extra bytes in the buffer allows us to elide certain
   // bounds checks in deserialization.
-  constexpr size_t kMinBuf = 512;
+  constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
-  b.reserve(kMinBuf);
+  if constexpr (kMinBuf)
+    b.reserve(kMinBuf);
   while (!ss_.stop_requested()) {
     if (Errno err = co_await read_record(&b)) {
       fail();
@@ -107,7 +108,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs->xidmap_.erase(it);
       cs.reset();
       cb(std::move(b));
-      b.reserve(kMinBuf);
+      if constexpr (kMinBuf)
+        b.reserve(kMinBuf);
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;

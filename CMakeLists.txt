@@ -14,6 +14,18 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+# Enable logging of build failures to a file
+# This is used to track build failures in CI,
+# so that we can see what failed more easily (without info buried under pages of logs).
+set(ENABLE_CI_FAIL_LOG "" CACHE STRING "Path to log file for build failures")
+if(ENABLE_CI_FAIL_LOG)
+  set(HAS_CI_FAIL_LOG ON)
+else()
+  set(HAS_CI_FAIL_LOG OFF)
+endif()
+
+message(STATUS "ENABLE_CI_FAIL_LOG: ${ENABLE_CI_FAIL_LOG}")
+message(STATUS "HAS_CI_FAIL_LOG: ${HAS_CI_FAIL_LOG}")
 
 # Get git commit hash
 find_package(Git)
@@ -130,6 +142,11 @@ else()
   # on the libsodium code.
   set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function -O1")
   set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function -O1")
+endif()
+
+if (HAS_CI_FAIL_LOG)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
 endif()
 
 # Enable libsodium

@@ -6,7 +6,7 @@ source ${SCRIPT_DIR}/env.sh
 CXX_FLAGS=
 BUILD_DIR=build
 BUILD_TYPE=Release
-CMAKE_FLAGS=
+CMAKE_FLAGS=()
 
 print_usage() {
   printf "usage: scripts/build.sh [OPTION]...\n"
@@ -37,7 +37,7 @@ while getopts 'c:f:d:t:x:' flag; do
          exit 1 
        fi
        ;;
-    x) CMAKE_FLAGS="${OPTARG}" ;;
+    x) CMAKE_FLAGS+=("${OPTARG}") ;;
     *) print_usage
        exit 1 ;;
     esac
@@ -56,7 +56,7 @@ cd "$BUILD_DIR"
 CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   "${CMAKE_INJECT[@]}" \
-  "${CMAKE_FLAGS}" \
+  "${CMAKE_FLAGS[@]}" \
   "$ROOT_DIR"
 
 make -j "$NPROC"

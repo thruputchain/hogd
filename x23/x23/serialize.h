@@ -165,6 +165,26 @@ size_of_fixed()
   return xdr_size_bounds<X>().max_;
 }
 
+template<is_xdr_struct X>
+constexpr auto kMaxFieldSize = []<size_t... I>(std::index_sequence<I...>) {
+  return std::array<size_t, sizeof...(I)>{
+      xdr_size_bounds<std::tuple_element_t<I, X>>().max_...};
+}(std::make_index_sequence<std::tuple_size_v<X>>{});
+
+template<is_xdr_struct X>
+consteval size_t
+first_unsafe_field(size_t nbytes, size_t cur_field = 0)
+{
+  while (cur_field < kMaxFieldSize<X>.size()) {
+    if (size_t n = kMaxFieldSize<X>[cur_field]; n <= nbytes)
+      nbytes = -n;
+    else
+      break;
+    cur_field++;
+  }
+  return cur_field;
+}
+
 } // namespace detail
 
 // Number of bytes required to marshal a data structure in XDR format.
@@ -554,10 +574,7 @@ struct Deserializer
     }
   }
 
-  bool unsafe_ok(const SizeBounds &b) const
-  {
-    return ee - p >= std::ptrdiff_t(b.max_);
-  }
+  bool unsafe_ok(SizeBounds b) const { return ee - p >= ptrdiff_t(b.max_); }
 
   template<bool Safe, is_xdr_cat<XdrCategory::kArray> X> void go(X &x)
   {
@@ -599,12 +616,30 @@ struct Deserializer
 
   template<bool Safe, is_xdr_struct X> void go(X &x)
   {
+    constexpr SizeBounds kSB = xdr_size_bounds<X>();
     if constexpr (CheckRecursion && is_recursive_xdr<X>)
       this->recurse();
-    if (!Safe || unsafe_ok(xdr_size_bounds<X>()))
+    if constexpr (std::tuple_size_v<X> == 0)
+      return;
+    else if (!Safe || unsafe_ok(kSB))
       visit_fields([this](auto &x) { this->go<false>(x); }, x);
-    else
+    else if constexpr (kSB.min_ <
+                       xdr_size_bounds<std::tuple_element_t<0, X>>().max_)
       visit_fields([this](auto &x) { this->go<true>(x); }, x);
+    // If we are Safe, but the minimum size of the whole structure is
+    // greater than the maximum size of field 0, then we might as well
+    // check once against the minimum size of the structure and then
+    // unmarshal the first few fields unsafely.  That optimizes the
+    // case of a structure that starts with a bunch of integers and
+    // ends with a vector, like call_body.
+    else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
+      throw XdrBadInput("x23::Deserializer: input too short");
+    else {
+      constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
+      [this, &x]<size_t... I>(std::index_sequence<I...>) {
+        (this->go<(I >= kUF)>(get<I>(x)), ...);
+      }(std::make_index_sequence<std::tuple_size_v<X>>{});
+    }
   }
   template<bool Safe, is_xdr_union X> void go(X &x)
   {
