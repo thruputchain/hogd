@@ -109,7 +109,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs.reset();
       cb(std::move(b));
       if constexpr (kMinBuf)
-	b.reserve(kMinBuf);
+        b.reserve(kMinBuf);
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
