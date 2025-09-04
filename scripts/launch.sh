@@ -70,7 +70,7 @@ wait_port 7888
 
 # Start hogdb.
 echo "Start hogdb"
-"$HOGDB_BINARY" /tmp/hogdb 1000000 127.0.0.1:7888 &
+"$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
 # Start hogexec.
 echo "Start hogexec"
