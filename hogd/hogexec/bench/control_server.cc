@@ -34,7 +34,12 @@ public:
       error("already running process: {}", *running_pid_);
       return CIServerErrorCode::kCIServerErrorCodeAlreadyRunning;
     }
-    info("starting process: {} {}", config.program_name, config.program_args);
+
+    std::string program_name = std::string(CMAKE_ROOT_BINARY_DIR) + "/" + std::string(config.program_name.begin(), config.program_name.end());
+    std::vector<std::string> program_args =
+    std::vector<std::string>(config.program_args.begin(),
+                             config.program_args.end());
+    info("starting process: {} {}", program_name, program_args);
 
     auto pid = fork();
     if (pid < 0) {
@@ -43,11 +48,6 @@ public:
     }
 
     if (pid == 0) {
-      std::string program_name =
-          std::string(config.program_name.begin(), config.program_name.end());
-      std::vector<std::string> program_args =
-          std::vector<std::string>(config.program_args.begin(),
-                                   config.program_args.end());
 
       // Child process
       std::vector<char *> args;
