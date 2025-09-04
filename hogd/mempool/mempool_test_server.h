@@ -221,14 +221,15 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
   SignedTransactionBatch txs;
   txs.reserve(num_txs);
   for (uint64_t i = 0; i < num_txs; i++) {
-    Timestamp created = i;
     SignedTransaction tx{
         .tx = Transaction{
             .origin_id = {},
-            .created = created,
             .invocation = fib_client.make_invocation<kProgramName>(
                 // TODO(jhumphri): How to get this number automatically?
                 /*gas_amount=*/5'000'000'000, kFibonacciN),
+            .uniquifier = {.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = i},
             .contracts_to_deploy = {}}};
     txs.push_back(tx);
   }
