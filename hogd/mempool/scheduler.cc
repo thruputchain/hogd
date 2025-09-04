@@ -267,7 +267,6 @@ Scheduler::cycle_groups(const ContractAddress &account)
 void
 Scheduler::dump_runqueue() const
 {
-  // TODO(jhumphri): Improve this.
   for (const auto &[height, tx_infos] : age_to_tx_) {
     std::println("runqueue age {}:", height);
     for (const TxInfo *info : tx_infos) {
@@ -317,7 +316,6 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
     // Handle existing txs in the runqueue.
-    // TODO(jhumphri): Optimize this. It is currently O(N^2).
     for (auto it = infos.begin(); it != infos.end();) {
       TxInfo *info = *it;
       const HogAge &averages = cached_hogs_[account];
@@ -374,33 +372,60 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 }
 
 void
-Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
-                             x23::Vec<SignedTransactionHash> &hashes,
-                             x23::Vec<SignedTransaction> &txs)
+Scheduler::remove_tx_from_runqueue(TxInfo *info,
+                                   x23::Vec<SignedTransactionHash> &hashes,
+                                   x23::Vec<SignedTransaction> &txs)
 {
-  // TODO(jhumphri): Make this more efficient by having [age_to_tx_] use vectors
-  // as values rather than unordered_sets.
-  std::vector<TxInfo *> v(info.begin(), info.end());
+  hashes.push_back(info->tx_hash);
+  txs.push_back(info->tx);
 
-  std::random_device rd;
-  std::mt19937 g(rd());
-  std::shuffle(v.begin(), v.end(), g);
-  for (TxInfo *i : v) {
-    if (num-- == 0) {
-      break;
+  CHECK_EQ(account_to_tx_[info->account].erase(info), 1UL);
+  if (account_to_tx_[info->account].empty()) {
+    CHECK_EQ(account_to_tx_.erase(info->account), 1UL);
+  }
+}
+
+void
+Scheduler::get_txs_all(std::unordered_set<TxInfo *> &info,
+                       x23::Vec<SignedTransactionHash> &hashes,
+                       x23::Vec<SignedTransaction> &txs)
+{
+  for (auto it = info.begin(); it != info.end();) {
+    remove_tx_from_runqueue(*it, hashes, txs);
+    it = info.erase(it);
+  }
+}
+
+void
+Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
+                          x23::Vec<SignedTransactionHash> &hashes,
+                          x23::Vec<SignedTransaction> &txs)
+{
+  while (num) {
+    std::unordered_map<ContractAddress, TxInfo *> account_set;
+    for (TxInfo *i : info) {
+      account_set.insert({i->account, i});
     }
 
-    hashes.push_back(i->tx_hash);
-    txs.push_back(i->tx);
-
-    CHECK_EQ(account_to_tx_[i->account].count(i), 1UL);
-    CHECK_EQ(hash_to_tx_.count(i->tx_hash), 1UL);
-
-    CHECK_EQ(account_to_tx_[i->account].erase(i), 1UL);
-    if (account_to_tx_[i->account].empty()) {
-      CHECK_EQ(account_to_tx_.erase(i->account), 1UL);
+    std::vector<TxInfo *> to_schedule;
+    to_schedule.reserve(account_set.size());
+    for (const auto &[_, tx] : account_set) {
+      to_schedule.push_back(tx);
     }
-    CHECK_EQ(info.erase(i), 1UL);
+
+    {
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(to_schedule.begin(), to_schedule.end(), g);
+    }
+
+    size_t num_iterations = std::min(num, to_schedule.size());
+    for (size_t i = 0; i < num_iterations; i++) {
+      TxInfo *this_info = to_schedule[i];
+      remove_tx_from_runqueue(this_info, hashes, txs);
+      CHECK_EQ(info.erase(this_info), 1UL);
+      num--;
+    }
   }
 }
 
@@ -409,50 +434,31 @@ Scheduler::schedule(size_t block_size)
 {
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;
-
-  std::random_device rd;
-  std::mt19937 g(rd());
+  hashes.reserve(block_size);
+  txs.reserve(block_size);
 
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
-
     auto &[average_age, info] = *age_to_tx_.begin();
+
     if (info.size() <= num_remaining) {
+      // All of the txs in [info] in the block, so we add all of them. Note that
+      // [get_txs_all()] removes the txs from [info], so it is important that we
+      // add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
-      // [add_txs_from_info] removes the hashes from [account_to_tx_] and
-      // [age_to_tx_].
-      add_txs_from_info(info, info.size(), hashes, txs);
+      get_txs_all(info, hashes, txs);
     }
     else {
-      std::unordered_map<ContractAddress, TxInfo *> eligible_accounts_set;
-      for (TxInfo *i : info) {
-        eligible_accounts_set.insert({i->account, i});
-      }
-      std::vector<ContractAddress> eligible_accounts;
-      eligible_accounts.reserve(eligible_accounts_set.size());
-      for (const auto &[account, _] : eligible_accounts_set) {
-        eligible_accounts.push_back(account);
-      }
-      std::shuffle(eligible_accounts.begin(), eligible_accounts.end(), g);
-
-      for (size_t i = 0; i < std::min(num_remaining, eligible_accounts.size());
-           i++) {
-        TxInfo *this_info = eligible_accounts_set[eligible_accounts[i]];
-        num_scheduled += 1;
-        // [add_txs_from_info] removes the hashes from [account_to_tx_] and
-        // [age_to_tx_].
-        std::unordered_set<TxInfo *> blah;
-        blah.insert(this_info);
-        add_txs_from_info(blah, 1, hashes, txs);
-        CHECK_EQ(info.erase(this_info), 1UL);
-      }
+      // We can only fit some of the txs in [info] in the block, so we need to
+      // choose a subset of [info] to schedule.
+      num_scheduled += num_remaining;
+      get_txs_subset(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
   }
-
   return {hashes, txs};
 }
 
@@ -520,7 +526,6 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
     txs.push_back(info.tx);
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
   }
-  // TODO(jhumphri): Add a test for this.
   // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
   // for all accounts in [accounts], add any stranded txs to the runqueue if
   // possible.
