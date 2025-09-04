@@ -574,10 +574,7 @@ struct Deserializer
     }
   }
 
-  bool unsafe_ok(const SizeBounds &b) const
-  {
-    return ee - p >= ptrdiff_t(b.max_);
-  }
+  bool unsafe_ok(SizeBounds b) const { return ee - p >= ptrdiff_t(b.max_); }
 
   template<bool Safe, is_xdr_cat<XdrCategory::kArray> X> void go(X &x)
   {
@@ -619,16 +616,28 @@ struct Deserializer
 
   template<bool Safe, is_xdr_struct X> void go(X &x)
   {
+    constexpr SizeBounds kSB = xdr_size_bounds<X>();
     if constexpr (CheckRecursion && is_recursive_xdr<X>)
       this->recurse();
-    if (!Safe || unsafe_ok(xdr_size_bounds<X>()))
+    if constexpr (std::tuple_size_v<X> == 0)
+      return;
+    else if (!Safe || unsafe_ok(kSB))
       visit_fields([this](auto &x) { this->go<false>(x); }, x);
+    else if constexpr (kSB.min_ <
+                       xdr_size_bounds<std::tuple_element_t<0, X>>().max_)
+      visit_fields([this](auto &x) { this->go<true>(x); }, x);
+    // If we are Safe, but the minimum size of the whole structure is
+    // greater than the maximum size of field 0, then we might as well
+    // check once against the minimum size of the structure and then
+    // unmarshal the first few fields unsafely.  That optimizes the
+    // case of a structure that starts with a bunch of integers and
+    // ends with a vector, like call_body.
     else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
       throw XdrBadInput("x23::Deserializer: input too short");
     else {
       constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
       [this, &x]<size_t... I>(std::index_sequence<I...>) {
-        (go<(I < kUF)>(get<I>(x)), ...);
+        (go<(I >= kUF)>(get<I>(x)), ...);
       }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
   }
