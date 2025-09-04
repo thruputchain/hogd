@@ -1,7 +1,9 @@
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -19,6 +21,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "x23/cleanup.h"
+#include "x23/format.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 
@@ -57,14 +60,13 @@ public:
         args.push_back(const_cast<char *>(arg.c_str()));
       }
       args.push_back(nullptr);
-      info("execvp: {} {}", program_name, args);
+
+      std::println(stderr, "execvp: %s %s\n", program_name, x23::show(config.program_args));
+
       execvp(program_name.c_str(), args.data());
 
-      // If execvp returns, it failed
-      error("execvp failed: {}", Errno{});
-      std::fflush(stdout);
-      std::fflush(stderr);
-      exit(EXIT_FAILURE);
+      std::println(stderr, "execvp failed: %s\n", strerror(errno));
+      _exit(EXIT_FAILURE);
     }
     
     info("forked process: {}", pid);

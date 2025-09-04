@@ -47,7 +47,12 @@ int handle_start_command(std::string const &host, std::string const &port, std::
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
     auto client = hogd::connect_to_control_server(cp, host, port);
-    std::println("Starting server: {}", args);
+    // gcc14 has vector<string> format problems in CI
+    std::string command;
+    for (auto const &arg : args) {
+      command += arg + " ";
+    }
+    std::println("Starting server: {}", command);
     client.start_server(args[0], std::vector<std::string>(args.begin() + 1, args.end()));
     std::println("Start command sent successfully");
     return 0;
