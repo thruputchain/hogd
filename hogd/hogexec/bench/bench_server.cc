@@ -1,4 +1,5 @@
 #include <cassert>
+#include <csignal>
 #include <cstdlib>
 #include <memory>
 #include <optional>
