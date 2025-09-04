@@ -1,6 +1,7 @@
 #!/bin/bash
 
 CHUCKD_BINARY=~/go/bin/chuckd
+LOADGEN_BINARY=/home/local/jhumphri/build/hogd/loadgen/loadgen_server
 HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
 HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
 
@@ -33,14 +34,32 @@ if [ ! -x "$CHUCKD_BINARY" ]; then
   go install github.com/groundhogchain/chuckd/chuckd@latest
 fi
 
+# Start hogd loadgen.
+"$LOADGEN_BINARY" -p 11222 &
+sleep 5
+
 # Start chuckd.
-"$CHUCKD_BINARY" -l info bench loadgen &
+"$CHUCKD_BINARY"                 \
+  --stack                        \
+  --level info                   \
+  bench loadgen                  \
+  --in-addr :7888                \
+  --loadgen-addr localhost:11222 \
+  --num-accts 10000              \
+  --num-txs 1000000              \
+  --exec-batch 100               \
+  --exec-par 10 &
+sleep 5
 
 # Start hogdb.
+echo "Start hogdb"
 "$HOGDB_BINARY" /tmp/hogdb 1000000 127.0.0.1:7888 &
+sleep 5
 
 # Start hogexec.
+echo "Start hogexec"
 "$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
+sleep 5
 
 # TODO(jhumphri): Launch the coordinator for the mempool.
 # TODO(jhumphri): Launch the coordinator for the executor.
