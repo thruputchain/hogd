@@ -17,7 +17,6 @@ namespace hogd {
 GStatus<void>
 base_init()
 {
-  Abc x;
   struct utsname buf;
   int cret = uname(&buf);
   if (cret < 0)
