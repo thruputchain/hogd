@@ -71,12 +71,10 @@ wait_port 7888
 # Start hogdb.
 echo "Start hogdb"
 "$HOGDB_BINARY" /tmp/hogdb 1000000 127.0.0.1:7888 &
-sleep 5
 
 # Start hogexec.
 echo "Start hogexec"
 "$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
-sleep 5
 
 # TODO(jhumphri): Launch the coordinator for the mempool.
 # TODO(jhumphri): Launch the coordinator for the executor.
