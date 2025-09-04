@@ -24,7 +24,6 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/metrics.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
 #include "transaction.hh"
 #include "types.hh"

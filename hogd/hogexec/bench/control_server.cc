@@ -89,6 +89,7 @@ public:
   {
     info("shutting down control server");
     waiting_for_shutdown_ = true;
+    waiting_for_shutdown_.notify_all();
   }
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
