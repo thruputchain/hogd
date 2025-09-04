@@ -29,22 +29,26 @@ mkdir -p "$BUILD_DIR"
 COLOR='\033[1;34m'
 NC='\033[0m'
 
+GCC_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/gcc_errors.log
+GCC_RELEASE_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/gcc_release_errors.log
+LLVM_ERRORS_LOG=${SCRIPT_DIR}/${BUILD_DIR}/llvm_errors.log
+
 # Optionally perform the second build in parallel, in the background;
 # Much of the CI time is bottlenecked on libsodium's configure step (sequential, low CPU usage)
 # and a few late-stage link jobs
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   LLVM_LOG=${BUILD_DIR}/llvm_build.log
   GCC_RELEASE_LOG=${BUILD_DIR}/gcc_release_build.log
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${BUILD_DIR}/llvm_errors.log" > "$LLVM_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}" > "$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${BUILD_DIR}/gcc_release_errors.log" > "$GCC_RELEASE_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG}" > "$GCC_RELEASE_LOG" 2>&1 &
   GCC_RELEASE_BUILD_PID=$!
 fi
 
 printf "${COLOR}STEP 1: Check build (gcc)\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${BUILD_DIR}/gcc_errors.log"; then
+if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}"; then
     printf "build failed!\n"
-    cat "${BUILD_DIR}/gcc_errors.log"
+    cat "${GCC_ERRORS_LOG}"
     exit 1
 fi
 
@@ -64,7 +68,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
         cat "$LLVM_LOG"
         printf "===== end llvm build log =====\n\n"
         printf "\n===== llvm errors =====\n"
-        cat "${BUILD_DIR}/llvm_errors.log"
+        cat "${LLVM_ERRORS_LOG}"
         printf "===== end llvm errors =====\n\n"
         exit 1
     fi
@@ -76,7 +80,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     TIDY_PID=$!
 else
     printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
-    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${BUILD_DIR}/llvm_errors.log" ; then
+    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}" ; then
         printf "build failed!\n"
         printf "\n===== llvm errors =====\n"
         cat "${BUILD_DIR}/llvm_errors.log"
@@ -127,15 +131,18 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
         cat "$GCC_RELEASE_LOG"
         printf "===== end gcc_release build log =====\n\n"
         printf "\n===== gcc_release errors =====\n"
-        cat "${BUILD_DIR}/gcc_release_errors.log"
+        cat "${GCC_RELEASE_ERRORS_LOG}"
         printf "===== end gcc_release errors =====\n\n"
         exit 1
     fi
     printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
 else
     printf "${COLOR}\nSTEP 7: Check release build (gcc)\n${NC}"
-    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc; then
+    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG}"; then
         printf "build failed!\n"
+        printf "\n===== gcc_release errors =====\n"
+        cat "${GCC_RELEASE_ERRORS_LOG}"
+        printf "===== end gcc_release errors =====\n\n"
         exit 1
     fi
 fi
