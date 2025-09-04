@@ -25,6 +25,7 @@ add_library(x23
   rpc_common.h
   rpc.h
   rpc_msg.x
+  serialize.cc
   serialize.h
   sockio.cc
   sockio.h

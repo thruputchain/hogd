@@ -12,6 +12,10 @@
 #include <cstdint>
 #include <thread>
 
+#if defined(__APPLE__)
+#define FASTCLOCK_USE_TSC 0
+#endif // __APPLE__
+
 #ifndef FASTCLOCK_USE_TSC
 #if (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)) &&      \
     defined(__SIZEOF_INT128__)

@@ -31,6 +31,7 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -203,6 +204,7 @@ public:
       enable_logging();
     }
     initialize(mode);
+    HogexecMetrics::launch_log_worker();
   }
 
   void enable_logging();

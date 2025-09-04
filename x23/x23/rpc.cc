@@ -39,21 +39,27 @@ RpcStreamImpl::read_uint(SLOC_ARG0)
   co_return getbe<std::uint32_t>(b.data());
 }
 
-Async<std::expected<Buf, Errno>>
-RpcStreamImpl::read_record(SLOC_ARG0)
+Async<Errno>
+RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
 {
-  Buf b;
+  bp->clear();
   bool done = false;
   while (!done) {
-    std::uint32_t len = co_await co_await read_uint();
+    std::uint32_t len;
+    if (auto res = co_await read_uint(); !res)
+      co_return res.error();
+    else
+      len = *res;
     done = len & 0x80000000;
     len &= 0x7fffffff;
-    if (b.size() + len > max_record_size)
+    if (bp->size() + len > max_record_size)
       co_return Errno{ENOMSG};
-    if (co_await co_await cp_->read(fd_, &b, len, true, true) != len)
+    if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res)
+      co_return res.error();
+    else if (*res != len)
       co_return Errno{ENOMSG};
   }
-  co_return b;
+  co_return 0;
 }
 
 std::uint32_t
@@ -73,15 +79,18 @@ Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
+  // Having some extra bytes in the buffer allows us to elide certain
+  // bounds checks in deserialization.
+  constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
+  if constexpr (kMinBuf)
+    b.reserve(kMinBuf);
   while (!ss_.stop_requested()) {
-    if (auto r = co_await read_record(); !r) {
+    if (Errno err = co_await read_record(&b)) {
       fail();
       co_return;
     }
-    else
-      b = std::move(*r);
     rpc_msg msg;
     size_t hdrbytes;
     try {
@@ -99,11 +108,13 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs->xidmap_.erase(it);
       cs.reset();
       cb(std::move(b));
+      if constexpr (kMinBuf)
+        b.reserve(kMinBuf);
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, b.subspan(hdrbytes));
+        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())

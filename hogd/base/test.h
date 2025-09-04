@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <filesystem>
-#include <immintrin.h>
 #include <string>
 
 #include "hogd/base/log.h"

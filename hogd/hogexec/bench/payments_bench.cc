@@ -20,6 +20,7 @@
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
@@ -60,6 +61,8 @@ struct BenchmarkState {
   x23::Vec<SignedTransaction> initialize(uint32_t exec_port,
                                          uint32_t coord_port, uint32_t num_txs)
   {
+    HogexecMetrics::launch_log_worker();
+
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
 

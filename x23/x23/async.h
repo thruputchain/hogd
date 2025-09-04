@@ -722,10 +722,8 @@ private:
   awaitable_type *asyncp() noexcept { return get_if<0>(this); }
   decltype(auto) awaiter() noexcept { return detail::get_awaiter(*asyncp()); }
 };
-template<typename T> requires (!is_awaitable<T>)
-MaybeAsync(T) -> MaybeAsync<T>;
-template<is_awaitable A> requires requires { typename detail::resume_type<A>; }
-MaybeAsync(A) -> MaybeAsync<detail::resume_type<A>, A>;
+template<typename T> MaybeAsync(T) -> MaybeAsync<T>;
+template<is_awaitable A> MaybeAsync(A) -> MaybeAsync<detail::resume_type<A>, A>;
 
 } // namespace x23
 
@@ -750,19 +748,6 @@ make_async(SLOC_PARM0)
     std::unreachable();
   }(SLOC_VAR);
   return std::pair{std::move(async), cb};
-}
-
-template<typename R>
-auto
-async_map(auto f, Async<R> a) -> Async<decltype(f(declval<R>()))>
-{
-  co_return f(co_await a);
-}
-auto
-async_map(auto f, Async<void> a) -> Async<decltype(f())>
-{
-  co_await a;
-  co_return f();
 }
 
 // A funciton that returns Detached is a detached coroutine that
@@ -834,8 +819,6 @@ struct MapAwait {
                    [this] -> decltype(auto) { return a().await_resume(); });
   }
 };
-template<typename F, typename A>
-MapAwait(F &&, A &&) -> MapAwait<std::decay_t<F>, std::decay_t<A>>;
 
 namespace detail {
 // If final_suspend doesn't suspend a coroutine, then the coroutine
