@@ -4,6 +4,8 @@
 
 namespace x23 {
 
+size_t default_max_message_size = 0x100'0000;
+
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
   peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
