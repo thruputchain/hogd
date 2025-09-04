@@ -22,6 +22,9 @@ template<typename T> struct RefOps {
 
 } // namespace detail
 
+template<typename T> requires (alignof(T) % 4 == 0)
+class AtomicRefPtr;
+
 // Refcounted pointer for classes with incref()/decref() methods.  If
 // you just want to delete at 0 reference count, use std::shared_ptr.
 // If you need something else, then define `incref()` and `decref()`
@@ -91,8 +94,72 @@ private:
   T *p_;
 
   friend T;
+  friend class AtomicRefPtr<T>;
 };
 template<typename T> RefPtr(T &) -> RefPtr<T>;
+
+// A way to generate RefPtr values without racing on the reference
+// count.  Uses the low two bits of the pointer as a lock.
+template<typename T> requires (alignof(T) % 4 == 0)
+class AtomicRefPtr {
+public:
+  AtomicRefPtr() noexcept = default;
+  AtomicRefPtr(RefPtr<T> np) { store(std::move(np)); }
+  AtomicRefPtr(const AtomicRefPtr &) noexcept = delete;
+  ~AtomicRefPtr() { exchange(nullptr); }
+
+  RefPtr<T> load() noexcept
+  {
+    auto p = take();
+    RefPtr<T> ret{*p};
+    put(p);
+    return ret;
+  }
+
+  void store(RefPtr<T> np) noexcept
+  {
+    exchange(std::move(np));
+  }
+
+  RefPtr<T> exchange(RefPtr<T> np) noexcept
+  {
+    T *p = take();
+    std::exchange(np.p_, p);
+    put(p);
+    return np;
+  }
+
+private:
+  std::atomic<uintptr_t> p_{0};
+
+  static constexpr uintptr_t kLocked = 0b01;
+  static constexpr uintptr_t kWantNotify = 0b10;
+
+  T *take() noexcept
+  {
+    for (;;) {
+      auto p = p_.load(std::memory_order_relaxed);
+      if ((p & 3) == 0 &&
+          p_.compare_exchange_weak(p, p | kLocked, std::memory_order_acquire,
+                                   std::memory_order_relaxed))
+        return reinterpret_cast<T *>(p);
+      if (!(p & kWantNotify) &&
+          !p_.compare_exchange_weak(p, p | kWantNotify,
+                                    std::memory_order_relaxed,
+                                    std::memory_order_relaxed))
+        continue;
+      p_.wait(p | kWantNotify);
+    }
+  }
+
+  void put(T *p) noexcept
+  {
+    auto old =
+        p_.exchange(reinterpret_cast<uintptr_t>(p), std::memory_order_release);
+    if (old & kWantNotify)
+      p_.notify_all();
+  }
+};
 
 // Base for classes that want to be managed by a RefPtr and deleted
 // when the reference count goes to zero.

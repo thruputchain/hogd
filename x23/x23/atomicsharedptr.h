@@ -5,6 +5,8 @@
 #include <atomic>
 #include <memory>
 
+#include <x23/config.h>
+
 namespace x23 {
 
 #if HAVE_ATOMIC_SHARED_PTR
