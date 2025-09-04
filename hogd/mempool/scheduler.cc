@@ -372,20 +372,26 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 }
 
 void
-Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info,
-                             x23::Vec<SignedTransactionHash> &hashes,
-                             x23::Vec<SignedTransaction> &txs)
+Scheduler::remove_tx_from_runqueue(TxInfo *info,
+                                   x23::Vec<SignedTransactionHash> &hashes,
+                                   x23::Vec<SignedTransaction> &txs)
+{
+  hashes.push_back(info->tx_hash);
+  txs.push_back(info->tx);
+
+  CHECK_EQ(account_to_tx_[info->account].erase(info), 1UL);
+  if (account_to_tx_[info->account].empty()) {
+    CHECK_EQ(account_to_tx_.erase(info->account), 1UL);
+  }
+}
+
+void
+Scheduler::get_txs_all(std::unordered_set<TxInfo *> &info,
+                       x23::Vec<SignedTransactionHash> &hashes,
+                       x23::Vec<SignedTransaction> &txs)
 {
   for (auto it = info.begin(); it != info.end();) {
-    TxInfo *i = *it;
-
-    hashes.push_back(i->tx_hash);
-    txs.push_back(i->tx);
-
-    CHECK_EQ(account_to_tx_[i->account].erase(i), 1UL);
-    if (account_to_tx_[i->account].empty()) {
-      CHECK_EQ(account_to_tx_.erase(i->account), 1UL);
-    }
+    remove_tx_from_runqueue(*it, hashes, txs);
     it = info.erase(it);
   }
 }
@@ -416,9 +422,7 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
     size_t num_iterations = std::min(num, to_schedule.size());
     for (size_t i = 0; i < num_iterations; i++) {
       TxInfo *this_info = to_schedule[i];
-      std::unordered_set<TxInfo *> blah;
-      blah.insert(this_info);
-      add_txs_from_info(blah, hashes, txs);
+      remove_tx_from_runqueue(this_info, hashes, txs);
       CHECK_EQ(info.erase(this_info), 1UL);
       num--;
     }
@@ -430,17 +434,19 @@ Scheduler::schedule(size_t block_size)
 {
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;
+  hashes.reserve(block_size);
+  txs.reserve(block_size);
 
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
-
     auto &[average_age, info] = *age_to_tx_.begin();
+
     if (info.size() <= num_remaining) {
       // We can fit all of the txs in [info] in the block, so we add all of
       // them.
       num_scheduled += info.size();
-      add_txs_from_info(info, hashes, txs);
+      get_txs_all(info, hashes, txs);
     }
     else {
       // We can only fit some of the txs in [info] in the block, so we need to
@@ -452,7 +458,6 @@ Scheduler::schedule(size_t block_size)
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
   }
-
   return {hashes, txs};
 }
 

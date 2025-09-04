@@ -161,13 +161,17 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
+  void remove_tx_from_runqueue(TxInfo *info,
+                               x23::Vec<SignedTransactionHash> &hashes,
+                               x23::Vec<SignedTransaction> &txs);
+
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain
   // several data structures to make it easy to look up txs with various key
   // types.
-  void add_txs_from_info(std::unordered_set<TxInfo *> &info,
-                         x23::Vec<SignedTransactionHash> &hashes,
-                         x23::Vec<SignedTransaction> &txs);
+  void get_txs_all(std::unordered_set<TxInfo *> &info,
+                   x23::Vec<SignedTransactionHash> &hashes,
+                   x23::Vec<SignedTransaction> &txs);
 
   void get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
                       x23::Vec<SignedTransactionHash> &hashes,
