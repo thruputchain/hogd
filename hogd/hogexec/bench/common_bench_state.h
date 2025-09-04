@@ -66,9 +66,9 @@ private:
       while (true) {
         auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
         if (!fd) {
-          error("failed to connect to coord {} on port {}, {}, retrying",
+          error("failed to connect:{} to coord on {} port {}, retrying",
                 Errno{}, server_addr_, coord_port_);
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          std::this_thread::sleep_for(std::chrono::milliseconds(500));
           continue;
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);

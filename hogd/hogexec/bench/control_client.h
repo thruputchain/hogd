@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <print>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "ci_server.hh"
+#include "hogd/base/log.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/vec.h"
@@ -52,6 +54,7 @@ connect_to_control_server(x23::CoroPoll &cp, std::string const &host,
                           std::string const &port)
 {
   while (true) {
+    info("connecting to control server on {}:{}", host, port);
     auto fd = cp.tcpconnect(host, port)();
     if (!fd) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
