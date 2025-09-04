@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <print>
 #include <signal.h>
@@ -47,15 +49,69 @@ public:
                                  config.program_args.end());
     info("starting process: {} {}", x23::show(config.program_name), x23::show(config.program_args));
 
+    // Create pipes for stdout and stderr
+    int stdout_pipe[2], stderr_pipe[2];
+    if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1) {
+      error("pipe creation failed: {}", Errno{});
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+
+    // Create temporary files
+    std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
+    std::filesystem::path stdout_path = temp_dir / ("hogd_stdout_" + std::to_string(getpid()) + "_XXXXXX");
+    std::filesystem::path stderr_path = temp_dir / ("hogd_stderr_" + std::to_string(getpid()) + "_XXXXXX");
+    
+    // Convert to C-style strings for mkstemp
+    std::string stdout_template = stdout_path.string();
+    std::string stderr_template = stderr_path.string();
+    
+    int stdout_fd = mkstemp(stdout_template.data());
+    int stderr_fd = mkstemp(stderr_template.data());
+    
+    if (stdout_fd == -1 || stderr_fd == -1) {
+      error("failed to create temporary files: {}", Errno{});
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+    
+    close(stdout_fd);  // We'll reopen in the duplication thread
+    close(stderr_fd);
+    stdout_temp_path_ = stdout_template;
+    stderr_temp_path_ = stderr_template;
+
     auto pid = fork();
     if (pid < 0) {
       error("fork failed: {}", Errno{});
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
       return CIServerErrorCode::kCIServerErrorCodeInternal;
     }
 
     if (pid == 0) {
-
       // Child process
+      
+      // Close read ends of pipes
+      close(stdout_pipe[0]);
+      close(stderr_pipe[0]);
+      
+      // Redirect stdout and stderr to write ends of pipes
+      if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 ||
+          dup2(stderr_pipe[1], STDERR_FILENO) == -1) {
+        // NOLINTBEGIN(modernize-use-std-print)
+        fprintf(stderr, "dup2 failed: %s\n", strerror(errno));
+        // NOLINTEND(modernize-use-std-print)
+        _exit(EXIT_FAILURE);
+      }
+      
+      // Close write ends as they're now duplicated
+      close(stdout_pipe[1]);
+      close(stderr_pipe[1]);
+
       std::vector<char *> args;
       args.push_back(const_cast<char *>(config.program_name.data()));
 
@@ -73,9 +129,27 @@ public:
       _exit(EXIT_FAILURE);
     }
 
-    info("forked process: {}", pid);
-
     // Parent process
+    
+    // Close write ends of pipes
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
+    
+    // Print temporary file paths
+    info("Child process output will be logged to:");
+    info("  stdout: {}", stdout_temp_path_);
+    info("  stderr: {}", stderr_temp_path_);
+    
+    // Start threads to duplicate output
+    stdout_thread_ = std::jthread([stdout_pipe, stdout_temp_path = stdout_temp_path_]() {
+      duplicate_output(stdout_pipe[0], STDOUT_FILENO, stdout_temp_path);
+    });
+    
+    stderr_thread_ = std::jthread([stderr_pipe, stderr_temp_path = stderr_temp_path_]() {
+      duplicate_output(stderr_pipe[0], STDERR_FILENO, stderr_temp_path);
+    });
+
+    info("forked process: {}", pid);
     running_pid_ = pid;
 
     return CIServerErrorCode::kCIServerErrorCodeOK;
@@ -87,6 +161,15 @@ public:
     if (running_pid_) {
       info("stopping running process: {}", *running_pid_);
       kill(*running_pid_, SIGTERM);
+      
+      // Wait for output duplication threads to finish
+      if (stdout_thread_.joinable()) {
+        stdout_thread_.join();
+      }
+      if (stderr_thread_.joinable()) {
+        stderr_thread_.join();
+      }
+      
       running_pid_.reset();
     }
     else {
@@ -104,6 +187,33 @@ public:
   }
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
+
+private:
+  // Helper function to duplicate output from pipe to both console and temp file
+  static void duplicate_output(int pipe_fd, int console_fd, const std::string& temp_path) {
+    std::ofstream temp_file(temp_path);
+    if (!temp_file.is_open()) {
+      error("Failed to open temp file: {}", temp_path);
+      return;
+    }
+    
+    char buffer[4096];
+    ssize_t bytes_read;
+    
+    while ((bytes_read = read(pipe_fd, buffer, sizeof(buffer))) > 0) {
+      // Write to console (original stdout/stderr)
+      write(console_fd, buffer, bytes_read);
+      
+      // Write to temp file
+      temp_file.write(buffer, bytes_read);
+      temp_file.flush();
+    }
+    
+    temp_file.close();
+    close(pipe_fd);
+  }
+
+public:
 
   void start_server(uint32_t port)
   {
@@ -141,6 +251,16 @@ public:
     listen_thread_.request_stop();
     shutdown(lfd_.get(), SHUT_RDWR);
     lfd_.reset();
+    
+    // Ensure output duplication threads are stopped
+    if (stdout_thread_.joinable()) {
+      stdout_thread_.request_stop();
+      stdout_thread_.join();
+    }
+    if (stderr_thread_.joinable()) {
+      stderr_thread_.request_stop();
+      stderr_thread_.join();
+    }
   }
 
 private:
@@ -151,6 +271,12 @@ private:
   std::atomic<bool> waiting_for_shutdown_ = false;
 
   std::optional<uint32_t> running_pid_;
+  
+  // For output duplication
+  std::jthread stdout_thread_;
+  std::jthread stderr_thread_;
+  std::string stdout_temp_path_;
+  std::string stderr_temp_path_;
 };
 
 } // namespace hogd

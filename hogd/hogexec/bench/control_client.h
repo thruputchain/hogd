@@ -1,8 +1,6 @@
 #pragma once
 
 #include <chrono>
-#include <cstdint>
-#include <print>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -11,6 +9,7 @@
 
 #include "ci_server.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/vec.h"

@@ -1,5 +1,4 @@
 #include <cassert>
-#include <csignal>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -75,12 +74,6 @@ usage(char *argv[])
 }
 } // namespace
 
-
-void handler(int sig) {
-    fprintf(stderr, "Caught signal: %d\n", sig);
-    std::_Exit(128 + sig);
-}
-
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
@@ -109,21 +102,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (!exec_port || !coord_port) {
     usage(argv);
   }
-
-
-    signal(SIGSEGV, handler);
-    signal(SIGILL,  handler);
-    signal(SIGBUS,  handler);
-    signal(SIGABRT, handler);
-    signal(SIGTERM, handler);
-    signal(SIGPIPE, handler);
-
-    std::set_terminate([]{
-        fprintf(stderr, "Unhandled exception!\n");
-        std::_Exit(1);
-    });
-
-
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   hogd::run_bench_server(1, *exec_port, *coord_port);
   return 0;
