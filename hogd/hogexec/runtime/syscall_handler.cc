@@ -192,7 +192,8 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_, get_block_execution_mode());
+    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                   get_block_execution_mode());
     auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
       return st.error();
@@ -208,7 +209,8 @@ SystemCallHandler::try_commit_transaction()
           .value()
           .should_revert()) {
     auto res = db_proxy_.commit_transaction();
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_, get_block_execution_mode());
+    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                   get_block_execution_mode());
     if (!res.has_value()) {
       return res.error();
     }
@@ -228,7 +230,8 @@ SystemCallHandler::try_commit_transaction()
 
   if (!result) {
     auto res = db_proxy_.abort_transaction();
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_, get_block_execution_mode());
+    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                   get_block_execution_mode());
 
     if (!res.has_value()) {
       return res.error();
@@ -265,7 +268,8 @@ SystemCallHandler::try_commit_transaction()
     }
   }
 
-  HogexecMetrics::mark_tx_success(cumulative_invoke_result_, get_block_execution_mode());
+  HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
+                                  get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   return true;
 }

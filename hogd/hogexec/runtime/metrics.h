@@ -14,48 +14,56 @@ namespace hogd {
 
 class HogexecMetrics {
 public:
-  
   static void launch_log_worker();
 
-  static void mark_tx_failed(InvokeResult const &result, BlockExecutionMode mode) {
+  static void mark_tx_failed(InvokeResult const &result,
+                             BlockExecutionMode mode)
+  {
     switch (mode) {
-      case BlockExecutionMode::kBlockExecutionModeProposal:
-        mark_failed_proposed_tx();
-        break;
-      case BlockExecutionMode::kBlockExecutionModeValidation:
-        mark_failed_validation_tx();
-        break;
+    case BlockExecutionMode::kBlockExecutionModeProposal:
+      mark_failed_proposed_tx();
+      break;
+    case BlockExecutionMode::kBlockExecutionModeValidation:
+      mark_failed_validation_tx();
+      break;
     }
     mark_gas_consumed(result.gas_consumed_);
   }
 
-  static void mark_tx_success(InvokeResult const &result, BlockExecutionMode mode) {
+  static void mark_tx_success(InvokeResult const &result,
+                              BlockExecutionMode mode)
+  {
     switch (mode) {
-      case BlockExecutionMode::kBlockExecutionModeProposal:
-        mark_successful_proposed_tx();
-        break;
-      case BlockExecutionMode::kBlockExecutionModeValidation:
-        mark_successful_validation_tx();
-        break;
+    case BlockExecutionMode::kBlockExecutionModeProposal:
+      mark_successful_proposed_tx();
+      break;
+    case BlockExecutionMode::kBlockExecutionModeValidation:
+      mark_successful_validation_tx();
+      break;
     }
     mark_gas_consumed(result.gas_consumed_);
   }
 
-  static void mark_successful_proposed_tx() {
+  static void mark_successful_proposed_tx()
+  {
     get_instance().successful_proposed_tx_count_.inc();
   }
-  static void mark_failed_proposed_tx() {
+  static void mark_failed_proposed_tx()
+  {
     get_instance().failed_proposed_tx_count_.inc();
   }
 
-  static void mark_successful_validation_tx() {
+  static void mark_successful_validation_tx()
+  {
     // TODO(geoff): unimpl
   }
-  static void mark_failed_validation_tx() {
+  static void mark_failed_validation_tx()
+  {
     // TODO(geoff): unimpl
   }
 
-  static void mark_gas_consumed(uint64_t gas) {
+  static void mark_gas_consumed(uint64_t gas)
+  {
     get_instance().gas_consumed_.inc(gas);
   }
 
@@ -68,13 +76,15 @@ private:
     uint64_t gas_consumed;
     uint64_t time_ns;
 
-    MetricsSnapshot operator-(const MetricsSnapshot& other) const {
-      return {
-        .successful_proposed_tx_count = successful_proposed_tx_count - other.successful_proposed_tx_count,
-        .failed_proposed_tx_count = failed_proposed_tx_count - other.failed_proposed_tx_count,
-        .gas_consumed = gas_consumed - other.gas_consumed,
-        .time_ns = time_ns - other.time_ns
-      };
+    MetricsSnapshot operator-(const MetricsSnapshot &other) const
+    {
+      return {.successful_proposed_tx_count =
+                  successful_proposed_tx_count -
+                  other.successful_proposed_tx_count,
+              .failed_proposed_tx_count =
+                  failed_proposed_tx_count - other.failed_proposed_tx_count,
+              .gas_consumed = gas_consumed - other.gas_consumed,
+              .time_ns = time_ns - other.time_ns};
     }
   };
 

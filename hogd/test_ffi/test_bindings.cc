@@ -132,8 +132,7 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   }
   try {
     hogd::SignedTransaction stx;
-    x23::deserialize(&stx,
-      x23::BufView{signed_tx, signed_tx_len});
+    x23::deserialize(&stx, x23::BufView{signed_tx, signed_tx_len});
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(*runtime_context, stx, *db_context));
     return out;

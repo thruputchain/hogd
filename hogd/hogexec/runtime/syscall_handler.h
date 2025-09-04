@@ -211,8 +211,11 @@ private:
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &&frame);
 
-  BlockExecutionMode get_block_execution_mode() const {
-    return std::holds_alternative<ProposalModeData>(execution_mode_data_) ? BlockExecutionMode::kBlockExecutionModeProposal : BlockExecutionMode::kBlockExecutionModeValidation;
+  BlockExecutionMode get_block_execution_mode() const
+  {
+    return std::holds_alternative<ProposalModeData>(execution_mode_data_)
+               ? BlockExecutionMode::kBlockExecutionModeProposal
+               : BlockExecutionMode::kBlockExecutionModeValidation;
   }
 };
 
