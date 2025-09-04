@@ -61,11 +61,11 @@ public:
       }
       args.push_back(nullptr);
 
-      std::println(stderr, "execvp: %s %s\n", program_name, x23::show(config.program_args));
-
+      // NOLINTBEGIN(modernize-use-std-print)
+      fprintf(stderr, "execvp: %s %s\n", program_name.c_str(), x23::show(config.program_args).c_str());
       execvp(program_name.c_str(), args.data());
-
-      std::println(stderr, "execvp failed: %s\n", strerror(errno));
+      fprintf(stderr, "execvp failed: %s\n", strerror(errno));
+      // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
     }
     
