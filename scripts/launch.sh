@@ -76,12 +76,7 @@ echo "Start hogdb"
 echo "Start hogexec"
 "$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
 
-# TODO(jhumphri): Launch the coordinator for the mempool.
-# TODO(jhumphri): Launch the coordinator for the executor.
 # TODO(jhumphri): Launch the mempool.
-# TODO(jhumphri): Launch the executor.
-# TODO(jhumphri): Launch the database that the mempool accesses.
-# TODO(jhumphri): Launch the database that the executor accesses.
 
 pids=($(jobs -pr))
 for pid in "${pids[@]}"; do
