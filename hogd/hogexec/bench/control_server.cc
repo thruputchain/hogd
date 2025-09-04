@@ -13,6 +13,7 @@
 #include <stop_token>
 #include <string>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -149,6 +150,11 @@ public:
       duplicate_output(stderr_pipe[0], STDERR_FILENO, stderr_temp_path);
     });
 
+    // Start thread to wait for child process
+    waitpid_thread_ = std::jthread([pid]() {
+      wait_for_child(pid);
+    });
+
     info("forked process: {}", pid);
     running_pid_ = pid;
 
@@ -168,6 +174,11 @@ public:
       }
       if (stderr_thread_.joinable()) {
         stderr_thread_.join();
+      }
+      
+      // Wait for waitpid thread to finish
+      if (waitpid_thread_.joinable()) {
+        waitpid_thread_.join();
       }
       
       running_pid_.reset();
@@ -211,6 +222,31 @@ private:
     
     temp_file.close();
     close(pipe_fd);
+  }
+
+  // Helper function to wait for child process and log exit status
+  static void wait_for_child(pid_t child_pid) {
+    int status;
+    pid_t result = waitpid(child_pid, &status, 0);
+    
+    if (result == -1) {
+      error("waitpid failed for child {}: {}", child_pid, Errno{});
+      return;
+    }
+    
+    if (WIFEXITED(status)) {
+      int exit_code = WEXITSTATUS(status);
+      if (exit_code == 0) {
+        info("Child process {} exited successfully with code {}", child_pid, exit_code);
+      } else {
+        error("Child process {} exited with error code {}", child_pid, exit_code);
+      }
+    } else if (WIFSIGNALED(status)) {
+      int signal_num = WTERMSIG(status);
+      error("Child process {} terminated by signal {} ({})", child_pid, signal_num, strsignal(signal_num));
+    } else {
+      error("Child process {} terminated with unknown status {}", child_pid, status);
+    }
   }
 
 public:
@@ -261,6 +297,12 @@ public:
       stderr_thread_.request_stop();
       stderr_thread_.join();
     }
+    
+    // Ensure waitpid thread is stopped
+    if (waitpid_thread_.joinable()) {
+      waitpid_thread_.request_stop();
+      waitpid_thread_.join();
+    }
   }
 
 private:
@@ -277,6 +319,9 @@ private:
   std::jthread stderr_thread_;
   std::string stdout_temp_path_;
   std::string stderr_temp_path_;
+  
+  // For waiting on child process
+  std::jthread waitpid_thread_;
 };
 
 } // namespace hogd
