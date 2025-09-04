@@ -2,7 +2,6 @@
 
 namespace hogd {
 
-class Authentication {
-};
+class Authentication {};
 
 } // namespace hogd
