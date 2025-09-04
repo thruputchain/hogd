@@ -132,8 +132,7 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   }
   try {
     hogd::SignedTransaction stx;
-    x23::deserialize(&stx,
-                     std::span<const unsigned char>(signed_tx, signed_tx_len));
+    x23::deserialize(&stx, x23::BufView{signed_tx, signed_tx_len});
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(*runtime_context, stx, *db_context));
     return out;
@@ -275,7 +274,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
 
   hogd::Contract contract;
   try {
-    x23::deserialize(&contract, std::span(contract_bytes, contract_len));
+    x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
   } catch (x23::XdrException &e) {
     return 1;
   }

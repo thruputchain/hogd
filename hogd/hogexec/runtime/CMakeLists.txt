@@ -19,6 +19,7 @@ add_library(runtime_objects OBJECT
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
+  metrics.cc
   multiplexed_context.cc
   runtime.cc
   status.cc
@@ -108,6 +109,7 @@ target_link_libraries(
   wasmi_lib
   runtime_trampoline
   protocol
+  metrics
   hogd
 )
 

@@ -13,6 +13,7 @@
 #include "transaction.hh"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
