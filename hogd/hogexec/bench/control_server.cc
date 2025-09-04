@@ -38,6 +38,7 @@ public:
 
     auto pid = fork();
     if (pid < 0) {
+      error("fork failed: {}", Errno{});
       return CIServerErrorCode::kCIServerErrorCodeInternal;
     }
 
@@ -63,6 +64,8 @@ public:
       error("execvp failed: {}", Errno{});
       exit(EXIT_FAILURE);
     }
+    
+    info("forked process: {}", pid);
 
     // Parent process
     running_pid_ = pid;
