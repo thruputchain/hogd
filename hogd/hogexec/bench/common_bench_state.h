@@ -64,7 +64,8 @@ private:
       while (true) {
         auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
         if (!fd) {
-          error("failed to connect to coord {} on port {}, {}, retrying", Errno{}, server_addr_, coord_port_);
+          error("failed to connect to coord {} on port {}, {}, retrying",
+                Errno{}, server_addr_, coord_port_);
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           continue;
         }
@@ -88,8 +89,9 @@ private:
   {
     auto ci_client = connect_to_control_server(cp_, server_addr_,
                                                std::to_string(ci_server_port_));
-    ci_client.start_server("bench_server", {"-e", std::to_string(exec_port_),
-                                            "-c", std::to_string(coord_port_)});
+    ci_client.start_server("hogd/hogexec/bench/bench_server",
+                           {"-e", std::to_string(exec_port_), "-c",
+                            std::to_string(coord_port_)});
   }
 
   void stop_db_server()

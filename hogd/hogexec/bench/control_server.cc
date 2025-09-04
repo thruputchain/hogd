@@ -38,10 +38,12 @@ public:
       return CIServerErrorCode::kCIServerErrorCodeAlreadyRunning;
     }
 
-    std::string program_name = std::string(CMAKE_ROOT_BINARY_DIR) + "/" + std::string(config.program_name.begin(), config.program_name.end());
+    std::string program_name =
+        std::string(CMAKE_ROOT_BINARY_DIR) + "/" +
+        std::string(config.program_name.begin(), config.program_name.end());
     std::vector<std::string> program_args =
-    std::vector<std::string>(config.program_args.begin(),
-                             config.program_args.end());
+        std::vector<std::string>(config.program_args.begin(),
+                                 config.program_args.end());
     info("starting process: {} {}", program_name, program_args);
 
     auto pid = fork();
@@ -62,13 +64,14 @@ public:
       args.push_back(nullptr);
 
       // NOLINTBEGIN(modernize-use-std-print)
-      fprintf(stderr, "execvp: %s %s\n", program_name.c_str(), x23::show(config.program_args).c_str());
+      fprintf(stderr, "execvp: %s %s\n", program_name.c_str(),
+              x23::show(config.program_args).c_str());
       execvp(program_name.c_str(), args.data());
       fprintf(stderr, "execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
     }
-    
+
     info("forked process: {}", pid);
 
     // Parent process

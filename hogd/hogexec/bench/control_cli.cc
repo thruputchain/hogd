@@ -41,7 +41,9 @@ handle_shutdown_command(std::string const &host, std::string const &port)
   }
 }
 
-int handle_start_command(std::string const &host, std::string const &port, std::vector<std::string> const &args)
+int
+handle_start_command(std::string const &host, std::string const &port,
+                     std::vector<std::string> const &args)
 {
   try {
     x23::ThreadPool pool;
@@ -53,7 +55,8 @@ int handle_start_command(std::string const &host, std::string const &port, std::
       command += arg + " ";
     }
     std::println("Starting server: {}", command);
-    client.start_server(args[0], std::vector<std::string>(args.begin() + 1, args.end()));
+    client.start_server(args[0],
+                        std::vector<std::string>(args.begin() + 1, args.end()));
     std::println("Start command sent successfully");
     return 0;
   } catch (std::exception const &e) {
@@ -79,12 +82,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string port = argv[2];
   std::string command = argv[3];
 
-
   if (command == "shutdown") {
     return handle_shutdown_command(host, port);
   }
   if (command == "start") {
-    return handle_start_command(host, port, std::vector<std::string>(argv + 4, argv + argc));
+    return handle_start_command(host, port,
+                                std::vector<std::string>(argv + 4,
+                                                         argv + argc));
   }
 
   std::println(stderr, "Unknown command: {}", command);

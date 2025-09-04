@@ -355,7 +355,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr>", argv[0]);
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr>",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace
