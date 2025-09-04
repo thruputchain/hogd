@@ -637,7 +637,7 @@ struct Deserializer
     else {
       constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
       [this, &x]<size_t... I>(std::index_sequence<I...>) {
-        (go<(I >= kUF)>(get<I>(x)), ...);
+        (this->go<(I >= kUF)>(get<I>(x)), ...);
       }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
   }
