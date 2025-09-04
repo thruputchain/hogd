@@ -2,6 +2,7 @@ add_xdr(
 	protocol
 	../../protocol/batch.x
 	../../protocol/catchup.x
+	../../protocol/ci_server.x
 	../../protocol/contract.x
 	../../protocol/contract_error.x
 	../../protocol/coord.x

@@ -1,0 +1,65 @@
+#pragma once
+
+#include <chrono>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "ci_server.hh"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+constexpr static uint16_t kControlServerPort = 11111;
+
+class ControlClientWrapper {
+public:
+  ControlClientWrapper(
+      CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client)
+    : client_(std::move(client))
+  {}
+
+  void start_server(std::string const &program_name,
+                    std::vector<std::string> const &program_args)
+  {
+    ServerConfig config;
+    config.program_name = x23::BoundedStr{program_name.c_str()};
+    for (auto const &arg : program_args) {
+      config.program_args.push_back(x23::BoundedStr{arg.c_str()});
+    }
+
+    if (client_.ciserver_start(config)() !=
+        CIServerErrorCode::kCIServerErrorCodeOK) {
+      throw std::runtime_error("Failed to start server");
+    }
+  }
+
+  void stop_server() { client_.ciserver_stop()(); }
+
+  void shutdown_server() { client_.ciserver_shutdown()(); }
+
+private:
+  CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client_;
+};
+
+inline auto
+connect_to_control_server(x23::CoroPoll &cp, std::string const &host,
+                          std::string const &port)
+{
+  while (true) {
+    auto fd = cp.tcpconnect(host, port)();
+    if (!fd) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      continue;
+    }
+    auto client_config = x23::rpc_stream_logged(cp, *fd);
+    return ControlClientWrapper(client_config.template client<CIServer1>());
+  }
+}
+
+} // namespace hogd

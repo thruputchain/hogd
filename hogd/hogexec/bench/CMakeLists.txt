@@ -58,3 +58,30 @@ target_link_libraries(
 )
 
 set_property(TARGET bench_server PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  control_server
+  control_server.cc
+)
+target_link_libraries(
+  control_server
+  hogd
+  protocol
+  runtime
+  hogdb
+)
+
+set_property(TARGET control_server PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  control_cli
+  control_cli.cc
+)
+target_link_libraries(
+  control_cli
+  hogd
+  protocol
+)
+
+set_property(TARGET control_cli PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
