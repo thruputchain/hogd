@@ -44,7 +44,7 @@ public:
     std::vector<std::string> program_args =
         std::vector<std::string>(config.program_args.begin(),
                                  config.program_args.end());
-    info("starting process: {} {}", program_name, program_args);
+    info("starting process: {} {}", x23::show(config.program_name), x23::show(config.program_args));
 
     auto pid = fork();
     if (pid < 0) {
