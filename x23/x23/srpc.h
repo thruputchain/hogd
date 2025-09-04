@@ -77,9 +77,8 @@ public:
   // record length, rpc_msg, and arguments.)
   using CallCB = std::function<void(rpc_msg *, BufView)>;
 
-  // Note if you change this, don't set it larger than 0x7fffffff
-  // because we don't support chunked messages.
-  static inline std::uint32_t default_max_message_size = 0x100'0000;
+  // Note don't set this larger than 0x7fffffff because we don't
+  // support chunked messages.
   size_t max_message_size_;
   SrvMap<SRpcService> srvmap_{};
 

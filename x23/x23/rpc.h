@@ -285,7 +285,7 @@ concept implements_async_rpc =
 namespace detail {
 class RpcStreamImpl : public RefCount {
 public:
-  size_t max_record_size = 1UZ << 24;
+  size_t max_message_size = default_max_message_size;
   RefPtr<CoroPoll> cp_;
 
   void fail();

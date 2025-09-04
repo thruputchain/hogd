@@ -254,4 +254,6 @@ struct RpcNoLogger {
   {}
 };
 
+extern size_t default_max_message_size;
+
 } // namespace x23

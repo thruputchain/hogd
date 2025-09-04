@@ -52,7 +52,7 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
       len = *res;
     done = len & 0x80000000;
     len &= 0x7fffffff;
-    if (bp->size() + len > max_record_size)
+    if (bp->size() + len > max_message_size)
       co_return Errno{ENOMSG};
     if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res)
       co_return res.error();
