@@ -8,6 +8,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/metrics/metrics.h"
 #include "rpc_types.hh"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -61,7 +62,23 @@ public:
 private:
   static HogexecMetrics &get_instance();
 
-  void print_stats();
+  struct MetricsSnapshot {
+    size_t successful_proposed_tx_count;
+    size_t failed_proposed_tx_count;
+    uint64_t gas_consumed;
+    uint64_t time_ns;
+
+    MetricsSnapshot operator-(const MetricsSnapshot& other) const {
+      return {
+        .successful_proposed_tx_count = successful_proposed_tx_count - other.successful_proposed_tx_count,
+        .failed_proposed_tx_count = failed_proposed_tx_count - other.failed_proposed_tx_count,
+        .gas_consumed = gas_consumed - other.gas_consumed,
+        .time_ns = time_ns - other.time_ns
+      };
+    }
+  };
+
+  MetricsSnapshot get_stats();
   void background_worker(std::stop_token &stoken);
 
   PerThreadCounter<size_t> successful_proposed_tx_count_;
