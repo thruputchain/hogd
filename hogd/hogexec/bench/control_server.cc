@@ -6,6 +6,7 @@
 #include <cstring>
 #include <optional>
 #include <print>
+#include <signal.h>
 #include <stdexcept>
 #include <stop_token>
 #include <string>

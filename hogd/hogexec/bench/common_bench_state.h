@@ -41,7 +41,9 @@ public:
     connect_exec();
   }
 
+  // NOLINTBEGIN(bugprone-exception-escape)
   ~CommonBenchState() { stop_db_server(); }
+  // NOLINTEND(bugprone-exception-escape)
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid = 0)
