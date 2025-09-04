@@ -443,16 +443,17 @@ Scheduler::schedule(size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
 
     if (info.size() <= num_remaining) {
-      // We can fit all of the txs in [info] in the block, so we add all of
-      // them.
+      // All of the txs in [info] in the block, so we add all of them. Note that
+      // [get_txs_all()] removes the txs from [info], so it is important that we
+      // add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
       get_txs_all(info, hashes, txs);
     }
     else {
       // We can only fit some of the txs in [info] in the block, so we need to
       // choose a subset of [info] to schedule.
-      get_txs_subset(info, num_remaining, hashes, txs);
       num_scheduled += num_remaining;
+      get_txs_subset(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
