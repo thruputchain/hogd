@@ -17,7 +17,6 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 
-#include "nomination.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 
