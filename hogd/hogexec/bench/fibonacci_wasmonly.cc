@@ -22,8 +22,8 @@
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/bench/control_client.h"
-#include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
 #include "transaction.hh"
@@ -36,7 +36,11 @@ namespace hogd {
 namespace {
 
 struct BenchmarkState : public CommonBenchState {
-  BenchmarkState(std::string server_addr, uint16_t exec_port, uint16_t coord_port) : CommonBenchState(std::move(server_addr), exec_port, coord_port, kControlServerPort) {}
+  BenchmarkState(std::string server_addr, uint16_t exec_port,
+                 uint16_t coord_port)
+    : CommonBenchState(std::move(server_addr), exec_port, coord_port,
+                       kControlServerPort)
+  {}
 
   ContractAddress contract_addr_;
 
@@ -50,7 +54,7 @@ struct BenchmarkState : public CommonBenchState {
         fibonacci_contract, SHA256Hash{},
         client_meta_t::entrypoint<"fibonacci">(),
         client_meta_t::make_calldata<"fibonacci">(uint32_t{5}), 1'000'000'000);
-    
+
     contract_addr_ = GenesisBlockLoader::calculate_deployed_address(
         sha256(*fibonacci_contract), SHA256Hash{});
 
@@ -189,7 +193,6 @@ struct BenchmarkState {
     return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
   }
 }; */
-
 
 void
 run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)

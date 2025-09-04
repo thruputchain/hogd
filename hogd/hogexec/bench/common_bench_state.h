@@ -29,23 +29,17 @@ namespace hogd {
 
 class CommonBenchState {
 public:
-
   CommonBenchState(std::string server_addr, uint16_t exec_port,
-                  uint16_t coord_port,
-                  uint16_t ci_server_port)
-    : server_addr_(std::move(server_addr))
-    , exec_port_(exec_port)
-    , coord_port_(coord_port)
-    , ci_server_port_(ci_server_port)
+                   uint16_t coord_port, uint16_t ci_server_port)
+    : server_addr_(std::move(server_addr)), exec_port_(exec_port),
+      coord_port_(coord_port), ci_server_port_(ci_server_port)
   {
     start_db_server();
     connect_coord();
     connect_exec();
   }
 
-  ~CommonBenchState() {
-    stop_db_server();
-  }
+  ~CommonBenchState() { stop_db_server(); }
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid = 0)
@@ -80,19 +74,25 @@ private:
 
   void connect_exec()
   {
-    std::string server_addrport = server_addr_ + ":" + std::to_string(exec_port_);
+    std::string server_addrport =
+        server_addr_ + ":" + std::to_string(exec_port_);
     db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(IntroExecResult{
         .exec_id = 0,
         .shards = {ShardCard{.address = server_addrport.c_str()}}}));
   }
 
-  void start_db_server() {
-    auto ci_client = connect_to_control_server(cp_, server_addr_, std::to_string(ci_server_port_));
-    ci_client.start_server("bench_server", {"-e", std::to_string(exec_port_), "-c", std::to_string(coord_port_)});
+  void start_db_server()
+  {
+    auto ci_client = connect_to_control_server(cp_, server_addr_,
+                                               std::to_string(ci_server_port_));
+    ci_client.start_server("bench_server", {"-e", std::to_string(exec_port_),
+                                            "-c", std::to_string(coord_port_)});
   }
 
-  void stop_db_server() {
-    auto ci_client = connect_to_control_server(cp_, server_addr_, std::to_string(ci_server_port_));
+  void stop_db_server()
+  {
+    auto ci_client = connect_to_control_server(cp_, server_addr_,
+                                               std::to_string(ci_server_port_));
     ci_client.stop_server();
   }
 

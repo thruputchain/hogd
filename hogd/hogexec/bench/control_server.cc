@@ -1,4 +1,5 @@
 #include <atomic>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -30,8 +31,10 @@ public:
   CIServerErrorCode ciserver_start(ServerConfig const &config)
   {
     if (running_pid_) {
+      error("already running process: {}", *running_pid_);
       return CIServerErrorCode::kCIServerErrorCodeAlreadyRunning;
     }
+    info("starting process: {} {}", config.program_name, config.program_args);
 
     auto pid = fork();
     if (pid < 0) {
@@ -53,7 +56,7 @@ public:
         args.push_back(const_cast<char *>(arg.c_str()));
       }
       args.push_back(nullptr);
-
+      info("execvp: {} {}", program_name, args);
       execvp(program_name.c_str(), args.data());
 
       // If execvp returns, it failed
@@ -67,9 +70,26 @@ public:
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
-  void ciserver_stop() { running_pid_.reset(); }
+  void ciserver_stop()
+  {
 
-  void ciserver_shutdown() { waiting_for_shutdown_ = true; }
+    if (running_pid_) {
+      info("stopping running process: {}", *running_pid_);
+      kill(*running_pid_, SIGTERM);
+      running_pid_.reset();
+    }
+    else {
+      error("no running process to stop");
+    }
+
+    running_pid_.reset();
+  }
+
+  void ciserver_shutdown()
+  {
+    info("shutting down control server");
+    waiting_for_shutdown_ = true;
+  }
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
