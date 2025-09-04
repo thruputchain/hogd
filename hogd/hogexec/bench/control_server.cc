@@ -62,6 +62,8 @@ public:
 
       // If execvp returns, it failed
       error("execvp failed: {}", Errno{});
+      std::fflush(stdout);
+      std::fflush(stderr);
       exit(EXIT_FAILURE);
     }
     

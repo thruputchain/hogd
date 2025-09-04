@@ -11,6 +11,8 @@
 
 #include "coord.hh"
 #include "db_coord.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
@@ -62,6 +64,7 @@ private:
       while (true) {
         auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
         if (!fd) {
+          error("failed to connect to coord {} on port {}, {}, retrying", Errno{}, server_addr_, coord_port_);
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
           continue;
         }

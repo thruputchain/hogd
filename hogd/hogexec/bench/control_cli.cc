@@ -3,6 +3,7 @@
 #include <exception>
 #include <print>
 #include <string>
+#include <vector>
 
 #include "control_client.h"
 #include "hogd/init.h"
@@ -14,9 +15,10 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} <command> <host> <port>", argv[0]);
+  std::println("Usage: {} <host> <port> <command> <args...>", argv[0]);
   std::println("Commands:");
   std::println("  shutdown  - Shutdown the control server");
+  std::println("  start     - Start a server");
   exit(EXIT_FAILURE);
 }
 
@@ -39,6 +41,22 @@ handle_shutdown_command(std::string const &host, std::string const &port)
   }
 }
 
+int handle_start_command(std::string const &host, std::string const &port, std::vector<std::string> const &args)
+{
+  try {
+    x23::ThreadPool pool;
+    x23::CoroPoll cp(pool);
+    auto client = hogd::connect_to_control_server(cp, host, port);
+    std::println("Starting server: {}", args);
+    client.start_server(args[0], std::vector<std::string>(args.begin() + 1, args.end()));
+    std::println("Start command sent successfully");
+    return 0;
+  } catch (std::exception const &e) {
+    std::println(stderr, "Error: {}", e.what());
+    return 1;
+  }
+}
+
 } // namespace
 
 int
@@ -48,16 +66,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (ret)
     return ret;
 
-  if (argc != 4) {
+  if (argc < 4) {
     usage(argv);
   }
 
-  std::string command = argv[1];
-  std::string host = argv[2];
-  std::string port = argv[3];
+  std::string host = argv[1];
+  std::string port = argv[2];
+  std::string command = argv[3];
+
 
   if (command == "shutdown") {
     return handle_shutdown_command(host, port);
+  }
+  if (command == "start") {
+    return handle_start_command(host, port, std::vector<std::string>(argv + 4, argv + argc));
   }
 
   std::println(stderr, "Unknown command: {}", command);
