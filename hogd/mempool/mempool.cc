@@ -33,11 +33,16 @@ namespace hogd {
 x23::Async<void>
 Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
 {
-  // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
-  // vetted. This vetting logic will include the authentication logic from
-  // Geoff's proposal.
-  scheduler_.add_txs(batch);
-  co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
+  // TODO(jhumphri): Is any other vetting logic needed?
+  SignedTransactionBatch authenticated;
+  authenticated.reserve(batch.size());
+  for (const SignedTransaction &tx : batch) {
+    if (Authentication::authenticate(tx)) {
+      authenticated.push_back(tx);
+    }
+  }
+  scheduler_.add_txs(authenticated);
+  co_return co_await coord_client_.coordscheduler_notify_vetted(authenticated);
 }
 
 x23::Async<void>

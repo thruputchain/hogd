@@ -2,6 +2,9 @@
 
 namespace hogd {
 
-class Authentication {};
+class Authentication {
+public:
+  static bool authenticate(const SignedTransaction &tx) { return false; }
+};
 
 } // namespace hogd
