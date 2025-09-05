@@ -81,15 +81,6 @@ bm_erc20_extend_experiment(benchmark::State &state)
   state.counters["txs_per_sec"] =
       benchmark::Counter(static_cast<double>(num_txs),
                          benchmark::Counter::kIsRate);
-  state.counters["txs_total"] =
-      benchmark::Counter(static_cast<double>(num_txs * state.iterations()));
-
-  // Set bytes processed for bandwidth calculation (approximate transaction
-  // size)
-  const size_t approx_tx_size = 256; // Rough estimate of transaction size
-  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
-                          static_cast<int64_t>(num_txs) *
-                          static_cast<int64_t>(approx_tx_size));
 }
 
 } // namespace
