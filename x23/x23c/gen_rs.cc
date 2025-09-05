@@ -356,7 +356,7 @@ impl {0}_{1}_Dispatcher {{
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_driver::server_state::ServerDispatch for {0}_{1}_Dispatcher {{
+impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
     fn prog_vers(&self) -> ::rpc_driver::ProgVers {{
         ::rpc_driver::ProgVers::new({2}, {3})
     }}
