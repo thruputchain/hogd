@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <print>
 #include <stdexcept>
@@ -161,9 +162,10 @@ public:
     close(stdout_fd);
     close(stderr_fd);
 
+    std::lock_guard<std::mutex> lock(running_pid_mutex_);
     running_pid_ = pid;
     // Start thread to wait for child process
-    waitpid_thread_ = std::jthread([pid]() { wait_for_child(pid); });
+    waitpid_thread_ = std::jthread([pid, this]() { wait_for_child(pid); });
 
     info("forked process: {}", pid);
 
@@ -172,9 +174,14 @@ public:
 
   void ciserver_stop()
   {
-    if (running_pid_) {
-      info("stopping running process: {}", *running_pid_);
-      kill(*running_pid_, SIGTERM);
+    auto pid = [&]() {
+        std::lock_guard<std::mutex> lock(running_pid_mutex_);
+        return running_pid_;
+    }();
+    
+    if (pid) {
+      info("stopping running process: {}", *pid);
+      kill(*pid, SIGTERM);
 
       // Wait for waitpid thread to finish
       if (waitpid_thread_.joinable()) {
@@ -184,8 +191,6 @@ public:
     else {
       error("no running process to stop");
     }
-
-    running_pid_.reset();
   }
 
   void ciserver_shutdown()
@@ -200,7 +205,7 @@ public:
 private:
   // Helper function to wait for child process and log exit status
   // NOLINTBEGIN(misc-include-cleaner)
-  static void wait_for_child(pid_t child_pid)
+  void wait_for_child(pid_t child_pid)
   {
     int status;
     auto result = waitpid(child_pid, &status, 0);
@@ -230,6 +235,9 @@ private:
       error("Child process {} terminated with unknown status {}", child_pid,
             status);
     }
+    
+    std::lock_guard<std::mutex> lock(running_pid_mutex_);
+    running_pid_.reset();
   }
   // NOLINTEND(misc-include-cleaner)
 public:
@@ -284,6 +292,7 @@ private:
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 
+  std::mutex running_pid_mutex_;
   std::optional<uint32_t> running_pid_;
 
   // For output logging
