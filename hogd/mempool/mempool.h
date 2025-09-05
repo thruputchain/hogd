@@ -32,8 +32,7 @@ public:
   Mempool(coord_client_t &&coord_client, db_client_t &&db_client,
           exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)), db_client_(std::move(db_client)),
-      exec_client_(std::move(exec_client)), scheduler_(db_client_),
-      authentication_(db_client_)
+      exec_client_(std::move(exec_client)), scheduler_(db_client_)
   {}
 
   // Disable copy and move.

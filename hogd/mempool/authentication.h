@@ -10,7 +10,7 @@ namespace hogd {
 
 class Authentication {
 public:
-  Authentication(db_client_t &db_client) : db_client_(db_client) {}
+  Authentication() = default;
 
   // TODO(jhumphri): Remove this.
   Ed25519SecretKey create_tmp_key_pair(const ContractAddress &account,
@@ -119,7 +119,6 @@ private:
     return true;
   }
 
-  db_client_t &db_client_;
   std::unordered_map<ContractAddress,
                      std::unordered_map<size_t, Ed25519PublicKey>>
       public_keys_;

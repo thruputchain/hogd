@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <unordered_map>
 
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/mempool.h"
@@ -35,7 +37,8 @@ TEST(Authentication, SignAndVerify)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, {{0, private_key}}, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
@@ -58,7 +61,8 @@ TEST(Authentication, SignAndVerifyMismatch)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, {{0, private_key}}, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -83,7 +87,8 @@ TEST(Authentication, SignAndVerifyWrongIndex)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, {{0, private_key}}, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -114,7 +119,8 @@ TEST(Authentication, SignAndVerifyMultiSig)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, private_keys,
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
@@ -144,7 +150,8 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, private_keys,
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -175,7 +182,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, private_keys,
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -208,7 +216,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign(tx, private_keys,
+                                 /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -244,12 +253,11 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
                                    /*idx=*/1)}};
 
   const Transaction &tx = txs[0];
-  const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys,
-                /*auxiliary_private_keys=*/
-                {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-                 {MempoolTestServer::kAccountAddresses[2],
-                  aux_2_private_keys}});
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, private_keys,
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
+       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
@@ -286,12 +294,11 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
   aux_2_private_keys[0] = ed25519_keygen().second;
 
   const Transaction &tx = txs[0];
-  const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys,
-                /*auxiliary_private_keys=*/
-                {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-                 {MempoolTestServer::kAccountAddresses[2],
-                  aux_2_private_keys}});
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, private_keys,
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
+       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -327,12 +334,11 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
                                    /*idx=*/1)}};
 
   const Transaction &tx = txs[0];
-  const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys,
-                /*auxiliary_private_keys=*/
-                {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-                 {MempoolTestServer::kAccountAddresses[2],
-                  aux_2_private_keys}});
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, private_keys,
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
+       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -372,12 +378,11 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
   aux_1_private_keys[1] = private_key_0;
 
   const Transaction &tx = txs[0];
-  const SignedTransaction signed_tx =
-      auth.sign(tx, private_keys,
-                /*auxiliary_private_keys=*/
-                {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-                 {MempoolTestServer::kAccountAddresses[2],
-                  aux_2_private_keys}});
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, private_keys,
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
+       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
