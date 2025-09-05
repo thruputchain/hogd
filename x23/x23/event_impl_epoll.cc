@@ -183,7 +183,7 @@ CoroPollImpl::getfd(BorrowedFd fd)
   return FdPtr{.p_ = state_ + fd.get(), .lk_ = std::move(sl)};
 }
 
-std::shared_ptr<ReadBuffer>
+RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
@@ -192,7 +192,7 @@ CoroPollImpl::get_reader(BorrowedFd fd)
   return fdp->reader();
 }
 
-std::shared_ptr<WriteBuffer>
+RefPtr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
@@ -201,13 +201,16 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   return fdp->writer();
 }
 
-std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
+  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> ret;
   auto fdp = getfd(fd);
-  if (fdp->mode() == FdState::kPoisoned)
-    return {nullptr, nullptr};
-  return {fdp->reader(), fdp->writer()};
+  if (fdp->mode() != FdState::kPoisoned) {
+    ret.first = fdp->reader();
+    ret.second = fdp->writer();
+  }
+  return ret;
 }
 
 void

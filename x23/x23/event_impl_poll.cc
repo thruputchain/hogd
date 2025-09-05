@@ -41,7 +41,7 @@ CoroPollImpl::time_to_stop()
   return state_->empty();
 }
 
-std::shared_ptr<ReadBuffer>
+RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto s = state_.take();
@@ -51,7 +51,7 @@ CoroPollImpl::get_reader(BorrowedFd fd)
   return f.reader();
 }
 
-std::shared_ptr<WriteBuffer>
+RefPtr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto s = state_.take();
@@ -61,7 +61,7 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   return f.writer();
 }
 
-std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
+std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
   auto s = state_.take();
