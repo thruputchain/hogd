@@ -10,5 +10,5 @@ NUM_ACCOUNTS=$2
 CLIENT="$BUILD_DIR/hogd/hogexec/bench/payments_bench"
 
 # Run the client process (waits for it to finish)
-"$CLIENT" -c 10001 -e 10000 -a $NUM_ACCOUNTS
+"$CLIENT" -c 10001 -e 10000 -a $NUM_ACCOUNTS -s hog11
 
