@@ -12,6 +12,7 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -98,6 +99,15 @@ struct GenRs {
   }
   void show_def(const ProgDef &prog);
 
+  void show_vers_trait(const VersDef &vers, const std::string &prog_name);
+  void show_vers_client(const VersDef &vers, const std::string &prog_name,
+                        const std::string &prog_id);
+
+  void show_vers(const VersDef &vers, const std::string &prog_name,
+                 const std::string &prog_id);
+  void show_server_dispatch(VersDef const &vers, std::string const &prog_name,
+                            std::string const &prog_id);
+
   void show_decl(const Declaration &d, string const &name_prefix)
   {
     if (d.qual == Declaration::kVoid) {
@@ -150,6 +160,7 @@ struct GenRs {
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
   static string map_type(const string &t);
+  static string map_proc_return_type(const string &t);
   static string map_case(const string &c);
   static string map_bound(const string &b);
   string type_name(const Declaration &d, bool generate,
@@ -305,10 +316,150 @@ GenRs::process(const vector<Definition> &defs)
   }
 }
 
+// Generate the trait that the server implements to support the rpc
+void
+GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
+{
+  prtop(R"(
+#[allow(non_camel_case_types)]
+#[async_trait::async_trait]
+pub trait {}_{}: Send + Sync {{)",
+        prog_name, vers.id);
+
+  for (auto const &proc : vers.procs) {
+    std::vector<string> args = {"&self"};
+    for (size_t i = 0; i < proc.arg_types.size(); i++) {
+      args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
+    }
+    prtop("    {}\n", proc.comment);
+    prtop("    async fn {}({}) -> {};\n", proc.id, join(args, ", "),
+          map_proc_return_type(proc.return_type));
+  }
+
+  prtop("}}\n");
+}
+
+void
+GenRs::show_server_dispatch(VersDef const &vers, std::string const &prog_name,
+                            std::string const &prog_id)
+{
+  prtop(R"(
+#[allow(non_camel_case_types)]
+pub struct {0}_{1}_Dispatcher {{
+  inner: Box<dyn {0}_{1}>,
+}}
+
+impl {0}_{1}_Dispatcher {{
+  pub fn new(inner: Box<dyn {0}_{1}>) -> Self {{
+    Self {{ inner }}
+  }}
+}}
+
+#[async_trait::async_trait]
+impl ::rpc_driver::server_state::ServerDispatch for {0}_{1}_Dispatcher {{
+    fn prog_vers(&self) -> ::rpc_driver::ProgVers {{
+        ::rpc_driver::ProgVers::new({2}, {3})
+    }}
+    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_driver::RpcError> {{
+        match proc {{
+)",
+        prog_name, vers.id, prog_id, vers.val);
+
+  auto make_arg_detuple = [&](size_t n) {
+    std::vector<string> out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; i++) {
+      out.push_back(std::format("args.{}", i));
+    }
+    return join(out, ", ");
+  };
+
+  for (auto const &proc : vers.procs) {
+    std::string type_args;
+    for (auto const &arg : proc.arg_types) {
+      type_args += map_type(arg) + ", ";
+    }
+
+    prtop("            // {}\n", proc.id);
+    prtop("            {} => {{\n", proc.val);
+    prtop("                let args: ({}) =\n", type_args);
+    prtop("                    xdrs::serialize_txs::decode(data).map_err(|_| "
+          "::rpc_driver::RpcError::GarbageArguments)?;\n");
+    prtop("                let res = self.inner.{}({}).await;\n", proc.id,
+          make_arg_detuple(proc.arg_types.size()));
+    prtop("                xdrs::serialize_txs::encode(&res).map_err(|_| "
+          "::rpc_driver::RpcError::SystemError)\n");
+    prtop("            }}\n");
+  }
+
+  prtop("            _ => Err(::rpc_driver::RpcError::InvalidProcedure),\n");
+
+  prtop("        }}\n"); // close match
+  prtop("    }}\n");     // close fn
+  prtop("}}");           // close trait impl
+}
+
+void
+GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
+                        const std::string &prog_id)
+{
+
+  prtop(R"(
+pub struct {0}_{1}_Client {{
+    handle: ::std::sync::Arc<::rpc_driver::ClientHandle>,
+}}
+
+impl {0}_{1}_Client {{
+    pub fn new(handle: ::std::sync::Arc<::rpc_driver::ClientHandle>) -> Self {{
+        Self {{ handle }}
+    }}
+
+    fn prog_vers() -> ::rpc_driver::ProgVers {{
+        ::rpc_driver::ProgVers::new({2}, {3})
+    }}
+)",
+        prog_name, vers.id, prog_id, vers.val);
+
+  for (auto const &proc : vers.procs) {
+    std::vector<string> args = {"&self"};
+    std::vector<string> call_args;
+    for (size_t i = 0; i < proc.arg_types.size(); i++) {
+      args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
+      call_args.push_back(std::format("arg{}", i));
+    }
+    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_driver::RpcError> {{\n",
+          proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
+    prtop("         let data = xdrs::serialize_txs::encode(&({})).map_err(|_| "
+          "::rpc_driver::RpcError::GarbageArguments)?;\n",
+          join(call_args, ", "));
+    prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
+          "&data).await?;\n",
+          proc.val);
+    prtop("         xdrs::serialize_txs::decode(&buf).map_err(|_| "
+          "::rpc_driver::RpcError::SystemError)\n");
+    prtop("    }}\n");
+  }
+  prtop("}}\n");
+}
+
+void
+GenRs::show_vers(const VersDef &vers, const std::string &prog_name,
+                 const std::string &prog_id)
+{
+  show_vers_trait(vers, prog_name);
+  prtop("\n");
+  show_server_dispatch(vers, prog_name, prog_id);
+  prtop("\n");
+  show_vers_client(vers, prog_name, prog_id);
+  prtop("\n");
+}
+
 void
 GenRs::show_def(const ProgDef &prog)
 {
-  // unimplemented
+  for (auto const &vers : prog.versions) {
+    show_vers(vers, prog.id, prog.val);
+  }
 }
 
 void
@@ -769,6 +920,15 @@ GenRs::map_type(const string &t)
   if (auto it = type_map.find(t); it != type_map.end())
     return it->second;
   return t;
+}
+
+string
+GenRs::map_proc_return_type(const string &t)
+{
+  if (t == "void") {
+    return "()";
+  }
+  return map_type(t);
 }
 
 string
