@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <future>
 #include <numeric>
 #include <random>
 #include <utility>
@@ -144,36 +145,36 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
   x23::Vec<SignedTransaction> work_txs;
   work_txs.resize(num_txs);
 
-  // Create a vector of indices to process in parallel
-  std::vector<size_t> indices(num_txs);
-  // NOLINTNEXTLINE(modernize-use-ranges)
-  std::iota(indices.begin(), indices.end(), 0);
+  size_t nthread = WorkerPool::get_default_pool().worker_count();
 
-  WorkerPool::get_default_pool().for_each_parallel(
-      indices,
-      [this, &work_txs](size_t i) {
-        // Each thread needs its own random number generator to avoid contention
-        thread_local static std::random_device rd;
-        thread_local static std::mt19937 gen(rd());
+  std::vector<std::future<void>> futures;
+  futures.reserve(nthread);
+  for (size_t i = 0; i < nthread; ++i) {
+    size_t start = i * batch_size;
+    size_t end = std::min<size_t>(start + batch_size, num_txs);
 
-        using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-        using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
+    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs, start, end]() {
+      thread_local static std::random_device rd;
+      thread_local static std::mt19937 gen(rd());
+      std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
 
-        std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+      auto make_account_pair = [&]() {
+        auto sender = dist(gen);
+        auto receiver = sender;
+        while (receiver == sender) {
+          receiver = dist(gen);
+        }
+        return std::make_pair(sender, receiver);
+      };
 
-        auto make_account_pair = [&]() {
-          auto sender = dist(gen);
-          auto receiver = sender;
-          while (receiver == sender) {
-            receiver = dist(gen);
-          }
-          return std::make_pair(sender, receiver);
-        };
+      using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+      using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
 
+      for (size_t j = start; j < end; ++j) {
         auto [sender, receiver] = make_account_pair();
         uint128_t amount = 10;
 
-        // has to match the deserialized objects in simple_wallet::do_action
+         // has to match the deserialized objects in simple_wallet::do_action
         Calldata internal_calldata =
             x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
                            GasAmount{1'000'000},
@@ -197,9 +198,14 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
                 },
         };
 
-        work_txs[i] = std::move(tx);
-      },
-      batch_size);
+        work_txs[j] = std::move(tx);
+      }
+    }));
+  }
+
+  for (auto &future : futures) {
+    future.wait();
+  }
 
   return {LoadgenExtension{
       .work_txs = std::move(work_txs),
