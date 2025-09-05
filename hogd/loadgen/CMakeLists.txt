@@ -44,3 +44,22 @@ target_link_libraries(
   loadgen
   hogd
 )
+
+# create loadgen benchmark binary
+add_executable(
+  erc20_experiment_bench
+  erc20_experiment_bench.cc
+)
+target_link_libraries(
+  erc20_experiment_bench
+  loadgen
+  benchmark::benchmark
+)
+
+add_dependencies(
+  erc20_experiment_bench
+  all_wasm_contracts
+  all_wasm_headers
+)
+
+set_property(TARGET erc20_experiment_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
