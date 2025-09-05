@@ -62,6 +62,10 @@ concept decays_to = std::same_as<std::decay_t<T>, std::decay_t<U>>;
 template<typename T, typename U>
 concept references = std::convertible_to<T, const U &>;
 
+// True for types that are not const or reference to const.
+template<typename T>
+concept is_mutable = !std::is_const_v<std::remove_reference_t<T>>;
+
 // Type Derived is a posibly cv- or reference-qualified Base or
 // subtype of Base.
 template<typename Derived, typename Base>

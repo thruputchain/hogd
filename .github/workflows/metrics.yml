@@ -3,7 +3,48 @@ name: Metrics
 on:
   push:
     branches: [ "main" ]  
+
 jobs:
+  bench_server:
+    runs-on: client
+    steps:
+    - name: clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+          ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+          ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+          ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: gcc version check
+      run: gcc --version
+    - name: clang version check
+      run: clang --version
+    - name: Add Cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: path check
+      run: echo $PATH
+    - name: cargo version check
+      run: cargo --version
+    - name: set gcc-14 in check
+      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11111
+
   build:
     runs-on: metrics
 

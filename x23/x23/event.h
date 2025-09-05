@@ -9,7 +9,6 @@
 #include <sys/socket.h>
 
 #include <x23/async.h>
-#include <x23/atomicsharedptr.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corosync.h>
@@ -59,24 +58,23 @@ public:
     return *this;
   }
 
-  std::shared_ptr<T> get()
+  RefPtr<T> get()
   {
     auto ret = t_.load();
     if (!ret) {
-      auto buf = std::make_shared<T>();
-      if (t_.compare_exchange_strong(ret, buf))
-        return buf;
+      ret = *new T{};
+      t_.compare_exchange(ret, nullptr);
     }
     return ret;
   }
   void reset() { t_.store(nullptr); }
 
 private:
-  atomic_shared_ptr<T> t_;
+  AtomicRefPtr<T> t_;
 };
 
-template<std::size_t StructSize>
-struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
+template<std::size_t StructSize> struct GenReadBuffer : RefCount {
+  static constexpr bool kAllowRefPtrConversion = true;
   static constexpr size_t kStructSize = StructSize;
   using PosType = std::conditional_t<
       kStructSize <= 0xff, std::uint8_t,
@@ -132,7 +130,8 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
 };
 using ReadBuffer = GenReadBuffer<0x10000>;
 
-struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
+struct WriteBuffer : RefCount {
+  static constexpr bool kAllowRefPtrConversion = true;
   static constexpr size_t kFlushThreshold = ReadBuffer::kStructSize;
 
   // This is true if we are waiting for a read, in which case don't
@@ -270,10 +269,9 @@ protected:
   bool time_to_stop();
   int get_max_fd();
   void wake();
-  std::shared_ptr<ReadBuffer> get_reader(BorrowedFd fd);
-  std::shared_ptr<WriteBuffer> get_writer(BorrowedFd fd);
-  std::pair<std::shared_ptr<ReadBuffer>, std::shared_ptr<WriteBuffer>>
-  get_rw(BorrowedFd fd);
+  RefPtr<ReadBuffer> get_reader(BorrowedFd fd);
+  RefPtr<WriteBuffer> get_writer(BorrowedFd fd);
+  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> get_rw(BorrowedFd fd);
 
 private:
   std::stop_source ss_;

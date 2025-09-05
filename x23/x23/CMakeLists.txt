@@ -1,7 +1,6 @@
 add_library(x23
   ${CMAKE_CURRENT_BINARY_DIR}/config.h
   async.h
-  atomicsharedptr.h
   callsite.h
   cleanup.h
   corosync.cc
