@@ -27,7 +27,6 @@ public:
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
     for (const DecoratedSignature &dec_sig : tx.signatures) {
-      // TODO(jhumphri): Populate [public_key] properly.
       Ed25519PublicKey public_key;
       if (!get_public_key(tx.tx.invocation.invoked_address,
                           dec_sig.public_key_id, public_key)) {
@@ -40,10 +39,8 @@ public:
     for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
       const ContractAddress &account = aux.address;
       for (const DecoratedSignature &dec_sig : aux.signatures) {
-        // TODO(jhumphri): Populate [public_key] properly.
         Ed25519PublicKey public_key;
-        if (!get_public_key(tx.tx.invocation.invoked_address,
-                            dec_sig.public_key_id, public_key)) {
+        if (!get_public_key(account, dec_sig.public_key_id, public_key)) {
           return false;
         }
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
@@ -58,7 +55,8 @@ public:
   sign(const Transaction &tx,
        const std::unordered_map<uint32_t, Ed25519SecretKey>
            &account_private_keys,
-       const x23::Vec<std::pair<ContractAddress, Ed25519SecretKey>>
+       const std::unordered_map<ContractAddress,
+                                std::unordered_map<uint32_t, Ed25519SecretKey>>
            &auxiliary_private_keys)
   {
     const AuthSignaturePreimage preimage{.signature_weight = 0,
@@ -78,13 +76,15 @@ public:
     }
 
     std::unordered_map<ContractAddress, x23::Vec<DecoratedSignature>> aux_map;
-    for (const auto &[account, private_key] : auxiliary_private_keys) {
-      Signature sig(CryptographicScheme::Ed25519);
-      sig.ed25519() = ed25519_sign(private_key, msg);
-      const DecoratedSignature dec_sig = {.public_key_id = 0,
-                                          .weight = 0,
-                                          .signature = sig};
-      aux_map[account].push_back(dec_sig);
+    for (const auto &[account, private_keys] : auxiliary_private_keys) {
+      for (const auto &[idx, private_key] : private_keys) {
+        Signature sig(CryptographicScheme::Ed25519);
+        sig.ed25519() = ed25519_sign(private_key, msg);
+        const DecoratedSignature dec_sig = {.public_key_id = idx,
+                                            .weight = 0,
+                                            .signature = sig};
+        aux_map[account].push_back(dec_sig);
+      }
     }
     signed_tx.aux_signatures.reserve(auxiliary_private_keys.size());
     for (const auto &[account, sigs] : aux_map) {
@@ -105,6 +105,7 @@ private:
     return ed25519_verify(public_key, sig, msg);
   }
 
+  // TODO(jhumphri): Populate [public_key] properly.
   bool get_public_key(const ContractAddress &account, size_t idx,
                       Ed25519PublicKey &public_key)
   {

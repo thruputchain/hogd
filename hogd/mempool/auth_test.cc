@@ -212,6 +212,47 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
+TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/0)},
+      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/1)}};
+  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_1_private_keys = {
+      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
+                                   /*idx=*/0)},
+      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
+                                   /*idx=*/1)}};
+  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_2_private_keys = {
+      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
+                                   /*idx=*/0)},
+      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
+                                   /*idx=*/1)}};
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      auth.sign(tx, private_keys,
+                /*auxiliary_private_keys=*/
+                {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
+                 {MempoolTestServer::kAccountAddresses[2],
+                  aux_2_private_keys}});
+  EXPECT_TRUE(auth.authenticate(signed_tx));
+}
+
 } // namespace hogd
 
 int
