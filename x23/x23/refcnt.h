@@ -15,8 +15,18 @@ namespace x23 {
 namespace detail {
 
 template<typename T> struct RefOps {
-  static void incref(T *p) noexcept(noexcept(p->incref())) { p->incref(); }
-  static void decref(T *p) noexcept(noexcept(p->decref())) { p->decref(); }
+  static auto incref(T *p) noexcept(noexcept(p->incref()))
+  {
+    return p->incref();
+  }
+  using tag_type = decltype(incref(declval<T *>()));
+
+  static void decref(T *p, auto... tag) noexcept(noexcept(p->decref(tag...)))
+      requires (sizeof...(tag) == !std::is_void_v<tag_type>)
+  {
+    p->decref(tag...);
+  }
+
   static T *get(T *p) noexcept { return p; }
 };
 
