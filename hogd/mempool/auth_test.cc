@@ -15,15 +15,26 @@
 
 namespace hogd {
 
-TEST(Mempool, SubmitUnvetted)
+TEST(Authentication, SignAndVerify)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  const Ed25519SecretKey private_key = auth.get_tmp_key_pair().second;
 
-  clients.interface->schedulercoord_submit_unvetted({txs[0]})();
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx = auth.sign(tx, private_key);
+  EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
 } // namespace hogd

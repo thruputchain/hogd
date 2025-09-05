@@ -43,6 +43,7 @@ public:
   Mempool &operator=(Mempool &&) = delete;
 
   Scheduler &scheduler() { return scheduler_; }
+  Authentication &authentication() { return authentication_; }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 

@@ -22,7 +22,7 @@ public:
 
   bool authenticate(const SignedTransaction &tx)
   {
-    // TODO(jhumphri): Populate [public_key].
+    // TODO(jhumphri): Populate [public_key] properly.
     const Ed25519PublicKey public_key = get_tmp_key_pair().first;
 
     const AuthSignaturePreimage preimage{.signature_weight = 0,
@@ -42,6 +42,20 @@ public:
       }
     }
     return true;
+  }
+
+  SignedTransaction sign(const Transaction &tx,
+                         const Ed25519SecretKey &private_key)
+  {
+    const AuthSignaturePreimage preimage{.signature_weight = 0,
+                                         .message = x23::serialize(tx)};
+    const x23::Buf msg = x23::serialize(preimage);
+    Signature sig(CryptographicScheme::Ed25519);
+    sig.ed25519() = ed25519_sign(private_key, msg);
+    const DecoratedSignature dec_sig = {.public_key_id = 0,
+                                        .weight = 0,
+                                        .signature = sig};
+    return {.tx = tx, .signatures = {dec_sig}, .aux_signatures = {}};
   }
 
 private:
