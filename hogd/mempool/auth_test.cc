@@ -62,6 +62,31 @@ TEST(Authentication, SignAndVerifyMismatch)
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
+TEST(Authentication, SignAndVerifyWrongIndex)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  const Ed25519SecretKey private_key =
+      auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                               /*idx=*/1);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      auth.sign(tx, {{0, private_key}}, /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
 TEST(Authentication, SignAndVerifyMultiSig)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
@@ -93,6 +118,36 @@ TEST(Authentication, SignAndVerifyMultiSig)
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
+TEST(Authentication, SignAndVerifyMultiSigMismatch)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/0)},
+      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/1)},
+      {3, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/3)}};
+  private_keys[3] = ed25519_keygen().second;
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
 TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
@@ -117,6 +172,39 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
       // [create_tmp_key_pair()].
       {4, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
                                    /*idx=*/3)}};
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      auth.sign(tx, private_keys, /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/0)},
+      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/1)},
+      {3, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
+                                   /*idx=*/3)}};
+  const Ed25519SecretKey &private_key_1 = private_keys[1];
+  const Ed25519SecretKey &private_key_3 = private_keys[3];
+  private_keys[1] = private_key_3;
+  private_keys[3] = private_key_1;
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
