@@ -52,7 +52,15 @@ public:
           [this](const std::stop_token &stoken) { worker_loop(stoken); });
     }
   }
-  ~WorkerPool() { assert(jobs_.empty()); }
+  ~WorkerPool()
+  {
+    assert(jobs_.empty());
+    // Make teardown slightly faster for large numbers of threads.
+    // Without this the destructor signals workers to stop one by one.
+    for (auto &worker : workers_) {
+      worker.request_stop();
+    }
+  }
 
   // disable move and copy.
   WorkerPool(WorkerPool &&p) = delete;

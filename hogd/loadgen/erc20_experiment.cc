@@ -1,6 +1,8 @@
 #include "hogd/loadgen/erc20_experiment.h"
 
+#include <algorithm>
 #include <cassert>
+#include <future>
 #include <random>
 #include <utility>
 #include <vector>
@@ -8,6 +10,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
@@ -133,53 +136,77 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
     return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
   }
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
-
-  auto make_account_pair = [&]() {
-    auto i = dist(gen);
-    auto j = i;
-    while (j == i) {
-      j = dist(gen);
-    }
-    return std::make_pair(i, j);
-  };
-
-  using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-  using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
-
   x23::Vec<SignedTransaction> work_txs;
-  work_txs.reserve(num_txs);
-  for (size_t i = 0; i < num_txs; ++i) {
-    auto [sender, receiver] = make_account_pair();
+  work_txs.resize(num_txs);
 
-    uint128_t amount = 10;
+  size_t nthread = WorkerPool::get_default_pool().worker_count();
 
-    // has to match the deserialized objects in simple_wallet::do_action
-    Calldata internal_calldata =
-        x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
-                       GasAmount{1'000'000},
-                       erc20_meta::make_calldata<"transfer">(
-                           wallets_[receiver].address, to_xdr(amount)));
+  size_t batch_size = num_txs / nthread;
+  if (num_txs % nthread != 0) {
+    batch_size++;
+  }
 
-    auto tx = SignedTransaction{
-        .tx =
-            Transaction{
-                .invocation =
-                    {
-                        .invoked_address = wallets_[sender].address,
-                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                        .gas_limit = GasAmount{1'000'000},
-                        .calldata = wallet_meta::make_calldata<"do_action">(
-                            ed25519_sign(wallets_[sender].secret_key,
-                                         internal_calldata),
-                            internal_calldata),
-                    },
-            },
-    };
+  std::vector<std::future<void>> futures;
+  futures.reserve(nthread);
+  for (size_t i = 0; i < nthread; ++i) {
+    size_t start = i * batch_size;
+    size_t end = std::min<size_t>(start + batch_size, num_txs);
+    if (i == nthread - 1) {
+      assert(end == num_txs);
+    }
 
-    work_txs.push_back(tx);
+    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs,
+                                                                start, end]() {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+
+      std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+
+      auto make_account_pair = [&]() {
+        auto sender = dist(gen);
+        auto receiver = sender;
+        while (receiver == sender) {
+          receiver = dist(gen);
+        }
+        return std::make_pair(sender, receiver);
+      };
+
+      using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+      using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
+
+      for (size_t j = start; j < end; ++j) {
+        auto [sender, receiver] = make_account_pair();
+        uint128_t amount = 10;
+
+        // has to match the deserialized objects in simple_wallet::do_action
+        Calldata internal_calldata =
+            x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
+                           GasAmount{1'000'000},
+                           erc20_meta::make_calldata<"transfer">(
+                               wallets_[receiver].address, to_xdr(amount)));
+
+        work_txs[j] = SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        {
+                            .invoked_address = wallets_[sender].address,
+                            .entrypoint =
+                                wallet_meta::entrypoint<"do_action">(),
+                            .gas_limit = GasAmount{1'000'000},
+                            .calldata = wallet_meta::make_calldata<"do_action">(
+                                ed25519_sign(wallets_[sender].secret_key,
+                                             internal_calldata),
+                                internal_calldata),
+                        },
+                },
+        };
+      }
+    }));
+  }
+
+  for (auto &future : futures) {
+    future.wait();
   }
 
   return {LoadgenExtension{
