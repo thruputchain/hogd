@@ -13,7 +13,7 @@ public:
   Authentication(db_client_t &db_client) : db_client_(db_client) {}
 
   // TODO(jhumphri): Remove this.
-  std::pair<Ed25519PublicKey, Ed25519SecretKey> get_tmp_key_pair()
+  static std::pair<Ed25519PublicKey, Ed25519SecretKey> get_tmp_key_pair()
   {
     static const std::pair<Ed25519PublicKey, Ed25519SecretKey> keys =
         ed25519_keygen();
@@ -44,7 +44,7 @@ public:
     return true;
   }
 
-  SignedTransaction sign(const Transaction &tx,
+  static SignedTransaction sign(const Transaction &tx,
                          const Ed25519SecretKey &private_key)
   {
     const AuthSignaturePreimage preimage{.signature_weight = 0,
@@ -59,7 +59,7 @@ public:
   }
 
 private:
-  bool check_decorated_signature(const DecoratedSignature &dec_sig,
+  static bool check_decorated_signature(const DecoratedSignature &dec_sig,
                                  const Ed25519PublicKey &public_key,
                                  const x23::Buf &msg)
   {
