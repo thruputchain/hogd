@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <memory>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
@@ -13,6 +12,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/hogdb/invoke_tx.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 

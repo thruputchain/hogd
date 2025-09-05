@@ -1,11 +1,12 @@
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <unistd.h>
+#include <thread>
 #include <utility>
 
 #include "hogd/base/io.h"
@@ -55,11 +56,9 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
     throw std::runtime_error("Failed to start executor server");
   }
 
-  // Wait for a byte from stdin (blocking)
-  char buf;
-  if (read(STDIN_FILENO, &buf, 1) > 0) {
-    std::println("Exiting server on stdin input");
-  }
+  while (true) {
+    std::this_thread::sleep_for(std::chrono::seconds(100));
+  };
 }
 } // namespace
 
@@ -102,8 +101,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (!exec_port || !coord_port) {
     usage(argv);
   }
-
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   hogd::run_bench_server(1, *exec_port, *coord_port);
+  std::println("bench_server finished with orderly shutdown");
   return 0;
 }

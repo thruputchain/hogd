@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -11,72 +10,40 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
-#include "db_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
-#include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/bench/common_bench_state.h"
+#include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/metrics.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
-#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
 namespace {
 
-struct BenchmarkState {
-
-  BenchmarkState(x23::ThreadPool &db_pool) : db_pool_(db_pool) {}
-
-  std::atomic<TransactionID> next_tx_id_ = 0;
-  BlockID block_number_ = 0;
-
-  x23::ThreadPool &db_pool_;
-  x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
-
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-
-  using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  std::unique_ptr<coord_client_t> coord_client_;
+struct BenchmarkState : public CommonBenchState {
+  BenchmarkState(std::string server_addr, uint16_t exec_port,
+                 uint16_t coord_port)
+    : CommonBenchState(std::move(server_addr), exec_port, coord_port,
+                       kControlServerPort)
+  {}
 
   ContractAddress contract_addr_;
 
-  void initialize(uint32_t exec_port, uint32_t coord_port)
+  void initialize()
   {
     HogexecMetrics::launch_log_worker();
-
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = exec_port});
-
-    coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
-      auto fd = cp_.tcpconnect("localhost", std::to_string(coord_port))();
-      if (!fd) {
-        throw std::runtime_error("Failed to connect to coord server");
-      }
-      auto client_config = x23::rpc_stream_logged(cp_, *fd);
-      return std::make_unique<coord_client_t>(
-          client_config.template client<DbCoord1>());
-    }();
-
     GenesisBlockBuilder genesis_builder;
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     using client_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
@@ -84,91 +51,13 @@ struct BenchmarkState {
         fibonacci_contract, SHA256Hash{},
         client_meta_t::entrypoint<"fibonacci">(),
         client_meta_t::make_calldata<"fibonacci">(uint32_t{5}), 1'000'000'000);
-    auto genesis_block = genesis_builder.build();
 
-    {
-      auto r = coord_client_->dbcoord_load_genesis_block(genesis_block)();
-      if (r != DbResult::DbResultOK) {
-        throw std::runtime_error("Failed to write genesis block");
-      }
-    }
-
-    {
-      auto r = coord_client_->dbcoord_create_snapshot(
-          0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
-      if (r != DbResult::DbResultOK) {
-        throw std::runtime_error("Failed to create snapshot");
-      }
-    }
-
-    block_number_++;
-
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
-
-    auto unfurl_txs = genesis_builder.make_unfurl_genesis_transactions();
-    for (auto &tx : unfurl_txs) {
-      auto handler = make_handler(tx);
-      if (!handler.root_invoke().is_root_success()) {
-        throw std::runtime_error("Failed to invoke transaction");
-      }
-      if (auto r = handler.try_commit_transaction();
-          !r.has_value() || !r.value()) {
-        throw std::runtime_error("failed to perform commit operation");
-      }
-    }
     contract_addr_ = GenesisBlockLoader::calculate_deployed_address(
         sha256(*fibonacci_contract), SHA256Hash{});
-    advance_block();
-  }
 
-  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
-                                 TransactionID txid = 0)
-  {
-    if (txid == 0) {
-      txid = allocate_txid();
-    }
-    auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
-    return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{}, make_hogexec_context());
-  }
-
-  void advance_block()
-  {
-    auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
-    if (r.result() != DbResult::DbResultOK) {
-      throw std::runtime_error("Failed to close snapshot");
-    }
-
-    auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
-    if (r2.result() != DbResult::DbResultOK) {
-      throw std::runtime_error("Failed to commit snapshot");
-    }
-
-    auto r3 = coord_client_->dbcoord_create_snapshot(
-        block_number_, block_number_ + 1,
-        BlockExecutionMode::kBlockExecutionModeProposal)();
-    if (r3 != DbResult::DbResultOK) {
-      throw std::runtime_error("Failed to create snapshot");
-    }
-
-    block_number_++;
-
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
-  }
-
-  TransactionID allocate_txid()
-  {
-    return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
+    run_genesis_block(genesis_builder);
   }
 };
-
-void
-setup_benchmark(BenchmarkState &bs, uint32_t exec_port, uint32_t coord_port)
-{
-  bs.initialize(exec_port, coord_port);
-}
 
 void
 run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
@@ -283,12 +172,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 }
 
 void
-run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
+run_fibonacci_client(std::string const &server_addr, uint32_t exec_port,
+                     uint32_t coord_port)
 {
-  x23::ThreadPool db_pool = x23::ThreadPool(1);
-  BenchmarkState bs(db_pool);
-
-  setup_benchmark(bs, exec_port, coord_port);
+  BenchmarkState bs(server_addr, exec_port, coord_port);
+  bs.initialize();
 
   // strong scaling
   for (auto nthread : {1, 4, 16, 64, 128, 256, 512, 2048}) {
@@ -333,7 +221,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port>", argv[0]);
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr>",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -346,10 +235,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::optional<int> exec_port;
   std::optional<int> coord_port;
+  std::optional<std::string> server_addr;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:s:")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);
@@ -357,17 +247,22 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'c':
       coord_port = std::stoi(optarg);
       break;
+    case 's':
+      server_addr = std::string(optarg);
+      break;
     default:
       usage(argv);
     }
   }
   // NOLINTEND(misc-include-cleaner)
-  if (!exec_port || !coord_port) {
+  if (!server_addr || !exec_port || !coord_port) {
     usage(argv);
   }
 
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  hogd::run_fibonacci_client(*exec_port, *coord_port);
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  hogd::run_fibonacci_client(*server_addr, *exec_port, *coord_port);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
   std::fflush(stdout);
   return 0;
 }
