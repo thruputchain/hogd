@@ -9,6 +9,7 @@
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/mempool/authentication.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -113,6 +114,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   Scheduler scheduler_;
+  Authentication authentication_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };

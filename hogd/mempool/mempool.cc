@@ -37,7 +37,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   SignedTransactionBatch authenticated;
   authenticated.reserve(batch.size());
   for (const SignedTransaction &tx : batch) {
-    if (Authentication::authenticate(tx)) {
+    if (authentication_.authenticate(tx)) {
       authenticated.push_back(tx);
     }
   }
