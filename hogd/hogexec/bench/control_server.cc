@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <optional>
 #include <print>
-#include <signal.h>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -15,6 +14,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <vector>
 
 #include "ci_server.hh"
@@ -61,8 +61,10 @@ public:
     std::string stdout_template = stdout_path.string();
     std::string stderr_template = stderr_path.string();
 
+    // NOLINTBEGIN(misc-include-cleaner)
     int stdout_fd = mkstemp(stdout_template.data());
     int stderr_fd = mkstemp(stderr_template.data());
+    // NOLINTEND(misc-include-cleaner)
 
     if (stdout_fd == -1 || stderr_fd == -1) {
       error("failed to create temporary files: {}", Errno{});
@@ -166,6 +168,7 @@ public:
 
 private:
   // Helper function to wait for child process and log exit status
+  // NOLINTBEGIN(misc-include-cleaner)
   static void wait_for_child(pid_t child_pid)
   {
     int status;
@@ -197,7 +200,7 @@ private:
             status);
     }
   }
-
+  // NOLINTEND(misc-include-cleaner)
 public:
   void start_server(uint32_t port)
   {

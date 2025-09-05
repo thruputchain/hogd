@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 
 #include "hogd/base/io.h"
