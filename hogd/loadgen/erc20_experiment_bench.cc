@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <stdexcept>
 
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -66,8 +67,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
   for (auto _ : state) {
     auto result = exp.extend_experiment(num_txs);
     if (!result.has_value()) {
-      state.SkipWithError("Failed to extend ERC20 experiment");
-      return;
+      throw std::runtime_error("Failed to extend ERC20 experiment");
     }
 
     // Verify we got the expected number of transactions

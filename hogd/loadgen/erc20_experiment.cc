@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <future>
-#include <numeric>
 #include <random>
 #include <utility>
 #include <vector>
@@ -153,12 +152,14 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
     size_t start = i * batch_size;
     size_t end = std::min<size_t>(start + batch_size, num_txs);
     if (i == nthread - 1) {
-        assert(end == num_txs);
+      assert(end == num_txs);
     }
 
-    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs, start, end]() {
-      thread_local static std::random_device rd;
-      thread_local static std::mt19937 gen(rd());
+    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs,
+                                                                start, end]() {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+
       std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
 
       auto make_account_pair = [&]() {
@@ -177,14 +178,14 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
         auto [sender, receiver] = make_account_pair();
         uint128_t amount = 10;
 
-         // has to match the deserialized objects in simple_wallet::do_action
+        // has to match the deserialized objects in simple_wallet::do_action
         Calldata internal_calldata =
             x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
                            GasAmount{1'000'000},
                            erc20_meta::make_calldata<"transfer">(
                                wallets_[receiver].address, to_xdr(amount)));
 
-        auto tx = SignedTransaction{
+        work_txs[j] = SignedTransaction{
             .tx =
                 Transaction{
                     .invocation =
@@ -200,8 +201,6 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
                         },
                 },
         };
-
-        work_txs[j] = std::move(tx);
       }
     }));
   }
