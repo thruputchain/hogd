@@ -137,21 +137,24 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
     return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
   }
 
-  const size_t batch_size =
-      std::max(static_cast<size_t>(10),
-               static_cast<size_t>(num_txs) /
-                   (4 * WorkerPool::get_default_pool().worker_count()));
-
   x23::Vec<SignedTransaction> work_txs;
   work_txs.resize(num_txs);
 
   size_t nthread = WorkerPool::get_default_pool().worker_count();
+
+  size_t batch_size = num_txs / nthread;
+  if (num_txs % nthread != 0) {
+    batch_size++;
+  }
 
   std::vector<std::future<void>> futures;
   futures.reserve(nthread);
   for (size_t i = 0; i < nthread; ++i) {
     size_t start = i * batch_size;
     size_t end = std::min<size_t>(start + batch_size, num_txs);
+    if (i == nthread - 1) {
+        assert(end == num_txs);
+    }
 
     futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs, start, end]() {
       thread_local static std::random_device rd;
