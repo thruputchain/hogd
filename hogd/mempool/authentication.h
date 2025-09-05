@@ -13,22 +13,26 @@ public:
   Authentication(db_client_t &db_client) : db_client_(db_client) {}
 
   // TODO(jhumphri): Remove this.
-  static std::pair<Ed25519PublicKey, Ed25519SecretKey> get_tmp_key_pair()
+  Ed25519SecretKey create_tmp_key_pair(const ContractAddress &account,
+                                       size_t idx)
   {
-    static const std::pair<Ed25519PublicKey, Ed25519SecretKey> keys =
-        ed25519_keygen();
-    return keys;
+    const auto &[public_key, private_key] = ed25519_keygen();
+    public_keys_[account][idx] = public_key;
+    return private_key;
   }
 
   bool authenticate(const SignedTransaction &tx)
   {
-    // TODO(jhumphri): Populate [public_key] properly.
-    const Ed25519PublicKey public_key = get_tmp_key_pair().first;
-
     const AuthSignaturePreimage preimage{.signature_weight = 0,
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
     for (const DecoratedSignature &dec_sig : tx.signatures) {
+      // TODO(jhumphri): Populate [public_key] properly.
+      Ed25519PublicKey public_key;
+      if (!get_public_key(tx.tx.invocation.invoked_address,
+                          dec_sig.public_key_id, public_key)) {
+        return false;
+      }
       if (!check_decorated_signature(dec_sig, public_key, msg)) {
         return false;
       }
@@ -36,6 +40,12 @@ public:
     for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
       const ContractAddress &account = aux.address;
       for (const DecoratedSignature &dec_sig : aux.signatures) {
+        // TODO(jhumphri): Populate [public_key] properly.
+        Ed25519PublicKey public_key;
+        if (!get_public_key(tx.tx.invocation.invoked_address,
+                            dec_sig.public_key_id, public_key)) {
+          return false;
+        }
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
           return false;
         }
@@ -44,31 +54,74 @@ public:
     return true;
   }
 
-  static SignedTransaction sign(const Transaction &tx,
-                         const Ed25519SecretKey &private_key)
+  static SignedTransaction
+  sign(const Transaction &tx,
+       const std::unordered_map<uint32_t, Ed25519SecretKey>
+           &account_private_keys,
+       const x23::Vec<std::pair<ContractAddress, Ed25519SecretKey>>
+           &auxiliary_private_keys)
   {
     const AuthSignaturePreimage preimage{.signature_weight = 0,
                                          .message = x23::serialize(tx)};
     const x23::Buf msg = x23::serialize(preimage);
-    Signature sig(CryptographicScheme::Ed25519);
-    sig.ed25519() = ed25519_sign(private_key, msg);
-    const DecoratedSignature dec_sig = {.public_key_id = 0,
-                                        .weight = 0,
-                                        .signature = sig};
-    return {.tx = tx, .signatures = {dec_sig}, .aux_signatures = {}};
+    SignedTransaction signed_tx{.tx = tx,
+                                .signatures = {},
+                                .aux_signatures = {}};
+    signed_tx.signatures.reserve(account_private_keys.size());
+    for (const auto &[idx, private_key] : account_private_keys) {
+      Signature sig(CryptographicScheme::Ed25519);
+      sig.ed25519() = ed25519_sign(private_key, msg);
+      const DecoratedSignature dec_sig = {.public_key_id = idx,
+                                          .weight = 0,
+                                          .signature = sig};
+      signed_tx.signatures.push_back(dec_sig);
+    }
+
+    std::unordered_map<ContractAddress, x23::Vec<DecoratedSignature>> aux_map;
+    for (const auto &[account, private_key] : auxiliary_private_keys) {
+      Signature sig(CryptographicScheme::Ed25519);
+      sig.ed25519() = ed25519_sign(private_key, msg);
+      const DecoratedSignature dec_sig = {.public_key_id = 0,
+                                          .weight = 0,
+                                          .signature = sig};
+      aux_map[account].push_back(dec_sig);
+    }
+    signed_tx.aux_signatures.reserve(auxiliary_private_keys.size());
+    for (const auto &[account, sigs] : aux_map) {
+      const AuxiliaryDecoratedSignatures aux_sigs{.address = account,
+                                                  .signatures = sigs};
+      signed_tx.aux_signatures.push_back(aux_sigs);
+    }
+    return signed_tx;
   }
 
 private:
   static bool check_decorated_signature(const DecoratedSignature &dec_sig,
-                                 const Ed25519PublicKey &public_key,
-                                 const x23::Buf &msg)
+                                        const Ed25519PublicKey &public_key,
+                                        const x23::Buf &msg)
   {
     CHECK_EQ(dec_sig.signature.scheme(), CryptographicScheme::Ed25519);
     const Ed25519Signature sig = dec_sig.signature.ed25519();
     return ed25519_verify(public_key, sig, msg);
   }
 
+  bool get_public_key(const ContractAddress &account, size_t idx,
+                      Ed25519PublicKey &public_key)
+  {
+    if (!public_keys_.contains(account)) {
+      return false;
+    }
+    if (!public_keys_[account].contains(idx)) {
+      return false;
+    }
+    public_key = public_keys_[account][idx];
+    return true;
+  }
+
   db_client_t &db_client_;
+  std::unordered_map<ContractAddress,
+                     std::unordered_map<size_t, Ed25519PublicKey>>
+      public_keys_;
 };
 
 } // namespace hogd
