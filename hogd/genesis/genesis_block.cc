@@ -82,7 +82,7 @@ GenesisBlockLoader::load_genesis_block(
 }
 
 std::vector<SignedTransaction>
-GenesisBlockBuilder::make_unfurl_genesis_transactions()
+GenesisBlockBuilder::make_unfurl_genesis_transactions() const
 {
   std::vector<SignedTransaction> unfurl_transactions;
   using token_claim_client_t =
@@ -180,7 +180,7 @@ GenesisBlockBuilder::add_initial_config(
 }
 
 GenesisBlock
-GenesisBlockBuilder::build()
+GenesisBlockBuilder::build() const
 {
   GenesisBlock block;
   for (auto const &entry : entries_) {

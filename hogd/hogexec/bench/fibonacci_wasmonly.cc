@@ -393,9 +393,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  x23::ThreadPool pool(1);
-  x23::CoroPoll cp(pool);
-
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   hogd::run_fibonacci_client(*server_addr, *exec_port, *coord_port);
   // NOLINTEND(bugprone-unchecked-optional-access)

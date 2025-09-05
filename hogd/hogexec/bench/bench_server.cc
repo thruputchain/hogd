@@ -57,7 +57,7 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
     throw std::runtime_error("Failed to start executor server");
   }
 
-  while(true) {
+  while (true) {
     std::this_thread::sleep_for(std::chrono::seconds(100));
   };
 }

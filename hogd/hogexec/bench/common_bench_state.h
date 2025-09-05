@@ -8,9 +8,11 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "coord.hh"
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -21,11 +23,13 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "loadgen.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -57,7 +61,11 @@ public:
   }
 
   void advance_block();
-  void run_genesis_block(GenesisBlockBuilder &genesis_builder);
+
+  void run_genesis_block(GenesisBlockBuilder const &genesis_builder);
+  void
+  run_genesis_block(GenesisBlock const &genesis_block,
+                    x23::Vec<InitializationBlock> const &initialization_txs);
 
 private:
   void connect_coord()
@@ -157,10 +165,21 @@ CommonBenchState::advance_block()
 
 // leaves the benchmark in a state where it's ready to execute transactions
 inline void
-CommonBenchState::run_genesis_block(GenesisBlockBuilder &genesis_builder)
+CommonBenchState::run_genesis_block(GenesisBlockBuilder const &genesis_builder)
 {
+  auto unfurl_txs = genesis_builder.make_unfurl_genesis_transactions();
+  InitializationBlock initialization_txs = {unfurl_txs.begin(),
+                                            unfurl_txs.end()};
+  run_genesis_block(genesis_builder.build(), {initialization_txs});
+}
+
+inline void
+CommonBenchState::run_genesis_block(
+    GenesisBlock const &genesis_block,
+    x23::Vec<InitializationBlock> const &initialization_txs)
+{
+
   assert(block_number_ == 0);
-  auto genesis_block = genesis_builder.build();
   {
     auto r = coord_client_->dbcoord_load_genesis_block(genesis_block)();
     if (r != DbResult::DbResultOK) {
@@ -180,18 +199,19 @@ CommonBenchState::run_genesis_block(GenesisBlockBuilder &genesis_builder)
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
 
-  auto unfurl_txs = genesis_builder.make_unfurl_genesis_transactions();
-  for (auto &tx : unfurl_txs) {
-    auto handler = make_handler(tx);
-    if (!handler.root_invoke().is_root_success()) {
-      throw std::runtime_error("Failed to invoke transaction");
+  for (auto const &block : initialization_txs) {
+    for (auto const &tx : block) {
+      auto handler = make_handler(tx);
+      if (!handler.root_invoke().is_root_success()) {
+        throw std::runtime_error("Failed to invoke transaction");
+      }
+      if (auto r = handler.try_commit_transaction();
+          !r.has_value() || !r.value()) {
+        throw std::runtime_error("failed to perform commit operation");
+      }
     }
-    if (auto r = handler.try_commit_transaction();
-        !r.has_value() || !r.value()) {
-      throw std::runtime_error("failed to perform commit operation");
-    }
+    advance_block();
   }
-  advance_block();
 }
 
 } // namespace hogd
