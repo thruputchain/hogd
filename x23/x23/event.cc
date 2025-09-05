@@ -52,8 +52,7 @@ WriteBuffer::Service::go()
 Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
-  std::shared_ptr<WriteBuffer> wbref(self.wb_->shared_from_this());
-  // RefPtr<CoroPoll> cpref{*self.cp_};
+  RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
       co_await self.cp_->write_wait(self.fd_);
@@ -104,8 +103,8 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
   size_t startsize = out->size();
   while (len > 0) {
     read_clear(fd);
-    std::shared_ptr<detail::ReadBuffer> r;
-    std::shared_ptr<detail::WriteBuffer> w;
+    RefPtr<detail::ReadBuffer> r{nullptr};
+    RefPtr<detail::WriteBuffer> w{nullptr};
     if (sync)
       std::tie(r, w) = get_rw(fd);
     else
