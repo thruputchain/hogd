@@ -78,6 +78,11 @@ public:
     stdout_temp_path_ = stdout_template;
     stderr_temp_path_ = stderr_template;
 
+    // Print temporary file paths BEFORE fork to ensure parent logging works
+    info("Child process output will be logged to:");
+    info("  stdout: {}", stdout_temp_path_);
+    info("  stderr: {}", stderr_temp_path_);
+
     auto pid = fork();
     if (pid < 0) {
       error("fork failed: {}", Errno{});
@@ -121,14 +126,9 @@ public:
 
     // Parent process
 
-    // Close the file descriptors in parent
+    // Close the file descriptors in parent (they're only needed in child)
     close(stdout_fd);
     close(stderr_fd);
-
-    // Print temporary file paths
-    info("Child process output will be logged to:");
-    info("  stdout: {}", stdout_temp_path_);
-    info("  stderr: {}", stderr_temp_path_);
 
     running_pid_ = pid;
     // Start thread to wait for child process
