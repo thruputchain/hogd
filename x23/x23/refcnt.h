@@ -25,6 +25,54 @@ template<typename T> struct RefOps {
 template<typename T> requires (alignof(T) % 4 == 0)
 class AtomicRefPtr;
 
+namespace detail {
+template<typename T, typename Ops> struct RefTag {
+  using ops = Ops;
+  using element_type = T;
+  static constexpr bool kTagged = false;
+
+  element_type *p_;
+
+  void ref() { ops::incref(p_); }
+  static void unref(element_type *p) { ops::decref(p); }
+  void movert(RefTag &other) noexcept { p_ = std::exchange(other.p_, nullptr); }
+
+  template<std::derived_from<RefTag> Self>
+  void swap(this Self &self, Self &other) noexcept
+  {
+    std::swap(self.p_, other.p_);
+  }
+};
+
+template<typename T, typename Ops>
+requires requires(T *p) { Ops::decref(p, Ops::incref(p)); }
+struct RefTag<T, Ops> {
+  using ops = Ops;
+  using element_type = T;
+  using tag_type = decltype(ops::incref(declval<T *>()));
+  static constexpr bool kTagged = true;
+
+  element_type *p_;
+  tag_type tag_;
+
+  void ref() { tag_ = ops::incref(p_); }
+  void unref(element_type *p) { ops::decref(p, tag_); }
+  void movert(RefTag &other) noexcept
+  {
+    p_ = std::exchange(other.p_, nullptr);
+    tag_ = other.tag_;
+  }
+
+  template<std::derived_from<RefTag> Self>
+  void swap(this Self &self, Self &other) noexcept
+  {
+    std::swap(self.p_, other.p_);
+    std::swap(self.tag_, other.tag_);
+  }
+};
+
+} // namespace detail
+
 // Refcounted pointer for classes with incref()/decref() methods.  For
 // types derived from RefCount, this will act like a std::shared_ptr,
 // except you can use AtomicRefPtr instead of relying on
@@ -34,28 +82,42 @@ class AtomicRefPtr;
 // You can of course generalize `incref()` and `decref()` methods on
 // your class, or define some other Ops adapter type for other
 // methods.
-template<typename T, typename Ops = detail::RefOps<T>> class RefPtr {
-public:
-  using element_type = T;
-  using ops = Ops;
+template<typename T, typename Ops = detail::RefOps<T>>
+class RefPtr : protected detail::RefTag<T, Ops> {
+  using super = detail::RefTag<T, Ops>;
+  using super::kTagged;
+  using super::movert;
+  using super::p_;
+  using super::ref;
+  using super::unref;
+  using typename super::ops;
 
+public:
   // Classes that don't have:
   //
   //   static constexpr bool kAllowRefPtrConversion = true;
   //
   // need to provide a factory function that creates RefPtrs.
   template<std::same_as<T> U = T> requires (U::kAllowRefPtrConversion)
-  RefPtr(T &t) : p_(&t)
+  RefPtr(T &t)
   {
-    ops::incref(p_);
+    p_ = &t;
+    ref();
   }
 
-  RefPtr() noexcept = default;
-  RefPtr(std::nullptr_t) noexcept {}
-  RefPtr(const RefPtr &other) : p_(other.p_) { ops::incref(p_); }
-  RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
+  RefPtr() noexcept : RefPtr{nullptr} {}
+  RefPtr(std::nullptr_t) noexcept { p_ = nullptr; }
+  RefPtr(const RefPtr &other)
+  {
+    p_ = other.p_;
+    ref();
+  }
+  RefPtr(RefPtr &&other) noexcept { movert(other); }
+
   ~RefPtr() { reset(); }
-  decltype(auto) operator=(this auto &&self, std::nullptr_t) // NOLINT
+
+  decltype(auto) operator=(this is_mutable auto &&self,
+                           std::nullptr_t) // NOLINT
   {
     self.reset();
     return (self);
@@ -65,9 +127,9 @@ public:
   {
     if (self.p_ != other.p_) {
       if (self.p_)
-        ops::decref(self.p_);
+        unref(self.p_);
       if ((self.p_ = other.p_))
-        ops::incref(self.p_);
+        ref(self.p_);
     }
     return (self);
   }
@@ -76,31 +138,32 @@ public:
   {
     if (&self != &other) {
       self.reset();
-      self.p_ = std::exchange(other.p_, nullptr);
+      self.movert(other);
     }
     return (self);
   }
-  auto get() const noexcept { return ops::get(p_); }
+  auto get() const noexcept { return ops::get(this->p_); }
   decltype(auto) operator*() const noexcept { return *get(); }
   auto operator->() const noexcept { return get(); }
   void reset()
   {
-    if (p_)
-      ops::decref(std::exchange(p_, nullptr));
+    if (this->p_)
+      this->unref(std::exchange(this->p_, nullptr));
   }
-  explicit operator bool() const noexcept { return p_; }
+  explicit operator bool() const noexcept { return this->p_; }
+
+  using super::swap;
 
 protected:
   template<std::same_as<T> U = T>
   requires (!requires { requires bool(U::kAllowRefPtrConversion); })
-  RefPtr(T &t) : p_(&t)
+  RefPtr(T &t)
   {
-    ops::incref(p_);
+    this->p_ = &t;
+    this->ref();
   }
 
 private:
-  T *p_{};
-
   friend T;
   friend class AtomicRefPtr<T>;
 };
