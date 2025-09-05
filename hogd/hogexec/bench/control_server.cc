@@ -10,12 +10,12 @@
 #include <print>
 #include <stdexcept>
 #include <stop_token>
+#include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <vector>
 
 #include "ci_server.hh"
@@ -175,10 +175,10 @@ public:
   void ciserver_stop()
   {
     auto pid = [&]() {
-        std::lock_guard<std::mutex> lock(running_pid_mutex_);
-        return running_pid_;
+      std::lock_guard<std::mutex> lock(running_pid_mutex_);
+      return running_pid_;
     }();
-    
+
     if (pid) {
       info("stopping running process: {}", *pid);
       kill(*pid, SIGTERM); // NOLINT(misc-include-cleaner)
@@ -235,7 +235,7 @@ private:
       error("Child process {} terminated with unknown status {}", child_pid,
             status);
     }
-    
+
     std::lock_guard<std::mutex> lock(running_pid_mutex_);
     running_pid_.reset();
   }
