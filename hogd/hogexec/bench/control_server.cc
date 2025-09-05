@@ -78,6 +78,23 @@ public:
     stdout_temp_path_ = stdout_template;
     stderr_temp_path_ = stderr_template;
 
+    // Save the parent's original stdout/stderr before fork
+    int parent_stdout = dup(STDOUT_FILENO);
+    if (parent_stdout == -1) {
+      error("failed to save parent stdout: {}", Errno{});
+      close(stdout_fd);
+      close(stderr_fd);
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+
+    int parent_stderr = dup(STDERR_FILENO);
+    if (parent_stderr == -1) {
+      error("failed to save parent stderr: {}", Errno{});
+      close(stdout_fd);
+      close(stderr_fd);
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+
     // Print temporary file paths BEFORE fork to ensure parent logging works
     info("Child process output will be logged to:");
     info("  stdout: {}", stdout_temp_path_);
@@ -86,6 +103,8 @@ public:
     auto pid = fork();
     if (pid < 0) {
       error("fork failed: {}", Errno{});
+      close(parent_stderr);
+      close(parent_stdout);
       close(stdout_fd);
       close(stderr_fd);
       return CIServerErrorCode::kCIServerErrorCodeInternal;
@@ -125,6 +144,18 @@ public:
     }
 
     // Parent process
+
+    // Restore parent's original stderr in case child affected it
+    if (dup2(parent_stderr, STDERR_FILENO) == -1) {
+      error("failed to restore parent stderr: {}", Errno{});
+    }
+    close(parent_stderr);
+
+    // Restore parent's original stdout in case child affected it
+    if (dup2(parent_stdout, STDOUT_FILENO) == -1) {
+      error("failed to restore parent stdout: {}", Errno{});
+    }
+    close(parent_stdout);
 
     // Close the file descriptors in parent (they're only needed in child)
     close(stdout_fd);
