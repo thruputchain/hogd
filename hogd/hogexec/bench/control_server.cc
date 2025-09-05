@@ -181,7 +181,7 @@ public:
     
     if (pid) {
       info("stopping running process: {}", *pid);
-      kill(*pid, SIGTERM);
+      kill(*pid, SIGTERM); // NOLINT(misc-include-cleaner)
 
       // Wait for waitpid thread to finish
       if (waitpid_thread_.joinable()) {
