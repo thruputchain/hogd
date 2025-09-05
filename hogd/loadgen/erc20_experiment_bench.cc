@@ -44,7 +44,7 @@ bm_erc20_generate_experiment(benchmark::State &state)
   // Report accounts processed per iteration
   state.counters["accounts"] =
       benchmark::Counter(static_cast<double>(num_accounts),
-                         benchmark::Counter::kIsRate);
+                         benchmark::Counter::kIsIterationInvariantRate);
 }
 
 void
@@ -80,7 +80,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
   // Report throughput metrics
   state.counters["txs_per_sec"] =
       benchmark::Counter(static_cast<double>(num_txs),
-                         benchmark::Counter::kIsRate);
+                         benchmark::Counter::kIsIterationInvariantRate);
 }
 
 } // namespace
