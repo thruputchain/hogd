@@ -64,6 +64,22 @@ handle_start_command(std::string const &host, std::string const &port,
   }
 }
 
+int
+handle_stop_command(std::string const &host, std::string const &port)
+{
+  try {
+    x23::ThreadPool pool;
+    x23::CoroPoll cp(pool);
+    auto client = hogd::connect_to_control_server(cp, host, port);
+    client.stop_server();
+    return 0;
+  }
+  catch (std::exception const &e) {
+    std::println(stderr, "Error: {}", e.what());
+    return 1;
+  }
+}
+
 } // namespace
 
 int
@@ -88,6 +104,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return handle_start_command(host, port,
                                 std::vector<std::string>(argv + 4,
                                                          argv + argc));
+  }
+  if (command == "stop") {
+    return handle_stop_command(host, port);
   }
 
   std::println(stderr, "Unknown command: {}", command);
