@@ -119,6 +119,11 @@ public:
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }
 
+  // for_each_state_item calls fn in parallel for every item that needs to be
+  // included in the merkle state root. It is typically used at initialization
+  // time when the database is first loaded.
+  void for_each_state_item(GetEachCallback fn);
+
   //
   // item key operations (for any item key type)
   //

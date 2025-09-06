@@ -15,6 +15,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/ramdb/db.h"
 
 namespace hogd {
 
@@ -36,6 +37,21 @@ enum class Prefix : char {
   kWasmHash = 'H',
   kWasmCode = 'C',
 };
+
+// Warning: you may have to update this if you make changes to Prefix.
+constexpr bool
+is_state_item(std::span<const std::byte> key)
+{
+  // we infer an ItemKey based on this size.
+  if (key.size() == kAddressSize + kItemKeySize)
+    return true;
+
+  // we infer an Address with prefix based on this size.
+  if (key.size() == kAddressSize + 1)
+    return static_cast<char>(key[0]) != static_cast<char>(Prefix::kHogAge);
+
+  return false;
+}
 
 constexpr auto
 make_address_key(const Address &addr, Prefix p)
@@ -81,6 +97,16 @@ hog_age_le_to_cpu(HogAge average)
 }
 
 } // namespace
+
+void
+HogDBDAO::for_each_state_item(GetEachCallback fn)
+{
+  db_.get_each_parallel([&fn](std::span<const std::byte> key, uint8_t type,
+                              std::span<const std::byte> value) {
+    if (is_state_item(key))
+      fn(key, type, value);
+  });
+}
 
 HogDBStatus<int128_t>
 HogDBDAO::read_address_balance(const Address &addr)
