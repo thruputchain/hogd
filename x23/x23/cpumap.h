@@ -239,7 +239,7 @@ template<typename T> struct PerCpuSet {
   // that takes a const CpuSet &.
   template<typename... Args> void populate(Args &&...args)
   {
-    for (size_t i = 0; i < map_.nbuckets(); ++i)
+    for (int i = 0; i < map_.nbuckets(); ++i)
       if (const auto &s = map_.cpuset(i); s.valid())
         construct(i, std::forward<Args>(args)...);
   }
