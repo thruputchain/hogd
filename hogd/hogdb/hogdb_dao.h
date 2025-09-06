@@ -103,7 +103,7 @@ private:
 // address. Currently this is for ItemKeys. Address balances are also marked as
 // kNNInt128 since hogdb treats them like a special ItemKey for native tokens.
 enum {
-  kNNInt128 = 0,
+  kNNInt128 = 1,
   kBytes,
 };
 
