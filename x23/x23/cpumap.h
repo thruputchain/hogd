@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <format>
 #include <string_view>
+#include <vector>
 
 #include <x23/config.h>
 #include <x23/err.h>
@@ -221,38 +222,70 @@ private:
 
 template<typename T> struct PerCpuSet {
   using value_type = T;
-  using nullable_type = std::conditional_t<is_nullable<T>, T, std::optional<T>>;
 
-  const CpuMap *map_{};
-  Vec<nullable_type> vals_;
-  Vec<unsigned> valid_;
-
-  PerCpuSet(const CpuMap &map) : map_(&map) {}
-
-  void populate(auto &&f)
-      requires requires(const CpuSet s) { nullable_type{f(s)}; }
+  PerCpuSet(const CpuMap &map)
+    : map_(map), constructed_(map_.nbuckets()),
+      values_(a.allocate(constructed_.size()))
+  {}
+  ~PerCpuSet()
   {
-    vals_.clear();
-    valid_.clear();
-    for (int i = 0; i < map_->nbuckets(); ++i)
-      if (const auto &s = map_->cpuset(i); s.valid()) {
-        valid_.emplace_back(vals_.size());
-        vals_.emplace_back(f(s));
-      }
-      else
-	vals_.emplace_back();
+    for (size_t i = 0; i < constructed_.size(); ++i)
+      if (constructed_[i])
+        std::destroy_at(values_ + i);
+    a.deallocate(values_, map_.nbuckets());
   }
 
-  value_type &lookup() { return lookup(map_->bucket()); }
+  // Supply either constructor arguments or an invocable arguments
+  // that takes a const CpuSet &.
+  template<typename... Args> void populate(Args &&...args)
+  {
+    for (size_t i = 0; i < map_.nbuckets(); ++i)
+      if (const auto &s = map_.cpuset(i); s.valid())
+        construct(i, std::forward<Args>(args)...);
+  }
+
+  value_type &lookup() { return lookup(map_.bucket()); }
   value_type &lookup(int bucket)
   {
-    auto *res = &vals_[bucket];
-    if (!*res)
-      res = &vals_[valid_[cpuid() % valid_.size()]];
-    if constexpr (std::same_as<value_type, nullable_type>)
-      return *res;
-    else
-      return **res;
+    assert(bucket < map_.nbuckets());
+    if (constructed_[bucket])
+      return values_[bucket];
+    assert(valid_indices_.size());
+    return values_[valid_indices_[bucket % valid_indices_.size()]];
+  }
+
+private:
+  static inline std::allocator<T> a;
+
+  const CpuMap &map_;
+  std::vector<bool> constructed_; // Says whether each of values_ is constructed
+  value_type *values_;            // Per-CpuSet values
+  Vec<unsigned> valid_indices_;   // List of valid indices to values_
+
+  // Simple emplace
+  template<typename... Args>
+  void construct(size_t i, Args &&...args)
+      requires std::constructible_from<value_type, Args...>
+  {
+    assert(!constructed_[i]);
+    std::construct_at(values_ + i, std::forward<Args>(args)...);
+    constructed_[i] = true;
+    valid_indices_.push_back(i);
+  }
+
+  // Emplace from invocation result on CpuSet
+  template<typename F, typename... Args>
+  requires std::invocable<F, Args..., const CpuSet &> &&
+           std::constructible_from<
+               value_type, std::invoke_result_t<F, Args..., const CpuSet &>>
+  void construct(size_t i, F &&f, Args &&...args)
+  {
+    assert(!constructed_[i]);
+    std::construct_at(values_ + i,
+                      std::invoke(std::forward<F>(f),
+                                  std::forward<Args>(args)..., map_.cpuset(i)));
+    constructed_[i] = true;
+    valid_indices_.push_back(i);
   }
 };
 
