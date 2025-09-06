@@ -37,8 +37,8 @@ cpuid() noexcept
 #endif // !HAVE_SCHED_GETCPU
 }
 
-// If field is MyField, then returns "Value" from the first line
-// of the form "MyField: Value" in file.
+// If field is "MyField", then returns "Value" from the first line in
+// file of the form "MyField: Value".
 std::string get_field(std::string_view field, std::filesystem::path file);
 
 #if HAVE_SCHED_SETAFFINITY
@@ -52,43 +52,43 @@ public:
   static constexpr auto kSize = CPU_ALLOC_SIZE(kNCPUs);
   struct uninitialized {};
 
-  constexpr CpuSet(uninitialized) {}
-  constexpr CpuSet() : CpuSet(uninitialized{}) { zero(); }
+  constexpr CpuSet(uninitialized) noexcept {}
+  constexpr CpuSet() noexcept : CpuSet(uninitialized{}) { zero(); }
 
-  cpu_set_t *set() { return reinterpret_cast<cpu_set_t *>(buf_); }
-  const cpu_set_t *set() const
+  cpu_set_t *set() noexcept { return reinterpret_cast<cpu_set_t *>(buf_); }
+  const cpu_set_t *set() const noexcept
   {
     return reinterpret_cast<const cpu_set_t *>(buf_);
   }
 
-  static constexpr size_t size() { return kSize; }
-  static constexpr unsigned num_cpus() { return kNCPUs; }
+  static constexpr size_t size() noexcept { return kSize; }
+  static constexpr unsigned num_cpus() noexcept { return kNCPUs; }
 
-  void zero() { CPU_ZERO_S(kSize, set()); }
-  void set(unsigned cpu)
+  void zero() noexcept { CPU_ZERO_S(kSize, set()); }
+  void set(unsigned cpu) noexcept
   {
     assert(cpu < kNCPUs);
     CPU_SET_S(cpu, kSize, set());
   }
-  void clr(unsigned cpu)
+  void clr(unsigned cpu) noexcept
   {
     assert(cpu < kNCPUs);
     CPU_CLR_S(cpu, kSize, set());
   }
-  bool isset(unsigned cpu) const
+  bool isset(unsigned cpu) const noexcept
   {
     assert(cpu < kNCPUs);
     return CPU_ISSET_S(cpu, kSize, set());
   }
-  int count() const { return CPU_COUNT_S(kSize, set()); }
+  int count() const noexcept { return CPU_COUNT_S(kSize, set()); }
 
 #define MAKE_BITOP(op, text)                                                   \
-  CpuSet &operator op##=(const CpuSet & o)                                     \
+  CpuSet &operator op##=(const CpuSet & o) noexcept                            \
   {                                                                            \
     CPU_##text##_S(kSize, set(), set(), o.set());                              \
     return *this;                                                              \
   }                                                                            \
-  friend CpuSet operator op(const CpuSet &a, const CpuSet &b)                  \
+  friend CpuSet operator op(const CpuSet &a, const CpuSet &b) noexcept         \
   {                                                                            \
     CpuSet ret{uninitialized{}};                                               \
     CPU_##text##_S(kSize, ret.set(), a.set(), b.set());                        \
@@ -99,14 +99,14 @@ public:
   MAKE_BITOP(^, XOR)
 #undef MAKE_BITOP
 
-  friend bool operator==(const CpuSet &a, const CpuSet &b)
+  friend bool operator==(const CpuSet &a, const CpuSet &b) noexcept
   {
     return CPU_EQUAL_S(kSize, a.set(), b.set());
   }
 
   // True if the set contains at least one CPU we are allowed to run
   // on in our cgroup.
-  bool valid(const CpuSet *allowed = allowed_cpus) const
+  bool valid(const CpuSet *allowed = allowed_cpus) const noexcept
   {
     return allowed ? (*this & *allowed).count() : count();
   }
@@ -120,10 +120,13 @@ public:
 private:
   alignas(cpu_set_t) char buf_[kSize];
 };
-}
+} // namespace x23
 
 template<> struct std::formatter<x23::CpuSet> {
-  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+  static constexpr auto parse(std::format_parse_context &ctx)
+  {
+    return ctx.begin();
+  }
 
   auto format(const x23::CpuSet &cs, auto &ctx) const
   {
@@ -167,7 +170,7 @@ get_allowed_cpus()
 class CpuSet {
 public:
   static constexpr unsigned kNCPUs = 1;
-  bool valid() const { return true; }
+  bool valid() const noexcept { return true; }
   Errno set_affinity() const { return 0; }
 };
 
@@ -236,6 +239,8 @@ template<typename T> struct PerCpuSet {
         valid_.emplace_back(vals_.size());
         vals_.emplace_back(f(s));
       }
+      else
+	vals_.emplace_back();
   }
 
   value_type &lookup() { return lookup(map_->bucket()); }
@@ -284,5 +289,10 @@ extern const CpuMap *llc_map;
 // during static initialization.  Once main starts, they will be
 // initialized anyway.
 void init_cpumaps();
+
+template<typename T>
+struct alignas(hardware_destructive_interference_size) CacheAligned : T {
+  using T::T;
+};
 
 } // namespace x23
