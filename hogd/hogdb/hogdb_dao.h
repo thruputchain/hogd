@@ -97,7 +97,11 @@ private:
   std::unique_ptr<Database> db_;
 };
 
-// Type identifiers; stored directly in the ramdb.
+// Item type identifiers; stored in the type field in ramdb.
+//
+// These are only used in cases where multiple types can be stored at an
+// address. Currently this is for ItemKeys. Address balances are also marked as
+// kNNInt128 since hogdb treats them like a special ItemKey for native tokens.
 enum {
   kNNInt128 = 0,
   kBytes,
