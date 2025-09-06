@@ -9,6 +9,7 @@
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/mempool/authentication.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -41,6 +42,7 @@ public:
   Mempool &operator=(Mempool &&) = delete;
 
   Scheduler &scheduler() { return scheduler_; }
+  Authentication &authentication() { return authentication_; }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 
@@ -113,6 +115,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   Scheduler scheduler_;
+  Authentication authentication_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };

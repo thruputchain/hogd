@@ -35,12 +35,12 @@ public:
                           ContractEntrypointID entrypoint, Calldata calldata,
                           int128_t amount);
 
-  GenesisBlock build();
+  GenesisBlock build() const;
 
   // The set of transactions that claim the balances that are set up
   // in the genesis block.
   // These could be, but are not required to be, all run in the first block.
-  std::vector<SignedTransaction> make_unfurl_genesis_transactions();
+  std::vector<SignedTransaction> make_unfurl_genesis_transactions() const;
 
 private:
   struct Entry {

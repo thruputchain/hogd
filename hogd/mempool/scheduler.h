@@ -7,7 +7,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "types.h"
 
 namespace hogd {
@@ -126,7 +126,7 @@ public:
   // Debug.
   void dump_runqueue() const;
 
-  // TODO(jhumphri): Make both of these private.
+private:
   // We use this type to store information about a tx in the runqueue.
   struct TxInfo {
     // The average age of hogs in the account that submitted this tx. This age
@@ -140,11 +140,6 @@ public:
     SignedTransaction tx;
   };
 
-  // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
-      account_to_tx_;
-
-private:
   // Writes the contents of [cached_hogs_] back to the database.
   //
   // Note that the scheduler removes hogs from the [kHogAgeGroupToSchedule]
@@ -166,13 +161,21 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
+  void remove_tx_from_runqueue(TxInfo *info,
+                               x23::Vec<SignedTransactionHash> &hashes,
+                               x23::Vec<SignedTransaction> &txs);
+
   // Helper function for [schedule()]. Removes txs from the runqueue. Note that
   // removing txs from the runqueue is a bit cumbersome because we maintain
   // several data structures to make it easy to look up txs with various key
   // types.
-  void add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
-                         x23::Vec<SignedTransactionHash> &hashes,
-                         x23::Vec<SignedTransaction> &txs);
+  void get_txs_all(std::unordered_set<TxInfo *> &info,
+                   x23::Vec<SignedTransactionHash> &hashes,
+                   x23::Vec<SignedTransaction> &txs);
+
+  void get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
+                      x23::Vec<SignedTransactionHash> &hashes,
+                      x23::Vec<SignedTransaction> &txs);
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
@@ -188,6 +191,9 @@ private:
 
   // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
+  // Maps an account to the txs it has submitted.
+  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
+      account_to_tx_;
   // Maps an average hog age to a set of txs submitted by accounts with that
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.

@@ -24,8 +24,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
@@ -197,7 +197,7 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
   ItemKey key = make_item_key(addrkey);
   if (key.is_address_balance()) {
     HogDBStatus<int128_t> nnint =
-        read_address_balance(ctx_.get_db(), key.get_address());
+        ctx_.get_db().read_address_balance(key.get_address());
     if (!nnint)
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
     StorageItem out(StorageItemType::kItemTypeNonnegativeInt);
@@ -208,7 +208,7 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
     return ret;
   }
 
-  HogDBStatus<DBItem> item = ctx_.get_db().get(key.as_bytes());
+  HogDBStatus<DBItem> item = ctx_.get_db().get_ramdb().get(key.as_bytes());
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
 
@@ -252,7 +252,7 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
   const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
   auto buf = std::span<const std::byte>(cptr, data.size());
   SHA256Hash hash = sha256(buf);
-  return to_rpc_error(write_wasm_code(ctx_.get_db(), hash, buf));
+  return to_rpc_error(ctx_.get_db().write_wasm_code(hash, buf));
 }
 
 RPCError
@@ -262,7 +262,7 @@ HogDBExecutorServer::commit_contract_deploy(BlockID /*block*/,
 {
   // TODO(abelay): this must be included as part of BlockTX, not just written.
 
-  return to_rpc_error(write_address_wasm_hash(ctx_.get_db(), addr, hash));
+  return to_rpc_error(ctx_.get_db().write_address_wasm_hash(addr, hash));
 }
 
 ExpectedContract
@@ -271,7 +271,7 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
   HogDBStatus<OwningSpan<const std::byte>> wasm =
-      read_wasm_code(ctx_.get_db(), hash);
+      ctx_.get_db().read_wasm_code(hash);
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
 
@@ -289,7 +289,7 @@ HogDBExecutorServer::get_deployment(BlockID /*block*/,
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
   HogDBStatus<SHA256Hash> hash =
-      read_address_wasm_hash(ctx_.get_db(), contract_address);
+      ctx_.get_db().read_address_wasm_hash(contract_address);
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
 
