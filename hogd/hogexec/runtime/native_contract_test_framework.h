@@ -24,8 +24,8 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -150,15 +150,15 @@ private:
     return ItemKey(addr.address, addr.key.contract_data_key());
   }
 
-  static HogDatabase open_db()
+  static HogDBDAO open_db()
   {
     Directory dir = Directory::open_temporary().value();
     constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
     auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
-    return HogDatabase(std::move(db));
+    return HogDBDAO(RAMDB(std::move(db)));
   }
 
-  HogDatabase db_;
+  HogDBDAO db_;
   MerkleTriePrefix trie_;
   RPCContext ctx_ = RPCContext(db_, trie_);
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);

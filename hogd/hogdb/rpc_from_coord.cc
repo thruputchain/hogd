@@ -26,8 +26,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
@@ -112,13 +112,12 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 x23::Async<HogAgeResult>
 HogDBCoordServer::dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
 {
-  HogDatabase &database = ctx_.get_db();
+  HogDBDAO &db = ctx_.get_db();
   HogAgeResult ret(DbResult::DbResultOK);
   ret.hog_age_batch().reserve(addresses.size());
 
   for (const ContractAddress &address : addresses) {
-    HogDBStatus<HogAge> status =
-        read_address_average_hog_age(database, address);
+    HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
     if (!status) {
       co_return HogAgeResult(DbResult::DbResultError);
     }
@@ -131,9 +130,9 @@ HogDBCoordServer::dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_write_hog_ages(const HogAgeBatch &ages)
 {
-  HogDatabase &database = ctx_.get_db();
+  HogDBDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
-    if (!write_address_average_hog_age(database, age)) {
+    if (!db.write_address_average_hog_age(age)) {
       co_return DbResult::DbResultError;
     }
   }
@@ -228,14 +227,14 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
         const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
         auto buf = std::span<const std::byte>(cptr, data.size());
         SHA256Hash hash = sha256(buf);
-        auto r = write_wasm_code(ctx_.get_db(), hash, buf);
+        auto r = ctx_.get_db().write_wasm_code(hash, buf);
         if (!r.has_value()) {
           error("failed to write genesis block contract: {}", r.error());
           failure = true;
         }
       },
       [&](ContractAddress const &addr, SHA256Hash const &hash) {
-        auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
+        auto r = ctx_.get_db().write_address_wasm_hash(addr, hash);
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;

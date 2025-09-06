@@ -76,7 +76,7 @@ private:
 [[nodiscard]] inline Address
 make_address(std::string_view str)
 {
-  return Address(sha256(byte_view(str.data(), str.size())));
+  return Address(sha256(std::as_bytes(std::span(str))));
 }
 
 [[nodiscard]] constexpr Address

@@ -17,8 +17,8 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 
@@ -28,10 +28,10 @@ namespace hogd {
 // by the database.
 class RPCContext {
 public:
-  RPCContext(HogDatabase &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
+  RPCContext(HogDBDAO &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
 
   // getters.
-  HogDatabase &get_db() const { return db_; }
+  HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
 
   // opens a new block transaction.
@@ -57,7 +57,7 @@ private:
   };
 
   // the database used to persist state.
-  HogDatabase &db_;
+  HogDBDAO &db_;
   // the merkle trie that generates hashes for the items in the database.
   MerkleTriePrefix &trie_;
   // protects block_txes_.
