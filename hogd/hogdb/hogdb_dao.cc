@@ -20,10 +20,10 @@ namespace hogd {
 
 namespace {
 
-// Prefix is prefix for each key to form an overall key in the ramdb that
-// indicates the category of data being stored. The rest of the key value is
-// always a contract address, except for kWasmCode, which uses the hash of the
-// wasm blob as the rest of the key.
+// Prefix is a prefix appended to each key to form an overall key that
+// indicates the category of data being stored. The rest of the key is normally
+// a contract address, except for kWasmCode, which uses the hash of the wasm
+// blob as the rest of its key.
 //
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
