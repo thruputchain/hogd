@@ -11,7 +11,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -38,7 +38,7 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
     throw std::runtime_error("Failed to open database");
   }
 
-  HogDatabase db(std::move(*db_result));
+  HogDBDAO db(RAMDB(std::move(*db_result)));
   MerkleTriePrefix trie;
   RPCContext ctx(db, trie);
 

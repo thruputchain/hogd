@@ -22,8 +22,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -81,8 +81,8 @@ public:
           Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
       CHECK(ramdb.has_value());
 
-      db_ = std::make_unique<HogDatabase>(std::move(*ramdb));
-      ctx_ = std::make_unique<RPCContext>(*db_, trie_);
+      db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
+      ctx_ = std::make_unique<RPCContext>(db_, trie_);
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       CHECK(db_executor_server_->start_server(/*port=*/0).has_value());
@@ -100,14 +100,14 @@ public:
       auto bytes = x23::serialize(*contract);
       auto contract_hash = sha256(*contract);
       auto ret =
-          write_wasm_code(*db_, contract_hash, std::as_bytes(std::span(bytes)));
+          db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)));
       if (!ret) {
         throw std::runtime_error("Failed to write contract");
       }
 
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
-        ret = write_address_wasm_hash(*db_, address, contract_hash);
+        ret = db_.write_address_wasm_hash(address, contract_hash);
         if (!ret) {
           throw std::runtime_error("Failed to write deployment");
         }
@@ -141,7 +141,7 @@ public:
 
     HogAge average;
     memset(&average, 0, sizeof(average));
-    HogDBStatus<HogAge> res = read_address_average_hog_age(*db_, account);
+    HogDBStatus<HogAge> res = db_.read_address_average_hog_age(account);
     if (res.has_value()) {
       average = *res;
     }
@@ -149,7 +149,7 @@ public:
     average.address = account;
     average.average_ages[group] = age;
     average.num_hogs[group] = to_xdr(num_hogs);
-    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
+    EXPECT_TRUE(db_.write_address_average_hog_age({average}));
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
@@ -171,7 +171,7 @@ private:
 
     // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
     Address addr(address);
-    auto ret = write_address_balance(*db_, addr, kStorageTokenAmount);
+    auto ret = db_.write_address_balance(addr, kStorageTokenAmount);
     if (!ret) {
       throw std::runtime_error("Failed to grant storage token");
     }
@@ -203,7 +203,7 @@ private:
 
   // The database server that the mempool accesses.
   TmpDir db_dir_;
-  std::unique_ptr<HogDatabase> db_;
+  HogDBDAO db_;
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
   std::unique_ptr<HogDBCoordServer> db_coordinator_server_;

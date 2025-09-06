@@ -188,6 +188,6 @@ private:
       fn();
     }
   }
-}; // namespace hogd
+};
 
 } // namespace hogd

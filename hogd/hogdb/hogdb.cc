@@ -27,7 +27,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -69,18 +69,18 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
 
   // create the RPC context.
-  HogDatabase db(std::move(*ramdb));
+  HogDBDAO db(RAMDB(std::move(*ramdb)));
   MerkleTriePrefix trie;
   RPCContext ctx(db, trie);
 
   // insert each item in the database into the merkle trie.
-  ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
-                                         uint8_t type,
-                                         std::span<const std::byte> value) {
-    std::span<const std::byte> k =
-        MerkleTrieHelpers::add_type_to_merkle_key(key, type);
-    CHECK(trie.insert(k, value));
-  });
+  ctx.get_db().get_ramdb().get_each_parallel(
+      [&trie](std::span<const std::byte> key, uint8_t type,
+              std::span<const std::byte> value) {
+        std::span<const std::byte> k =
+            MerkleTrieHelpers::add_type_to_merkle_key(key, type);
+        CHECK(trie.insert(k, value));
+      });
   trie.generate_top_level_hashes();
 
   // start the coordinator server.

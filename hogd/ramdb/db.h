@@ -148,6 +148,14 @@ public:
   static size_t estimate_heap_size(size_t n, size_t key_size,
                                    size_t value_size);
 
+  // estimate_heap_size returns the heap size needed to store a heap of size
+  // bytes, rounding up to include overheads for compacting and buffering to
+  // disk. This is important because these costs vary with the number of cores.
+  //
+  // This is especially useful for benchmarks and test cases, where OOM should
+  // be avoided.
+  static size_t estimate_heap_size(size_t bytes);
+
 private:
   // the directory that stores this database.
   Directory dir_;

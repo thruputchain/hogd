@@ -31,8 +31,8 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -41,7 +41,7 @@ namespace hogd {
 // tracks a change to a DB item. Each class that implements this concept is an
 // item type.
 template<typename T>
-concept is_item = requires(T t, HogDatabase &db, MerkleTriePrefix &trie,
+concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key, const T &arg) {
   // applies the change to the ramdb.
   { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
@@ -71,7 +71,7 @@ public:
     minus_ = delta_;
   }
 
-  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const NNInt128 &nnint);
   HogDBStatus<void> merge(const NNInt128 &nnint);
@@ -110,7 +110,7 @@ struct Bytes {
 public:
   Bytes(std::span<const std::byte> buf) : buf_(buf.begin(), buf.end()) {}
 
-  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
   HogDBStatus<void> merge(const Bytes &bytes)
@@ -139,7 +139,7 @@ static_assert(is_item<Bytes>);
 // Deletion's to the same item.
 class Deletion {
 public:
-  static HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+  static HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                   const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
   static HogDBStatus<void> merge(const Deletion & /*del*/) { return {}; }
@@ -169,7 +169,7 @@ public:
   void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
 
   // commit applies the item's changes to the ramdb.
-  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            ItemKey key) const;
 
   // narrow combines the reservation of a change into this one.
@@ -182,7 +182,7 @@ public:
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).
-  HogDBStatus<ssize_t> storage_cost_delta(HogDatabase &db, const ItemKey &key);
+  HogDBStatus<ssize_t> storage_cost_delta(HogDBDAO &db, const ItemKey &key);
 
 private:
   bool exclusive_{false};
@@ -217,9 +217,9 @@ ItemChange::get_raw_nnint128() const
 }
 
 inline HogDBStatus<ItemChange>
-make_balance_change(HogDatabase &db, const Address &addr, int128_t delta)
+make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
 {
-  auto balance = read_address_balance(db, addr);
+  auto balance = db.read_address_balance(addr);
   if (!balance.has_value()) {
     if (balance.error() != HogDBCode::kNotFound) {
       return balance.error();

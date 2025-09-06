@@ -11,8 +11,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/synchronized_map.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
@@ -223,7 +223,7 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const Address, const ItemLock &> v) {
         int128_t val = v.second.change.to_nnint128().value();
-        HogDBStatus<void> tmp = write_address_balance(db_, v.first, val);
+        HogDBStatus<void> tmp = db_.write_address_balance(v.first, val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;

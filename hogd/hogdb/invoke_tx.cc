@@ -11,8 +11,8 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
@@ -23,7 +23,7 @@ InvokeTX::read_nnint128(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return hogd::read_nnint128(block_.get_db(), key);
+    return block_.get_db().read_nnint128(key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   std::optional ret = change->to_nnint128();
@@ -37,7 +37,7 @@ InvokeTX::read_bytes(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return hogd::read_bytes(block_.get_db(), key);
+    return block_.get_db().read_bytes(key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   OwningSpan<const std::byte> ret = change->to_bytes();
@@ -171,7 +171,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
 {
-  HogDBStatus<int128_t> base = hogd::read_nnint128(block_.get_db(), key);
+  HogDBStatus<int128_t> base = block_.get_db().read_nnint128(key);
   if (!base) {
     if (base.error() != HogDBCode::kNotFound)
       return base.error();

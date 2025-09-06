@@ -227,6 +227,15 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += (heap_size / kLogletRegionSize + 1) * kBigItemThreshold;
   heap_size = align_up(heap_size, kLogletRegionSize);
 
+  // round up to include per-thread and disk buffering overheads.
+  return estimate_heap_size(heap_size);
+}
+
+size_t
+Database::estimate_heap_size(size_t bytes)
+{
+  size_t heap_size = align_up(bytes, kLogletRegionSize);
+
   // need two loglets per compactor thread and one loglet per worker thread.
   heap_size += available_parallelism() * kLogletRegionSize * 3;
 

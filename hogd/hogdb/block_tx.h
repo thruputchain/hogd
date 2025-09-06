@@ -7,8 +7,8 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
@@ -19,11 +19,11 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
-  BlockTX(HogDatabase &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
+  BlockTX(HogDBDAO &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
   ~BlockTX() = default;
 
   // getters
-  HogDatabase &get_db() const { return db_; }
+  HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
 
   // commit applies all changes to the database. If this fails, nothing will be
@@ -51,7 +51,7 @@ private:
     size_t ref;
   };
 
-  HogDatabase &db_;
+  HogDBDAO &db_;
   MerkleTriePrefix &trie_;
   SynchronizedMap<Address, ItemLock> addr_balance_locks_;
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
