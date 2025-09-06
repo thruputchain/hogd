@@ -7,7 +7,6 @@
 
 // xdr types
 #include "db_coord.hh"
-#include "nomination.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"
