@@ -32,8 +32,7 @@ template<typename T> struct RefOps {
 
 } // namespace detail
 
-template<typename T> requires (alignof(T) % 4 == 0)
-class AtomicRefPtr;
+template<typename T> class AtomicRefPtr;
 
 namespace detail {
 template<typename T, typename Ops> struct RefTag {
@@ -182,8 +181,7 @@ template<typename T> RefPtr(T &) -> RefPtr<T>;
 // A way to generate RefPtr values without racing with a thread that
 // might drop the last reference.  Uses the low two bits of the
 // pointer as a lock.
-template<typename T> requires (alignof(T) % 4 == 0)
-class AtomicRefPtr {
+template<typename T> class AtomicRefPtr {
 public:
   AtomicRefPtr() noexcept = default;
   AtomicRefPtr(RefPtr<T> np) { store(std::move(np)); }
@@ -224,10 +222,11 @@ public:
   }
 
 private:
-  std::atomic<uintptr_t> p_{0};
+  static_assert(alignof(T) % 2 == 0);
+  static constexpr uintptr_t kEmpty = 1;
+  static constexpr uintptr_t kEmptyWantNotify = 3;
 
-  static constexpr uintptr_t kLocked = 0b01;
-  static constexpr uintptr_t kWantNotify = 0b10;
+  std::atomic<uintptr_t> p_{0};
 
   static RefPtr<T> makeref(T *p) noexcept
   {
@@ -238,16 +237,19 @@ private:
   {
     for (;;) {
       auto p = p_.load(std::memory_order_relaxed);
-      if ((p & 3) == 0 &&
-          p_.compare_exchange_weak(p, p | kLocked, std::memory_order_acquire,
-                                   std::memory_order_relaxed))
-        return reinterpret_cast<T *>(p);
-      if (!(p & kWantNotify) &&
-          !p_.compare_exchange_weak(p, p | kWantNotify,
-                                    std::memory_order_relaxed,
-                                    std::memory_order_relaxed))
+      if (p != kEmpty && p != kEmptyWantNotify) {
+        if (p_.compare_exchange_weak(p, kEmpty, std::memory_order_acquire,
+                                     std::memory_order_relaxed))
+          return reinterpret_cast<T *>(p);
         continue;
-      p_.wait(p | kWantNotify);
+      }
+
+      if (p == kEmpty && !p_.compare_exchange_weak(p, kEmptyWantNotify,
+                                                   std::memory_order_relaxed,
+                                                   std::memory_order_relaxed))
+        continue;
+
+      p_.wait(kEmptyWantNotify);
     }
   }
 
@@ -255,8 +257,10 @@ private:
   {
     auto old =
         p_.exchange(reinterpret_cast<uintptr_t>(p), std::memory_order_release);
-    if (old & kWantNotify)
+    if (old == kEmptyWantNotify)
       p_.notify_all();
+    else
+      assert(old == kEmpty);
   }
 };
 
