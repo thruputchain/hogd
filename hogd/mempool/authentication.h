@@ -17,36 +17,60 @@ public:
   Ed25519SecretKey create_tmp_key_pair(const ContractAddress &account,
                                        size_t idx)
   {
+    CHECK(accounts_.contains(account));
+
     const auto &[public_key, private_key] = ed25519_keygen();
-    public_keys_[account][idx] = public_key;
+    accounts_[account].public_keys[idx].key =
+        PublicKey(CryptographicScheme::Ed25519);
+    accounts_[account].public_keys[idx].key.ed25519() = public_key;
     return private_key;
   }
 
   // TODO(jhumphri): Remove this.
-  void add_account(const ContractAddress &account, const AccountAuthData &data) {
+  void add_account(const ContractAddress &account, const AccountAuthData &data)
+  {
+    CHECK(!accounts_.contains(account));
     accounts_[account] = data;
   }
 
   bool authenticate(const SignedTransaction &tx)
   {
+    CHECK(accounts_.contains(tx.tx.invocation.invoked_address));
+    const AccountAuthData &auth_data =
+        accounts_[tx.tx.invocation.invoked_address];
+
     const AuthSignaturePreimage preimage{.signature_weight = 0,
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
+    Weight total_weight = 0;
     for (const DecoratedSignature &dec_sig : tx.signatures) {
+      Weight weight = 0;
       Ed25519PublicKey public_key;
       if (!get_public_key(tx.tx.invocation.invoked_address,
-                          dec_sig.public_key_id, public_key)) {
+                          dec_sig.public_key_id, weight, public_key)) {
         return false;
       }
       if (!check_decorated_signature(dec_sig, public_key, msg)) {
         return false;
       }
+      if (dec_sig.public_key_id >= MAX_SIGNERS) {
+        return false;
+      }
+      if ((1 << dec_sig.public_key_id) & auth_data.nonce_config.accepted_keys) {
+        total_weight += weight;
+      }
     }
+    if (total_weight < auth_data.nonce_config.required_weight) {
+      return false;
+    }
+
     for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
       const ContractAddress &account = aux.address;
       for (const DecoratedSignature &dec_sig : aux.signatures) {
+        Weight weight = 0;
         Ed25519PublicKey public_key;
-        if (!get_public_key(account, dec_sig.public_key_id, public_key)) {
+        if (!get_public_key(account, dec_sig.public_key_id, weight,
+                            public_key)) {
           return false;
         }
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
@@ -113,22 +137,24 @@ private:
 
   // TODO(jhumphri): Populate [public_key] properly.
   bool get_public_key(const ContractAddress &account, size_t idx,
-                      Ed25519PublicKey &public_key)
+                      Weight &max_weight, Ed25519PublicKey &public_key)
   {
-    if (!public_keys_.contains(account)) {
+    if (!accounts_.contains(account)) {
       return false;
     }
-    if (!public_keys_[account].contains(idx)) {
+    if (idx >= accounts_[account].public_keys.size()) {
       return false;
     }
-    public_key = public_keys_[account][idx];
+    const PublicKeyConfig &pk_config = accounts_[account].public_keys[idx];
+    if (pk_config.key != PublicKey(CryptographicScheme::Ed25519)) {
+      return false;
+    }
+    max_weight = pk_config.max_weight;
+    public_key = pk_config.key.ed25519();
     return true;
   }
 
   std::unordered_map<ContractAddress, AccountAuthData> accounts_;
-  std::unordered_map<ContractAddress,
-                     std::unordered_map<size_t, Ed25519PublicKey>>
-      public_keys_;
 };
 
 } // namespace hogd
