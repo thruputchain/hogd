@@ -16,8 +16,8 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
@@ -66,8 +66,7 @@ public:
   static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
                                                                int workers);
 
-  Benchmark(std::unique_ptr<Database> db,
-            std::unique_ptr<MerkleTriePrefix> trie, int workers,
+  Benchmark(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie, int workers,
             std::vector<Payment> &&ops)
     : db_(std::move(db)), trie_(std::move(trie)), workers_(workers),
       ops_(std::move(ops))
@@ -79,7 +78,7 @@ public:
   void run();
 
 private:
-  HogDatabase db_;
+  HogDBDAO db_;
   std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
@@ -93,7 +92,7 @@ make_key(size_t addr, size_t item)
   return make_item_key(make_address(addr), item);
 }
 
-std::unique_ptr<Database>
+HogDBDAO
 open_ramdb(size_t n)
 {
   // estimate size based on 1 x nnint128 and 1 x account_balance per account
@@ -108,7 +107,7 @@ open_ramdb(size_t n)
           .transform_error(to_hogdb_error);
   if (!db)
     fail(db.error());
-  return std::move(*db);
+  return HogDBDAO(RAMDB(std::move(*db)));
 }
 
 std::unique_ptr<MerkleTriePrefix>
@@ -118,11 +117,11 @@ create_merkle()
 }
 
 void
-populate_account_balances(HogDatabase &db, size_t n,
+populate_account_balances(HogDBDAO &db, size_t n,
                           int128_t val = kDefaultBalance)
 {
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus ret = write_address_balance(db, make_address(i), val); !ret)
+    if (HogDBStatus ret = db.write_address_balance(make_address(i), val); !ret)
       fail(ret.error());
   }
 }
@@ -145,11 +144,11 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = write_nnint128(bench->db_, make_key(0, 0), static_cast<int128_t>(n));
+  ret = bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(n));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = write_nnint128(bench->db_, make_key(0, i), 0);
+    ret = bench->db_.write_nnint128(make_key(0, i), 0);
     if (!ret)
       fail(ret.error());
   }
@@ -177,11 +176,11 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = write_nnint128(bench->db_, make_key(0, 0), static_cast<int128_t>(0));
+  ret = bench->db_.write_nnint128(make_key(0, 0), static_cast<int128_t>(0));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = write_nnint128(bench->db_, make_key(0, i), 1);
+    ret = bench->db_.write_nnint128(make_key(0, i), 1);
     if (!ret)
       fail(ret.error());
   }
@@ -209,7 +208,7 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(0, i), 1);
+    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(0, i), 1);
         !ret)
       fail(ret.error());
   }
@@ -236,7 +235,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(i, 0), 1);
+    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(i, 0), 1);
         !ret)
       fail(ret.error());
   }

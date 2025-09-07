@@ -12,8 +12,8 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 

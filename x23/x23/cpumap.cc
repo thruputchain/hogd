@@ -35,7 +35,7 @@ init_cpumaps()
       state.wait(1);
   }
 }
-static const bool _init = (init_cpumaps(), false);
+static const auto _init = (init_cpumaps(), std::tuple{});
 
 std::string
 get_field(std::string_view field, std::filesystem::path file)

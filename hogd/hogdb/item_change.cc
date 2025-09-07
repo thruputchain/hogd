@@ -12,19 +12,18 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
 
 inline HogDBStatus<void>
-NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
-                 const ItemKey &key) const
+NNInt128::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
   int128_t v = value();
-  HogDBStatus<void> ret = write_nnint128(db, key, v);
+  HogDBStatus<void> ret = db.write_nnint128(key, v);
   if (ret) {
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
                                     sizeof(v));
@@ -117,10 +116,10 @@ NNInt128::undo_merge(const NNInt128 &nnint)
 }
 
 inline HogDBStatus<void>
-Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
+Bytes::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
   std::span<const std::byte> v = std::as_bytes(std::span(buf_));
-  HogDBStatus<void> ret = write_bytes(db, key, v);
+  HogDBStatus<void> ret = db.write_bytes(key, v);
   if (ret) {
     // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
     // [trie.insert_or_update()] only fails if we attempt to insert an empty
@@ -132,14 +131,14 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
 }
 
 inline HogDBStatus<void>
-Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
+Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
-  HogDBStatus<int8_t> type_ret = get_item_type(db, key);
+  HogDBStatus<int8_t> type_ret = db.get_item_type(key);
   if (!type_ret) {
     return type_ret.error();
   }
 
-  HogDBStatus<void> remove_ret = remove_item(db, key);
+  HogDBStatus<void> remove_ret = db.remove_item(key);
   if (!remove_ret) {
     return remove_ret;
   }
@@ -159,7 +158,7 @@ concept is_monostate = std::same_as<std::decay_t<T>, std::monostate>;
 } // namespace
 
 HogDBStatus<void>
-ItemChange::commit(HogDatabase &db, MerkleTriePrefix &trie, ItemKey key) const
+ItemChange::commit(HogDBDAO &db, MerkleTriePrefix &trie, ItemKey key) const
 {
   return std::visit(
       [&db, &trie, &key](auto &arg) -> HogDBStatus<void> {
@@ -231,12 +230,12 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<ssize_t>
-ItemChange::storage_cost_delta(HogDatabase &db, const ItemKey &key)
+ItemChange::storage_cost_delta(HogDBDAO &db, const ItemKey &key)
 {
   // fetch the snapshot size of the object from the database if needed.
   if (!snapshot_cost_) {
     auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
-      HogDBStatus<size_t> ret = get_item_size(db, key);
+      HogDBStatus<size_t> ret = db.get_item_size(key);
       if (!ret && ret.error() == HogDBCode::kNotFound)
         return 0UL;
       if (!ret)

@@ -4,6 +4,7 @@ add_library(
   block_tx.cc
   invoke_tx.cc
   item_change.cc
+  hogdb_dao.cc
   rpc_context.cc
   rpc_from_coord.cc
   rpc_from_exec.cc
@@ -37,3 +38,18 @@ target_link_libraries(
   hogdb_bench
   hogdb
 )
+
+# Build hogdb_test executable
+add_executable(
+  hogdb_test
+  hogdb_test.cc
+)
+target_link_libraries(
+  hogdb_test
+  hogdb
+  GTest::gtest_main
+)
+gtest_discover_tests(
+  hogdb_test
+)
+
