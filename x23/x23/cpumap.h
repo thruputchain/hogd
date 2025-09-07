@@ -223,11 +223,13 @@ private:
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
 // ValidOnly is false, then it will only construct a T for CpuSets on
 // which we can actually be scheduled.
-template<typename T, bool ValidOnly = false> struct PerCpuSet {
+template<typename T, bool ValidOnly = false> class PerCpuSet {
+public:
   using value_type = T;
 
-  PerCpuSet(const CpuMap &map)
-    : map_(map), values_(a.allocate(map_.nbuckets()))
+  const CpuMap &map_;
+
+  PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
   {
     if constexpr (ValidOnly)
       constructed_.resize(map_.nbuckets());
@@ -239,8 +241,16 @@ template<typename T, bool ValidOnly = false> struct PerCpuSet {
     a.deallocate(values_, map_.nbuckets());
   }
 
-  // Supply either constructor arguments or an invocable arguments
-  // that takes a const CpuSet &.
+  size_t size() const { return map_.nbuckets(); }
+
+  // Supply either constructor arguments or invocable arguments that
+  // take a const CpuSet & as the final argument.  E.g.,
+  //
+  //   // default construct all elements
+  //   percpu.populate();
+  //
+  //   // create each per-CpuSet object with a lambda
+  //   percpu.populate([](const CpuSet &cs) { return create(cs); });
   template<typename... Args> void populate(Args &&...args)
   {
     // If this assert fails, you probably tried to populate twice
@@ -264,10 +274,27 @@ template<typename T, bool ValidOnly = false> struct PerCpuSet {
     return values_[bucket];
   }
 
+  // Minimal support to allow range-for
+  struct iterator {
+    PerCpuSet *cs_;
+    size_t idx_;
+
+    T &operator*() const { return cs_->values_[cs_->valid_indices_[idx_]]; }
+    iterator &operator++()
+    {
+      ++idx_;
+      return *this;
+    }
+    friend bool operator==(const iterator &a, const iterator &b) = default;
+  };
+  iterator begin() { return iterator{.cs_ = this, .idx_ = 0}; }
+  iterator end()
+  {
+    return iterator{.cs_ = this, .idx_ = valid_indices_.size()};
+  }
+
 private:
   static inline std::allocator<T> a;
-
-  const CpuMap &map_;
 
   // Record which indices of values_ have been constructed
   [[no_unique_address]] std::conditional_t<ValidOnly, std::vector<bool>,

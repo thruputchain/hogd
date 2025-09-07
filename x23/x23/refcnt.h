@@ -30,11 +30,6 @@ template<typename T> struct RefOps {
   static T *get(T *p) noexcept { return p; }
 };
 
-} // namespace detail
-
-template<typename T> class AtomicRefPtr;
-
-namespace detail {
 template<typename T, typename Ops> struct RefTag {
   using ops = Ops;
   using element_type = T;
@@ -172,23 +167,24 @@ protected:
     this->ref();
   }
 
-private:
   friend T;
-  friend class AtomicRefPtr<T>;
+  template<typename U, typename O> friend class AtomicRefPtr;
 };
-template<typename T> RefPtr(T &) -> RefPtr<T>;
 
 // A way to generate RefPtr values without racing with a thread that
-// might drop the last reference.  Uses the low two bits of the
-// pointer as a lock.
-template<typename T> class AtomicRefPtr {
+// might drop the last reference.  Uses the low bit of the pointer as
+// a lock, so only for types T that have an alignof(T) >= 2.
+template<typename T, typename Ops = detail::RefOps<T>> class AtomicRefPtr {
 public:
+  using NonAtomic = RefPtr<T, Ops>;
+  static_assert(!NonAtomic::kTagged); // Doesn't support tagged RefPtr types
+
   AtomicRefPtr() noexcept = default;
-  AtomicRefPtr(RefPtr<T> np) { store(std::move(np)); }
+  AtomicRefPtr(NonAtomic np) { store(std::move(np)); }
   AtomicRefPtr(const AtomicRefPtr &) noexcept = delete;
   ~AtomicRefPtr() { exchange(nullptr); }
 
-  RefPtr<T> load() noexcept
+  NonAtomic load() noexcept
   {
     auto p = take();
     auto ret = makeref(p);
@@ -196,9 +192,9 @@ public:
     return ret;
   }
 
-  void store(RefPtr<T> np) noexcept { exchange(std::move(np)); }
+  void store(NonAtomic np) noexcept { exchange(std::move(np)); }
 
-  RefPtr<T> exchange(RefPtr<T> np) noexcept
+  NonAtomic exchange(NonAtomic np) noexcept
   {
     T *p = take();
     std::swap(np.p_, p);
@@ -206,7 +202,7 @@ public:
     return np;
   }
 
-  bool compare_exchange(RefPtr<T> &desired, T *expected) noexcept
+  bool compare_exchange(NonAtomic &desired, T *expected) noexcept
   {
     bool ret = false;
     T *p = take();
@@ -228,9 +224,9 @@ private:
 
   std::atomic<uintptr_t> p_{0};
 
-  static RefPtr<T> makeref(T *p) noexcept
+  static NonAtomic makeref(T *p) noexcept
   {
-    return p ? RefPtr<T>(*p) : nullptr;
+    return p ? NonAtomic(*p) : nullptr;
   }
 
   T *take() noexcept

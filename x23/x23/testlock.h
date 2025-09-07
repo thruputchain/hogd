@@ -145,8 +145,8 @@ public:
 
   void block_while_inhibited() noexcept
   {
-    for (size_t i = 0; i < nshared(); ++i)
-      inhibitors_.lookup(i).block();
+    for (auto &inh : inhibitors_)
+      inh.block();
   }
 
   // With coroutines, there's a risk of the lock being released in a
