@@ -14,64 +14,100 @@ namespace x23 {
 
 namespace detail {
 
-template<typename T> struct RefOps {
-  static auto incref(T *p) noexcept(noexcept(p->incref()))
+template<typename Ptr> struct RefOps {
+  static auto incref(Ptr p) noexcept(noexcept(p->incref()))
   {
     return p->incref();
   }
-  using tag_type = decltype(incref(declval<T *>()));
+  using tag_type = decltype(incref(declval<Ptr>()));
 
-  static void decref(T *p, auto... tag) noexcept(noexcept(p->decref(tag...)))
+  static void decref(Ptr p, auto... tag) noexcept(noexcept(p->decref(tag...)))
       requires (sizeof...(tag) == !std::is_void_v<tag_type>)
   {
     p->decref(tag...);
   }
 
-  static T *get(T *p) noexcept { return p; }
+  static Ptr get(Ptr p) noexcept { return p; }
 };
 
-template<typename T, typename Ops> struct RefTag {
+// An generic exchange function that works with regular or atomic types
+template<typename A, typename B>
+inline decltype(auto)
+genexchange(A &&a, B &&b) noexcept
+{
+  if constexpr (requires { std::forward<A>(a).exchange(std::forward<B>(b)); })
+    return std::forward<A>(a).exchange(std::forward<B>(b));
+  else {
+    using std::exchange;
+    return exchange(a, b);
+  }
+}
+
+template<typename A, typename B>
+inline void
+genswap(A &a, B &b) noexcept
+{
+  if constexpr (requires { a.swap(b); })
+    a.swap(b);
+  else {
+    using std::swap;
+    if constexpr (requires { swap(a, b); })
+      swap(a, b);
+    else
+      b = genexchange(a, b);
+  }
+}
+
+// In the event that we bucket reference counts by CPU, we want to be
+// able to include a tag in a RefPtr recording the CPU or bucket in
+// which the reference count was incremeneted.
+template<typename Ptr, typename Ops> struct RefTag {
   using ops = Ops;
-  using element_type = T;
+  using pointer_type = Ptr;
+  using element_type = std::remove_reference_t<decltype(*declval<Ptr>())>;
   static constexpr bool kTagged = false;
 
-  element_type *p_;
+  pointer_type p_{};
 
   void ref() { ops::incref(p_); }
-  static void unref(element_type *p) { ops::decref(p); }
-  void movert(RefTag &other) noexcept { p_ = std::exchange(other.p_, nullptr); }
+  static void unref(pointer_type p) { ops::decref(p); }
+  void movert(RefTag &other) noexcept { p_ = genexchange(other.p_, nullptr); }
 
   template<std::derived_from<RefTag> Self>
-  void swap(this Self &self, Self &other) noexcept
+  void swap(this Self &self, auto &other) noexcept
   {
-    std::swap(self.p_, other.p_);
+    genswap(self.p_, other.p_);
   }
 };
 
-template<typename T, typename Ops>
-requires requires(T *p) { Ops::decref(p, Ops::incref(p)); }
-struct RefTag<T, Ops> {
+template<typename Ptr, typename Ops>
+requires requires(Ptr p) { Ops::decref(p, Ops::incref(p)); }
+struct RefTag<Ptr, Ops> {
   using ops = Ops;
-  using element_type = T;
-  using tag_type = decltype(ops::incref(declval<T *>()));
+  using pointer_type = Ptr;
+  using element_type = std::remove_reference_t<decltype(*declval<Ptr>())>;
+  using tag_type = decltype(ops::incref(declval<Ptr>()));
   static constexpr bool kTagged = true;
 
-  element_type *p_;
+  pointer_type p_{};
   tag_type tag_;
 
   void ref() { tag_ = ops::incref(p_); }
-  void unref(element_type *p) { ops::decref(p, tag_); }
+  void unref(pointer_type p) { ops::decref(p, tag_); }
   void movert(RefTag &other) noexcept
   {
-    p_ = std::exchange(other.p_, nullptr);
+    using std::exchange;
     tag_ = other.tag_;
+    p_ = genexchange(other.p_, nullptr);
   }
 
   template<std::derived_from<RefTag> Self>
-  void swap(this Self &self, Self &other) noexcept
+  void swap(this Self &self, auto &other) noexcept
   {
-    std::swap(self.p_, other.p_);
-    std::swap(self.tag_, other.tag_);
+    // It's important to do tag_ first, in case p_ is a sentinel value
+    // representing a locked state.
+    genswap(self.tag_, other.tag_);
+    genswap(self.p_, other.p_);
   }
 };
 
@@ -86,17 +122,20 @@ struct RefTag<T, Ops> {
 // You can of course generalize `incref()` and `decref()` methods on
 // your class, or define some other Ops adapter type for other
 // methods.
-template<typename T, typename Ops = detail::RefOps<T>>
-class RefPtr : protected detail::RefTag<T, Ops> {
-  using super = detail::RefTag<T, Ops>;
+template<typename T, typename Ops = detail::RefOps<T *>>
+class RefPtr : protected detail::RefTag<T *, Ops> {
+  using super = detail::RefTag<T *, Ops>;
   using super::kTagged;
   using super::movert;
   using super::p_;
   using super::ref;
   using super::unref;
-  using typename super::ops;
+  using ops = Ops;
 
 public:
+  using typename super::element_type;
+  using typename super::pointer_type;
+
   // Classes that don't have:
   //
   //   static constexpr bool kAllowRefPtrConversion = true;
@@ -109,8 +148,8 @@ public:
     ref();
   }
 
-  RefPtr() noexcept : RefPtr{nullptr} {}
-  RefPtr(std::nullptr_t) noexcept { p_ = nullptr; }
+  RefPtr() noexcept = default;
+  RefPtr(std::nullptr_t) : RefPtr() {}
   RefPtr(const RefPtr &other)
   {
     p_ = other.p_;
@@ -121,7 +160,7 @@ public:
   ~RefPtr() { reset(); }
 
   decltype(auto) operator=(this is_mutable auto &&self,
-                           std::nullptr_t) // NOLINT
+                           std::nullptr_t) noexcept // NOLINT
   {
     self.reset();
     return (self);
@@ -169,16 +208,17 @@ protected:
 
   friend T;
   template<typename U, typename O> friend class AtomicRefPtr;
+  template<typename P, typename O> friend struct detail::RefTag;
 };
 
 // A way to generate RefPtr values without racing with a thread that
 // might drop the last reference.  Uses the low bit of the pointer as
 // a lock, so only for types T that have an alignof(T) >= 2.
-template<typename T, typename Ops = detail::RefOps<T>> class AtomicRefPtr {
+template<typename T, typename Ops = detail::RefOps<T *>> class AtomicRefPtr {
 public:
   using NonAtomic = RefPtr<T, Ops>;
-  static_assert(!NonAtomic::kTagged); // Doesn't support tagged RefPtr types
 
+public:
   AtomicRefPtr() noexcept = default;
   AtomicRefPtr(NonAtomic np) { store(std::move(np)); }
   AtomicRefPtr(const AtomicRefPtr &) noexcept = delete;
@@ -197,32 +237,53 @@ public:
   NonAtomic exchange(NonAtomic np) noexcept
   {
     T *p = take();
-    std::swap(np.p_, p);
-    put(p);
+    r_.swap(np); // implicitly puts
+    np.p_ = p;
     return np;
   }
 
   bool compare_exchange(NonAtomic &desired, T *expected) noexcept
   {
-    bool ret = false;
     T *p = take();
     if (p == expected) {
       auto copy(desired);
-      std::swap(copy.p_, p);
-      ret = true;
+      r_.swap(copy); // implicitly puts
+      copy.p_ = p;
+      return true;
     }
-    else
-      desired = makeref(p);
+    desired = makeref(p);
     put(p);
-    return ret;
+    return false;
   }
 
 private:
   static_assert(alignof(T) % 2 == 0);
-  static constexpr uintptr_t kEmpty = 1;
-  static constexpr uintptr_t kEmptyWantNotify = 3;
+  template<uintptr_t V> requires (bool(V & 1))
+  struct Sentinel {
+    operator T *() const noexcept { return reinterpret_cast<T *>(V); }
+  };
+  static constexpr Sentinel<1> kEmpty{};
+  static constexpr Sentinel<3> kEmptyWantNotify{};
 
-  std::atomic<uintptr_t> p_{0};
+  struct ops {
+    static auto load(std::atomic<T *> &p) noexcept { return p.load(); }
+    static auto get(std::atomic<T *> &p) noexcept
+    {
+      return NonAtomic::ops::get(load(p));
+    }
+    static auto incref(std::atomic<T *> &p)
+    {
+      return NonAtomic::ops::incref(load(p));
+    }
+    static auto decref(std::atomic<T *> &p, auto... tag)
+        requires (sizeof...(tag) ==
+                  !std::is_void_v<typename NonAtomic::ops::tag_type>)
+    {
+      return NonAtomic::ops::decref(load(p), tag...);
+    }
+  };
+
+  detail::RefTag<std::atomic<T *>, ops> r_;
 
   static NonAtomic makeref(T *p) noexcept
   {
@@ -232,29 +293,29 @@ private:
   T *take() noexcept
   {
     for (;;) {
-      auto p = p_.load(std::memory_order_relaxed);
+      auto p = r_.p_.load(std::memory_order_relaxed);
       if (p != kEmpty && p != kEmptyWantNotify) {
-        if (p_.compare_exchange_weak(p, kEmpty, std::memory_order_acquire,
-                                     std::memory_order_relaxed))
-          return reinterpret_cast<T *>(p);
+        if (r_.p_.compare_exchange_weak(p, kEmpty, std::memory_order_acquire,
+                                        std::memory_order_relaxed))
+          return p;
         continue;
       }
 
-      if (p == kEmpty && !p_.compare_exchange_weak(p, kEmptyWantNotify,
-                                                   std::memory_order_relaxed,
-                                                   std::memory_order_relaxed))
+      if (p == kEmpty &&
+          !r_.p_.compare_exchange_weak(p, kEmptyWantNotify,
+                                       std::memory_order_relaxed,
+                                       std::memory_order_relaxed))
         continue;
 
-      p_.wait(kEmptyWantNotify);
+      r_.p_.wait(kEmptyWantNotify);
     }
   }
 
   void put(T *p) noexcept
   {
-    auto old =
-        p_.exchange(reinterpret_cast<uintptr_t>(p), std::memory_order_release);
+    auto old = r_.p_.exchange(p, std::memory_order_release);
     if (old == kEmptyWantNotify)
-      p_.notify_all();
+      r_.p_.notify_all();
     else
       assert(old == kEmpty);
   }
