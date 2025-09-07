@@ -1,5 +1,6 @@
 #pragma once
 
+#include "account.hh"
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/types.h"
@@ -19,6 +20,11 @@ public:
     const auto &[public_key, private_key] = ed25519_keygen();
     public_keys_[account][idx] = public_key;
     return private_key;
+  }
+
+  // TODO(jhumphri): Remove this.
+  void add_account(const ContractAddress &account, const AccountAuthData &data) {
+    accounts_[account] = data;
   }
 
   bool authenticate(const SignedTransaction &tx)
@@ -119,6 +125,7 @@ private:
     return true;
   }
 
+  std::unordered_map<ContractAddress, AccountAuthData> accounts_;
   std::unordered_map<ContractAddress,
                      std::unordered_map<size_t, Ed25519PublicKey>>
       public_keys_;
