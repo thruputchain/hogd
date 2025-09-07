@@ -131,17 +131,13 @@ class SharedLock : public TestLock {
     }
   };
 
-  size_t nshared() const { return map_.nbuckets(); }
-
 public:
-  const CpuMap &map_;
-
-  explicit SharedLock(const CpuMap &map = *llc_map)
-    : map_(map), inhibitors_(map_)
+  explicit SharedLock(const CpuMap &map = *llc_map) : inhibitors_(map)
   {
-    assert(nshared() > 0);
     inhibitors_.populate(this);
   }
+
+  const CpuMap &map() const noexcept { return inhibitors_.map_; }
 
   void block_while_inhibited() noexcept
   {
@@ -159,9 +155,7 @@ public:
 
   public:
     SharedHolder() noexcept : super(nullptr) {}
-    SharedHolder(SharedLock &sl) noexcept
-      : super(sl.inhibitors_.lookup())
-    {}
+    SharedHolder(SharedLock &sl) noexcept : super(sl.inhibitors_.lookup()) {}
     SharedHolder(SharedHolder &&) noexcept = default;
     using super::operator=;
     using super::reset;
