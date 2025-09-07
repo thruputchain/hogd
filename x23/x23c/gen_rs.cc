@@ -332,8 +332,8 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop("    async fn {}({}) -> {};\n", proc.id, join(args, ", "),
-          map_proc_return_type(proc.return_type));
+    prtop("    async fn {}({}) -> Result<{}, ::rpc_driver::ProgramError>;\n",
+          proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
   prtop("}}\n");
@@ -385,8 +385,9 @@ impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
     prtop("                let args: ({}) =\n", type_args);
     prtop("                    xdrs::serialize_txs::decode(data).map_err(|_| "
           "::rpc_driver::RpcError::GarbageArguments)?;\n");
-    prtop("                let res = self.inner.{}({}).await;\n", proc.id,
-          make_arg_detuple(proc.arg_types.size()));
+    prtop("                let res = self.inner.{}({}).await.map_err(|_| "
+          "::rpc_driver::RpcError::SystemError)?;\n",
+          proc.id, make_arg_detuple(proc.arg_types.size()));
     prtop("                xdrs::serialize_txs::encode(&res).map_err(|_| "
           "::rpc_driver::RpcError::SystemError)\n");
     prtop("            }}\n");
