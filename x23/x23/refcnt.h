@@ -114,7 +114,7 @@ public:
   }
 
   RefPtr() noexcept = default;
-  RefPtr(std::nullptr_t) : RefPtr() {}
+  RefPtr(std::nullptr_t) noexcept : RefPtr() {}
   RefPtr(const RefPtr &other)
   {
     p_ = other.p_;
@@ -155,12 +155,14 @@ public:
   auto operator->() const noexcept { return get(); }
   void reset()
   {
+    using std::exchange;
     if (this->p_)
-      this->unref(std::exchange(this->p_, nullptr));
+      this->unref(exchange(this->p_, nullptr));
   }
   explicit operator bool() const noexcept { return this->p_; }
 
-  friend void swap(RefPtr &a, RefPtr &b) noexcept {
+  friend void swap(RefPtr &a, RefPtr &b) noexcept
+  {
     using std::swap;
     if constexpr (kTagged)
       swap(a.tag_, b.tag_);
@@ -216,9 +218,9 @@ public:
   using NonAtomic = RefPtr<T, Ops>;
 
   AtomicRefPtr() noexcept = default;
-  AtomicRefPtr(NonAtomic np) { store(std::move(np)); }
+  AtomicRefPtr(NonAtomic np) noexcept { store(std::move(np)); }
   AtomicRefPtr(const AtomicRefPtr &) noexcept = delete;
-  ~AtomicRefPtr() { exchange(nullptr); }
+  ~AtomicRefPtr() { store(nullptr); }
 
   NonAtomic load() noexcept
   {
@@ -252,7 +254,7 @@ public:
 
 private:
   static_assert(alignof(T) % 2 == 0);
-  template<uintptr_t V> requires (bool(V & 1))
+  template<uintptr_t V> requires (V % 2 == 1)
   struct Sentinel {
     operator T *() const noexcept { return reinterpret_cast<T *>(V); }
   };
@@ -286,11 +288,11 @@ private:
 
   void put(T *p) noexcept
   {
-    auto old = p_.exchange(p, std::memory_order_release);
-    if (old == kEmptyWantNotify)
+    auto state = p_.exchange(p, std::memory_order_release);
+    if (state == kEmptyWantNotify)
       p_.notify_all();
     else
-      assert(old == kEmpty);
+      assert(state == kEmpty);
   }
 
   // Swap na into the atomic (unlocking the AtomicRefPtr>), and then
