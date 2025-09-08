@@ -212,13 +212,18 @@ which supplies the following functions:
 * `Buf serialize(const is_xdr_type auto &...x)` serializes zero or
   more XDR datatypes to `Buf`, which is just a `Vec<std::uint8_t>`.
 
-* `void deserialize(is_xdr_type auto *out, BufView buf)` deserializes
-  bytes into an XDR data type `*out`, and throws an exception if all
-  bytes are not consumed.  A `BufView` is derived from
-  `std::span<const std::uint8_t>` and can be initialized from several
-  byte container types, including `Buf`.
+* `void deserialize(is_xdr_type auto *out, BufViewEnd buf)`
+  deserializes bytes into an XDR data type `*out`, and throws an
+  exception if all bytes are not consumed.  A `BufViewEnd` is derived
+  from `BufView` which is derived from `std::span<const
+  std::uint8_t>`, and can be initialized from a `Buf` or `BufView`
+  (optionally with the buffer into which the `BufView` is a view).  It
+  keeps track of the capacity of the buffer, which allows an
+  optimization where deserialization elides some length checks to read
+  beyond the size of the buffer up to its capacity (before of course
+  throwing an exception if the buffer was too short).
 
-* `size_t deserialize_from(is_xdr_type auto *out, BufView buf)`
+* `size_t deserialize_from(is_xdr_type auto *out, BufViewEnd buf)`
   deserializes and returns the number of bytes consumed.  It does not
   throw an exception if the there are bytes remaining in `buf`.  If it
   returns `n`, subsequent XDR types can be deserialized from
@@ -431,7 +436,7 @@ been configured on the socket.
 ## Using synchronous RPC over stream sockets
 
 If you don't want coroutines, there is also a *synchronous* rpc
-interface defined in `<x23/srpc.h>.  In the server, simply define
+interface defined in `<x23/srpc.h>`.  In the server, simply define
 methods that match the return types of RPC methods (without wrapping
 them in `Async` the way you do for asynchronous servers).  Note that
 the synchronous server RPC reads and writes RPCs in batches, and
