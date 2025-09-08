@@ -326,7 +326,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   static constexpr bool kAllowRefPtrConversion = true;
 
   Logger logger_;
-  bool reader_running_;
+  bool reader_running_{false};
 
   RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger)
     : super(cp, std::move(fd)), logger_(std::move(logger))
