@@ -46,7 +46,7 @@ ExecCoordServer::connect_to_coord_allocate_service(
   }
 
   auto client_config = x23::rpc_stream_logged(cp_, *fd);
-  return std::make_optional(client_config.template client<Coordinator1>());
+  return std::make_optional(client_config->template client<Coordinator1>());
 }
 
 IntroExecResult

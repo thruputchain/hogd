@@ -115,7 +115,7 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
     //    std::println("accepted fd {} TCP port {} from {}", *s,
     //                 get_port(self->addr_), HostPort(ss));
     make_rpc_stream(self->cps_.get(*s), *s)
-        .server(std::make_unique<Server>(self), blank_rpc_v1{});
+        ->server(std::make_unique<Server>(self), blank_rpc_v1{});
   }
   std::println("server stopping");
 }
@@ -175,7 +175,7 @@ do_client(int port, const char *server)
     // std::println("connected fd {} TCP port {} to {}", fd.get(),
     // 		 get_port(local_addr(fd)), HostPort(server_addr));
     auto &cp = cps.get(fd);
-    auto c = make_rpc_stream(cp, fd.release()).client(blank_rpc_v1{});
+    auto c = make_rpc_stream(cp, fd.release())->client(blank_rpc_v1{});
 
     for (unsigned i = 0; i < ncoros; ++i)
       [](DiRef dir, auto c, std::atomic_int &count) -> Detached {

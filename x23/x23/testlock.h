@@ -71,13 +71,14 @@ private:
   std::atomic_int status_{kUnlocked};
 };
 
-// A shared version of TestLock.  The constructor argument is the
-// number of buckets for shared lockers, so that different shared
-// lockers can touch different cache lines.
+// A shared version of TestLock.  The constructor argument describes
+// how to group lockers, so that different shared lockers can touch
+// different cache lines.
 //
-// *Not* compatible with std::shared_lock because it needs to keep
-// some per-locker state around, so instead it returns a
-// shared_lock-like RAII type.
+// *Not* compatible with std::shared_lock, because it needs to
+// remember which bucket was referenced by a shared locker.  To keep
+// this per-locker state around, it returns a shared_lock-like RAII
+// type.
 //
 //   SharedLock sl;
 //
@@ -100,16 +101,18 @@ class SharedLock : public TestLock {
   struct alignas(hardware_destructive_interference_size) Inhibitor {
     std::atomic_uint count{0};
     std::atomic_bool want_wake{false};
-    TestLock *tl; // Could get away without, but we have a whole cache line
+    TestLock *tl_; // Could get away without, but we have a whole cache line
+
+    Inhibitor(TestLock *tl) noexcept : tl_(tl) {}
 
     void incref() noexcept
     {
       for (;;) {
         count.fetch_add(1);
-        if (!tl->busy())
+        if (!tl_->busy())
           return;
         decref();
-        tl->block_until_free();
+        tl_->block_until_free();
       }
     }
     void decref() noexcept
@@ -128,24 +131,18 @@ class SharedLock : public TestLock {
     }
   };
 
-  size_t nshared() const { return map_.nbuckets(); }
-
 public:
-  const CpuMap &map_;
-
-  explicit SharedLock(const CpuMap &map = *llc_map)
-    : map_(map), inhibitors_(std::make_unique<Inhibitor[]>(nshared()))
+  explicit SharedLock(const CpuMap &map = *llc_map) : inhibitors_(map)
   {
-    assert(nshared() > 0);
-    for (size_t i = 0; i < nshared(); ++i)
-      inhibitors_[i].tl = this;
+    inhibitors_.populate(this);
   }
-  ~SharedLock() { assert(inhibitors_.get()); }
+
+  const CpuMap &map() const noexcept { return inhibitors_.map_; }
 
   void block_while_inhibited() noexcept
   {
-    for (size_t i = 0; i < nshared(); ++i)
-      inhibitors_[i].block();
+    for (auto &inh : inhibitors_)
+      inh.block();
   }
 
   // With coroutines, there's a risk of the lock being released in a
@@ -158,9 +155,7 @@ public:
 
   public:
     SharedHolder() noexcept : super(nullptr) {}
-    SharedHolder(SharedLock &sl) noexcept
-      : super(sl.inhibitors_[sl.map_.bucket()])
-    {}
+    SharedHolder(SharedLock &sl) noexcept : super(sl.inhibitors_.lookup()) {}
     SharedHolder(SharedHolder &&) noexcept = default;
     using super::operator=;
     using super::reset;
@@ -172,7 +167,7 @@ public:
   SharedHolder hold_shared() noexcept { return *this; }
 
 protected:
-  std::unique_ptr<Inhibitor[]> inhibitors_;
+  PerCpuSet<Inhibitor> inhibitors_;
 };
 
 } // namespace x23

@@ -357,9 +357,9 @@ srpc_stream_logged(int fd, int logfd = RpcLogger::default_logfd)
 }
 
 template<typename Logger>
-struct SRpcMulticlient : RefCount, PerCpuSet<RefPtr<SRpcStream<Logger>>> {
+struct SRpcMulticlient : RefCount, PerCpuSet<RefPtr<SRpcStream<Logger>>, true> {
   using super1 = RefCount;
-  using super2 = PerCpuSet<RefPtr<SRpcStream<Logger>>>;
+  using super2 = PerCpuSet<RefPtr<SRpcStream<Logger>>, true>;
   using ClientRef = RefPtr<SRpcMulticlient>;
 
   template<typename VersMeta>
