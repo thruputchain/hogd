@@ -31,7 +31,7 @@ struct Connection {
     [](Connection *server, x23::UniqueFd lfd) -> x23::Detached {
       co_await server->cp_.pool_.bg();
       while (auto c = co_await server->cp_.accept(lfd))
-        x23::rpc_stream_logged(server->cp_, *c).server(server);
+        x23::rpc_stream_logged(server->cp_, *c)->server(server);
     }(this, std::move(lfd));
     return portno;
   }
@@ -61,7 +61,8 @@ TEST(ShutdownTest, AfterRPC)
   // This forces the threadpool to wait until a connection is formed (i.e. after
   // the background work begins running) before attempting to shutdown the
   // coropoll.
-  auto client = x23::rpc_stream_logged(cp, *fd).template client<blank_rpc_v1>();
+  auto client =
+      x23::rpc_stream_logged(cp, *fd)->template client<blank_rpc_v1>();
   client.null()();
 }
 } // namespace x23

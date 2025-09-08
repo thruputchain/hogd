@@ -363,6 +363,51 @@ The `rpc_service` type definition acts as a default interface in some
 cases, but is not necessary.  A single structure can implement
 multiple RPC programs and versions.
 
+Note that for short RPC functions that always run to completion, you
+do not need to return an `Async<T>`, but rather can return the
+underlying type `T` to save the overhead of allocating a coroutine
+frame.  For example, if `null()` never needs to suspend, fast, it's
+valid to say:
+
+``` cpp
+using x23::Async;
+
+struct MyVersImpl {
+  using rpc_service = myvers;
+  void null() {}
+  Async<std::int32_t> add(std::int32_t a, std::int32_t b)
+  {
+    // ...
+  }
+};
+static_assert(is_myvers<MyVersImpl*, Async>);
+```
+
+You may also have a method that is fast most of the time and needs to
+suspend occasionally.  In that case, you can return a `MaybeAsync<T>`
+which can be constructed from either a `T` or an `Async<T>`.  For
+example:
+
+``` cpp
+using x23::Async;
+using x23::MaybeAsync;
+
+std::optional<std::int32_t> cached_add(std::int32_t a, std::int32_t b);
+Async<std::int32_t> slow_add(std::int32_t a, std::int32_t b);
+
+struct MyVersImpl {
+  using rpc_service = myvers;
+  void null() {}
+  MaybeAsync<std::int32_t> add(std::int32_t a, std::int32_t b)
+  {
+    if (auto sum = cached_add(a, b))
+      return *sum;
+    return slow_add(a, b);  // no co_await, just return the Async
+  }
+};
+static_assert(is_myvers<MyVersImpl*, Async>);
+```
+
 ## Using asynchronous RPC over stream sockets
 
 To invoke and serve RPC services over a stream socket, include the
@@ -395,7 +440,7 @@ client_example(int fd)
   auto cstream = rpc_stream_logged(cp, fd);
   // Now X23 owns the file descriptor
 
-  myvers::client client = cstream.client(myvers{});
+  myvers::client client = cstream->client(myvers{});
   return client.add(5, 5)(); // second set of parens to wait synchronously
   // file descriptor will be closed on destruction of client
 }
@@ -409,7 +454,7 @@ MyVersImpl impl;
 void
 server_example(int fd)
 {
-  rpc_stream_logged(cp, fd).server(&impl);
+  rpc_stream_logged(cp, fd)->server(&impl);
 }
 ```
 
@@ -420,8 +465,8 @@ simply chain calls.  For instance if `MyVersImpl*` implemented
 multiple interface versions, you could say:
 
 ``` cpp
-  rpc_stream_logged(cp, fd).server(&impl, myvers{})
-                           .server(&impl, myvers2{});
+  rpc_stream_logged(cp, fd)->server(&impl, myvers{})
+                           ->server(&impl, myvers2{});
 ```
 
 Note that before X23 will read from a socket, you must either destroy
@@ -444,8 +489,7 @@ expects all methods to run to completion.  Methods that sleep or take
 a long time to execute will cause head-of-line blocking on the file
 descriptor.  Other than that, configuration is similar to asynchronous
 RPC except that you use `srpc_stream_logged` instead of
-`rpc_stream_logged` and access the configurator object like a pointer
-(with `->`) instead of an object (with `.`).
+`rpc_stream_logged`.
 
 ``` cpp
 struct MyVersImpl {
@@ -463,7 +507,6 @@ MyVersImpl impl;
 void
 server_example(int fd)
 {
-  // Note -> instead of . for configurator object
   srpc_stream_logged(fd)->server(&impl);
 }
 ```
