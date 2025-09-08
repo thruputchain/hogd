@@ -80,17 +80,33 @@
 
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <exception>
+#include <expected>
 #include <map>
 #include <print>
 #include <stop_token>
+#include <tuple>
 
+#include <type_traits>
+#include <utility>
 #include <x23/async.h>
+#include <x23/cleanup.h>
 #include <x23/corosync.h>
+#include <x23/corotrace.h>
+#include <x23/err.h>
 #include <x23/event.h>
 #include <x23/fileio.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
+#include <x23/rpc_msg.hh>
+#include <x23/serialize.h>
+#include <x23/vec.h>
 #include <x23/x23.h>
 
 namespace x23 {
@@ -152,7 +168,7 @@ private:
     using return_type = ProcMeta::return_type;
 
     RpcDispatcher &d_;
-    uint32_t xid_;
+    std::uint32_t xid_;
     const rpc_msg *callmsg_{};
 
     ProcHandler(RpcDispatcher &d, const rpc_msg &callmsg)

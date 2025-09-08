@@ -5,15 +5,20 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <limits>
+#include <string>
 #include <tuple>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
+#include <variant>
 
 #include <x23/utility.h>
 #include <x23/vec.h>

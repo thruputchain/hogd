@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 

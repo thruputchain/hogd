@@ -1,22 +1,32 @@
 
-#include <cassert>
-#include <system_error>
-
 #include <arpa/inet.h>
+#include <cassert>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <expected>
+#include <functional>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <sys/fcntl.h>
 #include <sys/socket.h>
+#include <system_error>
 
 #include "x23/cleanup.h"
 #include "x23/err.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace x23 {
 
 const std::error_category &
 gai_category()
 {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct gai_category_impl : public std::error_category {
     const char *name() const noexcept override { return "DNS"; }
     std::string message(int err) const override { return gai_strerror(err); }
