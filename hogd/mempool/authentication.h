@@ -100,7 +100,6 @@ public:
       Signature sig(CryptographicScheme::Ed25519);
       sig.ed25519() = ed25519_sign(private_key, msg);
       const DecoratedSignature dec_sig = {.public_key_id = idx,
-                                          .weight = 0,
                                           .signature = sig};
       signed_tx.signatures.push_back(dec_sig);
     }
@@ -111,7 +110,6 @@ public:
         Signature sig(CryptographicScheme::Ed25519);
         sig.ed25519() = ed25519_sign(private_key, msg);
         const DecoratedSignature dec_sig = {.public_key_id = idx,
-                                            .weight = 0,
                                             .signature = sig};
         aux_map[account].push_back(dec_sig);
       }
