@@ -2,12 +2,24 @@
 
 #pragma once
 
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <functional>
+#include <netinet/in.h>
+#include <string>
 #include <string_view>
+#include <sys/socket.h>
+#include <system_error>
+#include <utility>
 
 #include <sys/un.h>
 
+#include <x23/cleanup.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
+#include <x23/utility.h>
+#include <x23/vec.h>
 
 namespace x23 {
 
