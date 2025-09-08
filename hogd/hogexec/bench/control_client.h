@@ -60,7 +60,7 @@ connect_to_control_server(x23::CoroPoll &cp, std::string const &host,
       continue;
     }
     auto client_config = x23::rpc_stream_logged(cp, *fd);
-    return ControlClientWrapper(client_config.template client<CIServer1>());
+    return ControlClientWrapper(client_config->template client<CIServer1>());
   }
 }
 
