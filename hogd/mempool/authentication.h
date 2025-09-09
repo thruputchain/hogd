@@ -14,19 +14,6 @@ public:
   Authentication() = default;
 
   // TODO(jhumphri): Remove this.
-  Ed25519SecretKey create_tmp_key_pair(const ContractAddress &account,
-                                       size_t idx)
-  {
-    CHECK(accounts_.contains(account));
-
-    const auto &[public_key, private_key] = ed25519_keygen();
-    accounts_[account].public_keys[idx].key =
-        PublicKey(CryptographicScheme::Ed25519);
-    accounts_[account].public_keys[idx].key.ed25519() = public_key;
-    return private_key;
-  }
-
-  // TODO(jhumphri): Remove this.
   void add_account(const ContractAddress &account, const AccountAuthData &data)
   {
     CHECK(!accounts_.contains(account));
