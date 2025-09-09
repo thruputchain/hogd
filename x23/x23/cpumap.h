@@ -220,56 +220,99 @@ private:
 #endif // HAVE_SCHED_SETAFFINITY
 };
 
-template<typename T> struct PerCpuSet {
+// Construct one instance of type T for each CpuSet in a CpuMap.  If
+// ValidOnly is false, then it will only construct a T for CpuSets on
+// which we can actually be scheduled.
+template<typename T, bool ValidOnly = false> class PerCpuSet {
+public:
   using value_type = T;
 
-  PerCpuSet(const CpuMap &map)
-    : map_(map), constructed_(map_.nbuckets()),
-      values_(a.allocate(constructed_.size()))
-  {}
+  const CpuMap &map_;
+
+  PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
+  {
+    if constexpr (ValidOnly)
+      constructed_.resize(map_.nbuckets());
+  }
   ~PerCpuSet()
   {
-    for (size_t i = 0; i < constructed_.size(); ++i)
-      if (constructed_[i])
-        std::destroy_at(values_ + i);
+    for (auto i : valid_indices_)
+      std::destroy_at(values_ + i);
     a.deallocate(values_, map_.nbuckets());
   }
 
-  // Supply either constructor arguments or an invocable arguments
-  // that takes a const CpuSet &.
+  size_t size() const { return map_.nbuckets(); }
+
+  // Supply either constructor arguments or invocable arguments that
+  // take a const CpuSet & as the final argument.  E.g.,
+  //
+  //   // default construct all elements
+  //   percpu.populate();
+  //
+  //   // create each per-CpuSet object with a lambda
+  //   percpu.populate([](const CpuSet &cs) { return create(cs); });
   template<typename... Args> void populate(Args &&...args)
   {
-    for (int i = 0; i < map_.nbuckets(); ++i)
-      if (const auto &s = map_.cpuset(i); s.valid())
+    // If this assert fails, you probably tried to populate twice
+    assert(!valid_indices_.size());
+    for (int i = 0; i < map_.nbuckets(); ++i) {
+      const auto &s = map_.cpuset(i);
+      if (!ValidOnly || s.valid())
         construct(i, std::forward<Args>(args)...);
+    }
   }
 
   value_type &lookup() { return lookup(map_.bucket()); }
   value_type &lookup(int bucket)
   {
     assert(bucket < map_.nbuckets());
-    if (constructed_[bucket])
-      return values_[bucket];
-    assert(valid_indices_.size());
-    return values_[valid_indices_[bucket % valid_indices_.size()]];
+    if constexpr (ValidOnly)
+      if (!constructed_[bucket]) {
+        assert(valid_indices_.size());
+        return values_[valid_indices_[bucket % valid_indices_.size()]];
+      }
+    return values_[bucket];
+  }
+
+  // Minimal support to allow range-for
+  struct iterator {
+    PerCpuSet *cs_;
+    size_t idx_;
+
+    T &operator*() const { return cs_->values_[cs_->valid_indices_[idx_]]; }
+    iterator &operator++()
+    {
+      ++idx_;
+      return *this;
+    }
+    friend bool operator==(const iterator &a, const iterator &b) = default;
+  };
+  iterator begin() { return iterator{.cs_ = this, .idx_ = 0}; }
+  iterator end()
+  {
+    return iterator{.cs_ = this, .idx_ = valid_indices_.size()};
   }
 
 private:
   static inline std::allocator<T> a;
 
-  const CpuMap &map_;
-  std::vector<bool> constructed_; // Says whether each of values_ is constructed
-  value_type *values_;            // Per-CpuSet values
-  Vec<unsigned> valid_indices_;   // List of valid indices to values_
+  // Record which indices of values_ have been constructed
+  [[no_unique_address]] std::conditional_t<ValidOnly, std::vector<bool>,
+                                           std::tuple<>> constructed_;
+
+  value_type *values_;          // Per-CpuSet values
+  Vec<unsigned> valid_indices_; // List of valid indices to values_
 
   // Simple emplace
   template<typename... Args>
   void construct(size_t i, Args &&...args)
       requires std::constructible_from<value_type, Args...>
   {
-    assert(!constructed_[i]);
     std::construct_at(values_ + i, std::forward<Args>(args)...);
-    constructed_[i] = true;
+    if constexpr (ValidOnly) {
+      assert(!constructed_[i]);
+      constructed_[i] = true;
+    }
     valid_indices_.push_back(i);
   }
 

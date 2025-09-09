@@ -85,7 +85,7 @@ main(int argc, char **argv)
         exit(1);
       }
       auto cs = rpc_stream_logged(cp, *conres);
-      myvers::client c = cs.client<myvers>();
+      myvers::client c = cs->client<myvers>();
       client(c)();
       return 0;
     }
@@ -93,7 +93,7 @@ main(int argc, char **argv)
       [argv] -> Async<void> {
         auto lfd = x23::tcplisten(std::stoi(argv[2]));
         while (auto c = co_await cp.accept(lfd)) {
-          rpc_stream_logged(cp, *c).server<myvers>(&impl, context);
+          rpc_stream_logged(cp, *c)->server<myvers>(&impl, context);
         }
       }()();
     }
@@ -107,9 +107,9 @@ main(int argc, char **argv)
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0)
     x23::Errno{}.raise("socketpair");
 
-  rpc_stream_logged(cp, fds[1]).server<myvers>(&impl, context);
+  rpc_stream_logged(cp, fds[1])->server<myvers>(&impl, context);
 
   auto cs = rpc_stream_logged(cp, fds[0]);
-  myvers::client c = cs.client<myvers>();
+  myvers::client c = cs->client<myvers>();
   client(c)();
 }

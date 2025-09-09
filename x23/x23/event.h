@@ -324,6 +324,7 @@ private:
   };
 
   UniqueFd epollfd_;
+  UniqueFd eventfd_;
 
   SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
@@ -338,7 +339,6 @@ private:
   };
   FdPtr getfd(BorrowedFd fd);
 
-  static BorrowedFd always_eof();
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
@@ -467,7 +467,7 @@ public:
   connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
   {
     return connect(fd, reinterpret_cast<const sockaddr *>(ss),
-                   sizeof(*ss) X23_IFTRACE(, sloc));
+                   sockaddr_len(*ss) X23_IFTRACE(, sloc));
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
@@ -476,7 +476,7 @@ public:
   tcpconnect(const sockaddr_storage *ss SLOC_PARM)
   {
     return tcpconnect(reinterpret_cast<const sockaddr *>(ss),
-                      sizeof(*ss) X23_IFTRACE(, sloc));
+                      sockaddr_len(*ss) X23_IFTRACE(, sloc));
   }
 
   // Connect and return a file descriptor or a system error.

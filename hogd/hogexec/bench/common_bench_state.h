@@ -81,7 +81,7 @@ private:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
         return std::make_unique<coord_client_t>(
-            client_config.template client<DbCoord1>());
+            client_config->template client<DbCoord1>());
       }
     }();
   }

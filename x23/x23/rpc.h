@@ -28,7 +28,7 @@
 //
 //     ...
 //     auto cstream = rpc_stream_logged(cp, fd);
-//     auto client = ctream.client(myvers{});
+//     auto client = ctream->client(myvers{});
 //     client.null()(); // First function returns async, second waits for it
 //     int two = client.add1(1)();
 //
@@ -45,7 +45,7 @@
 // Impl impl;    // global implementation of service
 //
 //     ...
-//     rpc_stream_logged(cp, fd).server(&impl);
+//     rpc_stream_logged(cp, fd)->server(&impl);
 //
 // You can supply an extra context argument to every server method if
 // you supply it as a third argument after the RPC version object:
@@ -61,17 +61,17 @@
 // Impl impl;    // global implementation of service
 //
 //     ...
-//     rpc_stream_logged(cp, fd).server(&impl, myvers{}, &context);
+//     rpc_stream_logged(cp, fd)->server(&impl, myvers{}, &context);
 //
 // To attach multiple servers:
 //
-//     rpc_stream_logged(cp, fd).server(&impl, myvers{}, &context)
-//                              .server(&impl2, myothervers{}, &context);
+//     rpc_stream_logged(cp, fd)->server(&impl, myvers{}, &context)
+//                              ->server(&impl2, myothervers{}, &context);
 // or
 //     auto conf = rpc_stream_logged(cp, fd);
-//     conf.server(&impl, myvers{}, &context);
-//     conf.server(&impl2, myothervers{}, &context);
-//     conf.go(); // Or let conf go out of scope to start serving
+//     conf->server(&impl, myvers{}, &context);
+//     conf->server(&impl2, myothervers{}, &context);
+//     conf->go(); // Or let conf go out of scope to start serving
 //
 // Note rpc_stream and rpc_stream_logged will close the file
 // descriptor when is shuts down.  A stream with no clients will close
@@ -80,17 +80,33 @@
 
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <exception>
+#include <expected>
 #include <map>
 #include <print>
 #include <stop_token>
+#include <tuple>
 
+#include <type_traits>
+#include <utility>
 #include <x23/async.h>
+#include <x23/cleanup.h>
 #include <x23/corosync.h>
+#include <x23/corotrace.h>
+#include <x23/err.h>
 #include <x23/event.h>
 #include <x23/fileio.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
+#include <x23/rpc_msg.hh>
+#include <x23/serialize.h>
+#include <x23/vec.h>
 #include <x23/x23.h>
 
 namespace x23 {
@@ -152,7 +168,7 @@ private:
     using return_type = ProcMeta::return_type;
 
     RpcDispatcher &d_;
-    uint32_t xid_;
+    std::uint32_t xid_;
     const rpc_msg *callmsg_{};
 
     ProcHandler(RpcDispatcher &d, const rpc_msg &callmsg)
@@ -326,10 +342,110 @@ struct RpcStream : public detail::RpcStreamImpl {
   static constexpr bool kAllowRefPtrConversion = true;
 
   Logger logger_;
+  bool reader_running_{false};
 
   RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger)
     : super(cp, std::move(fd)), logger_(std::move(logger))
   {}
+
+  struct ClientRef : RefPtr<RpcStream> {
+    using super = RefPtr<RpcStream>;
+    using super::get;
+    ClientRef(RpcStream &s) : super(s)
+    {
+      get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+    }
+    ClientRef(const ClientRef &s) : super(s)
+    {
+      get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+    }
+    ~ClientRef()
+    {
+      if (get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
+        get()->fail();
+    }
+  };
+
+  template<typename VersMeta>
+  requires requires { typename VersMeta::template client<ClientRef>; }
+  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  {
+    go();
+    return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
+  }
+
+  template<typename Server,
+           typename VersMeta = typename std::remove_cvref_t<
+               decltype(*declval<Server>())>::rpc_service,
+           typename... ExtraArgs>
+  requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+  RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
+  {
+    assert(!reader_running_);
+    auto dispatch =
+        new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
+            std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    srvmap_.emplace(dispatch->getpv(), dispatch);
+    return this;
+  }
+  template<typename VersMeta, typename Server, typename... ExtraArgs>
+  requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+  RpcStream *server(Server srvr, ExtraArgs &&...ea)
+  {
+    return server<Server, VersMeta, ExtraArgs...>(std::move(srvr), {},
+                                                  std::forward<ExtraArgs>(
+                                                      ea)...);
+  }
+
+  void go()
+  {
+    if (!reader_running_) {
+      reader_running_ = true;
+      reader();
+    }
+  }
+
+  struct Configurator : public RefPtr<RpcStream> {
+    using super = RefPtr<RpcStream>;
+    using super::get;
+
+    Configurator(RpcStream &s) noexcept : super(s) {}
+    Configurator(const Configurator &) = delete;
+    ~Configurator() { get()->go(); }
+
+    RpcStream *operator->() const noexcept { return get(); }
+
+    template<typename Server,
+             typename VersMeta = typename std::remove_cvref_t<
+                 decltype(*declval<Server>())>::rpc_service,
+             typename... ExtraArgs>
+    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+    [[deprecated("use Configurator like a pointer")]]
+    Configurator &server(Server srvr, VersMeta vm = {},
+                         ExtraArgs &&...extra_args)
+    {
+      get()->template server<Server, VersMeta, ExtraArgs...>(
+          std::forward<Server>(srvr), vm,
+          std::forward<ExtraArgs>(extra_args)...);
+      return *this;
+    }
+    template<typename VersMeta, typename Server, typename... ExtraArgs>
+    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
+    [[deprecated("use Configurator like a pointer")]]
+    Configurator &server(Server srvr, ExtraArgs &&...ea)
+    {
+      get()->template server<Server, VersMeta, ExtraArgs...>(
+          std::move(srvr), {}, std::forward<ExtraArgs>(ea)...);
+      return *this;
+    }
+
+    template<typename VersMeta>
+    [[deprecated("use Configurator like a pointer")]]
+    auto client(VersMeta arg = {})
+    {
+      return get()->client(arg);
+    }
+  };
 
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
@@ -370,71 +486,6 @@ struct RpcStream : public detail::RpcStreamImpl {
     else
       co_return ret;
   }
-
-  struct ClientRef : RefPtr<RpcStream> {
-    using super = RefPtr<RpcStream>;
-    ClientRef(RpcStream &s) : super(s)
-    {
-      this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
-    }
-    ClientRef(const ClientRef &s) : super(s)
-    {
-      this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
-    }
-    ~ClientRef()
-    {
-      if (this->get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
-        this->get()->fail();
-    }
-  };
-
-  struct Configurator {
-    Configurator(RpcStream &s) noexcept : s_(s) {}
-    Configurator(const Configurator &) = delete;
-    ~Configurator() { go(); }
-
-    template<typename Server,
-             typename VersMeta = typename std::remove_cvref_t<
-                 decltype(*declval<Server>())>::rpc_service,
-             typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    Configurator &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
-    {
-      assert(!reader_running_);
-      auto dispatch = new RpcDispatcher<VersMeta, Server, Logger,
-                                        std::decay_t<ExtraArgs>...>(
-          std::move(srvr), s_->logger_, std::forward<ExtraArgs>(extra_args)...);
-      s_->srvmap_.emplace(dispatch->getpv(), dispatch);
-      return *this;
-    }
-    template<typename VersMeta, typename Server, typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    Configurator &server(Server srvr, ExtraArgs &&...ea)
-    {
-      return server<Server, VersMeta, ExtraArgs...>(std::move(srvr), {},
-                                                    std::forward<ExtraArgs>(
-                                                        ea)...);
-    }
-
-    template<typename VersMeta>
-    requires requires { typename VersMeta::template client<ClientRef>; }
-    typename VersMeta::template client<ClientRef> client(VersMeta = {})
-    {
-      go();
-      return typename VersMeta::template client<ClientRef>{ClientRef{*s_}};
-    }
-    void go()
-    {
-      if (!reader_running_) {
-        reader_running_ = true;
-        s_->reader();
-      }
-    }
-
-  private:
-    bool reader_running_{false};
-    RefPtr<RpcStream> s_;
-  };
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {

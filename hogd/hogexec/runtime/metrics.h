@@ -8,7 +8,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/metrics/metrics.h"
 #include "rpc_types.hh"
-#include "x23/fastclock.h"
 
 namespace hogd {
 
