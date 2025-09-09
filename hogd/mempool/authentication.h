@@ -50,9 +50,10 @@ public:
         nonce_weight += weight;
       }
     }
-    if (total_weight < tx.signature_weight ||
-        nonce_weight < auth_data.nonce_config.required_weight) {
-      printf("bad\n");
+    // We check [nonce_weight] here rather than below because only the account
+    // that submitted the tx can contribute its key weights to the nonce weight.
+    // Auxiliary accounts cannot do this.
+    if (nonce_weight < auth_data.nonce_config.required_weight) {
       return false;
     }
 
@@ -68,7 +69,13 @@ public:
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
           return false;
         }
+        total_weight += weight;
       }
+    }
+    // We check [total_weight] down here rather than above with the nonce weight
+    // because we need to include the weight of the auxiliary keys.
+    if (total_weight < tx.signature_weight) {
+      return false;
     }
     return true;
   }
