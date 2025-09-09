@@ -310,29 +310,23 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
-  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/1)}};
-  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_1_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/1)}};
-  std::unordered_map<uint32_t, Ed25519SecretKey> aux_2_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/1)}};
-  aux_2_private_keys[0] = ed25519_keygen().second;
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData auth_data = get_default_account();
+    private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+                       {1,
+                        create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
+    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+  }
+  private_keys[2][0] = ed25519_keygen().second;
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys,
+      tx, private_keys[0],
       /*auxiliary_private_keys=*/
-      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -351,28 +345,24 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
-  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/1)}};
-  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_1_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/0)},
-      {2, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/1)}};
-  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_2_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/1)}};
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData auth_data = get_default_account();
+    private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+                       {1,
+                        create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
+    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+  }
+  private_keys[1][2] = private_keys[1][1];
+  CHECK_EQ(private_keys[1].erase(1), 1UL);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys,
+      tx, private_keys[0],
       /*auxiliary_private_keys=*/
-      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -391,32 +381,26 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
-  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                                   /*idx=*/1)}};
-  std::unordered_map<uint32_t, Ed25519SecretKey> aux_1_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[1],
-                                   /*idx=*/1)}};
-  const std::unordered_map<uint32_t, Ed25519SecretKey> aux_2_private_keys = {
-      {0, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/0)},
-      {1, auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[2],
-                                   /*idx=*/1)}};
-  const Ed25519SecretKey private_key_0 = aux_1_private_keys[0];
-  const Ed25519SecretKey private_key_1 = aux_1_private_keys[1];
-  aux_1_private_keys[0] = private_key_1;
-  aux_1_private_keys[1] = private_key_0;
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData auth_data = get_default_account();
+    private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+                       {1,
+                        create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
+    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+  }
+  const Ed25519SecretKey private_key_0 = private_keys[1][0];
+  const Ed25519SecretKey private_key_1 = private_keys[1][1];
+  private_keys[1][0] = private_key_1;
+  private_keys[1][1] = private_key_0;
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys,
+      tx, private_keys[0],
       /*auxiliary_private_keys=*/
-      {{MempoolTestServer::kAccountAddresses[1], aux_1_private_keys},
-       {MempoolTestServer::kAccountAddresses[2], aux_2_private_keys}});
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
