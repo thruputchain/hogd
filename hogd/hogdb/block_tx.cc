@@ -230,8 +230,6 @@ BlockTX::commit(WorkerPool &pool)
         }
       });
 
-  trie_.generate_top_level_hashes();
-
   return ret;
 }
 

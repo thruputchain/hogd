@@ -52,11 +52,7 @@ public:
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
-  static x23::Async<DbTipResult> dbcoord_get_tip()
-  {
-    co_return DbTipResult{
-        DbResult::DbResultError}; // TODO(geoff): unimplemented
-  }
+  x23::Async<DbTipResult> dbcoord_get_tip();
 
   x23::Async<HogAgeResult>
   dbcoord_get_hog_ages(const ContractAddressBatch &addresses);
@@ -80,6 +76,10 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
+
+  // commit_block is a helper function that performs all the steps necessary to
+  // commit.
+  HogDBStatus<void> commit_block(BlockID id);
 };
 static_assert(is_DbCoord1<HogDBCoordServer *, x23::Async>);
 
