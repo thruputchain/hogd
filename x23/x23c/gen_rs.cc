@@ -420,13 +420,20 @@ impl {0}_{1}_Client {{
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
+  auto is_ref_type = [](const string &type) -> string {
+    const static std::set<string_view> nonref_types = {"hyper", "unsigned hyper", "bool", "int", "unsigned int"};
+    if (nonref_types.contains(type)) {
+      return "";
+    }
+    return "&";
+  };
 
   for (auto const &proc : vers.procs) {
     std::vector<string> args = {"&self"};
     std::vector<string> call_args;
     for (size_t i = 0; i < proc.arg_types.size(); i++) {
-      args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
-      call_args.push_back(std::format("arg{}", i));
+      args.push_back(std::format("arg{} : {}{}", i, is_ref_type(proc.arg_types[i]), map_type(proc.arg_types[i])));
+      call_args.push_back(std::format("{}arg{}", is_ref_type(proc.arg_types[i]), i));
     }
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_driver::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
