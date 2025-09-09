@@ -1,5 +1,7 @@
 #pragma once
 
+#include <condition_variable>
+#include <mutex>
 #include <stop_token>
 #include <thread>
 
@@ -101,6 +103,8 @@ private:
                                           failed_proposed_tx_count_),
                       make_counter_metric("gas_consumed", "", gas_consumed_)});
   std::jthread background_worker_;
+  std::condition_variable_any cv_;
+  std::mutex cv_mutex_;
 };
 
 } // namespace hogd

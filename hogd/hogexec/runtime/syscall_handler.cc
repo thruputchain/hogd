@@ -306,11 +306,12 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {
-    trace("Error resolving runtime for address: {}, error {}",
+    trace("SystemError: resolving runtime for address: {}, error {}",
           x23::show(address), runtime.error());
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
   if (!runtime.value()) {
+    trace("Failed to instantiate runtime for address: {}", x23::show(address));
     return std::pair{SyscallErrorCode::kSyscallErrorCodeContractLookupFailed,
                      0};
   }

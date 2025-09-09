@@ -21,6 +21,13 @@ target_link_libraries(
   runtime_trampoline
 )
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  corrosion_set_features(wasmi_lib
+      FEATURES
+          debug_logging
+  )
+endif()
+
 add_custom_command(
     OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/bindings.h

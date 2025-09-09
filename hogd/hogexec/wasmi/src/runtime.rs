@@ -72,6 +72,8 @@ impl WasmiRuntime {
                     unsafe { Module::new_unchecked(linker.engine(), bytes) }
                         .ok()?;
                 if !check_memory_limit(&module) {
+                    #[cfg(feature = "debug_logging")]
+                    eprintln!("Module instantiation failed: Memory export verification failed");
                     return None;
                 }
                 context.put_cached_module(hash, &module, &linker);
@@ -84,6 +86,8 @@ impl WasmiRuntime {
                     .ok()?;
 
             if !check_memory_limit(&module) {
+                #[cfg(feature = "debug_logging")]
+                eprintln!("Module instantiation failed: Memory export verification failed");
                 return None;
             }
             (module, linker)
@@ -92,8 +96,18 @@ impl WasmiRuntime {
         let mut store = Store::new(module.engine(), userctx);
         let instance = linker
             .instantiate(&mut store, &module)
+            .map_err(|e| {
+                #[cfg(feature = "debug_logging")]
+                eprintln!("Error instantiating store: {}", e);
+                e
+            })
             .ok()?
             .ensure_no_start(&mut store)
+            .map_err(|e| {
+                #[cfg(feature = "debug_logging")]
+                eprintln!("Error ensuring no start: {}", e);
+                e
+            })
             .ok()?;
         Some(Self { store, instance })
     }
