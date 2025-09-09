@@ -43,7 +43,8 @@ void
 add_gas_config(AccountAuthData &auth_data, GasAmount gas,
                const x23::Vec<size_t> &keys, Weight required_weight)
 {
-  CHECK_LT(auth_data.gas_permissions.size(), MAX_GAS_CONFIGS);
+  CHECK_LT(auth_data.gas_permissions.size(),
+           static_cast<size_t>(MAX_GAS_CONFIGS));
   GasPermissionConfig config{.limit = gas,
                              .accepted_keys = 0,
                              .required_weight = required_weight};
