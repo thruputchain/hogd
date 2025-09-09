@@ -74,10 +74,7 @@ public:
     }
     // We check [total_weight] down here rather than above with the nonce weight
     // because we need to include the weight of the auxiliary keys.
-    if (total_weight < tx.signature_weight) {
-      return false;
-    }
-    return true;
+    return total_weight >= tx.signature_weight;
   }
 
   static SignedTransaction

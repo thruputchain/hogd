@@ -1,8 +1,10 @@
+#include <array>
 #include <gtest/gtest.h>
 
 #include <memory>
 #include <unordered_map>
 
+#include "account.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -29,11 +31,11 @@ get_default_account()
     }
   }
   CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
-  constexpr NonceConfig nonce_config{.accepted_keys = 0, .required_weight = 0};
+  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
 
   return AccountAuthData{.public_keys = public_keys,
                          .gas_permissions = {},
-                         .nonce_config = nonce_config};
+                         .nonce_config = kNonceConfig};
 }
 
 Ed25519SecretKey
