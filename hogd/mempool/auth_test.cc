@@ -36,11 +36,22 @@ get_default_account()
                          .nonce_config = nonce_config};
 }
 
-AccountAuthData
-create_account(const ContractAddress &account)
+Ed25519SecretKey
+create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
 {
-  // TODO(jhumphri): Fill this in.
-  return get_default_account();
+  const auto &[public_key, private_key] = ed25519_keygen();
+  PublicKeyConfig &pk_config = auth_data.public_keys[idx];
+  pk_config.valid = true;
+  pk_config.key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config.key.ed25519() = public_key;
+  return private_key;
+}
+
+void
+set_nonce_key(AccountAuthData &auth_data, size_t idx)
+{
+  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
+  auth_data.nonce_config.accepted_keys |= (1 << idx);
 }
 
 } // namespace
@@ -60,9 +71,10 @@ TEST(Authentication, SignAndVerify)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
-      auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                               /*idx=*/0);
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -86,6 +98,8 @@ TEST(Authentication, SignAndVerifyMismatch)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
+  auth.add_account(MempoolTestServer::kAccountAddresses[0],
+                   get_default_account());
   const Ed25519SecretKey private_key = ed25519_keygen().second;
 
   const Transaction &tx = txs[0];
@@ -110,9 +124,10 @@ TEST(Authentication, SignAndVerifyWrongIndex)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
-      auth.create_tmp_key_pair(MempoolTestServer::kAccountAddresses[0],
-                               /*idx=*/1);
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =

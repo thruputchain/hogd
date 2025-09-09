@@ -144,7 +144,10 @@ private:
       return false;
     }
     const PublicKeyConfig &pk_config = accounts_[account].public_keys[idx];
-    if (pk_config.key != PublicKey(CryptographicScheme::Ed25519)) {
+    if (!pk_config.valid) {
+      return false;
+    }
+    if (pk_config.key.scheme() != CryptographicScheme::Ed25519) {
       return false;
     }
     max_weight = pk_config.max_weight;
