@@ -39,6 +39,21 @@ set_nonce_key(AccountAuthData &auth_data, size_t idx)
   auth_data.nonce_config.accepted_keys |= (1 << idx);
 }
 
+void
+add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+               const x23::Vec<size_t> &keys, Weight required_weight)
+{
+  CHECK_LT(auth_data.gas_permissions.size(),
+           static_cast<size_t>(MAX_GAS_CONFIGS));
+  GasPermissionConfig config{.limit = gas,
+                             .accepted_keys = 0,
+                             .required_weight = required_weight};
+  for (const size_t idx : keys) {
+    config.accepted_keys |= (1 << idx);
+  }
+  auth_data.gas_permissions.push_back(config);
+}
+
 } // namespace
 
 TEST(Authentication, SignAndVerify)
@@ -59,6 +74,8 @@ TEST(Authentication, SignAndVerify)
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
@@ -125,6 +142,194 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyWrongNonceIndex)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/2);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyNoGasIndices)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyNotEnoughGas)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/4'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyGasWrongIndex)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{1},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/2);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyGasMultipleConfigs)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/1'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  add_gas_config(auth_data, /*gas=*/2'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  add_gas_config(auth_data, /*gas=*/2'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_TRUE(auth.authenticate(signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMismatch)
@@ -200,6 +405,8 @@ TEST(Authentication, SignAndVerifyMultiSig)
   set_nonce_key(auth_data, /*idx=*/0);
   set_nonce_key(auth_data, /*idx=*/1);
   set_nonce_key(auth_data, /*idx=*/3);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0, 1, 3},
+                 /*required_weight=*/5);
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
@@ -213,6 +420,123 @@ TEST(Authentication, SignAndVerifyMultiSig)
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 5;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  set_nonce_key(auth_data, /*idx=*/3);
+  add_gas_config(auth_data, /*gas=*/1'000'000'000, /*keys=*/{0, 1},
+                 /*required_weight=*/3);
+  add_gas_config(auth_data, /*gas=*/4'000'000'000, /*keys=*/{3, 1},
+                 /*required_weight=*/5);
+  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+      {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
+      // We deliberately set [idx] to 3 below to test that everything works even
+      // when public keys do not have contiguous indices.
+      {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_TRUE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 5;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  set_nonce_key(auth_data, /*idx=*/3);
+  add_gas_config(auth_data, /*gas=*/1'000'000'000, /*keys=*/{0, 1},
+                 /*required_weight=*/3);
+  add_gas_config(auth_data, /*gas=*/4'000'000'000, /*keys=*/{4, 1},
+                 /*required_weight=*/5);
+  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+      {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
+      // We deliberately set [idx] to 3 below to test that everything works even
+      // when public keys do not have contiguous indices.
+      {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 5;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  set_nonce_key(auth_data, /*idx=*/3);
+  add_gas_config(auth_data, /*gas=*/1'000'000'000, /*keys=*/{0, 1},
+                 /*required_weight=*/4);
+  add_gas_config(auth_data, /*gas=*/4'000'000'000, /*keys=*/{3, 1},
+                 /*required_weight=*/5);
+  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+      {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
+      // We deliberately set [idx] to 3 below to test that everything works even
+      // when public keys do not have contiguous indices.
+      {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
@@ -435,6 +759,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
       set_nonce_key(auth_data, /*idx=*/0);
       set_nonce_key(auth_data, /*idx=*/1);
     }
+    add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0, 1},
+                   /*required_weight=*/2);
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
@@ -663,6 +989,47 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
       tx, /*signature_weight=*/1, private_keys[0],
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData auth_data = get_default_account();
+    if (i == 0) {
+      auth_data.nonce_config.required_weight = 2;
+      set_nonce_key(auth_data, /*idx=*/0);
+      set_nonce_key(auth_data, /*idx=*/1);
+    }
+    add_gas_config(auth_data, /*gas=*/4'000'000'000, /*keys=*/{0, 1},
+                   /*required_weight=*/2);
+    private_keys[i] = {
+        {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
+        {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
+    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+  }
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, /*signature_weight=*/12, private_keys[0],
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});

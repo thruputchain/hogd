@@ -31,8 +31,10 @@ public:
                                              tx.signature_weight,
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
+
     Weight total_weight = 0;
     Weight nonce_weight = 0;
+    x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(MAX_GAS_CONFIGS, 0);
     for (const DecoratedSignature &dec_sig : tx.signatures) {
       Weight weight = 0;
       Ed25519PublicKey public_key;
@@ -50,11 +52,30 @@ public:
       if ((1 << dec_sig.public_key_id) & auth_data.nonce_config.accepted_keys) {
         nonce_weight += weight;
       }
+      for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
+        const GasPermissionConfig &gas_config = auth_data.gas_permissions[i];
+        if ((1 << dec_sig.public_key_id) & gas_config.accepted_keys) {
+          gas_weights[i] += weight;
+        }
+      }
     }
     // We check [nonce_weight] here rather than below because only the account
     // that submitted the tx can contribute its key weights to the nonce weight.
     // Auxiliary accounts cannot do this.
     if (nonce_weight < auth_data.nonce_config.required_weight) {
+      return false;
+    }
+    // Similarly, we check if we have enough gas available here rather than
+    // below because only the account that submitted the tx can contribute gas.
+    // TODO(jhumphri): Support donated gas from other accounts.
+    GasAmount gas_available = 0;
+    for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
+      const GasPermissionConfig &gas_config = auth_data.gas_permissions[i];
+      if (gas_weights[i] >= gas_config.required_weight) {
+        gas_available += gas_config.limit;
+      }
+    }
+    if (gas_available < tx.tx.invocation.gas_limit) {
       return false;
     }
 
