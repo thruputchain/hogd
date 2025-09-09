@@ -302,7 +302,7 @@ create_clients(const MempoolTestServer &server)
           .interface = std::move(interface)};
 }
 
-AccountAuthData
+inline AccountAuthData
 get_default_account()
 {
   static std::array<PublicKeyConfig, MAX_SIGNERS> public_keys;

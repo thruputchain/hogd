@@ -2,10 +2,12 @@
 
 #include <memory>
 
+#include "account.hh"
 #include "db_coord.hh"
 #include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
+#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
 #include "nomination.hh"
