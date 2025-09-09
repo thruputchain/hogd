@@ -1,4 +1,7 @@
 
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+
 #include "x23/event.h"
 #include "x23/sockio.h"
 
@@ -9,7 +12,14 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
 {
   if (!epollfd_)
     Errno{}.raise("epoll_create1 failed");
-}
+  eventfd_.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+  if (!eventfd_)
+    Errno{}.raise("eventfd failed");
+  set_nonblock(eventfd_);
+  epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
+  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
+    Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
+};
 
 CoroPollImpl::~CoroPollImpl()
 {
@@ -122,32 +132,6 @@ CoroPollImpl::get_max_fd()
   return state_size_;
 }
 
-BorrowedFd
-CoroPollImpl::always_eof()
-{
-  // Note: /dev/null doesn't support epoll, so use a half-closed pipe
-  // as a file descriptor that always returns EOF.
-  static constinit std::atomic_int fd{-1};
-  int val = fd.load(std::memory_order_relaxed);
-  if (val == -1) [[unlikely]] {
-    int fds[2];
-    if (pipe(fds) == -1)
-      Errno{}.raise("pipe");
-    close(fds[1]);
-    int newfd = fds[0];
-    try {
-      set_nonblock(newfd);
-    } catch (...) {
-      close(newfd);
-      throw;
-    }
-    if (fd.compare_exchange_strong(val, newfd))
-      return newfd;
-    close(newfd);
-  }
-  return val;
-}
-
 // To wake CoroPoll::check from another thread, we just add a
 // level-triggered, one-shot check for a readable file descriptor
 // (always true).  Because we don't update the active flags in state,
@@ -155,12 +139,9 @@ CoroPollImpl::always_eof()
 void
 CoroPollImpl::wake()
 {
-  struct epoll_event ev;
-  ev.events = EPOLLIN | EPOLLONESHOT;
-  ev.data.fd = -1;
-  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, always_eof().get(), &ev) == -1 &&
-      errno != EEXIST) [[unlikely]]
-    Errno{}.raise("EPOLL_CTL_ADD always_eof");
+  uint64_t one{1};
+  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
+    Errno{}.raise("write(eventfd)");
 }
 
 CoroPollImpl::FdPtr
@@ -231,6 +212,11 @@ CoroPollImpl::check(int timeout)
     int fd = evs[i].data.fd;
     if (fd < 0)
       continue;
+    if (fd == eventfd_.get()) {
+      uint64_t buf;
+      ::read(eventfd_.get(), &buf, sizeof(buf));
+      continue;
+    }
     state_[fd].ready |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {

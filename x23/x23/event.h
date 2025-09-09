@@ -324,6 +324,7 @@ private:
   };
 
   UniqueFd epollfd_;
+  UniqueFd eventfd_;
 
   SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
@@ -338,7 +339,6 @@ private:
   };
   FdPtr getfd(BorrowedFd fd);
 
-  static BorrowedFd always_eof();
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
