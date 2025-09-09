@@ -31,6 +31,7 @@ public:
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
     Weight total_weight = 0;
+    Weight nonce_weight = 0;
     for (const DecoratedSignature &dec_sig : tx.signatures) {
       Weight weight = 0;
       Ed25519PublicKey public_key;
@@ -44,12 +45,14 @@ public:
       if (dec_sig.public_key_id >= MAX_SIGNERS) {
         return false;
       }
+      total_weight += weight;
       if ((1 << dec_sig.public_key_id) & auth_data.nonce_config.accepted_keys) {
-        total_weight += weight;
+        nonce_weight += weight;
       }
     }
     if (total_weight < tx.signature_weight ||
-        total_weight < auth_data.nonce_config.required_weight) {
+        nonce_weight < auth_data.nonce_config.required_weight) {
+      printf("bad\n");
       return false;
     }
 

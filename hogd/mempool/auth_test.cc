@@ -44,6 +44,7 @@ create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
   pk_config.valid = true;
   pk_config.key = PublicKey(CryptographicScheme::Ed25519);
   pk_config.key.ed25519() = public_key;
+  pk_config.max_weight = weight;
   return private_key;
 }
 
