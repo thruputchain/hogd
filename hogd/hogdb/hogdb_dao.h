@@ -125,8 +125,44 @@ public:
   void for_each_state_item(GetEachCallback fn);
 
   //
-  // item key operations (for any item key type)
+  // Global Operations
   //
+
+  HogDBStatus<DbTip> read_dbtip();
+  HogDBStatus<void> write_dbtip(const DbTip &tip);
+
+  //
+  // Address Operations
+  //
+
+  HogDBStatus<int128_t> read_address_balance(const Address &addr);
+  HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
+  HogDBStatus<SHA256Hash> read_address_wasm_hash(const Address &addr);
+
+  HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
+  HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
+  HogDBStatus<void> write_address_wasm_hash(const Address &addr,
+                                            const SHA256Hash &hash);
+
+  //
+  // WASM Operations
+  //
+
+  HogDBStatus<OwningSpan<const std::byte>>
+  read_wasm_code(const SHA256Hash &hash);
+  HogDBStatus<void> write_wasm_code(const SHA256Hash &hash,
+                                    std::span<const std::byte> buf);
+
+  //
+  // ItemKey Operations
+  //
+
+  HogDBStatus<int128_t> read_nnint128(const ItemKey &key);
+  HogDBStatus<OwningSpan<const std::byte>> read_bytes(const ItemKey &key);
+
+  HogDBStatus<void> write_nnint128(const ItemKey &key, int128_t val);
+  HogDBStatus<void> write_bytes(const ItemKey &key,
+                                std::span<const std::byte> buf);
 
   HogDBStatus<size_t> get_item_size(const ItemKey &key)
   {
@@ -143,26 +179,6 @@ public:
     assert(!key.is_address_balance());
     return db_.remove(key.as_bytes());
   }
-
-  // readers
-  HogDBStatus<int128_t> read_address_balance(const Address &addr);
-  HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
-  HogDBStatus<SHA256Hash> read_address_wasm_hash(const Address &addr);
-  HogDBStatus<OwningSpan<const std::byte>>
-  read_wasm_code(const SHA256Hash &hash);
-  HogDBStatus<int128_t> read_nnint128(const ItemKey &key);
-  HogDBStatus<OwningSpan<const std::byte>> read_bytes(const ItemKey &key);
-
-  // writers
-  HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
-  HogDBStatus<void> write_address_average_hog_age(const HogAge &val);
-  HogDBStatus<void> write_address_wasm_hash(const Address &addr,
-                                            const SHA256Hash &hash);
-  HogDBStatus<void> write_wasm_code(const SHA256Hash &hash,
-                                    std::span<const std::byte> buf);
-  HogDBStatus<void> write_nnint128(const ItemKey &key, int128_t val);
-  HogDBStatus<void> write_bytes(const ItemKey &key,
-                                std::span<const std::byte> buf);
 
 private:
   RAMDB db_;
