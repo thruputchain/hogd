@@ -483,8 +483,11 @@ public:
   Async<std::expected<int, std::system_error>>
   tcpconnect(std::string host, std::string port SLOC_PARM);
 
-private:
+protected:
   std::thread pollthread_;
+
+  struct no_loop_thread{};
+  CoroPoll(ThreadPool &pool, no_loop_thread);
 
   void loop();
 };

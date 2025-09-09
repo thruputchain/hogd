@@ -68,9 +68,15 @@ WriteBuffer::Service::worker(Service self, BufVec work)
 
 } // namespace detail
 
-CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool)
+  : CoroPoll(pool, no_loop_thread{})
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
+}
+
+CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread)
+  : CoroPollImpl(pool)
+{
   if (ignore_sigpipe) {
     ignore_sigpipe = false;
     std::signal(SIGPIPE, SIG_IGN);
@@ -83,7 +89,8 @@ CoroPoll::~CoroPoll()
   for (int i = 0, e = get_max_fd(); i < e; ++i)
     reset(i);
   wake();
-  pollthread_.join();
+  if (pollthread_.joinable())
+    pollthread_.join();
   destroy_wait();
 }
 
