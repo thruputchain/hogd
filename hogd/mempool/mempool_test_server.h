@@ -1,14 +1,17 @@
 #pragma once
 
+#include <array>
 #include <cstring>
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
+#include "account.hh"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
@@ -27,6 +30,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -305,11 +309,11 @@ create_clients(const MempoolTestServer &server)
 inline AccountAuthData
 get_default_account()
 {
-  static std::array<PublicKeyConfig, MAX_SIGNERS> public_keys;
+  static std::array<PublicKeyConfigOpt, MAX_SIGNERS> public_keys;
   if (public_keys.empty()) {
     // Initialize [public_keys].
     for (size_t i = 0; i < MAX_SIGNERS; i++) {
-      public_keys[i].valid = false;
+      public_keys[i] = nullptr;
     }
   }
   CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));

@@ -1,6 +1,6 @@
-#include <array>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <memory>
 #include <unordered_map>
 
@@ -15,6 +15,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -23,12 +24,12 @@ namespace {
 Ed25519SecretKey
 create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
 {
-  const auto &[public_key, private_key] = ed25519_keygen();
-  PublicKeyConfig &pk_config = auth_data.public_keys[idx];
-  pk_config.valid = true;
-  pk_config.key = PublicKey(CryptographicScheme::Ed25519);
-  pk_config.key.ed25519() = public_key;
-  pk_config.max_weight = weight;
+  const auto [public_key, private_key] = ed25519_keygen();
+  auto &pk_config = auth_data.public_keys[idx];
+  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
+  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config->key.ed25519() = public_key;
+  pk_config->max_weight = weight;
   return private_key;
 }
 
