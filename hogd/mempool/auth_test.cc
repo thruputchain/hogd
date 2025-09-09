@@ -28,7 +28,7 @@ get_default_account()
       public_keys[i].valid = false;
     }
   }
-  CHECK_EQ(public_keys.size(), MAX_SIGNERS);
+  CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
   constexpr NonceConfig nonce_config{.accepted_keys = 0, .required_weight = 0};
 
   return AccountAuthData{.public_keys = public_keys,
@@ -73,6 +73,8 @@ TEST(Authentication, SignAndVerify)
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
   AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
@@ -129,6 +131,7 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   Authentication &auth = clients.interface->authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
+  set_nonce_key(auth_data, /*idx=*/0);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
@@ -209,6 +212,10 @@ TEST(Authentication, SignAndVerifyMultiSig)
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
   AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 5;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  set_nonce_key(auth_data, /*idx=*/3);
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
@@ -272,6 +279,45 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
   Authentication &auth = clients.interface->authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 7;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  set_nonce_key(auth_data, /*idx=*/3);
+  const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
+      {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
+      {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
+      // We deliberately set [idx] to 3 below to test that everything works even
+      // when public keys do not have contiguous indices.
+      {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
+  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 6;
+  set_nonce_key(auth_data, /*idx=*/0);
+  set_nonce_key(auth_data, /*idx=*/1);
+  // We set [idx] to 2 rather than 3.
+  set_nonce_key(auth_data, /*idx=*/2);
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
@@ -400,6 +446,11 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
     AccountAuthData auth_data = get_default_account();
+    if (i == 0) {
+      auth_data.nonce_config.required_weight = 2;
+      set_nonce_key(auth_data, /*idx=*/0);
+      set_nonce_key(auth_data, /*idx=*/1);
+    }
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
@@ -468,9 +519,48 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
     AccountAuthData auth_data = get_default_account();
-    if (i == 0) {
-      auth_data.nonce_config.required_weight = 10;
+    auth_data.nonce_config.required_weight = 3;
+    set_nonce_key(auth_data, /*idx=*/0);
+    set_nonce_key(auth_data, /*idx=*/1);
+
+    private_keys[i] = {
+        {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
+        {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
+    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+  }
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, /*signature_weight=*/15, private_keys[0],
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
     }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData auth_data = get_default_account();
+    auth_data.nonce_config.required_weight = 2;
+    set_nonce_key(auth_data, /*idx=*/0);
+    set_nonce_key(auth_data, /*idx=*/2);
+
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
