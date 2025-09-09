@@ -51,7 +51,7 @@ void
 HogexecMetrics::background_worker(std::stop_token &stoken)
 {
   MetricsSnapshot snapshot{
-    .time_ns = x23::fastclock::get_ns(),
+      .time_ns = x23::fastclock::get_ns(),
   };
   while (!stoken.stop_requested()) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
