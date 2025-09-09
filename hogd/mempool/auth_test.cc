@@ -245,6 +245,8 @@ TEST(Authentication, SignAndVerifyMultiSig)
   set_nonce_key(auth_data, /*idx=*/0);
   set_nonce_key(auth_data, /*idx=*/1);
   set_nonce_key(auth_data, /*idx=*/3);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0, 1, 3},
+                 /*required_weight=*/5);
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/2)},
@@ -480,6 +482,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
       set_nonce_key(auth_data, /*idx=*/0);
       set_nonce_key(auth_data, /*idx=*/1);
     }
+    add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0, 1},
+                   /*required_weight=*/2);
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
