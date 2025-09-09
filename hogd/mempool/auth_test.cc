@@ -21,22 +21,18 @@ namespace {
 AccountAuthData
 get_default_account()
 {
-  static x23::Vec<PublicKeyConfig, MAX_SIGNERS> public_keys;
-  static x23::Vec<GasPermissionConfig, MAX_GAS_CONFIGS> gas_permissions;
+  static std::array<PublicKeyConfig, MAX_SIGNERS> public_keys;
   if (public_keys.empty()) {
-    // Initialize [public_keys] and [gas_permissions].
-    CHECK(gas_permissions.empty());
+    // Initialize [public_keys].
     for (size_t i = 0; i < MAX_SIGNERS; i++) {
-      public_keys.push_back(PublicKeyConfig{.valid = false});
-      gas_permissions.push_back(GasPermissionConfig{.valid = false});
+      public_keys[i].valid = false;
     }
   }
   CHECK_EQ(public_keys.size(), MAX_SIGNERS);
-  CHECK_EQ(gas_permissions.size(), MAX_GAS_CONFIGS);
   constexpr NonceConfig nonce_config{.accepted_keys = 0, .required_weight = 0};
 
   return AccountAuthData{.public_keys = public_keys,
-                         .gas_permissions = gas_permissions,
+                         .gas_permissions = {},
                          .nonce_config = nonce_config};
 }
 
