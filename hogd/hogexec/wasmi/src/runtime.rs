@@ -94,22 +94,22 @@ impl WasmiRuntime {
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance = linker
-            .instantiate(&mut store, &module)
-            .map_err(|e| {
-                #[cfg(feature = "debug_logging")]
-                eprintln!("Error instantiating store: {}", e);
-                e
-            })
-            .ok()?
-            .ensure_no_start(&mut store)
-            .map_err(|e| {
-                #[cfg(feature = "debug_logging")]
-                eprintln!("Error ensuring no start: {}", e);
-                e
-            })
-            .ok()?;
-        Some(Self { store, instance })
+        let instance_result = linker.instantiate(&mut store, &module);
+        #[cfg(feature = "debug_logging")]
+        let instance_result = instance_result.map_err(|e| {
+            eprintln!("Error instantiating store: {}", e);
+            e
+        });
+        let instance = instance_result.ok()?.ensure_no_start(&mut store);
+        #[cfg(feature = "debug_logging")]
+        let instance = instance.map_err(|e| {
+            eprintln!("Error ensuring no start: {}", e);
+            e
+        });
+        Some(Self {
+            store,
+            instance: instance.ok()?,
+        })
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
