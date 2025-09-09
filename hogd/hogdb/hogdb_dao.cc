@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <string>
 
 // xdr types
 #include "db_coord.hh"
@@ -16,7 +17,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
-#include "x23/x23.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
