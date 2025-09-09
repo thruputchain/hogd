@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <string>
 
 // xdr types
 #include "db_coord.hh"
@@ -12,14 +13,17 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
+
+constexpr std::string kGlobalTipKey = ">DBTIP";
 
 // Prefix is a prefix appended to each key to form an overall key that
 // indicates the category of data being stored. The rest of the key is normally
@@ -42,6 +46,10 @@ enum class Prefix : char {
 constexpr bool
 is_state_item(std::span<const std::byte> key)
 {
+  // skip global state.
+  if (static_cast<char>(key[0]) == '>')
+    return false;
+
   // we infer an ItemKey based on this size.
   if (key.size() == kAddressSize + kItemKeySize)
     return true;
@@ -72,30 +80,6 @@ make_wasm_code_key(const SHA256Hash &hash)
   return ret;
 }
 
-HogAge
-hog_age_cpu_to_le(HogAge average)
-{
-  for (uint128_xdr &n : average.num_hogs) {
-    n = xdr_cpu_to_le(n);
-  }
-  for (BlockHeight &a : average.average_ages) {
-    a = cpu_to_le(a);
-  }
-  return average;
-}
-
-HogAge
-hog_age_le_to_cpu(HogAge average)
-{
-  for (uint128_xdr &n : average.num_hogs) {
-    n = xdr_le_to_cpu(n);
-  }
-  for (BlockHeight &a : average.average_ages) {
-    a = le_to_cpu(a);
-  }
-  return average;
-}
-
 } // namespace
 
 void
@@ -106,6 +90,31 @@ HogDBDAO::for_each_state_item(GetEachCallback fn)
     if (is_state_item(key))
       fn(key, type, value);
   });
+}
+
+HogDBStatus<DbTip>
+HogDBDAO::read_dbtip()
+{
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(kGlobalTipKey)), 0);
+  if (!raw)
+    return raw.error();
+
+  DbTip tip;
+  try {
+    x23::deserialize(&tip, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return tip;
+}
+
+HogDBStatus<void>
+HogDBDAO::write_dbtip(const DbTip &tip)
+{
+  auto buf = x23::serialize(tip);
+  return db_.put(std::as_bytes(std::span(kGlobalTipKey)), 0,
+                 std::as_bytes(std::span(buf)));
 }
 
 HogDBStatus<int128_t>
@@ -123,13 +132,19 @@ HogDBDAO::read_address_balance(const Address &addr)
 HogDBStatus<HogAge>
 HogDBDAO::read_address_average_hog_age(const Address &addr)
 {
-  HogAge val;
   auto key = make_address_key(addr, Prefix::kHogAge);
-  HogDBStatus<void> ret = db_.get_if_type(std::as_bytes(std::span(key)), 0,
-                                          writable_byte_view(val));
-  if (!ret)
-    return ret.error();
-  return hog_age_le_to_cpu(val);
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0);
+  if (!raw)
+    return raw.error();
+
+  HogAge age;
+  try {
+    x23::deserialize(&age, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return age;
 }
 
 HogDBStatus<SHA256Hash>
@@ -180,11 +195,12 @@ HogDBDAO::write_address_balance(const Address &addr, int128_t val)
 }
 
 HogDBStatus<void>
-HogDBDAO::write_address_average_hog_age(const HogAge &val)
+HogDBDAO::write_address_average_hog_age(const HogAge &age)
 {
-  auto key = make_address_key(val.address, Prefix::kHogAge);
+  auto key = make_address_key(age.address, Prefix::kHogAge);
+  auto buf = x23::serialize(age);
   return db_.put(std::as_bytes(std::span(key)), 0,
-                 byte_view(hog_age_cpu_to_le(val)));
+                 std::as_bytes(std::span(buf)));
 }
 
 HogDBStatus<void>
