@@ -20,24 +20,6 @@ namespace hogd {
 
 namespace {
 
-AccountAuthData
-get_default_account()
-{
-  static std::array<PublicKeyConfig, MAX_SIGNERS> public_keys;
-  if (public_keys.empty()) {
-    // Initialize [public_keys].
-    for (size_t i = 0; i < MAX_SIGNERS; i++) {
-      public_keys[i].valid = false;
-    }
-  }
-  CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
-  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
-
-  return AccountAuthData{.public_keys = public_keys,
-                         .gas_permissions = {},
-                         .nonce_config = kNonceConfig};
-}
-
 Ed25519SecretKey
 create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
 {

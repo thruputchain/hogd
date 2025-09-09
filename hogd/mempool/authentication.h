@@ -9,6 +9,7 @@
 
 namespace hogd {
 
+// TODO(jhumphri): Handle [block_expiry_height].
 class Authentication {
 public:
   Authentication() = default;

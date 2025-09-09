@@ -49,6 +49,8 @@
 
 namespace hogd {
 
+constexpr size_t kNumTxs = 100;
+
 class MempoolTestServer {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
@@ -300,6 +302,22 @@ create_clients(const MempoolTestServer &server)
           .interface = std::move(interface)};
 }
 
-constexpr size_t kNumTxs = 100;
+AccountAuthData
+get_default_account()
+{
+  static std::array<PublicKeyConfig, MAX_SIGNERS> public_keys;
+  if (public_keys.empty()) {
+    // Initialize [public_keys].
+    for (size_t i = 0; i < MAX_SIGNERS; i++) {
+      public_keys[i].valid = false;
+    }
+  }
+  CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
+  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
+
+  return AccountAuthData{.public_keys = public_keys,
+                         .gas_permissions = {},
+                         .nonce_config = kNonceConfig};
+}
 
 } // namespace hogd
