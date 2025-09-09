@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -133,6 +134,74 @@ TEST_F(HogDBTest, DataAccessObject)
     EXPECT_EQ(kBytes, *rtype);
   }
   EXPECT_TRUE(db_.remove_item(ikey));
+}
+
+TEST_F(HogDBTest, ItemChange)
+{
+  //
+  // Test NNInt128 changes
+  //
+
+  // try different bases (conflict)
+  EXPECT_EQ(ItemChange(NNInt128(10, 1)).merge(ItemChange(NNInt128(20, 1))),
+            HogDBError(HogDBCode::kConflict));
+
+  // try using nnint128 as a lock (conflict)
+  EXPECT_EQ(ItemChange(NNInt128(1, -1)).merge(ItemChange(NNInt128(1, -1))),
+            HogDBError(HogDBCode::kConflict));
+
+  // try positive addition (no conflict)
+  EXPECT_TRUE(ItemChange(NNInt128(0, 10)).merge(ItemChange(NNInt128(0, 10))));
+
+  // try subtract to zero (no conflict)
+  EXPECT_TRUE(ItemChange(NNInt128(10, -5)).merge(ItemChange(NNInt128(10, -5))));
+
+  // try subtract below zero (conflict)
+  EXPECT_EQ(ItemChange(NNInt128(10, -6)).merge(ItemChange(NNInt128(10, -5))),
+            HogDBError(HogDBCode::kConflict));
+
+  //
+  // Test Byte changes
+  //
+
+  std::string a("a");
+  std::string b("b");
+  auto as = std::as_bytes(std::span(a));
+  auto bs = std::as_bytes(std::span(b));
+
+  // try same bytes (no conflict)
+  EXPECT_TRUE(ItemChange(Bytes(as)).merge(ItemChange(Bytes(as))));
+
+  // try different bytes (conflict)
+  EXPECT_EQ(ItemChange(Bytes(as)).merge(ItemChange(Bytes(bs))),
+            HogDBError(HogDBCode::kConflict));
+}
+
+TEST_F(HogDBTest, StorageCost)
+{
+  ItemKey ikey = make_key(kAddress, kAddress);
+
+  // test new item creation
+  {
+    ItemChange change(NNInt128(1, 1));
+    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
+    ASSERT_TRUE(delta);
+    if (delta) {
+      EXPECT_GT(*delta, 0);
+    }
+  }
+
+  // test modification to existing item
+  int128_t test_nnint128 = 10;
+  EXPECT_TRUE(db_.write_nnint128(ikey, test_nnint128));
+  {
+    ItemChange change(NNInt128(1, 1));
+    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
+    ASSERT_TRUE(delta);
+    if (delta) {
+      EXPECT_EQ(*delta, 0);
+    }
+  }
 }
 
 } // namespace hogd
