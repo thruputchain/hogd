@@ -78,6 +78,8 @@ public:
   ErrnoStatus<off_t> lseek(off_t offset, int whence) const;
   // sync flushes all modified file data to the storage device.
   ErrnoStatus<void> sync() const;
+  // ftruncate() system call. Truncate or extend the file.
+  ErrnoStatus<void> ftruncate(off_t length) const;
 
   // close closes the file.
   ErrnoStatus<void> close();
@@ -230,6 +232,7 @@ public:
     in_ = reader.in_;
     buf_ = std::move(reader.buf_);
     pos_ = std::exchange(reader.pos_, std::span<const std::byte>());
+    off_ = reader.off_;
     return *this;
   }
   BufferedReader(const BufferedReader &reader) = delete;
@@ -248,12 +251,16 @@ public:
     if (dst.size() < pos_.size()) {
       std::copy_n(pos_.begin(), dst.size(), dst.begin());
       pos_ = pos_.subspan(dst.size());
+      off_ += dst.size();
       return dst.size();
     }
 
     // slow path: handle direct reads and buffer refill.
     return read_slowpath(dst);
   }
+
+  // get the count of bytes read and skipped from this reader.
+  off_t offset() const { return off_; }
 
   // throw away the next n bytes, refilling as needed.
   // returns bytes skipped; can be less than n on EOF.
@@ -270,6 +277,8 @@ private:
   std::vector<std::byte> buf_;
   // a span within buf_; contains the bytes that have yet to be read.
   std::span<const std::byte> pos_;
+  // total bytes read and skipped.
+  off_t off_{};
 
   // read_slowpath is the slowpath for read().
   ErrnoStatus<size_t> read_slowpath(std::span<std::byte> dst);

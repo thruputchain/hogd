@@ -1,6 +1,7 @@
 #include "hogd/ramdb/disk_reader.h"
 
 #include <fcntl.h>
+#include <unistd.h> // NOLINT(misc-include-cleaner) for off_t
 
 #include <algorithm>
 #include <cassert>
@@ -239,21 +240,35 @@ private:
   FileMetadata() = default;
 };
 
+// Return of kCorruption indicates recovery should not continue.
+// No other return aside from okay should be returned.  If load_log_file
+// returns okay it has guaranteed that the processed log file only contains
+// committed log entries. If this file is_last_log_file it will truncate the
+// file if needed to ensure this invariant. If the file !is_last_log_file
+// it will return kCorruption if a file ends with uncommitted entries.
+// Inductively, this rule should ensure that in a normal sequence of crashes
+// (1) that recovery always succeeds unless some file was externally
+// truncated/corrupted and
+// (2) that after resuming cur_lsn > the begin_lsn on every WAL filename
+// in the directory, which ensures two runs of the database don't overwrite
+// each other's records and diverge.
 DBStatus<void>
 load_log_file(
     LogletAllocator &allocator, Directory &dir, const FileMetadata &file,
-    uint64_t &cur_lsn, std::optional<uint64_t> target_lsn,
+    uint64_t &cur_lsn, std::optional<uint64_t> target_lsn, bool is_last_file,
     const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func)
 {
   DBStatus<File> f =
-      dir.openat(file.path_, O_RDONLY).transform_error(to_db_error);
+      dir.openat(file.path_, O_RDWR).transform_error(to_db_error);
   if (!f) {
     warn("couldn't open logfile `{}`: {}", file.path_, f.error());
-    return f.error();
+    return DBError(DBCode::kCorruption);
   }
 
   BufferedReader r(*f);
   LogletBuffer buf(&allocator);
+  bool uncommitted_records = false;
+  off_t uncommitted_off = 0; // NOLINT(misc-include-cleaner)
 
   while (!target_lsn || cur_lsn < *target_lsn) {
     // read the next ItemHeader from the log file.
@@ -261,11 +276,14 @@ load_log_file(
     ErrnoStatus<void> ret = read_full(r, writable_byte_view(tmp));
     if (!ret) {
       if (ret.error() == ENODATA)
-        break;
+        goto eof;
 
-      debug("error reading log file");
-      return to_db_error(ret.error());
+      // fail the whole recovery
+      error("error reading log file: {}", ret.error());
+      return DBError(DBCode::kCorruption);
     }
+
+    uncommitted_records = true;
 
     // validate the header.
     ItemHeader hdr;
@@ -273,7 +291,7 @@ load_log_file(
       hdr = *ret;
     }
     else {
-      debug("error validating item header");
+      error("error validating item header");
       return DBError(DBCode::kCorruption);
     }
 
@@ -285,13 +303,25 @@ load_log_file(
         (target_lsn && hdr.lsn >= *target_lsn);
 
     if (skip) {
+      if (hdr.storage == ItemStorage::kCommit) {
+        // if we see a commit record that we plan to skip, dump the buffered
+        // records immediately.  It might be a good idea to check the crc on
+        // the commit record just in case one comes into existence via
+        // corruption.
+        buf.take_buffer();
+        uncommitted_records = false;
+        uncommitted_off = r.offset();
+      }
+
       size_t to_skip = hdr.key_len + hdr.value_len;
       ErrnoStatus<size_t> ret = r.skip(to_skip);
-      if (!ret)
-        return {to_db_error(ret.error())};
+      if (!ret) {
+        info("failure while skipping {} bytes in {}", to_skip, file.path_);
+        return DBError(DBCode::kCorruption);
+      }
       // hit eof while trying to skip
       if (*ret < to_skip)
-        break;
+        goto eof;
       continue;
     }
 
@@ -308,9 +338,10 @@ load_log_file(
       }
       ret = read_full(r, dst->get_all());
       if (!ret) {
-        debug("couldn't read item: {}", ret.error());
-        // Need to return to load() -> if another file, then fail.
-        return to_db_error(ret.error());
+        if (ret.error() == ENODATA)
+          goto eof;
+        info("couldn't read item: {}", ret.error());
+        return DBError(DBCode::kCorruption);
       }
       break;
     }
@@ -325,11 +356,12 @@ load_log_file(
     {
       // validate the commit header.
       uint32_t commit_crc;
-      DBStatus<void> ret = read_full(r, writable_byte_view(commit_crc))
-                               .transform_error(to_db_error);
+      ret = read_full(r, writable_byte_view(commit_crc));
       if (!ret) {
+        if (ret.error() == ENODATA)
+          goto eof;
         debug("couldn't read commit record crc");
-        return ret.error();
+        return DBError(DBCode::kCorruption);
       }
       if (!crc_valid(commit_crc, buf, &hdr)) {
         info("crc check failure checking commit for lsn {}", hdr.lsn);
@@ -339,11 +371,13 @@ load_log_file(
       // insert the changes into the database.
       // for WAL files this applies just one lsn of items. snapshot
       // files may commit items of many lsns per commit record.
-      ret = func(buf.take_buffer());
+      DBStatus<void> ret = func(buf.take_buffer());
       if (!ret) {
-        debug("failed applying callback to recovery buffer");
-        return ret.error();
+        error("failed applying callback to recovery buffer: {}", ret.error());
+        return DBError(DBCode::kCorruption);
       }
+      uncommitted_records = false;
+      uncommitted_off = r.offset();
 
       if (!file.snapshot_file_ && cur_lsn != hdr.lsn) {
         error("replaying log file {}, saw commit for lsn {} while expecting "
@@ -359,12 +393,40 @@ load_log_file(
 
     default:
     {
+      error("record with unknown storage type {}",
+            std::to_underlying(hdr.storage));
       return DBError(DBCode::kCorruption);
     }
     }
   }
+eof:
 
-  return {};
+  if (!uncommitted_records)
+    return {};
+
+  if (is_last_file) {
+    info("truncating uncommitted records from {} starting at offset {}",
+         file.path_, uncommitted_off);
+    ErrnoStatus<void> trunc_ret = f->ftruncate(uncommitted_off),
+                      sync_ret = f->sync();
+    if (!trunc_ret || !sync_ret) {
+      error("failed to truncate {} which has uncommitted records starting at "
+            "offset {}; cannot guarantee future recoveries will succeed so "
+            "terminating recovery; inspect and trim this file and manually "
+            "retry recovery to continue: {} {}",
+            file.path_, uncommitted_off, trunc_ret.error(), sync_ret.error());
+      return DBError(DBCode::kCorruption);
+    }
+    // truncating uncommitted records from the last wal file is fine; safe to
+    // recover.
+    return {};
+  }
+  // uncommitted records anywhere else in an incomplete file is a problem.
+  // inductively, that should never happen (due to the ftruncate above) unless
+  // files were corrupted.
+  error("file {} ended with uncommitted records but isn't the last wal file",
+        file.path_);
+  return DBError(DBCode::kCorruption);
 }
 
 DBStatus<std::vector<FileMetadata>>
@@ -508,7 +570,7 @@ DiskReader::cleanup(const Directory &dir)
 
   for (auto &file : *files) {
     if (needed.contains(file.path_)) {
-      info("file {} needed for recovery; retaining", file.path_);
+      debug("file {} needed for recovery; retaining", file.path_);
       continue;
     }
     info("file {} not needed for recovery; cleaning up", file.path_);
@@ -540,7 +602,10 @@ DiskReader::load_database(
 
   DBStatus<void> prev_ret{};
 
+  size_t left_to_process = files->size();
   for (FileMetadata &file : *files) {
+    left_to_process--;
+
     if (file.snapshot_file_) {
       if (file.end_lsn_exclusive_ < cur_lsn) {
         info("skipping unneeded snapshot file {}", file.path_);
@@ -557,7 +622,8 @@ DiskReader::load_database(
     info("loading file {}", file.path_);
 
     uint64_t tmp = cur_lsn;
-    ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn, func);
+    ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn,
+                        left_to_process == 0, func);
     if (!ret) {
       warn("couldn't completely load logfile {}: {}", file.path_, ret.error());
       if (ret.error() == DBCode::kCorruption)
