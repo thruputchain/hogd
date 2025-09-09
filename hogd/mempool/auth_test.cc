@@ -39,6 +39,20 @@ set_nonce_key(AccountAuthData &auth_data, size_t idx)
   auth_data.nonce_config.accepted_keys |= (1 << idx);
 }
 
+void
+add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+               const x23::Vec<size_t> &keys, Weight required_weight)
+{
+  CHECK_LT(auth_data.gas_permissions.size(), MAX_GAS_CONFIGS);
+  GasPermissionConfig config{.limit = gas,
+                             .accepted_keys = 0,
+                             .required_weight = required_weight};
+  for (const size_t idx : keys) {
+    config.accepted_keys |= (1 << idx);
+  }
+  auth_data.gas_permissions.push_back(config);
+}
+
 } // namespace
 
 TEST(Authentication, SignAndVerify)
@@ -59,6 +73,8 @@ TEST(Authentication, SignAndVerify)
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
