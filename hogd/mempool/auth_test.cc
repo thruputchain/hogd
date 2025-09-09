@@ -27,8 +27,8 @@ get_default_account()
     // Initialize [public_keys] and [gas_permissions].
     CHECK(gas_permissions.empty());
     for (size_t i = 0; i < MAX_SIGNERS; i++) {
-      public_keys.push_back({.valid = false});
-      gas_permissions.push_back({.valid = false});
+      public_keys.push_back(PublicKeyConfig{.valid = false});
+      gas_permissions.push_back(GasPermissionConfig{.valid = false});
     }
   }
   CHECK_EQ(public_keys.size(), MAX_SIGNERS);
