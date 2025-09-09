@@ -180,26 +180,40 @@ TEST_F(HogDBTest, ItemChange)
 TEST_F(HogDBTest, StorageCost)
 {
   ItemKey ikey = make_key(kAddress, kAddress);
+  MerkleTriePrefix trie;
 
-  // test new item creation
+  // test new nnint128 item creation
   {
     ItemChange change(NNInt128(1, 1));
     HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    ASSERT_TRUE(delta);
+    EXPECT_TRUE(delta);
     if (delta) {
+      // cost should go up.
       EXPECT_GT(*delta, 0);
+    }
+    HogDBStatus<void> ret = change.commit(db_, trie, ikey);
+    EXPECT_TRUE(ret);
+  }
+
+  // test modification to existing nnint128 item
+  {
+    ItemChange change(NNInt128(1, 1));
+    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
+    EXPECT_TRUE(delta);
+    if (delta) {
+      // cost shouldn't change.
+      EXPECT_EQ(*delta, 0);
     }
   }
 
-  // test modification to existing item
-  int128_t test_nnint128 = 10;
-  EXPECT_TRUE(db_.write_nnint128(ikey, test_nnint128));
+  // test deletion to existing nnint128 item
   {
-    ItemChange change(NNInt128(1, 1));
+    ItemChange change(Deletion{});
     HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    ASSERT_TRUE(delta);
+    EXPECT_TRUE(delta);
     if (delta) {
-      EXPECT_EQ(*delta, 0);
+      // cost should go down.
+      EXPECT_LT(*delta, 0);
     }
   }
 }
