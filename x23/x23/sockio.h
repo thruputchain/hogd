@@ -44,6 +44,11 @@ void set_nodelay(BorrowedFd fd, bool on = true);
 // Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
 
+// After calling this function, closing fd (which must be a TCP
+// socket) will send a RST segment instead of a FIN segment, thereby
+// avoiding TIME_WAIT on the active closer.
+void enable_abortive_close(BorrowedFd fd);
+
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6).
 // stcplisten does not make the socket non-blocking
 UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
@@ -72,8 +77,8 @@ sockaddr_len(const sockaddr_storage &ss)
   }
 }
 
-// Create a TCP connection.  You can make bind the socket or make the
-// file descriptor non-blocking in prep_fd.
+// Create a TCP connection.  You can bind the socket or make the file
+// descriptor non-blocking in prep_fd.
 UniqueFd tcpconnect(const sockaddr_storage &ss,
                     std::function<void(int)> prep_fd = nullptr);
 

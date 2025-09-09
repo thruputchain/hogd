@@ -191,6 +191,7 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
   set_nodelay(fd);
 
   int err = 0;
+  reset(fd);
   write_clear(fd);
   if (::connect(fd.get(), sa, len) == -1)
     err = errno;

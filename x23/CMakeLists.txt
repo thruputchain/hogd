@@ -223,7 +223,7 @@ add_subdirectory(tests)
 add_custom_target(check
   DEPENDS build_tests
   COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --switch=$(COLOR) --cyan "Running tests..."
-  COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure
+  COMMAND ${CMAKE_CTEST_COMMAND} --force-new-ctest-process --output-on-failure --parallel
   COMMENT "Building and running tests"
 )
 

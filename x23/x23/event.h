@@ -422,15 +422,18 @@ public:
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
-  template<typename Addr = sockaddr>
+  template<typename Addr = std::nullptr_t>
   Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
                                           socklen_t *addrlen = nullptr,
                                           bool close_on_exec = true SLOC_PARM)
   {
     while (!stop_requested()) {
-      if constexpr (!std::same_as<decltype(addr), std::nullptr_t>)
-        if (addrlen)
-          *addrlen = sizeof(*addr);
+      socklen_t ignoredlen;
+      if constexpr (!std::same_as<decltype(addr), std::nullptr_t>) {
+        if (!addrlen)
+	  addrlen = &ignoredlen;
+	*addrlen = sizeof(*addr);
+      }
       read_clear(lfd);
 #if HAVE_ACCEPT4
       int fd =
@@ -451,6 +454,7 @@ public:
 #endif // !HAVE_ACCEPT4
       if (fd >= 0) {
         set_nodelay(fd);
+	reset(fd);
         co_return fd;
       }
       if (Errno err{}; err != EAGAIN)
