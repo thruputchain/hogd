@@ -37,6 +37,8 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
   case StorageItemType::kItemTypeReplayCache:
     return variant_type{std::in_place_type<ReplayCacheEntry>,
                         item.replay_cache_metadata()};
+  case StorageItemType::kItemTypeAuthData:
+    throw std::runtime_error("Auth data not yet supported");
   }
   assert(false);
   throw std::runtime_error("Impossible");
@@ -56,6 +58,8 @@ SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
                           from_xdr(item.nnint())};
     case StorageItemType::kItemTypeDeleted:
       return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
+    case StorageItemType::kItemTypeAuthData:
+      throw std::runtime_error("Auth data not yet supported");
     default:
       assert(false);
       throw std::runtime_error("Impossible");

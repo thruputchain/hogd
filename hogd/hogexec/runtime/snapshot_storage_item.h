@@ -10,6 +10,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -121,6 +122,11 @@ private:
     constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
   };
 
+  struct AccountAuthDataEntry {
+    AccountAuthData account_auth_data_;
+    constexpr static ItemViewType kItemType = ItemViewType::kAccountAuthData;
+  };
+
   class RetrocausalQueueEntry {
   public:
     RetrocausalQueueEntry() = default;
@@ -150,7 +156,8 @@ private:
 
   using variant_type =
       std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                   DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry>;
+                   DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry,
+                   AccountAuthDataEntry>;
   static variant_type make_variant(StorageItem item, StorageKey const &db_key);
   static variant_type make_contract_key_variant(StorageItem item);
 
