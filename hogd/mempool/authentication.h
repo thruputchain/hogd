@@ -26,7 +26,8 @@ public:
     const AccountAuthData &auth_data =
         accounts_[tx.tx.invocation.invoked_address];
 
-    const AuthSignaturePreimage preimage{.signature_weight = 0,
+    const AuthSignaturePreimage preimage{.signature_weight =
+                                             tx.signature_weight,
                                          .message = x23::serialize(tx.tx)};
     const x23::Buf msg = x23::serialize(preimage);
     Weight total_weight = 0;
@@ -47,7 +48,8 @@ public:
         total_weight += weight;
       }
     }
-    if (total_weight < auth_data.nonce_config.required_weight) {
+    if (total_weight < tx.signature_weight ||
+        total_weight < auth_data.nonce_config.required_weight) {
       return false;
     }
 
@@ -69,17 +71,18 @@ public:
   }
 
   static SignedTransaction
-  sign(const Transaction &tx,
+  sign(const Transaction &tx, Weight signature_weight,
        const std::unordered_map<uint32_t, Ed25519SecretKey>
            &account_private_keys,
        const std::unordered_map<ContractAddress,
                                 std::unordered_map<uint32_t, Ed25519SecretKey>>
            &auxiliary_private_keys)
   {
-    const AuthSignaturePreimage preimage{.signature_weight = 0,
+    const AuthSignaturePreimage preimage{.signature_weight = signature_weight,
                                          .message = x23::serialize(tx)};
     const x23::Buf msg = x23::serialize(preimage);
     SignedTransaction signed_tx{.tx = tx,
+                                .signature_weight = signature_weight,
                                 .signatures = {},
                                 .aux_signatures = {}};
     signed_tx.signatures.reserve(account_private_keys.size());

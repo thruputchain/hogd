@@ -78,7 +78,7 @@ TEST(Authentication, SignAndVerify)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, {{0, private_key}},
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
@@ -104,7 +104,7 @@ TEST(Authentication, SignAndVerifyMismatch)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, {{0, private_key}},
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
@@ -131,7 +131,7 @@ TEST(Authentication, SignAndVerifyWrongIndex)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, {{0, private_key}},
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
@@ -162,7 +162,7 @@ TEST(Authentication, SignAndVerifyMultiSig)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, private_keys,
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx));
 }
@@ -192,7 +192,7 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, private_keys,
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
@@ -222,7 +222,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, private_keys,
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
@@ -256,7 +256,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
-      hogd::Authentication::sign(tx, private_keys,
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
@@ -288,7 +288,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys[0],
+      tx, /*signature_weight=*/1, private_keys[0],
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
@@ -323,7 +323,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys[0],
+      tx, /*signature_weight=*/1, private_keys[0],
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
@@ -359,7 +359,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys[0],
+      tx, /*signature_weight=*/1, private_keys[0],
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
@@ -397,7 +397,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx = hogd::Authentication::sign(
-      tx, private_keys[0],
+      tx, /*signature_weight=*/1, private_keys[0],
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});

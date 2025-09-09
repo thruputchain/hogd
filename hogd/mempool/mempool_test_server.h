@@ -223,7 +223,6 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
   for (uint64_t i = 0; i < num_txs; i++) {
     SignedTransaction tx{
         .tx = Transaction{
-            .origin_id = {},
             .invocation = fib_client.make_invocation<kProgramName>(
                 // TODO(jhumphri): How to get this number automatically?
                 /*gas_amount=*/5'000'000'000, kFibonacciN),
