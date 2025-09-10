@@ -58,7 +58,7 @@ TEST(WorkerPoolTest, Exceptions)
 
 TEST(WorkerPoolTest, ParallelForEach)
 {
-  constexpr size_t kElements = 1024;
+  constexpr ssize_t kElements = 1024;
   constexpr size_t kWidth = 16;
   std::vector<int> vec(kElements, 1);
   WorkerPool &pool = WorkerPool::get_default_pool();
