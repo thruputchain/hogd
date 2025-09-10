@@ -60,11 +60,12 @@ public:
   // before calling this function, [cached_hogs_[account]] must be updated.
   void update_accounts(const x23::Vec<ContractAddress> &accounts);
 
-  // Chooses txs to schedule in the next block. [block_size] is the maximum
-  // number of txs that will be included in the next block, though fewer txs
-  // than [block_size] may be included.
+  // Chooses txs to schedule in the next block. [block_height] is the height of
+  // the block that is being scheduled. [block_size] is the maximum number of
+  // txs that will be included in the next block, though fewer txs than
+  // [block_size] may be included.
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-  schedule(size_t block_size);
+  schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed*. This method just removes the remaining tx state
@@ -198,6 +199,11 @@ private:
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
+  // Maps a block expiry height to a set of txs that expire at that height. So
+  // in other words, if a set of txs expire at block height 10, those txs can be
+  // included in block 10 and all blocks with smaller heights, but they cannot
+  // be included in blocks 11+.
+  std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
   // Holds all txs that cannot be scheduled, typically because an account does
   // not have enough hogs. Maps an account to its stranded txs. This makes it
   // easy to look up which stranded txs correspond to an account, since we will

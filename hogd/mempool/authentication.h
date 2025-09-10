@@ -23,13 +23,9 @@ public:
     accounts_[account] = data;
   }
 
-  bool authenticate(const SignedTransaction &tx, BlockHeight current_block)
+  bool authenticate(const SignedTransaction &tx)
   {
     CHECK(accounts_.contains(tx.tx.invocation.invoked_address));
-    if (tx.tx.uniquifier.block_expiry_height < current_block) {
-      return false;
-    }
-
     const AccountAuthData &auth_data =
         accounts_[tx.tx.invocation.invoked_address];
     const AuthSignaturePreimage preimage{.signature_weight =

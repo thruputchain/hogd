@@ -429,7 +429,7 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 }
 
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-Scheduler::schedule(size_t block_size)
+Scheduler::schedule(BlockHeight block_height, size_t block_size)
 {
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;

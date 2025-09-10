@@ -206,7 +206,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
-      scheduler_.schedule(kMaxBlockSize);
+      scheduler_.schedule(/*block_height=*/nomination.block_height,
+                          kMaxBlockSize);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
