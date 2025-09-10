@@ -118,8 +118,8 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
   case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeAuthData);
-    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() =
-        AuthDataLock{.modified_key_ids = {delta.auth_data_change_signer().public_key_id}};
+    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() = AuthDataLock{
+        .modified_key_ids = {delta.auth_data_change_signer().public_key_id}};
     return lock;
   default:
     throw std::runtime_error("unimplemented");

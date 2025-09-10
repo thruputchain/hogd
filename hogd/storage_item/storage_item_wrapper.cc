@@ -128,8 +128,9 @@ int128_t
 StorageItemWrapper::AuthDataWrapper::storage_cost( // NOLINT
     StorageCostModel const *cost_model) const
 {
-  return cost_model->kBaseItemCost; // TODO(geoff): vary size based on number of signers
-        // cost_model->get_auth_data_cost(auth_data_.size());
+  return cost_model
+      ->kBaseItemCost; // TODO(geoff): vary size based on number of signers
+                       // cost_model->get_auth_data_cost(auth_data_.size());
 }
 
 int128_t

@@ -48,7 +48,7 @@ public:
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChangeSigner);
     delta.auth_data_change_signer().public_key_id = key_id;
-    delta.auth_data_change_signer().public_key = 
+    delta.auth_data_change_signer().public_key =
         x23::Ptr<PublicKey>(new PublicKey(CryptographicScheme::Ed25519));
     return delta;
   }
@@ -57,12 +57,13 @@ public:
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
-    delta.retrocausal_queue().consume.emplace(RetrocausalQueueConsumeDelta{
-        .past_block_consume = RetrocausalQueuePastBlockConsumeDelta{
-            .max_fully_consumed_block_number = 0,
-            .partial_consumed_number = 0},
-        .current_block_consumed = {}
-    });
+    delta.retrocausal_queue().consume.emplace(
+        RetrocausalQueueConsumeDelta{.past_block_consume =
+                                         RetrocausalQueuePastBlockConsumeDelta{
+                                             .max_fully_consumed_block_number =
+                                                 0,
+                                             .partial_consumed_number = 0},
+                                     .current_block_consumed = {}});
     return delta;
   }
 
@@ -117,10 +118,12 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                              std::to_underlying(
+                                  StorageItemRPCFlags::kStorageNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value()) << "bytestring_conflict: Intermediate bytestring should fail";
+    ASSERT_FALSE(r_intermediate.value())
+        << "bytestring_conflict: Intermediate bytestring should fail";
     ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
   }
 
@@ -128,13 +131,15 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
   // The bug test: now try to reserve an RCQ delta that doesn't need consume
-  // This should succeed if the reference was properly released on the failure above
+  // This should succeed if the reference was properly released on the failure
+  // above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value()) << "Should be able to reserve insert-only RCQ after consume conflict";
+  ASSERT_TRUE(r3.value())
+      << "Should be able to reserve insert-only RCQ after consume conflict";
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
@@ -168,30 +173,35 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
-  ASSERT_FALSE(r2.value()) << "auth_conflict: Second auth data delta with same key ID should fail";
+  ASSERT_FALSE(r2.value())
+      << "auth_conflict: Second auth data delta with same key ID should fail";
 
   // Here the reference is held; adding a bytestring here should fail
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                              std::to_underlying(
+                                  StorageItemRPCFlags::kStorageNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value()) << "bytestring_conflict: Intermediate bytestring should fail";
+    ASSERT_FALSE(r_intermediate.value())
+        << "bytestring_conflict: Intermediate bytestring should fail";
     ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
   }
 
   // Here's where the reference must be released.
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
-  // The bug test: now try to reserve a different type after the failed auth reservation
-  // This should succeed if the reference was properly released on the failure above
+  // The bug test: now try to reserve a different type after the failed auth
+  // reservation This should succeed if the reference was properly released on
+  // the failure above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value()) << "Should be able to reserve bytestring after auth conflict";
+  ASSERT_TRUE(r3.value())
+      << "Should be able to reserve bytestring after auth conflict";
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
@@ -231,24 +241,28 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                              std::to_underlying(
+                                  StorageItemRPCFlags::kStorageNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value()) << "bytestring_conflict: Intermediate bytestring should fail";
+    ASSERT_FALSE(r_intermediate.value())
+        << "bytestring_conflict: Intermediate bytestring should fail";
     ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
   }
 
   // Here's where the reference must be released.
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
-  // The bug test: now try to reserve a different type after the failed replay cache reservation
-  // This should succeed if the reference was properly released on the failure above
+  // The bug test: now try to reserve a different type after the failed replay
+  // cache reservation This should succeed if the reference was properly
+  // released on the failure above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value()) << "Should be able to reserve bytestring after replay cache conflict";
+  ASSERT_TRUE(r3.value())
+      << "Should be able to reserve bytestring after replay cache conflict";
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
@@ -275,34 +289,41 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 
   // Now try to subtract more than the base value - this should fail
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_nnint_delta(5, -10), // Try to subtract 10 from 5 (would go negative)
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx2.add_delta(
+      key,
+      make_nnint_delta(5, -10), // Try to subtract 10 from 5 (would go negative)
+      std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
-  ASSERT_FALSE(r2.value()) << "nnint_conflict: Subtraction that would go negative should fail";
+  ASSERT_FALSE(r2.value())
+      << "nnint_conflict: Subtraction that would go negative should fail";
 
   // Here the reference is held; adding a bytestring here should fail
   {
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                              std::to_underlying(
+                                  StorageItemRPCFlags::kStorageNone));
     auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
     ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value()) << "bytestring_conflict: Intermediate bytestring should fail";
+    ASSERT_FALSE(r_intermediate.value())
+        << "bytestring_conflict: Intermediate bytestring should fail";
     ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
   }
 
   // Here's where the reference must be released.
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
-  // The bug test: now try to reserve a different type after the failed NNInt reservation
-  // This should succeed if the reference was properly released on the failure above
+  // The bug test: now try to reserve a different type after the failed NNInt
+  // reservation This should succeed if the reference was properly released on
+  // the failure above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r3 = tx3.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value()) << "Should be able to reserve bytestring after nnint conflict";
+  ASSERT_TRUE(r3.value())
+      << "Should be able to reserve bytestring after nnint conflict";
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());

@@ -278,9 +278,14 @@ private:
 
 class AuthDataArgs {
 public:
-  AuthDataArgs(const AccountAuthData *base_auth_data) : base_auth_data_(base_auth_data) {}
+  AuthDataArgs(const AccountAuthData *base_auth_data)
+    : base_auth_data_(base_auth_data)
+  {}
 
-  static bool typeclass_match(const AccountAuthData * /*unused*/) { return true; }
+  static bool typeclass_match(const AccountAuthData * /*unused*/)
+  {
+    return true;
+  }
 
   std::shared_ptr<const StorageItemWrapper>
   to_item(StorageCostModel const *cost_model) const;
@@ -305,7 +310,7 @@ public:
 
 private:
   const AccountAuthData *base_auth_data_;
-  
+
   std::set<uint32_t> modified_key_ids_;
   std::map<uint32_t, x23::Ptr<PublicKeyConfig>> committed_changes_;
   bool has_committed_delta_ = false;
@@ -398,10 +403,10 @@ struct UnmodifiedState {
 // - to_item(): Converts variant state into a StorageItemWrapper, to be passed
 // to the next block.
 class RefcountedDeltaVariant {
-  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
-                                 RetrocausalQueueArgs, ExclusiveLockedState,
-                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs,
-                                 AuthDataArgs>;
+  using variant_t =
+      std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
+                   ExclusiveLockedState, DeleteArgs, UnmodifiedState,
+                   ReplayCacheArgs, AuthDataArgs>;
 
 public:
   RefcountedDeltaVariant() = default;

@@ -520,8 +520,10 @@ AuthDataArgs::commit_change_signer(uint32_t key_id, const PublicKey *new_key)
   if (new_key) {
     // Create a PublicKeyConfig with the new key and default weight
     PublicKeyConfig config{.key = *new_key, .max_weight = 1};
-    committed_changes_[key_id] = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(config));
-  } else {
+    committed_changes_[key_id] =
+        x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(config));
+  }
+  else {
     committed_changes_[key_id] = nullptr;
   }
   has_committed_delta_ = true;
@@ -533,7 +535,8 @@ AuthDataArgs::to_item(StorageCostModel const *cost_model) const
   AccountAuthData new_auth_data;
   if (base_auth_data_) {
     new_auth_data = *base_auth_data_;
-  } else {
+  }
+  else {
     // Initialize default auth data
     for (size_t i = 0; i < MAX_SIGNERS; ++i) {
       new_auth_data.public_keys[i] = nullptr;
@@ -555,7 +558,8 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
     StorageCostModel const *current_model,
     StorageItemWrapper const * /*base_item*/) const
 {
-  // TODO(geoff): Implement proper cost model for auth data based on number of signers
+  // TODO(geoff): Implement proper cost model for auth data based on number of
+  // signers
   return current_model->kBaseItemCost;
 }
 
@@ -568,7 +572,7 @@ AuthDataArgs::get_marginal_cost_upper_bound_static(
   if (is_committed || base_item) {
     base_cost = 0;
   }
-  
+
   // TODO(geoff): Consider marginal cost for adding/removing signers
   return base_cost;
 }
@@ -579,7 +583,7 @@ AuthDataArgs::get_marginal_cost_upper_bound(
     StorageItemWrapper const *base_item) const
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeAuthDataChangeSigner);
-  return get_marginal_cost_upper_bound_static(has_committed_delta_, delta, 
+  return get_marginal_cost_upper_bound_static(has_committed_delta_, delta,
                                               current_model, base_item);
 }
 
@@ -657,8 +661,7 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
         else if constexpr (std::same_as<args_t, AuthDataArgs>) {
           // hack because the signature of the ctor has to match the
           // typeclass_match signature in this implementation
-          return typeclass.item_type() ==
-                     StorageItemType::kItemTypeAuthData &&
+          return typeclass.item_type() == StorageItemType::kItemTypeAuthData &&
                  args.typeclass_match(nullptr);
         }
         else {
