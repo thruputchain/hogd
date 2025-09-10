@@ -308,6 +308,9 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   }
 
   cached_hogs_[account_address] = new_averages;
+
+  // TODO(jhumphri): I don't think this is right. What if an account has all of
+  // its txs stranded? We need to get them on the runqueue.
   // No need to call [update_accounts({account_address})] because receiving hogs
   // does not affect the [kHogAgeGroupReceived] group. So in other words,
   // receiving hogs does not affect the order in which txs are scheduled.
@@ -436,6 +439,7 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 void
 Scheduler::discard_expired_txs(BlockHeight current_height)
 {
+  std::unordered_set<ContractAddress> accounts;
   for (auto it = expiry_to_tx_.begin(); it != expiry_to_tx_.end();) {
     BlockHeight height = it->first;
     if (height >= current_height) {
@@ -445,10 +449,29 @@ Scheduler::discard_expired_txs(BlockHeight current_height)
     x23::Vec<SignedTransactionHash> tx_hashes;
     for (TxInfo *info : it->second) {
       tx_hashes.push_back(info->tx_hash);
+
+      if (on_runqueue(*info)) {
+        accounts.insert(info->tx.tx.invocation.invoked_address);
+        cached_hogs_[info->tx.tx.invocation.invoked_address]
+            .num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(from_xdr(cached_hogs_[info->tx.tx.invocation.invoked_address]
+                                .num_hogs[kHogAgeGroupToSchedule]) +
+                   info->tx.tx.invocation.gas_limit);
+      }
     }
     CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
 
     it = expiry_to_tx_.erase(it);
+  }
+
+  // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
+  // for all accounts in [accounts], add any stranded txs to the runqueue if
+  // possible.
+  for (const ContractAddress &account : accounts) {
+    update_accounts({account});
+    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+      cycle_groups(account);
+    }
   }
 }
 

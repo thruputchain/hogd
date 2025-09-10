@@ -188,6 +188,12 @@ private:
   // discarded.
   void discard_expired_txs(BlockHeight current_height);
 
+  bool on_runqueue(TxInfo &info)
+  {
+    return account_to_tx_.contains(info.account) &&
+           account_to_tx_[info.account].contains(&info);
+  }
+
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
@@ -196,6 +202,9 @@ private:
   // Caches the number of hogs and hog ages for an account so that the scheduler
   // does not need to make as many RPC calls to the database.
   std::unordered_map<ContractAddress, HogAge> cached_hogs_;
+
+  // Maps a tx hash to information about the tx.
+  std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
 
   // ---------------
   // Runqueue data structures. We maintain several data structures to make it
@@ -206,8 +215,6 @@ private:
   // such as due to an insuffucient hog balance on the submitting account, are
   // stored in [stranded_] below.
 
-  // Maps a tx hash to information about the tx.
-  std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
   // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
       account_to_tx_;
