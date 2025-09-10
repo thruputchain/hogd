@@ -17,7 +17,7 @@ struct CoroWake : CoroPoll {
   uint64_t id_;
   std::atomic_uint64_t loopcnt_{};
 
-  CoroWake(ThreadPool &pool) : id_(idctr++), CoroPoll(pool, no_loop_thread{})
+  CoroWake(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{}), id_(idctr++)
   {
     pollthread_ = std::thread(&CoroWake::loop, this);
     std::println("Created CoroWake {}", id_);
@@ -53,13 +53,13 @@ reset_fd(ThreadPool &pool)
 {
   CoroWake cp(pool);
 
-  auto lfd = tcplisten(0);
+  auto lfd = tcplisten(0, 1000);
   auto dest = local_addr(lfd);
 
   [&cp, lfd = std::move(lfd)](this auto) -> Detached {
     sockaddr_storage peer;
     while (auto fd = co_await cp.accept(lfd, &peer)) {
-      [&cp, fd = UniqueFd{*fd}, port = get_port(peer)](this auto) -> Detached {
+      [&cp, fd = UniqueFd{*fd}](this auto) -> Detached {
         Buf b;
         co_await cp.read(fd, &b, 1);
 	enable_abortive_close(fd); // avoid TIME_WAIT
@@ -69,13 +69,12 @@ reset_fd(ThreadPool &pool)
   }();
 
   DestroyInhibit di;
-  for (int i = 0; i < 300; ++i)
+  for (int i = 0; i < 1000; ++i)
     [&cp, dest, i, r = RefPtr{di}](this auto) -> Detached {
       UniqueFd fd{socket(dest.ss_family, SOCK_STREAM, 0)};
       if (auto res = co_await cp.connect(fd, &dest); !res)
         std::println(stderr, "connect: {}", res.error());
-      auto port = get_port(local_addr(fd));
-      auto n = write(fd.get(), "A", 1);
+      [[maybe_unused]] auto n = write(fd.get(), "A", 1);
       assert(n == 1);
       Buf b;
       co_await cp.read(fd, &b, 1);
@@ -90,6 +89,5 @@ main()
   setlinebuf(stdout);
   ThreadPool pool;
   simple_wake(pool);
-  for (int i = 0; i < 100; ++i)
-    reset_fd(pool);
+  reset_fd(pool);
 }
