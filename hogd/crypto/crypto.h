@@ -2,7 +2,6 @@
 
 #pragma once
 
-
 extern "C" {
 #include "blake3.h"
 }
@@ -197,10 +196,10 @@ crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
 
 } // namespace hogd
 
-#if(__cpp_lib_format_ranges < 202207L)
+#if (__cpp_lib_format_ranges < 202207L)
 
-#include <format>
 #include "hogd/base/string.h"
+#include <format>
 
 template<> struct std::formatter<hogd::SHA256Hash> {
   static constexpr auto parse(std::format_parse_context &ctx)
