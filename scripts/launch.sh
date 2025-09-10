@@ -72,6 +72,7 @@ sleep 5
 
 # Start hogdb.
 echo "Start hogdb"
+rm -rf /tmp/hogdb
 "$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
 # Start hogexec.
