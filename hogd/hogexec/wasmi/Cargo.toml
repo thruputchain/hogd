@@ -10,6 +10,9 @@ rust-version = "1.81"
 lru = "0.14.0"
 wasmi = "0.36.0"
 
+[features]
+debug_logging = []
+
 [lib]
 crate-type = ["staticlib"]
 

@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "bcs"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "serde",
  "thiserror",
@@ -42,9 +42,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "2.9.3"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34efbcccd345379ca2868b2b2c9d3782e9cc58ba87bc7d79d5b53d9c9ae6f25d"
+checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
 
 [[package]]
 name = "block-buffer"
@@ -57,10 +57,11 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.34"
+version = "1.2.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42bc4aea80032b7bf409b0bc7ccad88853858911b7713a8062fdc0623867bedc"
+checksum = "5252b3d2648e5eedbc1a6f501e3c795e07025c1e93bbf8bbdd6eef7f447a6d54"
 dependencies = [
+ "find-msvc-tools",
  "shlex",
 ]
 
@@ -208,6 +209,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "find-msvc-tools"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fd99930f64d146689264c637b5af2f0233a933bef0d8570e2526bf9e083192d"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -216,7 +223,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 [[package]]
 name = "gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "darling",
  "groundhog_xdr",
@@ -246,7 +253,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "groundhog-erc1271-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "sdk",
  "serde",
@@ -257,7 +264,7 @@ dependencies = [
 [[package]]
 name = "groundhog-erc20-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "sdk",
  "serde",
@@ -268,10 +275,13 @@ dependencies = [
 [[package]]
 name = "groundhog_xdr"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#a4a433634b778be0b58743a51e21fb338b7559b3"
 dependencies = [
+ "macros 0.1.0 (git+ssh://git@github.com/groundhogchain/protocol-rs.git)",
  "serde",
  "serde_arrays",
+ "thiserror",
+ "xdr_common",
  "xdrs",
 ]
 
@@ -289,9 +299,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "indexmap"
-version = "2.11.0"
+version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
+checksum = "206a8042aec68fa4a62e8d3f7aa4ceb508177d9324faf261e1959e495b7a1921"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -352,14 +362,27 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.27"
+version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#a4a433634b778be0b58743a51e21fb338b7559b3"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "syn",
+]
+
+[[package]]
+name = "macros"
+version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "darling",
  "gen",
@@ -409,7 +432,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "native_exec"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "bindgen",
  "cmake",
@@ -511,11 +534,11 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "sdk"
 version = "0.0.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a68f38c623ae3da835be63545f064b4ab602c3b3"
 dependencies = [
  "bcs",
  "groundhog_xdr",
- "macros",
+ "macros 0.1.0 (git+ssh://git@github.com/groundhogchain/sdk_rs.git)",
  "native_exec",
  "serde",
  "serde_arrays",
@@ -536,7 +559,7 @@ dependencies = [
 [[package]]
 name = "serde_arrays"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#a7ad3a2e98bfc98d794782ab62bcd361c70be51c"
+source = "git+ssh://git@github.com/groundhogchain/serde_arrays.git#1ed5726fd5c62802d9943f8b4d853aa5087e78c2"
 dependencies = [
  "serde",
 ]
@@ -739,7 +762,7 @@ checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
 [[package]]
 name = "xdr-derive"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#29c91a66e89eddf73ea80d5ebde79be641e42088"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#a5d982c2847344ba126684fdea5bed76d991cf31"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -750,7 +773,7 @@ dependencies = [
 [[package]]
 name = "xdr-repr"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#29c91a66e89eddf73ea80d5ebde79be641e42088"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#a5d982c2847344ba126684fdea5bed76d991cf31"
 dependencies = [
  "xdr_common",
 ]
@@ -763,7 +786,7 @@ source = "git+ssh://git@github.com/groundhogchain/xdr_common.git#fe9df26f21f9e69
 [[package]]
 name = "xdrs"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#29c91a66e89eddf73ea80d5ebde79be641e42088"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#a5d982c2847344ba126684fdea5bed76d991cf31"
 dependencies = [
  "thiserror",
  "xdr-derive",

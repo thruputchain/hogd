@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/metrics.h"
 
 #include <chrono>
+#include <mutex>
 #include <stop_token>
 #include <thread>
 
@@ -51,9 +52,12 @@ void
 HogexecMetrics::background_worker(std::stop_token &stoken)
 {
   MetricsSnapshot snapshot{
-    .time_ns = x23::fastclock::get_ns(),
+      .time_ns = x23::fastclock::get_ns(),
   };
   while (!stoken.stop_requested()) {
+    std::unique_lock g(cv_mutex_);
+    cv_.wait_for(g, stoken, std::chrono::seconds(1), [] { return true; });
+
     std::this_thread::sleep_for(std::chrono::seconds(1));
     auto new_snapshot = get_stats();
     auto delta = new_snapshot - snapshot;

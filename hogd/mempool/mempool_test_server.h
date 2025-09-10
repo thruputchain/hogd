@@ -1,14 +1,17 @@
 #pragma once
 
+#include <array>
 #include <cstring>
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
+#include "account.hh"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
@@ -27,6 +30,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -48,6 +52,8 @@
 #include "x23/threadpool.h"
 
 namespace hogd {
+
+constexpr size_t kNumTxs = 100;
 
 class MempoolTestServer {
 public:
@@ -223,7 +229,6 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
   for (uint64_t i = 0; i < num_txs; i++) {
     SignedTransaction tx{
         .tx = Transaction{
-            .origin_id = {},
             .invocation = fib_client.make_invocation<kProgramName>(
                 // TODO(jhumphri): How to get this number automatically?
                 /*gas_amount=*/5'000'000'000, kFibonacciN),
@@ -301,6 +306,22 @@ create_clients(const MempoolTestServer &server)
           .interface = std::move(interface)};
 }
 
-constexpr size_t kNumTxs = 100;
+inline AccountAuthData
+get_default_account()
+{
+  static std::array<PublicKeyConfigOpt, MAX_SIGNERS> public_keys;
+  if (public_keys.empty()) {
+    // Initialize [public_keys].
+    for (size_t i = 0; i < MAX_SIGNERS; i++) {
+      public_keys[i] = nullptr;
+    }
+  }
+  CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
+  constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
+
+  return AccountAuthData{.public_keys = public_keys,
+                         .gas_permissions = {},
+                         .nonce_config = kNonceConfig};
+}
 
 } // namespace hogd

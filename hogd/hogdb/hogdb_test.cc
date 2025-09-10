@@ -7,6 +7,7 @@
 #include <utility>
 
 // xdr types
+#include "db_coord.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
@@ -60,6 +61,21 @@ constexpr uint64_t kAddress = 0xdeadbeef;
 
 TEST_F(HogDBTest, DataAccessObject)
 {
+  //
+  // Global operations
+  //
+
+  // test db tip
+  DbTip tip{.height = 10,
+            .hash = sha256(std::as_bytes(std::span("foo"))),
+            .id = 30};
+  EXPECT_TRUE(db_.write_dbtip(tip));
+  HogDBStatus<DbTip> rtip = db_.read_dbtip();
+  EXPECT_TRUE(rtip);
+  if (rtip) {
+    EXPECT_EQ(*rtip, tip);
+  }
+
   //
   // Address operations
   //
