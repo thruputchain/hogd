@@ -2,6 +2,11 @@ add_library(genesis
   genesis_block.cc
 )
 
+add_dependencies(
+  genesis
+  all_wasm_headers
+)
+
 target_link_libraries(genesis
   base
   crypto
