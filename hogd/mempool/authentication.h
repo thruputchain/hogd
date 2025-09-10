@@ -21,12 +21,15 @@ public:
     accounts_[account] = data;
   }
 
-  bool authenticate(const SignedTransaction &tx)
+  bool authenticate(const SignedTransaction &tx, BlockHeight current_block)
   {
     CHECK(accounts_.contains(tx.tx.invocation.invoked_address));
+    if (tx.tx.uniquifier.block_expiry_height < current_block) {
+      return false;
+    }
+
     const AccountAuthData &auth_data =
         accounts_[tx.tx.invocation.invoked_address];
-
     const AuthSignaturePreimage preimage{.signature_weight =
                                              tx.signature_weight,
                                          .message = x23::serialize(tx.tx)};
