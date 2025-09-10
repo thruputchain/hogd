@@ -5,7 +5,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/types.h"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/x23/serialize.h"
+#include <unordered_map>
 
 namespace hogd {
 
@@ -162,15 +164,15 @@ private:
     if (idx >= accounts_[account].public_keys.size()) {
       return false;
     }
-    const PublicKeyConfig &pk_config = accounts_[account].public_keys[idx];
-    if (!pk_config.valid) {
+    auto &pk_config = accounts_[account].public_keys[idx];
+    if (!pk_config) {
       return false;
     }
-    if (pk_config.key.scheme() != CryptographicScheme::Ed25519) {
+    if (pk_config->key.scheme() != CryptographicScheme::Ed25519) {
       return false;
     }
-    max_weight = pk_config.max_weight;
-    public_key = pk_config.key.ed25519();
+    max_weight = pk_config->max_weight;
+    public_key = pk_config->key.ed25519();
     return true;
   }
 
