@@ -11,6 +11,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -550,7 +551,7 @@ AuthDataArgs::to_item(StorageCostModel const *cost_model) const
 }
 
 int128_t
-AuthDataArgs::get_current_committed_cost(
+AuthDataArgs::get_current_committed_cost( // NOLINT
     StorageCostModel const *current_model,
     StorageItemWrapper const * /*base_item*/) const
 {
