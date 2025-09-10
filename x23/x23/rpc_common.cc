@@ -6,6 +6,15 @@ namespace x23 {
 
 size_t default_max_message_size = 0x100'0000;
 
+int RpcLogger::default_logfd = -1;
+
+static const auto _init = ([] {
+  if (RpcLogger::default_logfd == -1)
+    if (char *p = getenv("X23TRACE"))
+      if (int n = atoi(p))
+	RpcLogger::default_logfd = n;
+ }(), std::tuple{});
+
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
   peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
