@@ -38,7 +38,8 @@ target_link_libraries(
   crypto_interface
   OpenSSL::SSL
   OpenSSL::Crypto
-  GTest::gtest_main)
+  gtest_headers
+)
 
 # create crypto module test binary
 add_executable(

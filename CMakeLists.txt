@@ -100,6 +100,11 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
 enable_testing()
 include(GoogleTest)
 
+add_library(gtest_headers INTERFACE)
+target_include_directories(gtest_headers INTERFACE
+    ${gtest_SOURCE_DIR}/include
+)
+
 # Enable performance (Google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
