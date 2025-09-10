@@ -431,8 +431,8 @@ public:
       socklen_t ignoredlen;
       if constexpr (!std::same_as<decltype(addr), std::nullptr_t>) {
         if (!addrlen)
-	  addrlen = &ignoredlen;
-	*addrlen = sizeof(*addr);
+          addrlen = &ignoredlen;
+        *addrlen = sizeof(*addr);
       }
       read_clear(lfd);
 #if HAVE_ACCEPT4
@@ -454,7 +454,7 @@ public:
 #endif // !HAVE_ACCEPT4
       if (fd >= 0) {
         set_nodelay(fd);
-	reset(fd);
+        reset(fd);
         co_return fd;
       }
       if (Errno err{}; err != EAGAIN)
@@ -490,7 +490,7 @@ public:
 protected:
   std::thread pollthread_;
 
-  struct no_loop_thread{};
+  struct no_loop_thread {};
   CoroPoll(ThreadPool &pool, no_loop_thread);
 
   void loop();
