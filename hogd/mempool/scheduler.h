@@ -98,9 +98,13 @@ public:
   // remove their state entirely from the scheduler. Specifically, information
   // about the txs is still held in [hash_to_tx_]. The caller needs to
   // ultimately call [mark_txs_executed()] to remove this state.
+  // TODO(jhumphri): We should pass a set instead of a vector, both here and in
+  // [mark_txs_executed()] and the other functions. Otherwise, a malicious
+  // nomination could crash a node by including the same hash twice and
+  // triggering a CHECK failure.
   bool
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> &ret);
+                                x23::Vec<SignedTransaction> *ret);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

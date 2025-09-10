@@ -433,16 +433,22 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
   }
 }
 
-void Scheduler::discard_expired_txs(BlockHeight current_height) {
-  for (auto it = expiry_to_txs_.begin(); it != expiry_to_txs_.end(); ) {
+void
+Scheduler::discard_expired_txs(BlockHeight current_height)
+{
+  for (auto it = expiry_to_tx_.begin(); it != expiry_to_tx_.end();) {
     BlockHeight height = it->first;
     if (height >= current_height) {
       break;
     }
+
+    x23::Vec<SignedTransactionHash> tx_hashes;
     for (TxInfo *info : it->second) {
-      // TODO(jhumphri): Delete the tx from either the runqueue or [stranded_].
+      tx_hashes.push_back(info->tx_hash);
     }
-    it = expiry_to_txs_.erase(it);
+    CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
+
+    it = expiry_to_tx_.erase(it);
   }
 }
 
@@ -574,7 +580,7 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
 bool
 Scheduler::find_and_remove_from_runqueue(
     const x23::Vec<SignedTransactionHash> &hashes,
-    x23::Vec<SignedTransaction> &ret)
+    x23::Vec<SignedTransaction> *ret)
 {
   // Check that we have a transaction for each hash. In the second for loop
   // below, we remove txs from the runqueue, so we want to make sure that we
@@ -587,11 +593,15 @@ Scheduler::find_and_remove_from_runqueue(
     }
   }
 
-  ret.clear();
+  if (ret) {
+    ret->clear();
+  }
   for (const SignedTransactionHash &hash : hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
-    ret.push_back(it->second.tx);
+    if (ret) {
+      ret->push_back(it->second.tx);
+    }
 
     // When the if statement is true, the tx is on the runqueue. Otherwise, it
     // is stranded. We need to remove it from the correct data structures

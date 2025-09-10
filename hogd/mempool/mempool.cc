@@ -294,7 +294,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   {
     x23::Vec<SignedTransaction> signed_txs;
     if (!scheduler_.find_and_remove_from_runqueue(nomination.transaction_hashes,
-                                                  signed_txs)) {
+                                                  &signed_txs)) {
       co_await finish_block(block_id);
       co_await abandon_snapshot(block_id);
       co_return SchedulerValidationResult(
