@@ -187,6 +187,7 @@ private:
   // does not need to make as many RPC calls to the database.
   std::unordered_map<ContractAddress, HogAge> cached_hogs_;
 
+  // ---------------
   // Runqueue data structures. We maintain several data structures to make it
   // easy to order the runqueue and look up txs with several key types.
 
@@ -199,11 +200,9 @@ private:
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
-  // Maps a block expiry height to a set of txs that expire at that height. So
-  // in other words, if a set of txs expire at block height 10, those txs can be
-  // included in block 10 and all blocks with smaller heights, but they cannot
-  // be included in blocks 11+.
-  std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
+  // ---------------
+
+
   // Holds all txs that cannot be scheduled, typically because an account does
   // not have enough hogs. Maps an account to its stranded txs. This makes it
   // easy to look up which stranded txs correspond to an account, since we will
@@ -211,6 +210,12 @@ private:
   std::unordered_map<ContractAddress,
                      std::map<GasAmount, std::unordered_set<TxInfo *>>>
       stranded_;
+
+  // Maps a block expiry height to a set of txs that expire at that height. So
+  // in other words, if a set of txs expire at block height 10, those txs can be
+  // included in block 10 and all blocks with smaller heights, but they cannot
+  // be included in blocks 11+.
+  std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
 };
 
 } // namespace hogd
