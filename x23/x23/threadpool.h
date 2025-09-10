@@ -1,5 +1,104 @@
 // -*- C++ -*-
 
+// This module implements an affinity-aware thread pool for resuming
+// coroutines.  Except for tests, you generally only need one
+// ThreadPool per program, which can be default-constructed (to create
+// one thread per available hardware thread), or given an explicit
+// number of software threads to use (generally most useful to reduce
+// threads for debugging).
+//
+// As a general rule AVOID DOING ANYTHING THAT BLOCKS in a ThreadPool
+// thread, as the threads in the pool are intended for coroutines that
+// suspend themselves.  See ThreadPool::async if you need to run a
+// blocking function (e.g., getaddrinfo) from within a coroutine and
+// want to suspend the coroutine until a result is available.
+//
+// A ThreadPool::Job is just a CpuHinted<std::coroutine_handle<>>,
+// which can be initialized from a std::coroutine_handle<> but
+// remembers the CPU on which it was created.  Hence if you create
+// Jobs at the time a coroutine is suspended, they will typically be
+// resumed on a CPU that shares the same last-level cache (LLC) as
+// where they last executed.
+//
+// The main method is go, which immediately queues a job or jobs for
+// execution:
+//
+//   void go(std::vector<Job> &&jobs);
+//   void go(Job item) { go(std::vector{item}); }
+//
+// Queuing a batch of jobs is more efficient than queuing jobs one at
+// a time, because it allows the ThreadPool to lock a runqueue one and
+// enqueue multiple jobs.  If you are making a bunch of callbacks that
+// are CoroCBs, the method CoroCB::set_result_without_resuming can be
+// useful here, although set_result_without_resuming may not require
+// enqueuing if the coroutine is not yet suspended.  Hence the idom is:
+//
+//   using WorkItem = CpuHinted<CoroCB<Errno>>;
+//
+//   std::vector<ThreadPool::Job> work;
+//   for (WorkItem &wi : /* some source of work */)
+//     if (std::coroutine_handle<> h =
+//         wi->wi_set_result_without_resuming(Errno{0}))
+//       // Returns non-NULL when coroutine needs to be resumed
+//       work.emplace_back(h, wi.cpuhint); // preserves hint from WorkItem
+//
+//   pool.go(std::move(work));
+//
+// If you only have one CoroCB to run, you can do so with
+// ThreadPool::make_callback, but the above idiom will be more
+// efficient when you can batch work.
+//
+// Other notable methods:
+//
+//   ThreadPool::bg() - you can co_await this to suspend your
+//     coroutine immediately and migrade to a different CPU.
+//
+//   ThreadPool::quiesce() - block until every thread in the pool has
+//     returned from whatever coroutine it is invoking.  This allows
+//     for RCU-style synchronization with the following pattern:
+//        - writers acquire an exclusive lock then quiesce
+//        - readers check no exclusive lock is held, then examine
+//          shared data safely so long as they don't suspend the
+//          coroutine.
+//     Note that it is an error to call quiesce() from within a
+//     ThreadPool thread, as this would lead to deadlock.
+//
+// ThreadPool's affinity strategy is as follows.  It keeps one
+// runqueue for each LLC on the machine.  For instance, on the
+// 64-core, 128-hyperthread AMD EPYC 9554 there are 8 different LLCs,
+// so 8 runqueues.  For each job, the runqueues store a coroutine to
+// resume, a CPU hint, and the time at which the job was enqueued.
+//
+// Worker threads float according to the OS scheduler, and a worker
+// attempts to service whatever runqueue corresponds to its current
+// CPU's LLC, with two exceptions.  First, to avoid starvation, the
+// last worker thread servicing a runqueue cannot change to a new
+// runqueue unless its old queue is empty.  Second if the current
+// CPU's runqueue is empty for a sufficient period, the worker will
+// look at two other runqueues and service the older of the two jobs
+// at the head of these queues.  The worker checks other runqueues
+// after futex-waiting 10, 100, and 1000 microseconds before waiting
+// permanently on its own runqueue.  Empirically, a futex wait seems
+// to do better than spinning, probably because of background work in
+// other threads.
+//
+// When servicing a runqueue, if there is Job that last ran on the
+// same CPU core as the worker, and the job is no more than 5
+// microseconds older than the head of the queue, then the worker will
+// preferentially resume the coroutine from the same core.  Otherwise,
+// it resumes the oldest job in the queue (i.e., the head of the
+// queue).
+//
+// When enqueuing Jobs, ThreadPool::go() will generally add a
+// coroutine to the runqueue corresponding to the Job's LLC, but there
+// are exceptions for load balancing.  go() processes a batch of jobs
+// and sorts them by "affinity queue"--i.e., the runqueue
+// corresponding to the LLC of the CPU hint in the Job.  When
+// processing a job for which it has not already locked the affinity
+// queue, it examines the time of the oldest job on a random runqueue,
+// and if that is least 10 microseconds less old than the affinity
+// queue, it migrates the job to the other queue.
+
 #pragma once
 
 #include <atomic>
@@ -103,7 +202,10 @@ public:
   void go(std::vector<Job> &&jobs);
   void go(Job item) { go(std::vector{item}); }
 
-  // Make a callback asynchronously in another thread
+  // Make a callback asynchronously in another thread.  This is
+  // convenient for one callback, but not as efficient as calling go()
+  // on a batch of coroutine_handles.  See the discussion in the
+  // comment at the top of the file.
   template<typename R>
   void make_callback(CpuHinted<CoroCB<R>> cb, references<R> auto &&r)
   {

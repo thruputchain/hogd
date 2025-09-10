@@ -224,7 +224,7 @@ CoroPollImpl::check(int timeout)
         if (WorkItem wi = state_[fd].callbacks[write].exchange({})) {
           --numcoro_;
           if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
-            coroqueue.push_back({h, wi.cpuhint});
+            coroqueue.emplace_back(h, wi.cpuhint);
         }
       }
   }
