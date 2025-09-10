@@ -39,7 +39,7 @@ TEST(PerThreadTest, ForEach)
   for (int i = 0; i < kThreads; ++i) {
     joins.emplace_back([&vecs, &vecs_done, &exit] {
       vecs->push_back(1);
-      EXPECT_EQ(vecs->size(), 1);
+      EXPECT_EQ(vecs->size(), 1U);
       vecs_done.count_down();
       exit.wait();
     });
