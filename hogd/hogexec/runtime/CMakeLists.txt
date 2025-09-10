@@ -96,7 +96,7 @@ add_library(runtime_test_objects OBJECT
 
 target_link_libraries(
   runtime_test_objects
-  gtest_headers
+  GTest::gtest
   hogd_interface
 )
 
