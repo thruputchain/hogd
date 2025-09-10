@@ -62,7 +62,7 @@ reset_fd(ThreadPool &pool)
       [&cp, fd = UniqueFd{*fd}](this auto) -> Detached {
         Buf b;
         co_await cp.read(fd, &b, 1);
-	enable_abortive_close(fd); // avoid TIME_WAIT
+        enable_abortive_close(fd); // avoid TIME_WAIT
       }();
     }
     co_return;

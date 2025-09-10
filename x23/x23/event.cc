@@ -68,14 +68,12 @@ WriteBuffer::Service::worker(Service self, BufVec work)
 
 } // namespace detail
 
-CoroPoll::CoroPoll(ThreadPool &pool)
-  : CoroPoll(pool, no_loop_thread{})
+CoroPoll::CoroPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{})
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }
 
-CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread)
-  : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread) : CoroPollImpl(pool)
 {
   if (ignore_sigpipe) {
     ignore_sigpipe = false;
