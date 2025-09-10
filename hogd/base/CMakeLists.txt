@@ -27,7 +27,7 @@ add_library(base_test_objects OBJECT
 )
 target_link_libraries(
   base_test_objects
-  gtest_headers
+  GTest::gtest_main
 )
 
 # create base module test binary
