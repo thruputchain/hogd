@@ -541,9 +541,8 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     // Check if this key_id is already in the previous lock
     const auto &prev_modified_keys =
         prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
-    bool already_locked =
-        std::find(prev_modified_keys.begin(), prev_modified_keys.end(),
-                  key_id) != prev_modified_keys.end();
+    bool already_locked = std::ranges::find(prev_modified_keys, key_id) !=
+                          prev_modified_keys.end();
 
     if (!already_locked) {
       if (!args.try_reserve_change_signer(key_id)) {
@@ -676,8 +675,8 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
                                          .extra_lock_data.auth_data_lock()
                                          .modified_key_ids;
     bool was_previously_locked =
-        std::find(prev_modified_keys.begin(), prev_modified_keys.end(),
-                  key_id) != prev_modified_keys.end();
+        std::ranges::find(prev_modified_keys, key_id) !=
+        prev_modified_keys.end();
 
     if (!was_previously_locked) {
       args.undo_change_signer(key_id);

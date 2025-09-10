@@ -26,6 +26,7 @@
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -1456,8 +1457,6 @@ TEST_P(DeltaManagerTest, NNIntAdd)
   EXPECT_TRUE(pool.run_test(experiment));
 }
 
-// NOLINTEND(bugprone-unchecked-optional-access)
-
 TEST_P(DeltaManagerTest, AuthDataChangeSigner)
 {
   InvalidStateFlag invalid_state_flag;
@@ -1592,6 +1591,8 @@ TEST_P(DeltaManagerTest, AuthDataFailedReservationReleasesReference)
   // Clean up
   item.commit(bytestring_delta, *lk3);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(
     BlockModes, DeltaManagerTest,

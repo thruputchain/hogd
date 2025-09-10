@@ -25,6 +25,7 @@
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
