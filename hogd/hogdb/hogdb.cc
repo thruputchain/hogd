@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -21,6 +22,7 @@
 #include "coord.hh"
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/merkle.h"
 #include "rpc_types.hh" // NOLINT
 
@@ -31,6 +33,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -82,6 +85,21 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     CHECK(trie.insert(k, value));
   });
   trie.generate_top_level_hashes();
+
+  // load the tip metadata from the database (won't exist in a new database).
+  HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
+  if (tip) {
+    if (trie.get_root_hash() != tip->hash) {
+      critical("Root hash doesn't match DbTip: expected '{}', got '{}'",
+               trie.get_root_hash(), tip->hash);
+      return EXIT_FAILURE;
+    }
+    ctx.get_tip() = *tip;
+  }
+  else {
+    ctx.get_tip().height = 0;
+    ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
+  }
 
   // start the coordinator server.
   info("starting coordinator server.");

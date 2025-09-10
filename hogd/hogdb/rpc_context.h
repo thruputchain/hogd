@@ -9,9 +9,13 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+
+// xdr types
+#include "db_coord.hh"
 
 #include "hogd/base/perthread.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -33,6 +37,7 @@ public:
   // getters.
   HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
+  DbTip &get_tip() { return tip_; }
 
   // opens a new block transaction.
   HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
@@ -60,6 +65,8 @@ private:
   HogDBDAO &db_;
   // the merkle trie that generates hashes for the items in the database.
   MerkleTriePrefix &trie_;
+  // tracks details about the last committed block.
+  DbTip tip_ = DbTip{.id = UINT64_MAX};
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
