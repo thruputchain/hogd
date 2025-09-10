@@ -70,7 +70,7 @@ reset_fd(ThreadPool &pool)
 
   DestroyInhibit di;
   for (int i = 0; i < 1000; ++i)
-    [&cp, dest, i, r = RefPtr{di}](this auto) -> Detached {
+    [&cp, dest, r = RefPtr{di}](this auto) -> Detached {
       UniqueFd fd{socket(dest.ss_family, SOCK_STREAM, 0)};
       if (auto res = co_await cp.connect(fd, &dest); !res)
         std::println(stderr, "connect: {}", res.error());
