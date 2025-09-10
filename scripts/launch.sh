@@ -68,6 +68,8 @@ wait_port 11222
   --max-msg-size 200000000 &
 wait_port 7888
 
+sleep 5
+
 # Start hogdb.
 echo "Start hogdb"
 "$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
