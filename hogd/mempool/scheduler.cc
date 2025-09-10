@@ -147,6 +147,11 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
                 .insert(&it->second)
                 .second);
     }
+    {
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
+      CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
+    }
   }
 }
 
@@ -468,7 +473,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
   std::unordered_set<ContractAddress> accounts;
 
   for (const SignedTransactionHash &hash : hashes) {
-    const TxInfo &info = hash_to_tx_[hash];
+    TxInfo &info = hash_to_tx_[hash];
     HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
     accounts.insert(info.account);
 
@@ -494,6 +499,14 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
           compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
                               from_xdr(already_scheduled_hogs),
                               already_scheduled_age);
+    }
+    {
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
+      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
+      if (expiry_to_tx_[expiry_height].empty()) {
+        CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
+      }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
   }
@@ -523,6 +536,14 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
                             .num_hogs[kHogAgeGroupToSchedule]) +
                info.tx.tx.invocation.gas_limit);
     txs.push_back(info.tx);
+    {
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
+      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
+      if (expiry_to_tx_[expiry_height].empty()) {
+        CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
+      }
+    }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
   }
   // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
