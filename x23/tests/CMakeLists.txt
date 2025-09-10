@@ -20,6 +20,7 @@ endmacro()
 add_x23_test(affinity)
 add_x23_test(callback)
 add_x23_test(cleanup)
+add_x23_test(corowake)
 add_x23_test(event)
 add_x23_test(format)
 add_x23_test(heap)
@@ -31,8 +32,11 @@ add_x23_test(srpcthroughput latency.h)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
 
 # flaky tests: prefer timeout failure over stuck CI
-set_tests_properties(event PROPERTIES TIMEOUT 10)
-set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
+#set_tests_properties(event PROPERTIES TIMEOUT 10)
+#set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
+#set_tests_properties(corowake PROPERTIES TIMEOUT 90)
+
+# example of disabling a test entirely
 #set_tests_properties(rpcthroughput PROPERTIES DISABLED TRUE)
 
 if(GOOGLETEST_PATH)

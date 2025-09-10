@@ -34,7 +34,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   auto fdp = getfd(fd);
   assert(!fdp->callbacks[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready &= ~epflags[write];
+  fdp->ready &= ~epflags[write] | epflags[!write];
 }
 
 void
