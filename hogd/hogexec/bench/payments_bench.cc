@@ -136,7 +136,7 @@ run_payments_bench(std::string const &server_addr, uint32_t exec_port,
   size_t offset = 0;
 
   // strong scaling
-  for (auto nthread : {1, 4, 16, 64, 128, 256, 512, 2048}) {
+  for (auto nthread : {1, 16, 64, 128, 256, 512, 2048}) {
     assert(offset + 10000 * 10 <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
@@ -145,7 +145,7 @@ run_payments_bench(std::string const &server_addr, uint32_t exec_port,
     // offset += 10000 * 10;
   }
   // weak scaling
-  for (auto nthread : {1, 4, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
+  for (auto nthread : {1, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
     assert(offset + 10000 * 10 <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,

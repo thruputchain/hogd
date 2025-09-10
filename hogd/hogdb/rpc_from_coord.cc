@@ -55,12 +55,59 @@ to_db_result(HogDBStatus<T> ret)
 {
   // TODO(abelay): the RPC error codes ought to be the same as or similar to
   // HogDBStatus; the current ones don't capture the range of possible errors.
-  if (!ret)
+  if (!ret) {
+    error("to_db_result error: {}", ret.error());
     return DbResult::DbResultError;
+  }
   return DbResult::DbResultOK;
 }
 
 } // namespace
+
+x23::Async<DbTipResult>
+HogDBCoordServer::dbcoord_get_tip()
+{
+  DbTipResult ret(DbResult::DbResultOK);
+  ret.db_tip() = ctx_.get_tip();
+  co_return ret;
+}
+
+HogDBStatus<void>
+HogDBCoordServer::commit_block(BlockID id)
+{
+  // check if already committed.
+  if (ctx_.get_tip().id == id) {
+    error("tried to commit the same block '{}' more than once", id);
+    return HogDBError(HogDBCode::kExists);
+  }
+
+  // update the DbTip.
+  ctx_.get_trie().generate_top_level_hashes();
+  ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
+  ctx_.get_tip().height = ctx_.get_tip().height + 1;
+  ctx_.get_tip().id = id;
+  HogDBStatus<void> ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
+  if (!ret)
+    return ret.error();
+
+  // write all the changes in the block TX.
+  BlockTX *btx = ctx_.get_block_tx(id);
+  ret = btx->commit();
+  if (!ret)
+    return ret.error();
+
+  // persist everything to the ramdb.
+  HogDBStatus<uint64_t> lsn = ctx_.get_db().commit();
+  if (!lsn)
+    return lsn.error();
+
+  // destroy the block TX.
+  ctx_.close_block_tx(id);
+
+  info("committed block {}: hash='{}', height='{}', lsn='{}", id,
+       ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
+  return {};
+}
 
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
@@ -75,15 +122,9 @@ x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
   BlockTX *btx = ctx_.get_block_tx(id);
-  if (!btx) {
+  if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
-  }
-
-  DbBlockResult ret(to_db_result(btx->commit()));
-  ctx_.get_trie().generate_top_level_hashes();
-  ret.block_hash() = ctx_.get_trie().get_root_hash();
-  ctx_.close_block_tx(id);
-  co_return ret;
+  co_return DbBlockResult(to_db_result(commit_block(id)));
 }
 
 x23::Async<DbResult>
@@ -102,11 +143,16 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 {
-  // TODO(abelay): Get rid of this. This should not be a separate RPC method.
-  // Instead both commit and abort should implicitly close.
+  // TODO(abelay): rename this to finish_snapshot. It will be called before
+  // either commit_snapshot or abort_snapshot because the merkle root is needed
+  // to create a proposal block.
 
-  // ctx_.close_block_tx(id);
-  co_return DbBlockResult(DbResult::DbResultOK);
+  // TODO(abelay): we could potential free memory here too.
+
+  DbBlockResult ret(DbResult::DbResultOK);
+  ctx_.get_trie().generate_top_level_hashes();
+  ret.block_hash() = ctx_.get_trie().get_root_hash();
+  co_return ret;
 }
 
 x23::Async<HogAgeResult>
@@ -190,19 +236,20 @@ HogDBCoordServer::start_server(uint16_t port)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 {
+  constexpr static BlockID kGenesisBlockID = 0;
   if (is_initialized_) {
     co_return DbResult::DbResultError;
   }
 
   is_initialized_ = true;
 
-  auto r = ctx_.open_block_tx(0);
+  auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
     co_return DbResult::DbResultError;
   }
 
-  auto *itx = ctx_.get_invoke_tx(0, 0);
+  auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
   assert(itx);
 
   bool failure = false;
@@ -247,16 +294,8 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   itx->commit();
-  ctx_.close_invoke_tx(0, 0);
-  auto commit_res = ctx_.get_block_tx(0)->commit();
-  if (!commit_res.has_value()) {
-    error("failed to commit genesis block: {}", commit_res.error());
-    co_return DbResult::DbResultError;
-  }
-
-  ctx_.close_block_tx(0);
-
-  co_return DbResult::DbResultOK;
+  ctx_.close_invoke_tx(kGenesisBlockID, 0);
+  co_return to_db_result(commit_block(kGenesisBlockID));
 }
 
 x23::Async<DbShardResult>

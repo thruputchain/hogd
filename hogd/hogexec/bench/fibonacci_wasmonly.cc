@@ -118,7 +118,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
   fib_client_t fib_client(bs.contract_addr_);
 
-  for (int nrep = 0; nrep < 10; nrep++) {
+  for (int nrep = 0; nrep < 5; nrep++) {
     info("bench rep {} for {} txs (fib {}, commit {}) on {} threads", nrep,
          num_txs, nfib, do_commit, num_exec_threads);
     auto start_time = std::chrono::steady_clock::now();
@@ -179,14 +179,14 @@ run_fibonacci_client(std::string const &server_addr, uint32_t exec_port,
   bs.initialize();
 
   // strong scaling
-  for (auto nthread : {1, 4, 16, 64, 128, 256, 512, 2048}) {
+  for (auto nthread : {1, 16, 64, 128, 256, 512, 2048}) {
     run_bench_rep(bs, 10000, 20, nthread, true);
     run_bench_rep(bs, 10000, 20, nthread, false);
     run_bench_rep(bs, 10000, 15, nthread, true);
     run_bench_rep(bs, 10000, 15, nthread, false);
   }
   // weak scaling
-  for (auto nthread : {1, 4, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
+  for (auto nthread : {1, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
     run_bench_rep(bs, nthread * 1000, 15, nthread, true);

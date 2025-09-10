@@ -59,6 +59,16 @@ set_nonblock(BorrowedFd fd, bool on)
     Errno{}.raise("F_SETFL");
 }
 
+void
+enable_abortive_close(BorrowedFd fd)
+{
+  struct linger lin;
+  lin.l_onoff = 1;
+  lin.l_linger = 0;
+  if (setsockopt(fd.get(), SOL_SOCKET, SO_LINGER, &lin, sizeof(lin)) < 0)
+    Errno{}.raise("SO_LINGER");
+}
+
 UniqueFd
 stcplisten(std::uint16_t port, int backlog)
 {
