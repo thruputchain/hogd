@@ -52,6 +52,8 @@ delta_to_typeclass(StorageDelta const &delta,
     return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
   case StorageDeltaType::kDeltaTypeReplayCacheModify:
     return StorageItemTypeClass(StorageItemType::kItemTypeReplayCache);
+  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+    return StorageItemTypeClass(StorageItemType::kItemTypeAuthData);
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -112,6 +114,12 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
         StorageItemType::kItemTypeReplayCache);
     lock.full_typeclass_lock().extra_lock_data.nonces() =
         delta.replay_cache_modify().nonces;
+    return lock;
+  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeAuthData);
+    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() =
+        AuthDataLock{.modified_key_ids = {delta.auth_data_change_signer().public_key_id}};
     return lock;
   default:
     throw std::runtime_error("unimplemented");
