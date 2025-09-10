@@ -495,7 +495,9 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
   std::unordered_set<ContractAddress> accounts;
 
   for (const SignedTransactionHash &hash : hashes) {
-    TxInfo &info = hash_to_tx_[hash];
+    auto it = hash_to_tx_.find(hash);
+    CHECK(it != hash_to_tx_.end());
+    TxInfo &info = it->second;
     HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
     accounts.insert(info.account);
 
