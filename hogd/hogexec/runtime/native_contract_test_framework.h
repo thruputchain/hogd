@@ -340,6 +340,8 @@ public:
 
   void run_genesis_initialization(GenesisBlock const &genesis_block);
 
+  auto &get_coord_client() { return coord_wrapper_->client(); }
+
 private:
   void initialize(BlockExecutionMode mode)
   {

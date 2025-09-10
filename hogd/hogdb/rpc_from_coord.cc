@@ -106,6 +106,7 @@ HogDBCoordServer::commit_block(BlockID id)
 
   info("committed block {}: hash='{}', height='{}', lsn='{}", id,
        ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
+  assert(ctx_.get_tip().height != 0);
   return {};
 }
 
@@ -237,11 +238,10 @@ x23::Async<DbResult>
 HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 {
   constexpr static BlockID kGenesisBlockID = 0;
-  if (is_initialized_) {
+  if (ctx_.get_tip().height != 0) {
+    error("Genesis block can only be loaded if the database has no blocks");
     co_return DbResult::DbResultError;
   }
-
-  is_initialized_ = true;
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {

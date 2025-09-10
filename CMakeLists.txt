@@ -100,6 +100,17 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
 enable_testing()
 include(GoogleTest)
 
+# Note: One can extract the include directory from the gtest library
+# with the following snippet:
+#add_library(gtest_headers INTERFACE)
+#target_include_directories(gtest_headers INTERFACE
+#    ${gtest_SOURCE_DIR}/include
+#)
+# This may slightly improves build parallelism (the base/crypto tests don't need to wait
+# to start building for the gtest library to build) depending on gtest_headers causes all sorts
+# of false-positive clang-tidy errors.
+
+
 # Enable performance (Google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
