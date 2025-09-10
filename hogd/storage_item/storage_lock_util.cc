@@ -124,8 +124,7 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
          delta.auth_data_change().auth_data_change_signers) {
       auth_data_lock.modified_key_ids.push_back(signer.public_key_id);
     }
-    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() =
-        AuthDataLock{.modified_key_ids = auth_data_lock.modified_key_ids};
+    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() = auth_data_lock;
     return lock;
   }
   default:
