@@ -90,16 +90,16 @@ extern std::unique_ptr<Logger> logger;
 template<LogLevel Level>
 void
 do_log(std::string_view fmt, const std::source_location &loc,
-       std::format_args &&args)
+       std::format_args args)
 {
   if constexpr (should_log(Level)) {
-    logger->vlog(Level, fmt, loc, std::move(args));
+    logger->vlog(Level, fmt, loc, args);
   }
 }
 
 [[noreturn]] void do_panic(std::string_view fmt,
                            const std::source_location &loc,
-                           std::format_args &&args);
+                           std::format_args args);
 
 template<typename Tag>
 bool
