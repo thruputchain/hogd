@@ -16,7 +16,10 @@
 #include <thread>
 #include <utility>
 
-#include "rpc_types.hh" // NOLINT
+// XDR headers
+#include "coord.hh"
+#include "db_coord.hh"
+#include "rpc_types.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
