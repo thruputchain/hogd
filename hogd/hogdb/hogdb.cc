@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -96,6 +97,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
   else {
     ctx.get_tip().height = 0;
+    ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
 
   // start the coordinator server.

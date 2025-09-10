@@ -73,6 +73,12 @@ HogDBCoordServer::dbcoord_get_tip()
 HogDBStatus<void>
 HogDBCoordServer::commit_block(BlockID id)
 {
+  // check if already committed.
+  if (ctx_.get_tip().id == id) {
+    error("tried to commit the same block '{}' more than once", id);
+    return HogDBError(HogDBCode::kExists);
+  }
+
   // update the DbTip.
   ctx_.get_trie().generate_top_level_hashes();
   ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
@@ -96,7 +102,7 @@ HogDBCoordServer::commit_block(BlockID id)
   // destroy the block TX.
   ctx_.close_block_tx(id);
 
-  info("commited block {}: hash='{}', height='{}', lsn='{}", id,
+  info("committed block {}: hash='{}', height='{}', lsn='{}", id,
        ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
   return {};
 }
