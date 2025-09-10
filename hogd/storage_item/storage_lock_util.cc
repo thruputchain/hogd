@@ -120,11 +120,12 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeAuthData);
     AuthDataLock auth_data_lock;
-    for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
       auth_data_lock.modified_key_ids.push_back(signer.public_key_id);
     }
-    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() = AuthDataLock{
-        .modified_key_ids = auth_data_lock.modified_key_ids};
+    lock.full_typeclass_lock().extra_lock_data.auth_data_lock() =
+        AuthDataLock{.modified_key_ids = auth_data_lock.modified_key_ids};
     return lock;
   }
   default:

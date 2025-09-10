@@ -116,7 +116,8 @@ private:
   // kSetItemTypeClass -> kSetItemTypeClass
   // In essence -- leave the base typeclass lock unchanged,
   // but release any type-specific lock data.
-  // Leaves the object in a state where locks are held for delta, not the previous lock.
+  // Leaves the object in a state where locks are held for delta, not the
+  // previous lock.
   void revert_set_typeclass_lock_to_set_typeclass(StorageLock const &lock,
                                                   StorageDelta const &delta);
   // kSetItemTypeClass -> kNone

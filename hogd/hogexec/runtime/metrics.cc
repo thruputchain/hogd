@@ -57,7 +57,7 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
   while (!stoken.stop_requested()) {
     std::unique_lock g(cv_mutex_);
     cv_.wait_for(g, stoken, std::chrono::seconds(1), [] { return false; });
-    
+
     auto new_snapshot = get_stats();
     auto delta = new_snapshot - snapshot;
     double time_delta_s = delta.time_ns / 1'000'000'000.0;

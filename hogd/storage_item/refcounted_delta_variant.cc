@@ -515,7 +515,8 @@ AuthDataArgs::undo_change_signer(uint32_t key_id)
 }
 
 void
-AuthDataArgs::commit_change_signer(uint32_t key_id, const PublicKeyConfig *new_key)
+AuthDataArgs::commit_change_signer(uint32_t key_id,
+                                   const PublicKeyConfig *new_key)
 {
   assert(modified_key_ids_.contains(key_id));
   if (new_key) {

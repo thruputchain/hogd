@@ -155,9 +155,9 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
         variant_.release_reference();
       };
 
-      for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
-        if (!args->try_reserve_change_signer(
-                signer.public_key_id)) {
+      for (auto const &signer :
+           delta.auth_data_change().auth_data_change_signers) {
+        if (!args->try_reserve_change_signer(signer.public_key_id)) {
           do_cleanup();
           return false;
         }
@@ -228,9 +228,9 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kDeltaTypeAuthDataChange:
   {
     auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
-    for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
-      args.commit_change_signer(signer.public_key_id,
-                                signer.public_key.get());
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
+      args.commit_change_signer(signer.public_key_id, signer.public_key.get());
     }
   } break;
   default:
@@ -558,7 +558,8 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
       }
     };
 
-    for (auto const &signer : delta.auth_data_change().auth_data_change_signers) {
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
       uint32_t key_id = signer.public_key_id;
 
       // Check if this key_id is already in the previous lock
@@ -695,16 +696,17 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
   {
     auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
 
-
     // Release the lock for this key ID, then re-acquire it
     const auto &prev_modified_keys = lock.full_typeclass_lock()
                                          .extra_lock_data.auth_data_lock()
                                          .modified_key_ids;
-    for (auto const& key_id : prev_modified_keys) {
+    for (auto const &key_id : prev_modified_keys) {
       args.undo_change_signer(key_id);
     }
-    for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
-      [[maybe_unused]] auto r = args.try_reserve_change_signer(signer.public_key_id);
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
+      [[maybe_unused]] auto r =
+          args.try_reserve_change_signer(signer.public_key_id);
       assert(r);
     }
     break;

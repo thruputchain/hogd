@@ -2,7 +2,9 @@
 
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -46,11 +48,18 @@ public:
     return d;
   }
 
-  static auto make_auth_data_delta(uint32_t key_id)
+  static auto make_auth_data_delta(std::vector<uint32_t> const &key_ids)
   {
-    const auto empty_config = PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519}, .max_weight = Weight{1}};
+    const auto empty_config =
+        PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                        .max_weight = Weight{1}};
     StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChange);
-    delta.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = key_id, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(empty_config))});
+    for (auto key_id : key_ids) {
+      delta.auth_data_change().auth_data_change_signers.push_back(
+          AuthDataChangeSigner{.public_key_id = key_id,
+                               .public_key = x23::Ptr<PublicKeyConfig>(
+                                   new PublicKeyConfig(empty_config))});
+    }
     return delta;
   }
 
@@ -162,7 +171,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 
   // First, create a successful auth data reservation to occupy key ID 0
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_auth_data_delta(0),
+  tx1.add_delta(key, make_auth_data_delta({0, 2}),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -170,7 +179,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 
   // Now try to reserve the same key ID again - this should fail
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_auth_data_delta(0), // Same key ID
+  tx2.add_delta(key, make_auth_data_delta({1, 2}), // Overlap in key ids
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
@@ -327,6 +336,44 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
       << "Should be able to reserve bytestring after nnint conflict";
 
   // Clean up
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+}
+
+TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Auth data is not supported in HogDB";
+    return;
+  }
+
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto key = make_addrkey(contract_addr, "test");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_auth_data_delta({2, 5, 7}),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_FALSE(r2.value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(key, make_auth_data_delta({2, 7}),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
   ASSERT_TRUE(tx3.commit_transaction().has_value());
 }

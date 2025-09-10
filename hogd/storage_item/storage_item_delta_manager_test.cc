@@ -1461,7 +1461,8 @@ TEST_P(DeltaManagerTest, NNIntAdd)
 TEST_P(DeltaManagerTest, AuthDataChangeSigner)
 {
   auto make_pk_config = []() {
-    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519}, .max_weight = Weight{1}};
+    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                           .max_weight = Weight{1}};
   };
 
   InvalidStateFlag invalid_state_flag;
@@ -1470,7 +1471,10 @@ TEST_P(DeltaManagerTest, AuthDataChangeSigner)
 
   // Create an auth data change delta for key ID 0
   StorageDelta auth_delta(StorageDeltaType::kDeltaTypeAuthDataChange);
-  auth_delta.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = 0, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(make_pk_config()))});
+  auth_delta.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
 
   // Try to reserve the delta
   auto lk1 = item.try_reserve(auth_delta, StorageLock(StorageLockType::kNone));
@@ -1486,7 +1490,10 @@ TEST_P(DeltaManagerTest, AuthDataChangeSigner)
 
   // Now try to reserve a different key ID
   StorageDelta auth_delta2(StorageDeltaType::kDeltaTypeAuthDataChange);
-  auth_delta2.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = 1, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(make_pk_config()))});
+  auth_delta2.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 1,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
 
   auto lk3 = item.try_reserve(auth_delta2, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk3);
@@ -1556,7 +1563,8 @@ TEST_P(DeltaManagerTest, RCQFailedReservationReleasesReference)
 TEST_P(DeltaManagerTest, AuthDataFailedReservationReleasesReference)
 {
   auto make_pk_config = []() {
-    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519}, .max_weight = Weight{1}};
+    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                           .max_weight = Weight{1}};
   };
 
   InvalidStateFlag invalid_state_flag;
@@ -1565,14 +1573,20 @@ TEST_P(DeltaManagerTest, AuthDataFailedReservationReleasesReference)
 
   // First, create a successful auth data reservation to occupy key ID 0
   StorageDelta auth_delta1(StorageDeltaType::kDeltaTypeAuthDataChange);
-  auth_delta1.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = 0, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(make_pk_config()))});
+  auth_delta1.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
 
   auto lk1 = item.try_reserve(auth_delta1, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk1);
 
   // Now try to reserve the same key ID again - this should fail
   StorageDelta auth_delta2(StorageDeltaType::kDeltaTypeAuthDataChange);
-  auth_delta2.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = 0, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(make_pk_config()))});
+  auth_delta2.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
 
   auto lk2 = item.try_reserve(auth_delta2, StorageLock(StorageLockType::kNone));
   ASSERT_FALSE(lk2); // Should fail due to conflict
