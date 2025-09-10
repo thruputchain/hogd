@@ -48,10 +48,9 @@ public:
 
   static auto make_auth_data_delta(uint32_t key_id)
   {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChangeSigner);
-    delta.auth_data_change_signer().public_key_id = key_id;
-    delta.auth_data_change_signer().public_key =
-        x23::Ptr<PublicKey>(new PublicKey(CryptographicScheme::Ed25519));
+    const auto empty_config = PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519}, .max_weight = Weight{1}};
+    StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChange);
+    delta.auth_data_change().auth_data_change_signers.push_back(AuthDataChangeSigner{.public_key_id = key_id, .public_key = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(empty_config))});
     return delta;
   }
 

@@ -515,14 +515,13 @@ AuthDataArgs::undo_change_signer(uint32_t key_id)
 }
 
 void
-AuthDataArgs::commit_change_signer(uint32_t key_id, const PublicKey *new_key)
+AuthDataArgs::commit_change_signer(uint32_t key_id, const PublicKeyConfig *new_key)
 {
   assert(modified_key_ids_.contains(key_id));
   if (new_key) {
     // Create a PublicKeyConfig with the new key and default weight
-    PublicKeyConfig config{.key = *new_key, .max_weight = 1};
     committed_changes_[key_id] =
-        x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(config));
+        x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(*new_key));
   }
   else {
     committed_changes_[key_id] = nullptr;
@@ -583,7 +582,7 @@ AuthDataArgs::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *current_model,
     StorageItemWrapper const *base_item) const
 {
-  assert(delta.type() == StorageDeltaType::kDeltaTypeAuthDataChangeSigner);
+  assert(delta.type() == StorageDeltaType::kDeltaTypeAuthDataChange);
   return get_marginal_cost_upper_bound_static(has_committed_delta_, delta,
                                               current_model, base_item);
 }
@@ -616,7 +615,7 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
     return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                                  cost_model,
                                                                  base_item);
-  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
     return AuthDataArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                               cost_model,
                                                               base_item);

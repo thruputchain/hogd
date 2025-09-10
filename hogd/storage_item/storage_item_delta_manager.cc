@@ -138,7 +138,7 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     }
     return false;
   }
-  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
   {
     const auto *prev_auth_data =
         (committed_item_ &&
@@ -146,10 +146,22 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
             ? &committed_item_->auth_data()
             : nullptr;
     if (auto *args = variant_.try_set_variant<AuthDataArgs>(prev_auth_data)) {
-      if (!args->try_reserve_change_signer(
-              delta.auth_data_change_signer().public_key_id)) {
+
+      std::set<uint32_t> cleanup_keys = {};
+      auto do_cleanup = [&]() {
+        for (auto key_id : cleanup_keys) {
+          args->undo_change_signer(key_id);
+        }
         variant_.release_reference();
-        return false;
+      };
+
+      for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
+        if (!args->try_reserve_change_signer(
+                signer.public_key_id)) {
+          do_cleanup();
+          return false;
+        }
+        cleanup_keys.insert(signer.public_key_id);
       }
       return true;
     }
@@ -213,11 +225,13 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
       args.commit_insert(nonce);
     }
   } break;
-  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
   {
     auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
-    args.commit_change_signer(delta.auth_data_change_signer().public_key_id,
-                              delta.auth_data_change_signer().public_key.get());
+    for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
+      args.commit_change_signer(signer.public_key_id,
+                                signer.public_key.get());
+    }
   } break;
   default:
     throw std::runtime_error("unimplemented commit_delta");
@@ -536,17 +550,29 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   {
     assert(variant_.has_variant_arm<AuthDataArgs>());
     auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
-    uint32_t key_id = delta.auth_data_change_signer().public_key_id;
+    std::set<uint32_t> cleanup_keys = {};
 
-    // Check if this key_id is already in the previous lock
-    const auto &prev_modified_keys =
-        prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
-    bool already_locked = std::ranges::find(prev_modified_keys, key_id) !=
-                          prev_modified_keys.end();
+    auto do_cleanup = [&]() {
+      for (auto key_id : cleanup_keys) {
+        args.undo_change_signer(key_id);
+      }
+    };
 
-    if (!already_locked) {
-      if (!args.try_reserve_change_signer(key_id)) {
-        return std::nullopt;
+    for (auto const &signer : delta.auth_data_change().auth_data_change_signers) {
+      uint32_t key_id = signer.public_key_id;
+
+      // Check if this key_id is already in the previous lock
+      const auto &prev_modified_keys =
+          prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
+      bool already_locked = std::ranges::find(prev_modified_keys, key_id) !=
+                            prev_modified_keys.end();
+
+      if (!already_locked) {
+        if (!args.try_reserve_change_signer(key_id)) {
+          do_cleanup();
+          return std::nullopt;
+        }
+        cleanup_keys.insert(key_id);
       }
     }
 
@@ -665,22 +691,20 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     break;
   }
-  case StorageDeltaType::kDeltaTypeAuthDataChangeSigner:
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
   {
     auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
-    uint32_t key_id = delta.auth_data_change_signer().public_key_id;
+
 
     // Release the lock for this key ID, then re-acquire it
     const auto &prev_modified_keys = lock.full_typeclass_lock()
                                          .extra_lock_data.auth_data_lock()
                                          .modified_key_ids;
-    bool was_previously_locked =
-        std::ranges::find(prev_modified_keys, key_id) !=
-        prev_modified_keys.end();
-
-    if (!was_previously_locked) {
+    for (auto const& key_id : prev_modified_keys) {
       args.undo_change_signer(key_id);
-      [[maybe_unused]] auto r = args.try_reserve_change_signer(key_id);
+    }
+    for (auto const& signer : delta.auth_data_change().auth_data_change_signers) {
+      [[maybe_unused]] auto r = args.try_reserve_change_signer(signer.public_key_id);
       assert(r);
     }
     break;

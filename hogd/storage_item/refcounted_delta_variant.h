@@ -293,7 +293,7 @@ public:
   bool try_reserve_change_signer(uint32_t key_id);
   void undo_change_signer(uint32_t key_id);
 
-  void commit_change_signer(uint32_t key_id, const PublicKey *new_key);
+  void commit_change_signer(uint32_t key_id, const PublicKeyConfig *new_key);
 
   int128_t
   get_current_committed_cost(StorageCostModel const *current_model,
