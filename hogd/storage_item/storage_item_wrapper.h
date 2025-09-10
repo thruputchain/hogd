@@ -2,6 +2,7 @@
 
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/replay_cache.h"
@@ -22,6 +23,8 @@ public:
                      StorageCostModel const *cost_model);
   StorageItemWrapper(ReplayCache replay_cache,
                      StorageCostModel const *cost_model);
+  StorageItemWrapper(AccountAuthData auth_data,
+                     StorageCostModel const *cost_model);
 
   auto &bytestring(this auto &self)
   {
@@ -41,6 +44,11 @@ public:
   auto &replay_cache(this auto &self)
   {
     return std::get<ReplayCacheWrapper>(self.storage_item_).cache_;
+  }
+
+  auto &auth_data(this auto &self)
+  {
+    return std::get<AuthDataWrapper>(self.storage_item_).auth_data_;
   }
 
   StorageItemType type() const;
@@ -99,8 +107,18 @@ private:
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
 
+  struct AuthDataWrapper {
+    AccountAuthData auth_data_;
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeAuthData;
+    // Converts to wire format for network transmission
+    StorageItem to_wire_item() const;
+    // Returns storage cost based on auth data size
+    int128_t storage_cost(StorageCostModel const *cost_model) const;
+  };
+
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper, ReplayCacheWrapper>
+               RetrocausalQueueWrapper, ReplayCacheWrapper, AuthDataWrapper>
       storage_item_;
   const StorageCostModel *cost_model_;
 };

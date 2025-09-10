@@ -7,6 +7,8 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
+#include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -140,6 +142,16 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
               StorageItemType::kItemTypeNonnegativeInt);
     EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
   }
+}
+
+TEST_P(GenesisBlockUnfurlTest, DoubleLoadError)
+{
+  GenesisBlock genesis_block{};
+
+  auto r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbResult::DbResultOK);
+  r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbResult::DbResultError);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

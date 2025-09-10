@@ -30,7 +30,6 @@ add_library(genesis_test_objects OBJECT
 target_link_libraries(genesis_test_objects
   GTest::gtest
   hogd_interface
-  crypto
 )
 
 target_include_directories(genesis_test_objects PRIVATE
