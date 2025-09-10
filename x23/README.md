@@ -328,7 +328,7 @@ do_ten_things()
 ### The most vexing capture problem
 
 It is perfectly fine to use lambdas to define coroutines, but you have
-to ensure coroutine does not outlive the lambda, and unfortunately
+to ensure the coroutine does not outlive the lambda, and unfortunately
 it's all too easy to write code in which that is not the case.  Here's
 an example of a serious bug:
 
@@ -348,11 +348,11 @@ safe.  Unfortunately, `n` is captured into a lambda object, which is
 is a temporary object destroyed at the end of the full expression
 (basically at the semicolon).  Yet the coroutine is likely suspended
 by `thing()`, which means it will be resumed later after the lambda is
-destroyed, making the access to `n` in the loop condition a use-after
-free bug.
+destroyed, making the access to `n` in the loop condition a
+use-after-free bug.
 
-There are ways to avoid the above problem.  The first is just not to
-capture anything in coroutines.  You can instead pass any necessary
+There are two ways to avoid the above problem.  The first is just not
+to capture anything in coroutines.  You can instead pass any necessary
 values to the coroutine as parameters, which will be copied into the
 coroutine itself.  This is fine, but a bit redundant because it
 requires naming the capture twice:
@@ -370,14 +370,19 @@ do_n_things(int n)
 
 The second option is to copy the lambda into itself by means of the
 versatile C++23 [deducing this feature][deducing-this].  Briefly,
-deducing this allows first argument to reference the method object if
-it starts with the keyword `this`.  With such an explicit `this`
-argument, you no longer use the `this` keyword in the method, but
-rather access the object via the first method parameter (by convention
-often called `self`).  As an example, in the code below, calling
-`substr()` on an object of type `DerivedString` returns a
-`DerivedString`, not a BaseString, because `BaseString::substr`
-deduces the type of `this` as `DerivedString`:
+deducing this allows a method to get its object explicitly as the
+first argument, rather than implicitly through the `this` keyword.  To
+use this feature, you must tag the first argument to a method with the
+keyword `this`, which tells the compiler to use that argument (by
+convention often called `self`) as the object.  Note that while
+implicit `this` is a pointer, an explicit `this` argument has
+reference semantics, making it possible to infer whether the object is
+an lvalue or rvalue.
+
+As an example, in the code below, calling `substr()` on an object of
+type `DerivedString` returns a `DerivedString`, not a BaseString,
+because `BaseString::substr` deduces the type of `this` as
+`DerivedString`:
 
 ``` cpp
 struct BaseString {
@@ -387,7 +392,7 @@ struct BaseString {
                size_t count = Self::npos)
    {
      return Self(self.begin() + pos,
-                 self.begin() + std::min(self.size(), self.count - pos));
+                 self.begin() + std::min(self.size(), count - pos));
    }
 };
 
