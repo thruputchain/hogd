@@ -275,7 +275,7 @@ dependencies = [
 [[package]]
 name = "groundhog_xdr"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#a4a433634b778be0b58743a51e21fb338b7559b3"
+source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#11d5f25bb916fa9948644411279840f4e6cba950"
 dependencies = [
  "macros 0.1.0 (git+ssh://git@github.com/groundhogchain/protocol-rs.git)",
  "serde",
@@ -369,7 +369,7 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#a4a433634b778be0b58743a51e21fb338b7559b3"
+source = "git+ssh://git@github.com/groundhogchain/protocol-rs.git#11d5f25bb916fa9948644411279840f4e6cba950"
 dependencies = [
  "darling",
  "proc-macro2",

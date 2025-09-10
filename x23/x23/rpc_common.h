@@ -163,7 +163,7 @@ with_proc_meta(std::uint32_t procno, F &&f)
 }
 
 struct RpcLogger {
-  static inline int default_logfd = -1;
+  static int default_logfd;
   int logfd_ = default_logfd;
   std::string peername_;
 

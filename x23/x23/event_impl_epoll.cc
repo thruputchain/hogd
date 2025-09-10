@@ -107,6 +107,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     assert(err != -1);
   }
   else {
+    fdp->ready = 0; // because EPOLLERR is sticky
     if (old_mode == kActive) {
       [[maybe_unused]] int err =
           epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
