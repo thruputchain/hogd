@@ -70,9 +70,11 @@ public:
 
   ~HogexecMetrics()
   {
-    background_worker_.request_stop();
-    cv_.notify_all();
-    background_worker_.join();
+    if (background_worker_.joinable()) {
+      background_worker_.request_stop();
+      cv_.notify_all();
+      background_worker_.join();
+    }
   }
 
 private:
