@@ -178,6 +178,12 @@ private:
                       x23::Vec<SignedTransactionHash> &hashes,
                       x23::Vec<SignedTransaction> &txs);
 
+  // Discards all txs that have expired before [current_height]. In other words,
+  // if [current_height] is the height of the current block being scheduled,
+  // then all txs that expire at heights [current_height - 1] and smaller are
+  // discarded.
+  void discard_expired_txs(BlockHeight current_height);
+
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.

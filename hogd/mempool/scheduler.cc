@@ -433,6 +433,19 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
   }
 }
 
+void Scheduler::discard_expired_txs(BlockHeight current_height) {
+  for (auto it = expiry_to_txs_.begin(); it != expiry_to_txs_.end(); ) {
+    BlockHeight height = it->first;
+    if (height >= current_height) {
+      break;
+    }
+    for (TxInfo *info : it->second) {
+      // TODO(jhumphri): Delete the tx from either the runqueue or [stranded_].
+    }
+    it = expiry_to_txs_.erase(it);
+  }
+}
+
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 Scheduler::schedule(BlockHeight block_height, size_t block_size)
 {
