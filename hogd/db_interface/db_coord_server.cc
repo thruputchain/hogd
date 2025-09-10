@@ -91,8 +91,10 @@ DbCoordServer::start_server(uint16_t port_number)
 x23::Async<DbResult>
 DbCoordServer::dbcoord_load_genesis_block(GenesisBlock const &genesis_block)
 {
-  block_manager_->initialize_genesis_block(genesis_block);
-  co_return DbResult::DbResultOK;
+  if (block_manager_->initialize_genesis_block(genesis_block)) {
+    co_return DbResult::DbResultOK;
+  }
+  co_return DbResult::DbResultError;
 }
 
 } // namespace hogd

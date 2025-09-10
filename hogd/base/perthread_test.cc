@@ -39,7 +39,7 @@ TEST(PerThreadTest, ForEach)
   for (int i = 0; i < kThreads; ++i) {
     joins.emplace_back([&vecs, &vecs_done, &exit] {
       vecs->push_back(1);
-      EXPECT_EQ(vecs->size(), 1);
+      EXPECT_EQ(vecs->size(), 1U);
       vecs_done.count_down();
       exit.wait();
     });
@@ -49,10 +49,11 @@ TEST(PerThreadTest, ForEach)
   vecs_done.wait();
   std::unique_lock ul = vecs.lock_threads();
   vecs.for_each(ul, [&vec](const std::vector<int> &v) {
-    EXPECT_EQ(v.size(), 1);
+    EXPECT_EQ(v.size(), 1U);
     vec.insert(vec.end(), v.cbegin(), v.cend());
   });
-  EXPECT_EQ(vec.size(), kThreads);
+  constexpr static unsigned int kThreadsUnsigned = kThreads;
+  EXPECT_EQ(vec.size(), kThreadsUnsigned);
   exit.count_down();
 }
 
