@@ -75,7 +75,7 @@ private:
         auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
         if (!fd) {
           error("failed to connect:{} to coord on {} port {}, retrying",
-                Errno{}, server_addr_, coord_port_);
+                fd.error().what(), server_addr_, coord_port_);
           std::this_thread::sleep_for(std::chrono::milliseconds(500));
           continue;
         }
