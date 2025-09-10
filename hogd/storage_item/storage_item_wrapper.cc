@@ -4,6 +4,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -31,6 +32,11 @@ StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue,
 StorageItemWrapper::StorageItemWrapper(ReplayCache replay_cache,
                                        StorageCostModel const *cost_model)
   : storage_item_(ReplayCacheWrapper{.cache_ = std::move(replay_cache)}),
+    cost_model_(cost_model)
+{}
+StorageItemWrapper::StorageItemWrapper(AccountAuthData auth_data,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(AuthDataWrapper{.auth_data_ = std::move(auth_data)}),
     cost_model_(cost_model)
 {}
 
@@ -77,6 +83,14 @@ StorageItemWrapper::ReplayCacheWrapper::to_wire_item() const
   return item;
 }
 
+StorageItem
+StorageItemWrapper::AuthDataWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeAuthData);
+  item.auth_data() = auth_data_;
+  return item;
+}
+
 int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost(
     StorageCostModel const *cost_model) const
@@ -108,6 +122,15 @@ StorageItemWrapper::ReplayCacheWrapper::storage_cost(
 {
   return cost_model->kBaseItemCost +
          cost_model->get_replay_cache_cost(cache_.size());
+}
+
+int128_t
+StorageItemWrapper::AuthDataWrapper::storage_cost( // NOLINT
+    StorageCostModel const *cost_model) const
+{
+  return cost_model
+      ->kBaseItemCost; // TODO(geoff): vary size based on number of signers
+                       // cost_model->get_auth_data_cost(auth_data_.size());
 }
 
 int128_t

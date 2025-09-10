@@ -11,6 +11,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -24,6 +25,7 @@
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -495,6 +497,97 @@ ReplayCacheArgs::commit_threshold_change(ReplayNonce new_threshold)
   committed_nonces_.erase(committed_nonces_.begin(), bound);
 }
 
+bool
+AuthDataArgs::try_reserve_change_signer(uint32_t key_id)
+{
+  if (key_id >= MAX_SIGNERS) {
+    return false;
+  }
+  auto [_, inserted] = modified_key_ids_.insert(key_id);
+  return inserted;
+}
+
+void
+AuthDataArgs::undo_change_signer(uint32_t key_id)
+{
+  [[maybe_unused]] auto res = modified_key_ids_.erase(key_id);
+  assert(res == 1);
+}
+
+void
+AuthDataArgs::commit_change_signer(uint32_t key_id,
+                                   const PublicKeyConfig *new_key)
+{
+  assert(modified_key_ids_.contains(key_id));
+  if (new_key) {
+    // Create a PublicKeyConfig with the new key and default weight
+    committed_changes_[key_id] =
+        x23::Ptr<PublicKeyConfig>(new PublicKeyConfig(*new_key));
+  }
+  else {
+    committed_changes_[key_id] = nullptr;
+  }
+  has_committed_delta_ = true;
+}
+
+std::shared_ptr<const StorageItemWrapper>
+AuthDataArgs::to_item(StorageCostModel const *cost_model) const
+{
+  AccountAuthData new_auth_data;
+  if (base_auth_data_) {
+    new_auth_data = *base_auth_data_;
+  }
+  else {
+    // Initialize default auth data
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      new_auth_data.public_keys[i] = nullptr;
+    }
+  }
+
+  // Apply committed changes
+  for (const auto &[key_id, new_key] : committed_changes_) {
+    if (key_id < MAX_SIGNERS) {
+      new_auth_data.public_keys[key_id] = new_key;
+    }
+  }
+
+  return std::make_shared<const StorageItemWrapper>(new_auth_data, cost_model);
+}
+
+int128_t
+AuthDataArgs::get_current_committed_cost( // NOLINT
+    StorageCostModel const *current_model,
+    StorageItemWrapper const * /*base_item*/) const
+{
+  // TODO(geoff): Implement proper cost model for auth data based on number of
+  // signers
+  return current_model->kBaseItemCost;
+}
+
+int128_t
+AuthDataArgs::get_marginal_cost_upper_bound_static(
+    bool is_committed, StorageDelta const & /*delta*/,
+    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
+{
+  int128_t base_cost = current_model->kBaseItemCost;
+  if (is_committed || base_item) {
+    base_cost = 0;
+  }
+
+  // TODO(geoff): Consider marginal cost for adding/removing signers
+  return base_cost;
+}
+
+int128_t
+AuthDataArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  assert(delta.type() == StorageDeltaType::kDeltaTypeAuthDataChange);
+  return get_marginal_cost_upper_bound_static(has_committed_delta_, delta,
+                                              current_model, base_item);
+}
+
 int128_t
 ExclusiveLockedState::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *cost_model,
@@ -523,6 +616,10 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
     return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                                  cost_model,
                                                                  base_item);
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+    return AuthDataArgs::get_marginal_cost_upper_bound_static(false, delta,
+                                                              cost_model,
+                                                              base_item);
   default:
     throw std::runtime_error("Impossible state : delta is " + x23::show(delta));
   }
@@ -560,6 +657,12 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
           // typeclass_match signature in this implemebntation
           return typeclass.item_type() ==
                      StorageItemType::kItemTypeReplayCache &&
+                 args.typeclass_match(nullptr);
+        }
+        else if constexpr (std::same_as<args_t, AuthDataArgs>) {
+          // hack because the signature of the ctor has to match the
+          // typeclass_match signature in this implementation
+          return typeclass.item_type() == StorageItemType::kItemTypeAuthData &&
                  args.typeclass_match(nullptr);
         }
         else {

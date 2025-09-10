@@ -68,6 +68,15 @@ public:
     get_instance().gas_consumed_.inc(gas);
   }
 
+  ~HogexecMetrics()
+  {
+    if (background_worker_.joinable()) {
+      background_worker_.request_stop();
+      cv_.notify_all();
+      background_worker_.join();
+    }
+  }
+
 private:
   static HogexecMetrics &get_instance();
 
