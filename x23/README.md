@@ -311,6 +311,110 @@ options to get a value from an `Async`:
       });
     ```
 
+### `Detached` coroutines
+
+If you want to launch a coroutine to do background work, you can do
+this be declaring a function that returns `Detached`.  For example:
+
+``` cpp
+Detached
+do_ten_things()
+{
+  for (int i = 0; i < 10; ++i)
+    co_await thing();
+}
+```
+
+### The most vexing capture problem
+
+It is perfectly fine to use lambdas to define coroutines, but you have
+to ensure coroutine does not outlive the lambda, and unfortunately
+it's all too easy to write code in which that is not the case.  Here's
+an example of a serious bug:
+
+``` cpp
+void
+do_n_things(int n)
+{
+  [n] -> Detached {   // Serious BUG!
+    for (int i = 0; i < n; ++i)
+      co_await thing();
+  }(); <-- lambda destroyed here
+}
+```
+
+At first glance, you may think `n` is captured by value, so this is
+safe.  Unfortunately, `n` is captured into a lambda object, which is
+is a temporary object destroyed at the end of the full expression
+(basically at the semicolon).  Yet the coroutine is likely suspended
+by `thing()`, which means it will be resumed later after the lambda is
+destroyed, making the access to `n` in the loop condition a use-after
+free bug.
+
+There are ways to avoid the above problem.  The first is just not to
+capture anything in coroutines.  You can instead pass any necessary
+values to the coroutine as parameters, which will be copied into the
+coroutine itself.  This is fine, but a bit redundant because it
+requires naming the capture twice:
+
+``` cpp
+void
+do_n_things(int n)
+{
+  [](int n) -> Detached {   // Ok
+    for (int i = 0; i < n; ++i)
+      co_await thing();
+  }(n);
+}
+```
+
+The second option is to copy the lambda into itself by means of the
+versatile C++23 [deducing this feature][deducing-this].  Briefly,
+deducing this allows first argument to reference the method object if
+it starts with the keyword `this`.  With such an explicit `this`
+argument, you no longer use the `this` keyword in the method, but
+rather access the object via the first method parameter (by convention
+often called `self`).  As an example, in the code below, calling
+`substr()` on an object of type `DerivedString` returns a
+`DerivedString`, not a BaseString, because `BaseString::substr`
+deduces the type of `this` as `DerivedString`:
+
+``` cpp
+struct BaseString {
+   //...
+   template<typename Self>
+   Self substr(this const Self &self, size_t pos,
+               size_t count = Self::npos)
+   {
+     return Self(self.begin() + pos,
+                 self.begin() + std::min(self.size(), self.count - pos));
+   }
+};
+
+struct DerivedString {
+  //...
+  using BaseString::BaseString;
+};
+```
+
+[deducing-this]: https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2021/p0847r7.html
+
+The `this` argument is almost always passed by reference, often as a
+forwarding reference (`this auto &&self`).  However, you can also copy
+an object into a method by passing `this` by value--which is
+especially useful in the case of preserving lambda captures:
+
+``` cpp
+void
+do_n_things(int n)
+{
+  [n](this auto) -> Detached { // OK because this not a reference
+    for (int i = 0; i < n; ++i)
+      co_await thing();
+  };
+}
+```
+
 ## RPC services
 
 The [RPC language][RPC-language] specifies that RPC interfaces are
