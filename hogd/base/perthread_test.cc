@@ -49,7 +49,7 @@ TEST(PerThreadTest, ForEach)
   vecs_done.wait();
   std::unique_lock ul = vecs.lock_threads();
   vecs.for_each(ul, [&vec](const std::vector<int> &v) {
-    EXPECT_EQ(v.size(), 1);
+    EXPECT_EQ(v.size(), 1U);
     vec.insert(vec.end(), v.cbegin(), v.cend());
   });
   EXPECT_EQ(vec.size(), kThreads);

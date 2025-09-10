@@ -22,7 +22,7 @@ TEST(WideIntegralTest, AddSub)
 
   a -= 150;
   EXPECT_EQ(a.get_capped<int64_t>(), -50);
-  EXPECT_EQ(a.get_capped<uint64_t>(), 0);
+  EXPECT_EQ(a.get_capped<uint64_t>(), 0U);
   EXPECT_EQ(a.get_capped<int32_t>(), -50);
 
   EXPECT_TRUE(a.is_in_range<int64_t>());
@@ -32,7 +32,7 @@ TEST(WideIntegralTest, AddSub)
   a -= 500;
 
   EXPECT_FALSE(a.is_in_range<uint8_t>());
-  EXPECT_EQ(a.get_capped<uint8_t>(), 0);
+  EXPECT_EQ(a.get_capped<uint8_t>(), 0U);
 
   EXPECT_FALSE(a.is_in_range<int8_t>());
   EXPECT_EQ(a.get_capped<int8_t>(), -128);
@@ -55,11 +55,11 @@ TEST(WideIntegralTest, Unsigned)
 {
   hogd::WideIntegral<uint8_t> a(uint8_t{100});
   a += uint8_t{100};
-  EXPECT_EQ(a.get_capped<uint8_t>(), 200);
+  EXPECT_EQ(a.get_capped<uint8_t>(), 200U);
   EXPECT_EQ(a.get_capped<int8_t>(), 127);
   a -= uint8_t{250};
   a -= uint8_t{250};
-  EXPECT_EQ(a.get_capped<uint8_t>(), 0);
+  EXPECT_EQ(a.get_capped<uint8_t>(), 0U);
   EXPECT_EQ(a.get_capped<int8_t>(), -128);
 }
 
@@ -69,11 +69,11 @@ TEST(WideIntegralTest, Assignment)
   hogd::WideIntegral<uint8_t> a(uint8_t{100});
   a = int8_t{50};
   EXPECT_TRUE(a.is_in_range<uint8_t>());
-  EXPECT_EQ(a.get_capped<uint8_t>(), 50);
+  EXPECT_EQ(a.get_capped<uint8_t>(), 50U);
 
   a = uint8_t{255};
   EXPECT_TRUE(a.is_in_range<uint8_t>());
-  EXPECT_EQ(a.get_capped<uint8_t>(), 255);
+  EXPECT_EQ(a.get_capped<uint8_t>(), 255U);
 }
 
 TEST(WideIntegralTest, EdgeCases)
@@ -95,7 +95,7 @@ TEST(WideIntegralTest, EdgeCases)
   EXPECT_TRUE(c.is_in_range<uint8_t>());
   c += uint8_t{1};
   EXPECT_FALSE(c.is_in_range<uint8_t>());
-  EXPECT_EQ(c.get_capped<uint8_t>(), 255);
+  EXPECT_EQ(c.get_capped<uint8_t>(), 255U);
 }
 
 TEST(WideIntegralTest, LargeValues)

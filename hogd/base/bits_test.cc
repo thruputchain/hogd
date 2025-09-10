@@ -13,15 +13,15 @@ TEST(BitsTest, Alignment)
 {
   // cases without an aligned val
   uint64_t val = 0x1234;
-  EXPECT_EQ(align_up(val, 0x1000), 0x2000);
-  EXPECT_EQ(align_down(val, 0x1000), 0x1000);
-  EXPECT_EQ(align_up(val, 0x200), 0x1400);
-  EXPECT_EQ(align_down(val, 0x200), 0x1200);
+  EXPECT_EQ(align_up(val, 0x1000), 0x2000U);
+  EXPECT_EQ(align_down(val, 0x1000), 0x1000U);
+  EXPECT_EQ(align_up(val, 0x200), 0x1400U);
+  EXPECT_EQ(align_down(val, 0x200), 0x1200U);
 
   // cases with an already aligned val
   val = 0x1000;
-  EXPECT_EQ(align_up(val, 0x200), 0x1000);
-  EXPECT_EQ(align_down(val, 0x200), 0x1000);
+  EXPECT_EQ(align_up(val, 0x200), 0x1000U);
+  EXPECT_EQ(align_down(val, 0x200), 0x1000U);
 }
 
 TEST(BitsTest, DivideUp)
@@ -42,7 +42,7 @@ TEST(BitsTest, WrappingSequence)
     EXPECT_GE(s, s);
     EXPECT_LE(s, s);
     EXPECT_EQ(s + delta, s + delta);
-    EXPECT_EQ(s + delta - s, delta);
+    EXPECT_EQ(T(s + delta - s), delta);
   };
 
   do_check.template operator()<uint8_t>(10);
