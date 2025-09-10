@@ -460,6 +460,9 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   hashes.reserve(block_size);
   txs.reserve(block_size);
 
+  // Discard any expired txs before scheduling the current block.
+  discard_expired_txs(block_height);
+
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
