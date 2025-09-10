@@ -1,6 +1,5 @@
 # Create a ramdb module library
-add_library(
-  ramdb
+add_library(ramdb_objects OBJECT
   db.cc
   db_status.cc
   disk_reader.cc
@@ -10,9 +9,18 @@ add_library(
   scalable_map.cc
 )
 target_link_libraries(
+  ramdb_objects
+  hogd_interface
+)
+
+add_library(
+  ramdb
+  $<TARGET_OBJECTS:ramdb_objects>
+)
+
+target_link_libraries(
   ramdb
   hogd
-  crypto
 )
 
 # Build the db_bench executable
