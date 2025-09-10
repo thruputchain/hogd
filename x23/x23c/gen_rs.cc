@@ -406,6 +406,7 @@ GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
 {
 
   prtop(R"(
+#[derive(Clone, Debug)]
 pub struct {0}_{1}_Client {{
     handle: ::std::sync::Arc<::rpc_driver::ClientHandle>,
 }}
