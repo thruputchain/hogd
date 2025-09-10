@@ -58,7 +58,7 @@ std::unique_ptr<Logger> logger;
 
 [[noreturn]] void
 do_panic(std::string_view fmt, const std::source_location &loc,
-         std::format_args &&args)
+         std::format_args args)
 {
   std::string buf;
   std::vformat_to(std::back_inserter(buf), fmt, args);
