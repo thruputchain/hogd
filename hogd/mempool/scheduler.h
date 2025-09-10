@@ -190,6 +190,11 @@ private:
   // ---------------
   // Runqueue data structures. We maintain several data structures to make it
   // easy to order the runqueue and look up txs with several key types.
+  //
+  // These data structures *only* hold txs that are currently on the runqueue,
+  // i.e., eligible to be scheduled! Txs that are not eligible to be scheduled,
+  // such as due to an insuffucient hog balance on the submitting account, are
+  // stored in [stranded_] below.
 
   // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
@@ -200,8 +205,9 @@ private:
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
-  // ---------------
 
+  // ---------------
+  // Stranded txs.
 
   // Holds all txs that cannot be scheduled, typically because an account does
   // not have enough hogs. Maps an account to its stranded txs. This makes it
@@ -211,10 +217,18 @@ private:
                      std::map<GasAmount, std::unordered_set<TxInfo *>>>
       stranded_;
 
+  // ---------------
+  // Other data structures for txs.
+
   // Maps a block expiry height to a set of txs that expire at that height. So
   // in other words, if a set of txs expire at block height 10, those txs can be
   // included in block 10 and all blocks with smaller heights, but they cannot
   // be included in blocks 11+.
+  //
+  // This data structure holds *all* txs. So in other words, it holds all txs on
+  // the runqueue and all txs in [stranded_]. When we advance past a block
+  // height, we want to discard all txs that expire at that block height,
+  // regardless of whether they are on the runqueue or stranded.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
 };
 
