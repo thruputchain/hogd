@@ -236,19 +236,20 @@ HogDBCoordServer::start_server(uint16_t port)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 {
+  constexpr static BlockID kGenesisBlockID = 0;
   if (is_initialized_) {
     co_return DbResult::DbResultError;
   }
 
   is_initialized_ = true;
 
-  auto r = ctx_.open_block_tx(0);
+  auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
     co_return DbResult::DbResultError;
   }
 
-  auto *itx = ctx_.get_invoke_tx(0, 0);
+  auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
   assert(itx);
 
   bool failure = false;
@@ -293,8 +294,8 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   itx->commit();
-  ctx_.close_invoke_tx(0, 0);
-  co_return to_db_result(commit_block(0));
+  ctx_.close_invoke_tx(kGenesisBlockID, 0);
+  co_return to_db_result(commit_block(kGenesisBlockID));
 }
 
 x23::Async<DbShardResult>

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -65,7 +66,7 @@ private:
   // the merkle trie that generates hashes for the items in the database.
   MerkleTriePrefix &trie_;
   // tracks details about the last committed block.
-  DbTip tip_ = DbTip{};
+  DbTip tip_ = DbTip{.id = UINT64_MAX};
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.

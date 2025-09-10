@@ -23,6 +23,8 @@
 
 namespace hogd {
 
+// TODO(geoff): This should be refactored; right now initialize() technically
+// opens a block before the genesis initialization.
 void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
