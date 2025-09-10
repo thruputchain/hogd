@@ -22,6 +22,7 @@
 #include "coord.hh"
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/merkle.h"
 #include "rpc_types.hh" // NOLINT
 
