@@ -46,6 +46,11 @@ public:
     return std::get<ReplayCacheWrapper>(self.storage_item_).cache_;
   }
 
+  auto &auth_data(this auto &self)
+  {
+    return std::get<AuthDataWrapper>(self.storage_item_).auth_data_;
+  }
+
   StorageItemType type() const;
   StorageItem to_wire_item() const;
 

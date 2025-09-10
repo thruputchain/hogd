@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -8,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/wide_integral.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -20,6 +22,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -273,6 +276,41 @@ private:
   bool has_committed_delta_ = false;
 };
 
+class AuthDataArgs {
+public:
+  AuthDataArgs(const AccountAuthData *base_auth_data) : base_auth_data_(base_auth_data) {}
+
+  static bool typeclass_match(const AccountAuthData * /*unused*/) { return true; }
+
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
+
+  bool try_reserve_change_signer(uint32_t key_id);
+  void undo_change_signer(uint32_t key_id);
+
+  void commit_change_signer(uint32_t key_id, const PublicKey *new_key);
+
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const *base_item) const;
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
+
+private:
+  const AccountAuthData *base_auth_data_;
+  
+  std::set<uint32_t> modified_key_ids_;
+  std::map<uint32_t, x23::Ptr<PublicKeyConfig>> committed_changes_;
+  bool has_committed_delta_ = false;
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState
@@ -362,7 +400,8 @@ struct UnmodifiedState {
 class RefcountedDeltaVariant {
   using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
                                  RetrocausalQueueArgs, ExclusiveLockedState,
-                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs>;
+                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs,
+                                 AuthDataArgs>;
 
 public:
   RefcountedDeltaVariant() = default;
