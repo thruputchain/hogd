@@ -16,20 +16,15 @@
 #include <thread>
 #include <utility>
 
-// TODO(abelay): there is apparently a header dependency problem inside x23
-// where x23/vec.h cannot be included first.  These generated headers are not
-// needed, but included as a hack to avoid it.
-#include "coord.hh"
-#include "db_coord.hh" // NOLINT
-#include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/merkle.h"
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
