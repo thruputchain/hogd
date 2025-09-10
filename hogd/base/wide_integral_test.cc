@@ -124,7 +124,7 @@ TEST(WideIntegralTest, LargeTypeConversions)
 
   a += 1'000'000;
 
-  EXPECT_EQ(a.get_capped<uint32_t>(), 1'000'100);
+  EXPECT_EQ(a.get_capped<uint32_t>(), 1'000'100U);
   a += std::numeric_limits<uint64_t>::max();
   EXPECT_EQ(a.get_capped<uint64_t>(), std::numeric_limits<uint64_t>::max());
   EXPECT_EQ(a.get_capped<uint128_t>(),

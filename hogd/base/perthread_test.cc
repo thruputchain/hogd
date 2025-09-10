@@ -52,7 +52,8 @@ TEST(PerThreadTest, ForEach)
     EXPECT_EQ(v.size(), 1U);
     vec.insert(vec.end(), v.cbegin(), v.cend());
   });
-  EXPECT_EQ(vec.size(), kThreads);
+  constexpr static unsigned int kThreadsUnsigned = kThreads;
+  EXPECT_EQ(vec.size(), kThreadsUnsigned);
   exit.count_down();
 }
 
