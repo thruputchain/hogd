@@ -2,6 +2,7 @@
 
 #pragma once
 
+
 extern "C" {
 #include "blake3.h"
 }
@@ -11,8 +12,8 @@ extern "C" {
 
 #include <array>
 #include <cassert>
-#include <format>
 #include <span>
+#include <version>
 
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -21,7 +22,7 @@ extern "C" {
 #include <utility>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/string.h"
+
 #include "hogd/base/types.h"
 #include "types.hh"
 
@@ -196,6 +197,11 @@ crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
 
 } // namespace hogd
 
+#if(__cpp_lib_format_ranges < 202207L)
+
+#include <format>
+#include "hogd/base/string.h"
+
 template<> struct std::formatter<hogd::SHA256Hash> {
   static constexpr auto parse(std::format_parse_context &ctx)
   {
@@ -207,3 +213,5 @@ template<> struct std::formatter<hogd::SHA256Hash> {
                           hogd::encode_hex(std::as_bytes(std::span(hash))));
   }
 };
+
+#endif
