@@ -55,8 +55,10 @@ to_db_result(HogDBStatus<T> ret)
 {
   // TODO(abelay): the RPC error codes ought to be the same as or similar to
   // HogDBStatus; the current ones don't capture the range of possible errors.
-  if (!ret)
+  if (!ret) {
+    error("to_db_result error: {}", ret.error());
     return DbResult::DbResultError;
+  }
   return DbResult::DbResultOK;
 }
 

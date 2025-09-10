@@ -65,7 +65,7 @@ private:
   // the merkle trie that generates hashes for the items in the database.
   MerkleTriePrefix &trie_;
   // tracks details about the last committed block.
-  DbTip tip_;
+  DbTip tip_ = DbTip{};
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
