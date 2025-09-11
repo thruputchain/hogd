@@ -17,6 +17,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -91,27 +92,42 @@ make_address(std::integral auto val)
 // ItemKey identifies an on-chain storage item for an Address.
 class ItemKey {
 public:
-  constexpr ItemKey(Address addr, RawKey key, bool addr_balance = false)
-    : item_key_{.addr = addr, .key = key}, addr_balance_(addr_balance),
+  constexpr ItemKey(
+      Address addr, RawKey key,
+      StorageKeyType key_type = StorageKeyType::kStorageKeyTypeContractData)
+    : item_key_{.addr = addr, .key = key}, key_type_(key_type),
       memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
   {}
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
-    if (addr_balance_)
+    if (key_type_ == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance ||
+        key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData)
       return item_key_.addr.as_bytes();
     return byte_view(item_key_);
   }
   constexpr bool operator==(const ItemKey &key) const
   {
-    if (addr_balance_ != key.addr_balance_)
+    if (key_type_ != key.key_type_)
       return false;
-    if (addr_balance_)
+    switch (key_type_) {
+    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    case StorageKeyType::kStorageKeyTypeAccountAuthData:
       return item_key_.addr == key.item_key_.addr;
-    return item_key_.addr == key.item_key_.addr &&
-           item_key_.key == key.item_key_.key;
+    case StorageKeyType::kStorageKeyTypeContractData:
+      return item_key_.addr == key.item_key_.addr &&
+             item_key_.key == key.item_key_.key;
+    }
+    std::unreachable();
   }
 
-  constexpr bool is_address_balance() const { return addr_balance_; }
+  constexpr bool is_address_balance() const
+  {
+    return key_type_ == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance;
+  }
+  constexpr bool is_account_auth_data() const
+  {
+    return key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData;
+  }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
   [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
 
@@ -123,7 +139,7 @@ private:
     Address addr;
     RawKey key;
   } item_key_;
-  bool addr_balance_;
+  StorageKeyType key_type_;
   const size_t memoized_hash_;
 };
 
@@ -146,7 +162,30 @@ make_item_key(const Address &addr, std::integral auto val)
 make_address_balance_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf, true);
+  return ItemKey(addr, buf,
+                 StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_account_auth_data_item_key(const Address &addr)
+{
+  RawKey buf{};
+  return ItemKey(addr, buf,
+                 StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_item_key(const AddressAndKey &addrkey)
+{
+  switch (addrkey.key.key_type()) {
+  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    return make_address_balance_item_key(addrkey.address);
+  case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    return make_account_auth_data_item_key(addrkey.address);
+  case StorageKeyType::kStorageKeyTypeContractData:
+    return ItemKey(addrkey.address, addrkey.key.contract_data_key());
+  }
+  std::unreachable();
 }
 
 } // namespace hogd

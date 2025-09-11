@@ -38,6 +38,7 @@ constexpr std::string kGlobalTipKey = ">DBTIP";
 enum class Prefix : char {
   kHogAge = 'A',
   kBalance = 'B',
+  kAccountAuthData = 'D',
   kWasmHash = 'H',
   kWasmCode = 'C',
 };

@@ -3,10 +3,11 @@
 #include <cassert>
 #include <optional>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
-#include "executor_to_db_rpc.hh"
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -151,6 +152,21 @@ private:
   std::set<ReplayNonce> inserted_nonces_;
 };
 
+class AccountAuthDataItem {
+public:
+  StorageDelta get_delta() const;
+
+  constexpr static ItemViewType kItemType = ItemViewType::kAccountAuthData;
+
+  void change_public_key(uint32_t key_index, PublicKeyConfigOpt new_key)
+  {
+    pk_changes_[key_index] = std::move(new_key);
+  }
+
+private:
+  std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;
+};
+
 // Represent state of an ItemView that has not been modified during
 // the current transaction.
 // Should never be created outside of ItemView, but might be
@@ -259,7 +275,8 @@ public:
 
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem>
+               NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
+               AccountAuthDataItem>
       delta_args_;
   StorageItemRPCFlagSet flags_ =
       std::to_underlying(StorageItemRPCFlags::kStorageNone);

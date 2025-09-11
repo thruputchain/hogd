@@ -25,6 +25,7 @@ add_library(runtime_objects OBJECT
   status.cc
   storage_snapshot_cache.cc
   snapshot_storage_item.cc
+  syscall_auth.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
