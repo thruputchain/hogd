@@ -1,6 +1,7 @@
 #pragma once
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -24,7 +25,6 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
