@@ -3,6 +3,8 @@
 #include <cassert>
 #include <memory>
 
+#include "exec_coord.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -18,44 +20,64 @@ ExecutorStateManager::get_executor_context(
 
   if (auto it = active_blocks->find(block_id); it != active_blocks->end()) {
     auto out = it->second;
-    assert(out->mode() == mode);
-    return out;
+    assert(out.context->mode() == mode);
+    return out.context;
   }
   return nullptr;
 }
 
-void
+ExecResult
+ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
+                                 WorkerPool &main_worker_pool)
+{
+  auto active_blocks = active_blocks_.take();
+
+  if (auto it = active_blocks->find(new_block_id); it != active_blocks->end()) {
+    if (it->second.context->mode() != mode) {
+      return ExecResult::ExecResultSystemError;
+    }
+    it->second.refcount++;
+    return ExecResult::ExecResultOK;
+  }
+
+  [[maybe_unused]] auto [_, inserted] = active_blocks->emplace(
+      new_block_id, ContextEntry{.refcount = 1,
+                                 .context = std::make_unique<ExecutorContext>(
+                                     ExecutionMode::kProposing, new_block_id,
+                                     *db_proxy_, main_worker_pool)});
+  assert(inserted);
+  return ExecResult::ExecResultOK;
+}
+
+ExecResult
 ExecutorStateManager::open_proposal(BlockID new_proposal_id,
                                     WorkerPool &main_worker_pool)
 {
-  auto active_blocks = active_blocks_.take();
-
-  [[maybe_unused]] auto [_, inserted] =
-      active_blocks->emplace(new_proposal_id,
-                             std::make_unique<ExecutorContext>(
-                                 ExecutionMode::kProposing, new_proposal_id,
-                                 *db_proxy_, main_worker_pool));
-  assert(inserted);
+  return open_block(new_proposal_id, ExecutionMode::kProposing,
+                    main_worker_pool);
 }
-void
+
+ExecResult
 ExecutorStateManager::open_validation(BlockID new_validation_id,
                                       WorkerPool &main_worker_pool)
 {
-  auto active_blocks = active_blocks_.take();
-
-  [[maybe_unused]] auto [_, inserted] =
-      active_blocks->emplace(new_validation_id,
-                             std::make_unique<ExecutorContext>(
-                                 ExecutionMode::kValidating, new_validation_id,
-                                 *db_proxy_, main_worker_pool));
-  assert(inserted);
+  return open_block(new_validation_id, ExecutionMode::kValidating,
+                    main_worker_pool);
 }
 
 void
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   auto active_blocks = active_blocks_.take();
-  active_blocks->erase(block_id);
+  auto it = active_blocks->find(block_id);
+  if (it == active_blocks->end()) {
+    error("Tried to remove block that does not exist");
+    return;
+  }
+  it->second.refcount--;
+  if (it->second.refcount == 0) {
+    active_blocks->erase(it);
+  }
 }
 
 } // namespace hogd
