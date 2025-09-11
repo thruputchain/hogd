@@ -4,6 +4,9 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_coord.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -21,13 +24,23 @@ public:
   std::shared_ptr<ExecutorContext> get_executor_context(BlockID block_id,
                                                         ExecutionMode mode);
 
-  void open_proposal(BlockID new_proposal_id, WorkerPool &main_worker_pool);
-  void open_validation(BlockID new_validation_id, WorkerPool &main_worker_pool);
+  // return ExecResultOk if successful, or ExecResultSystemError if
+  // the block_id already exists and is of a different mode.
+  ExecResult open_proposal(BlockID new_proposal_id,
+                           WorkerPool &main_worker_pool);
+  ExecResult open_validation(BlockID new_validation_id,
+                             WorkerPool &main_worker_pool);
   void remove_block(BlockID block_id);
 
 private:
-  x23::MVar<std::unordered_map<BlockID, std::shared_ptr<ExecutorContext>>>
-      active_blocks_;
+  ExecResult open_block(BlockID block_id, ExecutionMode mode,
+                        WorkerPool &main_worker_pool);
+  struct ContextEntry {
+    uint32_t refcount = 0;
+    std::shared_ptr<ExecutorContext> context = nullptr;
+  };
+
+  x23::MVar<std::unordered_map<BlockID, ContextEntry>> active_blocks_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
 };
 

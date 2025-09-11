@@ -11,8 +11,9 @@ extern "C" {
 
 #include <array>
 #include <cassert>
-#include <format>
+#include <cstddef>
 #include <span>
+#include <version>
 
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -21,7 +22,7 @@ extern "C" {
 #include <utility>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/string.h"
+
 #include "hogd/base/types.h"
 #include "types.hh"
 
@@ -195,15 +196,3 @@ crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
 }
 
 } // namespace hogd
-
-template<> struct std::formatter<hogd::SHA256Hash> {
-  static constexpr auto parse(std::format_parse_context &ctx)
-  {
-    return ctx.begin();
-  }
-  static auto format(const hogd::SHA256Hash &hash, std::format_context &ctx)
-  {
-    return std::format_to(ctx.out(), "{}",
-                          hogd::encode_hex(std::as_bytes(std::span(hash))));
-  }
-};

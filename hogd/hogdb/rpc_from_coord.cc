@@ -23,6 +23,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"

@@ -4,11 +4,25 @@
 
 #pragma once
 
+#include <cassert>
+#include <compare>
+#include <cstdint>
+#include <format>
 #include <map>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
 
+#include <x23/cleanup.h>
 #include <x23/format.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
+#include <x23/sockio.h>
+#include <x23/utility.h>
+#include <x23/vec.h>
+#include <x23/x23.h>
 
 namespace x23 {
 
@@ -236,6 +250,16 @@ struct RpcLogger {
     auto logmsg = make_log_message<Meta>(true, peername_, msg, pl...);
     write(logfd_, logmsg.data(), logmsg.size());
   }
+
+  template<typename VersMeta> void log_server_advertise(BorrowedFd fd)
+  {
+    if (logfd_ < 0)
+      return;
+    auto logmsg = std::format("Advertising program {}::{} on {} (fd {})",
+                              VersMeta::program_name, VersMeta::version_name,
+                              show_addr(remote_addr(fd)), fd.get());
+    write(logfd_, logmsg.data(), logmsg.size());
+  }
 };
 
 struct RpcNoLogger {
@@ -252,6 +276,7 @@ struct RpcNoLogger {
   void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
+  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
 };
 
 extern size_t default_max_message_size;

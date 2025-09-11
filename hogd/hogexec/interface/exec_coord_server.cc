@@ -77,7 +77,7 @@ ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
   std::string host = {host_port.host.begin(), host_port.host.end()};
   std::string port = {host_port.port.begin(), host_port.port.end()};
 
-  auto exec_result = get_exec_result(host, port);
+  IntroExecResult exec_result = get_exec_result(host, port);
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
   if (mock_db) {
     start_rpc_service(*mock_db, exec_result.exec_id);

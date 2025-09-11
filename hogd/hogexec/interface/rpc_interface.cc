@@ -116,8 +116,7 @@ ExecutorRpcInterface::executorcoord_validate_batch(
 x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_open_proposal_block(BlockID id)
 {
-  executor_states_.open_proposal(id, main_worker_pool_);
-  co_return ExecResult::ExecResultOK;
+  co_return executor_states_.open_proposal(id, main_worker_pool_);
 }
 
 x23::Async<ExecResult>
