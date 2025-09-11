@@ -11,6 +11,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -764,6 +765,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }
 
+// == Native token syscalls ==
+
 SystemStatus<SyscallStatus<int128_t>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
@@ -848,6 +851,32 @@ SystemCallHandler::modify_native_token_balance(
   assert(item_view->get<UnmodifiedItem>());
   return item_view->set(NativeTokenBalanceItem(
       NNIntItem{.base_value_ = std::nullopt, .add_value_ = transfer_amount}));
+}
+
+// == Authentication syscalls ==
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::change_public_key_registration(uint32_t key_index,
+                                                  PublicKeyConfigOpt new_key)
+{
+  assert(!invocation_frame_stack_.empty());
+  auto addr = invocation_frame_stack_.get_active_frame().address();
+  AddressAndKey addrkey{.address = addr,
+                        .key = StorageKey(
+                            StorageKeyType::kStorageKeyTypeAccountAuthData)};
+
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
+    account_auth_data_item->change_public_key(key_index, std::move(new_key));
+    return {};
+  }
+
+  assert(item_view->get<UnmodifiedItem>());
+  AccountAuthDataItem new_item;
+  new_item.change_public_key(key_index, std::move(new_key));
+  return item_view->set(new_item);
 }
 
 } // namespace hogd

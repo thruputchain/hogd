@@ -325,6 +325,18 @@ ReplayCacheItem::get_delta() const
   return delta;
 }
 
+StorageDelta
+AccountAuthDataItem::get_delta() const
+{
+  auto delta = StorageDelta(StorageDeltaType::kDeltaTypeAuthDataChange);
+  for (auto const &[key_index, new_key] : pk_changes_) {
+    delta.auth_data_change().auth_data_change_signers.push_back(
+        AuthDataChangeSigner{.public_key_id = key_index,
+                             .public_key = new_key});
+  }
+  return delta;
+}
+
 std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {

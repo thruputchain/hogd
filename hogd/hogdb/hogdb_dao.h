@@ -18,7 +18,6 @@
 #include "db_coord.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
-#include "nomination.hh"
 #include "types.hh"
 
 #include "hogd/base/span.h"

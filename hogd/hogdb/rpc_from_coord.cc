@@ -41,15 +41,6 @@ namespace hogd {
 
 namespace {
 
-ItemKey
-make_item_key(const AddressAndKey &addr)
-{
-  if (addr.key.key_type() ==
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-    return ItemKey(addr.address, {}, true);
-  return ItemKey(addr.address, addr.key.contract_data_key());
-}
-
 template<typename T>
 DbResult
 to_db_result(HogDBStatus<T> ret)

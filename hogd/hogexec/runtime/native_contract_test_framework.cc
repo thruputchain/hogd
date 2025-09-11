@@ -12,6 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
