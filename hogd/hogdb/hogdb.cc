@@ -139,13 +139,16 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         continue;
       }
 
-      const std::string address =
+      const std::string coord_address =
           "127.0.0.1:" + std::to_string(kCoordServerPort);
+      const std::string exec_address =
+          "127.0.0.1:" + std::to_string(kExecServerPort);
       ShardCard card{.protocol = "blah",
                      .upid = {},
                      .block_height = 0,
                      .shard_count = 1,
-                     .address = address.c_str()};
+                     .address_for_coord = coord_address.c_str(),
+                     .address_for_exec = exec_address.c_str()};
       client->coordinator_intro_shard(card)();
       break;
     }
