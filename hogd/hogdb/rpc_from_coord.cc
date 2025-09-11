@@ -82,18 +82,21 @@ HogDBCoordServer::commit_block(BlockID id)
     return HogDBError(HogDBCode::kExists);
   }
 
+  // write all the changes in the block TX.
+  BlockTX *btx = ctx_.get_block_tx(id);
+  HogDBStatus<void> ret = btx->commit();
+  if (!ret)
+    return ret.error();
+
+  // destroy the block TX.
+  ctx_.close_block_tx(id);
+
   // update the DbTip.
   ctx_.get_trie().generate_top_level_hashes();
   ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
   ctx_.get_tip().height = ctx_.get_tip().height + 1;
   ctx_.get_tip().id = id;
-  HogDBStatus<void> ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
-  if (!ret)
-    return ret.error();
-
-  // write all the changes in the block TX.
-  BlockTX *btx = ctx_.get_block_tx(id);
-  ret = btx->commit();
+  ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
   if (!ret)
     return ret.error();
 
@@ -101,9 +104,6 @@ HogDBCoordServer::commit_block(BlockID id)
   HogDBStatus<uint64_t> lsn = ctx_.get_db().commit();
   if (!lsn)
     return lsn.error();
-
-  // destroy the block TX.
-  ctx_.close_block_tx(id);
 
   info("committed block {}: hash='{}', height='{}', lsn='{}", id,
        ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
