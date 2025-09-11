@@ -24,8 +24,14 @@ def load_cpp_to_xdr_map(spec: dict) -> dict[str, str]:
         )
     return cpp_to_xdr_typenames
 
+
 def load_known_primitive_types(spec: dict) -> list[str]:
-    return [type_mapping["base_name"] for type_mapping in spec["type_mappings"] if ("primitive_type" in type_mapping and type_mapping["primitive_type"])]
+    return [
+        type_mapping["base_name"]
+        for type_mapping in spec["type_mappings"]
+        if ("primitive_type" in type_mapping and type_mapping["primitive_type"])
+    ]
+
 
 """
 Each syscall generates a
@@ -162,7 +168,9 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
         in_out = "input"
 
     primitive_type = False
-    if is_input and (("primitive_type" in inp and inp["primitive_type"]) or ("typename" in inp and inp["typename"] in primitive_types)):
+    if (is_input and
+        (("primitive_type" in inp and inp["primitive_type"]) or
+         ("typename" in inp and inp["typename"] in primitive_types))):
         primitive_type = True
 
     optional = False
