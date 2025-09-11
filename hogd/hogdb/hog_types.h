@@ -117,6 +117,7 @@ public:
       return item_key_.addr == key.item_key_.addr &&
              item_key_.key == key.item_key_.key;
     }
+    std::unreachable();
   }
 
   constexpr bool is_address_balance() const
