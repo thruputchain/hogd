@@ -142,14 +142,6 @@ public:
   }
 
 private:
-  static ItemKey make_item_key(const AddressAndKey &addr)
-  {
-    if (addr.key.key_type() ==
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-      return ItemKey(addr.address, {}, true);
-    return ItemKey(addr.address, addr.key.contract_data_key());
-  }
-
   static HogDBDAO open_db()
   {
     Directory dir = Directory::open_temporary().value();

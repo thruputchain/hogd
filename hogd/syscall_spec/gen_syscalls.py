@@ -24,6 +24,8 @@ def load_cpp_to_xdr_map(spec: dict) -> dict[str, str]:
         )
     return cpp_to_xdr_typenames
 
+def load_known_primitive_types(spec: dict) -> list[str]:
+    return [type_mapping["base_name"] for type_mapping in spec["type_mappings"] if ("primitive_type" in type_mapping and type_mapping["primitive_type"])]
 
 """
 Each syscall generates a
@@ -159,8 +161,13 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
         const = "const "
         in_out = "input"
 
+    primitive_type = False
+    if is_input and (("primitive_type" in inp and inp["primitive_type"]) or ("typename" in inp and inp["typename"] in primitive_types)):
+        primitive_type = True
+
     optional = False
     if "optional" in inp and inp["optional"]:
+        primitive_type = False
         optional = True
 
     # put optional_ on front of arg name, for readability
@@ -177,7 +184,7 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
 
     typename = inp["typename"]
 
-    if "primitive_type" in inp and inp["primitive_type"] and is_input:
+    if primitive_type:
         if optional:
             raise Exception("optional primitive_type is unimplemented")
         return 1, f"{typename} {arg_name}"
@@ -550,6 +557,7 @@ validate_syscall_numbers_in_order(spec_full)
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
 cpp_to_xdr_typenames = load_cpp_to_xdr_map(spec_full)
+primitive_types = load_known_primitive_types(spec_full)
 
 os.makedirs(args.output_dir, exist_ok=True)
 

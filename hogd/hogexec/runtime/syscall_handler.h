@@ -9,6 +9,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -164,6 +165,11 @@ public:
   SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &contract_address,
                               int128_t transfer_amount);
+
+  // == Authentication syscalls ==
+  SystemStatus<SyscallStatus<void>>
+  change_public_key_registration(uint32_t key_index,
+                                 PublicKeyConfigOpt new_key);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
