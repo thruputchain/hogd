@@ -50,12 +50,12 @@ ExecCoordServer::connect_to_coord_allocate_service(
 }
 
 IntroExecResult
-ExecCoordServer::get_exec_result(std::string const &coord_address,
-                                 std::string const &coord_allocate_port)
+ExecCoordServer::get_exec_result()
 {
   while (true) {
     auto client =
-        connect_to_coord_allocate_service(coord_address, coord_allocate_port);
+        connect_to_coord_allocate_service(coord_address_,
+                                          std::to_string(coord_port_));
     if (!client) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
@@ -68,16 +68,7 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 void
 ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
 {
-  x23::HostPort host_port;
-  if (!host_port.parse(self_card_.address)) {
-    throw std::runtime_error(
-        std::format("Invalid coord address: {}", self_card_.address));
-  }
-
-  std::string host = {host_port.host.begin(), host_port.host.end()};
-  std::string port = {host_port.port.begin(), host_port.port.end()};
-
-  auto exec_result = get_exec_result(host, port);
+  auto exec_result = get_exec_result();
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
   if (mock_db) {
     start_rpc_service(*mock_db, exec_result.exec_id);

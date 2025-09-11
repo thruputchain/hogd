@@ -23,10 +23,11 @@ namespace hogd {
 // coordinator.
 class ExecCoordServer {
 public:
-  ExecCoordServer(ExecCard self_card, int poll_threads)
-    : self_card_(std::move(self_card)),
-      main_worker_pool_(available_parallelism()), x23_pool_(poll_threads),
-      cp_(x23_pool_)
+  ExecCoordServer(ExecCard self_card, const std::string &coord_address,
+                  uint16_t coord_port, int poll_threads)
+    : self_card_(std::move(self_card)), coord_address_(coord_address),
+      coord_port_(coord_port), main_worker_pool_(available_parallelism()),
+      x23_pool_(poll_threads), cp_(x23_pool_)
   {}
 
   ~ExecCoordServer() { await_shutdown_request(); }
@@ -68,10 +69,11 @@ private:
   connect_to_coord_allocate_service(std::string const &coord_address,
                                     std::string const &coord_allocate_port);
 
-  IntroExecResult get_exec_result(std::string const &coord_address,
-                                  std::string const &coord_allocate_port);
+  IntroExecResult get_exec_result();
 
   ExecCard self_card_;
+  const std::string coord_address_;
+  const uint16_t coord_port_;
   WorkerPool main_worker_pool_;
   // We want to wait for CoroPoll to shutdown before shutting down WorkerPool,
   // as CoroPoll shutdown makes sure no pending RPCs are in flight (which might
