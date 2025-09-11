@@ -255,9 +255,9 @@ struct RpcLogger {
   {
     if (logfd_ < 0)
       return;
-    auto logmsg =
-        std::format("Advertising program {}::{} on {}", VersMeta::program_name,
-                    VersMeta::version_name, show_addr(remote_addr(fd)));
+    auto logmsg = std::format("Advertising program {}::{} on {} (fd {})",
+                              VersMeta::program_name, VersMeta::version_name,
+                              show_addr(remote_addr(fd)), fd.get());
     write(logfd_, logmsg.data(), logmsg.size());
   }
 };
