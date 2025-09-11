@@ -29,7 +29,8 @@ def load_known_primitive_types(spec: dict) -> list[str]:
     return [
         type_mapping["base_name"]
         for type_mapping in spec["type_mappings"]
-        if ("primitive_type" in type_mapping and type_mapping["primitive_type"])
+        if ("primitive_type" in type_mapping and
+            type_mapping["primitive_type"])
     ]
 
 
