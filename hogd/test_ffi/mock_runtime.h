@@ -64,7 +64,7 @@ private:
 // aside from that explicitly consumed by syscalls.
 //
 // Also note that the host_call_context_ in a mock contract
-// does NOT keept track of a SystemCallHandler* pointer.
+// does NOT keep track of a SystemCallHandler* pointer.
 // The mock testing system uses a separate method for tracking
 // SystemCallHandler* context.
 class MockRuntime : public Runtime {
