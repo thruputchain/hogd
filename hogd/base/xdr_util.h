@@ -115,7 +115,8 @@ template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
   {
     return ctx.begin();
   }
-  static auto format(const std::array<uint8_t, N> &array, std::format_context &ctx)
+  static auto format(const std::array<uint8_t, N> &array,
+                     std::format_context &ctx)
   {
     return std::format_to(ctx.out(), "{}",
                           hogd::encode_hex(std::as_bytes(std::span(array))));
