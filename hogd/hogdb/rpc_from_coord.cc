@@ -117,7 +117,13 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
-  co_return DbBlockResult(to_db_result(commit_block(id)));
+  HogDBStatus<void> ret = commit_block(id);
+  if (!ret)
+    co_return DbBlockResult(DbResult::DbResultError);
+
+  DbBlockResult result(DbResult::DbResultOK);
+  result.block_hash() = ctx_.get_tip().hash;
+  co_return result;
 }
 
 x23::Async<DbResult>
