@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "coord.hh"
+#include "exec_coord.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -16,8 +17,10 @@ namespace hogd {
 
 TEST(ExecCoordTest, TestConnection) {
 
+    x23::RpcLogger::default_logfd = 1;
+
     MockDBWrapper mock_db;
-    auto address = x23::uformat("localhost:{}", mock_db.coord_port());
+    auto address = x23::uformat("localhost:{}", mock_db.exec_port());
     ExecCoordServer exec_coord_server(ExecCard{.protocol = "blah", .upid = {}, .address = address}, 1);
 
     exec_coord_server.init_from_coord(nullptr);
@@ -25,7 +28,7 @@ TEST(ExecCoordTest, TestConnection) {
     auto port = exec_coord_server.start_server(0);
     ASSERT_NE(port, 0);
 
-    x23::ThreadPool pool(1);
+    x23::ThreadPool pool(4);
     x23::CoroPoll cp(pool);
 
     auto server_addr =

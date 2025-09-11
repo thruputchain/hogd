@@ -53,13 +53,17 @@ IntroExecResult
 ExecCoordServer::get_exec_result(std::string const &coord_address,
                                  std::string const &coord_allocate_port)
 {
+  std::println("Getting exec result {} {}", coord_address, coord_allocate_port);
   while (true) {
     auto client =
         connect_to_coord_allocate_service(coord_address, coord_allocate_port);
     if (!client) {
+      std::println("Failed to connect to coord allocate service");
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
+
+    std::println("Connected to coord allocate service");
 
     return client->coordinator_intro_exec(self_card_)();
   }
