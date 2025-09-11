@@ -138,7 +138,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
               "ShardedDB with more than one shard is not yet supported");
         }
         x23::HostPort hostport;
-        if (!hostport.parse(sharded_db.shards_[0].address)) {
+        if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           throw std::runtime_error("Failed to parse database shard address");
         }
         auto server_addr = hostport.to_addr(true);
