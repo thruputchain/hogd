@@ -16,7 +16,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/format.h"
+#include "hogd/base/xdr_util.h"  // IWYU pragma: keep
 
 namespace hogd {
 
@@ -69,7 +69,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
       auto received_hash = sha256(*out);
       if (received_hash != hash) {
         panic("Received incorrect contract hash from db: {} != {}",
-              x23::show(received_hash), x23::show(hash));
+              received_hash, hash);
       }
     }
   }
