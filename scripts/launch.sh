@@ -68,16 +68,18 @@ wait_port 11222
   --max-msg-size 200000000 &
 wait_port 7888
 
-sleep 5
+sleep 1
+
+# Start hogexec.
+echo "Start hogexec"
+"$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
+
+sleep 1
 
 # Start hogdb.
 echo "Start hogdb"
 rm -rf /tmp/hogdb
 "$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
-
-# Start hogexec.
-echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
 
 # TODO(jhumphri): Launch the mempool.
 
