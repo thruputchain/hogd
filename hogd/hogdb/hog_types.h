@@ -184,6 +184,7 @@ make_item_key(const AddressAndKey &addrkey)
   case StorageKeyType::kStorageKeyTypeContractData:
     return ItemKey(addrkey.address, addrkey.key.contract_data_key());
   }
+  std::unreachable();
 }
 
 } // namespace hogd
