@@ -13,8 +13,10 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/test_ffi/test_bindings.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -57,6 +59,12 @@ span_type_test(std::span<const std::byte> span_in,
 
   return {{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}, 0};
 }
+// just used to instantiate the mock contract
+ForeignInvokeResult
+dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
+{
+  return ForeignInvokeResult{};
+}
 
 } // namespace
 
@@ -68,6 +76,10 @@ TEST(MockSyscallTest, IntTypeTest)
                                     make_hogexec_context()),
                                 SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+  mock_runtime.set_available_gas(1000);
 
   uint32_t inp_1 = 100;
   int128_t inp_128 = int128_t{1} << 70;
@@ -84,6 +96,7 @@ TEST(MockSyscallTest, IntTypeTest)
       reinterpret_cast<uint64_t>(&inp_128_by_value),
       reinterpret_cast<uint64_t>(&out_1), reinterpret_cast<uint64_t>(&out_2),
       reinterpret_cast<uint64_t>(&out_128), 0);
+  context.pop_mock_runtime();
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);
@@ -105,6 +118,10 @@ TEST(MockSyscallTest, SpanTest)
                                 SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
 
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+  mock_runtime.set_available_gas(1000);
+
   uint64_t inp = 0x090A;
   uint32_t out = 0;
 
@@ -117,6 +134,7 @@ TEST(MockSyscallTest, SpanTest)
           reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
           reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0,
           0);
+  context.pop_mock_runtime();
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);
