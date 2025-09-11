@@ -135,7 +135,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         printf("it's a sharded db\n");
         auto sharded_db = std::get<ShardedDB>(db_identifier);
         for (ShardCard &s : sharded_db.shards_) {
-          printf("shard: %s\n", s.address.c_str());
+          printf("shard: %s\n", s.address_for_exec.c_str());
         }
         assert(!sharded_db.shards_.empty());
         if (sharded_db.shards_.size() > 1) {
@@ -143,7 +143,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
               "ShardedDB with more than one shard is not yet supported");
         }
         x23::HostPort hostport;
-        if (!hostport.parse(sharded_db.shards_[0].address)) {
+        if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           throw std::runtime_error("Failed to parse database shard address");
         }
         auto server_addr = hostport.to_addr(true);
