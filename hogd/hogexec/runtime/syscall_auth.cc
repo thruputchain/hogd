@@ -1,5 +1,4 @@
 
-#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -8,6 +7,7 @@
 #include <utility>
 
 #include "account.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -32,7 +32,7 @@ syscall_ChangePublicKeyRegistration_inner(
         return SyscallError{
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
       }
-      if (input_key_bytes.size() != 0) {
+      if (!input_key_bytes.empty()) {
         return SyscallError{
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
       }
