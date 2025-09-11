@@ -2,8 +2,13 @@
 
 # CHUCKD_BINARY=~/go/bin/chuckd
 # LOADGEN_BINARY=/home/local/jhumphri/build/hogd/loadgen/loadgen_server
-# HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
 # HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
+# HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
+
+killall -9 chuckd > /dev/null 2>&1
+killall -9 loadgen_server > /dev/null 2>&1
+killall -9 hogexec > /dev/null 2>&1
+killall -9 hogdb > /dev/null 2>&1
 
 set -Eeuo pipefail
 
