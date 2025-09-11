@@ -5,6 +5,8 @@ LOADGEN_BINARY=/home/local/jhumphri/build/hogd/loadgen/loadgen_server
 HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
 HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
 
+X23TRACE=1
+
 set -Eeuo pipefail
 
 # Kill the whole process group on exit or when interrupted.

@@ -118,6 +118,7 @@ remove_syserr_from_call(auto syserr, auto &&f)
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
+        printf("it's a local mock db\n");
         auto mock_db = std::get<LocalMockDB>(db_identifier);
         auto server_addr =
             x23::HostPort{"localhost",
@@ -131,7 +132,11 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
             ->client(DatabaseToExecutorInterfaceV1{});
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
+        printf("it's a sharded db\n");
         auto sharded_db = std::get<ShardedDB>(db_identifier);
+        for (ShardCard &s : sharded_db.shards_) {
+          printf("shard: %s\n", s.address.c_str());
+        }
         assert(!sharded_db.shards_.empty());
         if (sharded_db.shards_.size() > 1) {
           throw std::runtime_error(
