@@ -381,6 +381,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
   RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
   {
+    logger_.template log_server_advertise<VersMeta>(fd_);
     assert(!reader_running_);
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
