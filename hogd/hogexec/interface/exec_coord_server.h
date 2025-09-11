@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,6 +34,7 @@ public:
 
   uint16_t start_server(uint16_t port_number)
   {
+    assert(rpc_interface_);
     return rpc_interface_->start_server(port_number);
   }
 

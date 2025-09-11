@@ -17,3 +17,15 @@ target_link_libraries(
   runtime
   precompiles
 )
+
+add_executable(
+  exec_interface_test
+  exec_coord_test.cc
+)
+
+target_link_libraries(
+  exec_interface_test
+  exec_interface
+  runtime_test_lib
+  GTest::gtest
+)
