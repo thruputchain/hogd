@@ -67,7 +67,7 @@ to_span(const Bytestring &bs)
 
 } // namespace
 
-ErrnoStatus<void>
+void
 HogDBExecutorServer::start_server(uint16_t port)
 {
   lfd_ = x23::stcplisten(port);
@@ -92,8 +92,6 @@ HogDBExecutorServer::start_server(uint16_t port)
       }
     }
   });
-
-  return {};
 }
 
 // HogDBExecutorServer implementations

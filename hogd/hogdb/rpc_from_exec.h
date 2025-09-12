@@ -31,7 +31,7 @@ public:
   explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
 
   // Start the server on the specified port
-  ErrnoStatus<void> start_server(uint16_t port);
+  void start_server(uint16_t port);
 
   RPCError commit_transaction(BlockID block, TransactionID tx);
   RPCError abort_transaction(BlockID block, TransactionID tx);
