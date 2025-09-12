@@ -12,7 +12,6 @@ namespace hogd {
 // (and log more helpful errors when debugging system integration)
 class BlockIDStateManager {
 public:
-
   // Either the genesis block, or the last committed block id.
   // Set when initializing from db.
   void log_block_id_tip(BlockID block_id);
@@ -23,17 +22,13 @@ public:
   void log_block_abandon(BlockID block_id);
 
 private:
-  enum class BlockIDState {
-    kOpened,
-    kClosed,
-    kAbandoned
-  };
+  enum class BlockIDState { kOpened, kClosed, kAbandoned };
 
   std::mutex mtx_;
   std::unordered_map<BlockID, BlockIDState> block_id_states_;
-  // If there is a block id that committed, then we assume that all future block ids will be strictly larger
-  // than the last committed one.
+  // If there is a block id that committed, then we assume that all future block
+  // ids will be strictly larger than the last committed one.
   std::optional<BlockID> last_committed_block_id_;
 };
 
-}
+} // namespace hogd
