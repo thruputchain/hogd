@@ -92,7 +92,7 @@ public:
       ctx_ = std::make_unique<RPCContext>(db_, trie_);
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-      CHECK(db_executor_server_->start_server(/*port=*/0).has_value());
+      db_executor_server_->start_server(/*port=*/0);
       executor_db_port_ = db_executor_server_->port();
 
       db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);

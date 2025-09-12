@@ -21,7 +21,6 @@
 #include "db_coord.hh"
 
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
@@ -107,11 +106,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
-  ErrnoStatus<void> ret = exec_server.start_server(kExecServerPort);
-  if (!ret) {
-    critical("Failed to start executor server: {}", ret.error());
-    return EXIT_FAILURE;
-  }
+  exec_server.start_server(kExecServerPort);
 
   // TODO(jhumphri): Check this and clean it up.
   x23::ThreadPool x23_pool(/*nthreads=*/1);
@@ -125,12 +120,20 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     const std::string host = {host_port.host.begin(), host_port.host.end()};
     const std::string port = {host_port.port.begin(), host_port.port.end()};
 
-    auto fd = cp.tcpconnect(host, port)();
-    if (!fd) {
-      return EXIT_FAILURE;
-    }
+    auto fd = [&cp, host = std::move(host), port = std::move(port),
+               &coordinator_addr]() {
+      while (true) {
+        auto fd = cp.tcpconnect(host, port)();
+        if (fd) {
+          return *fd;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        warn_every_n_sec(5.0F, "waiting for coordinator address {}",
+                         *coordinator_addr);
+      }
+    }();
 
-    auto client_config = x23::rpc_stream_logged(cp, *fd);
+    auto client_config = x23::rpc_stream_logged(cp, fd);
     while (true) {
       auto client =
           std::make_optional(client_config.template client<Coordinator1>());
@@ -152,6 +155,9 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       client->coordinator_intro_shard(card)();
       break;
     }
+  }
+  else {
+    warn("no coordinator address provided, skipping coordinator connection");
   }
 
   // block forever
