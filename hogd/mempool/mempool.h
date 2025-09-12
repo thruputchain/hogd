@@ -34,7 +34,7 @@ public:
     : coord_client_(std::move(coord_client)),
       db_coord_client_(std::move(db_coord_client)),
       db_sched_client_(std::move(db_sched_client)),
-      exec_client_(std::move(exec_client)), scheduler_(db_sched_client)
+      exec_client_(std::move(exec_client)), scheduler_(db_sched_client_)
   {}
 
   // Disable copy and move.

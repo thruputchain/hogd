@@ -56,9 +56,7 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     return true;
   }
 
-  printf("about to send\n");
   HogAgeResult res = db_sched_client_.dbsched_get_hog_ages(to_send)();
-  printf("return from send\n");
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     return false;
   }
