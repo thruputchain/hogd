@@ -37,21 +37,6 @@ namespace hogd {
 
 namespace {
 
-template<typename T>
-DbSchedResult
-to_db_result(HogDBStatus<T> ret)
-{
-  // TODO(abelay): the RPC error codes ought to be the same as or similar to
-  // HogDBStatus; the current ones don't capture the range of possible errors.
-  if (!ret) {
-    error("to_db_result error: {}", ret.error());
-    return DbSchedResult::DbSchedResultError;
-  }
-  return DbSchedResult::DbSchedResultOK;
-}
-
-} // namespace
-
 x23::Async<HogAgeResult>
 HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 {
