@@ -51,10 +51,7 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   // Start the executor server
   std::println("Starting executor server on port {}", exec_port);
   HogDBExecutorServer db_executor_server(ctx);
-  auto exec_ret = db_executor_server.start_server(exec_port);
-  if (!exec_ret) {
-    throw std::runtime_error("Failed to start executor server");
-  }
+  db_executor_server.start_server(exec_port);
 
   while (true) {
     std::this_thread::sleep_for(std::chrono::seconds(100));

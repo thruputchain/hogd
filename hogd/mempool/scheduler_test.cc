@@ -14,6 +14,7 @@
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
 #include "hogd/mempool/scheduler.h"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
