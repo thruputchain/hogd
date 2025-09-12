@@ -25,6 +25,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
@@ -192,6 +193,7 @@ public:
     if (log) {
       enable_logging();
     }
+    BlockIDStateManager::throw_on_error_ = true;
     initialize(mode);
     HogexecMetrics::launch_log_worker();
   }

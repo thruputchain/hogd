@@ -84,7 +84,8 @@ private:
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
 
-  std::conditional_t<is_debug_build(), BlockIDStateManager, std::monostate>
+  std::conditional_t<is_debug_build(), BlockIDStateManager,
+                     UncheckedBlockIDStateManager>
       block_id_state_manager_;
 
   // commit_block is a helper function that performs all the steps necessary to

@@ -107,6 +107,9 @@ x23::Async<DbResult>
 HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
                                           BlockExecutionMode mode)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_open(parent_id, new_id);
+  }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
   co_return to_db_result(ctx_.open_block_tx(new_id));
@@ -115,6 +118,9 @@ HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_commit(id);
+  }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
@@ -124,6 +130,9 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_abandon(id);
+  }
   BlockTX *ret = ctx_.get_block_tx(id);
   if (!ret)
     co_return DbResult::DbResultError;
