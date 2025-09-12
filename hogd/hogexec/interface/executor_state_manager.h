@@ -21,8 +21,7 @@ public:
     : db_proxy_(std::move(db_proxy))
   {}
 
-  std::shared_ptr<ExecutorContext> get_executor_context(BlockID block_id,
-                                                        ExecutionMode mode);
+  std::shared_ptr<ExecutorContext> get_executor_context(BlockID block_id);
 
   // return ExecResultOk if successful, or ExecResultSystemError if
   // the block_id already exists and is of a different mode.
