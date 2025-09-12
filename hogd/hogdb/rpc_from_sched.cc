@@ -9,14 +9,12 @@
 #include <cstdlib>
 #include <mutex>
 #include <netinet/in.h>
-#include <span>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <utility>
 
 // generated x23 headers
 #include "db_sched.hh"
-#include "genesis.hh"
 
 #include "rpc_types.hh"
 #include "types.hh"
@@ -25,9 +23,6 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
-#include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
