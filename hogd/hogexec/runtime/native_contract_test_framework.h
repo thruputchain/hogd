@@ -114,10 +114,7 @@ public:
   HogdbWrapper() : db_(open_db())
   {
     db_coord_server_.start_server(0);
-    auto r = db_executor_server_.start_server(0);
-    if (!r) {
-      throw std::runtime_error("HogdbWrapper: start_server failed");
-    }
+    db_executor_server_.start_server(0);
   }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
