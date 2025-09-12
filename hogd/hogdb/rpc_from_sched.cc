@@ -35,8 +35,6 @@
 
 namespace hogd {
 
-namespace {
-
 x23::Async<HogAgeResult>
 HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 {

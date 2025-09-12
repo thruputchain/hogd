@@ -272,56 +272,49 @@ struct Clients {
 inline Clients
 create_clients(const MempoolTestServer &server)
 {
+  // Mempool-Coordinator RPC client.
   auto coord_pool = std::make_unique<x23::ThreadPool>(1);
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  coord_client_t coord_client = [&] -> coord_client_t {
-    auto fd =
-        coord_cp->tcpconnect(MempoolTestServer::kAddress,
-                             std::to_string(server.coordinator_sched_port()))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to coord server");
-    }
-    auto client_config = x23::rpc_stream_logged(*coord_cp, *fd);
-    return client_config.template client<CoordScheduler1>();
-  }();
+  x23::UniqueFd coord_fd =
+      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                     server.coordinator_sched_port()}
+                           .to_addr());
+  coord_client_t coord_client =
+      x23::rpc_stream_logged(*coord_cp, coord_fd.release())
+          ->client(CoordScheduler1{});
 
+  // Coordinator-DB RPC client.
   auto db_coord_pool = std::make_unique<x23::ThreadPool>(1);
   auto db_coord_cp = std::make_unique<x23::CoroPoll>(*db_coord_pool);
-  db_coord_client_t db_coord_client = [&] -> db_coord_client_t {
-    auto fd =
-        db_coord_cp->tcpconnect(MempoolTestServer::kAddress,
-                                std::to_string(server.db_coordinator_port()))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to db coord server");
-    }
-    auto client_config = x23::rpc_stream_logged(*db_coord_cp, *fd);
-    return client_config.template client<DbCoord1>();
-  }();
+  x23::UniqueFd db_coord_fd =
+      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                     server.db_coordinator_port()}
+                           .to_addr());
+  db_coord_client_t db_coord_client =
+      x23::rpc_stream_logged(*db_coord_cp, db_coord_fd.release())
+          ->client(DbCoord1{});
 
+  // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>(1);
   auto db_sched_cp = std::make_unique<x23::CoroPoll>(*db_sched_pool);
-  db_sched_client_t db_sched_client = [&] -> db_sched_client_t {
-    auto fd =
-        db_sched_cp->tcpconnect(MempoolTestServer::kAddress,
-                                std::to_string(server.db_scheduler_port()))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to db sched server");
-    }
-    auto client_config = x23::rpc_stream_logged(*db_sched_cp, *fd);
-    return client_config.template client<DbSched1>();
-  }();
+  x23::UniqueFd db_sched_fd =
+      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                     server.db_scheduler_port()}
+                           .to_addr());
+  db_sched_client_t db_sched_client =
+      x23::rpc_stream_logged(*db_sched_cp, db_sched_fd.release())
+          ->client(DbSched1{});
 
+  // Mempool-Executor RPC client.
   auto exec_pool = std::make_unique<x23::ThreadPool>(1);
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  exec_client_t exec_client = [&] -> exec_client_t {
-    auto fd = exec_cp->tcpconnect(MempoolTestServer::kAddress,
-                                  std::to_string(server.executor_port()))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to executor server");
-    }
-    auto client_config = x23::rpc_stream_logged(*exec_cp, *fd);
-    return client_config.template client<ExecutorCoord1>();
-  }();
+  x23::UniqueFd exec_fd =
+      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                     server.executor_port()}
+                           .to_addr());
+  exec_client_t exec_client =
+      x23::rpc_stream_logged(*exec_cp, exec_fd.release())
+          ->client(ExecutorCoord1{});
 
   auto interface = std::make_unique<Mempool>(std::move(coord_client),
                                              std::move(db_coord_client),
