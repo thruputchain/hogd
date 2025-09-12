@@ -16,6 +16,7 @@
 
 // xdr types
 #include "db_coord.hh"
+#include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
 #include "types.hh"
