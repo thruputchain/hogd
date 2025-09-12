@@ -1,12 +1,21 @@
 add_library(
-  merkle
+  merkle_objects OBJECT
   node.cc
   merkle_trie.cc
 )
+
+target_link_libraries(
+  merkle_objects
+  hogd_interface
+)
+
+add_library(
+  merkle
+  $<TARGET_OBJECTS:merkle_objects>
+)
+
 target_link_libraries(
   merkle
-  base
-  crypto
   hogd
 )
 
@@ -16,7 +25,6 @@ add_executable(
 )
 target_link_libraries(
   hex_array_test
-  base
   hogd
   GTest::gtest_main
 )
@@ -28,7 +36,6 @@ add_executable(
 )
 target_link_libraries(
   node_test
-  base
   hogd
   merkle
   GTest::gtest_main

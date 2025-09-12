@@ -9,6 +9,7 @@
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
@@ -16,7 +17,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/format.h"
 
 namespace hogd {
 
@@ -69,7 +69,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
       auto received_hash = sha256(*out);
       if (received_hash != hash) {
         panic("Received incorrect contract hash from db: {} != {}",
-              x23::show(received_hash), x23::show(hash));
+              received_hash, hash);
       }
     }
   }

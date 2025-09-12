@@ -16,20 +16,18 @@
 #include <thread>
 #include <utility>
 
-// TODO(abelay): there is apparently a header dependency problem inside x23
-// where x23/vec.h cannot be included first.  These generated headers are not
-// needed, but included as a hack to avoid it.
+// XDR headers
 #include "coord.hh"
-#include "db_coord.hh" // NOLINT
-#include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/merkle.h"
-#include "rpc_types.hh" // NOLINT
+#include "db_coord.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -141,13 +139,16 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         continue;
       }
 
-      const std::string address =
+      const std::string coord_address =
           "127.0.0.1:" + std::to_string(kCoordServerPort);
+      const std::string exec_address =
+          "127.0.0.1:" + std::to_string(kExecServerPort);
       ShardCard card{.protocol = "blah",
                      .upid = {},
                      .block_height = 0,
                      .shard_count = 1,
-                     .address = address.c_str()};
+                     .address_for_coord = coord_address.c_str(),
+                     .address_for_exec = exec_address.c_str()};
       client->coordinator_intro_shard(card)();
       break;
     }

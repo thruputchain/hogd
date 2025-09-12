@@ -12,10 +12,12 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <utility>
 
 // xdr types
 #include "db_coord.hh"
-#include "nomination.hh"
+#include "hogd/base/os.h"
+#include "hogd/base/worker_pool.h"
 #include "types.hh"
 
 #include "hogd/base/span.h"

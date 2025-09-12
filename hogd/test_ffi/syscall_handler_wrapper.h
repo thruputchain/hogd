@@ -8,6 +8,7 @@
 #include <tuple>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -50,6 +51,7 @@ public:
       return false;
     }
 
+    assert(mock_runtime_stack_.empty());
     current_context_ = this;
     return true;
   }
@@ -59,6 +61,27 @@ public:
   {
     assert(get_context() == this);
     current_context_ = nullptr;
+    assert(mock_runtime_stack_.empty());
+  }
+
+  void push_mock_runtime(MockRuntime *runtime)
+  {
+    assert(get_context() == this);
+    mock_runtime_stack_.push_back(runtime);
+  }
+
+  void pop_mock_runtime()
+  {
+    assert(get_context() == this);
+    assert(!mock_runtime_stack_.empty());
+    mock_runtime_stack_.pop_back();
+  }
+
+  MockRuntime *get_mock_runtime()
+  {
+    assert(get_context() == this);
+    assert(!mock_runtime_stack_.empty());
+    return mock_runtime_stack_.back();
   }
 
   SystemCallHandler &to_handler() { return handler_; }
@@ -67,6 +90,7 @@ private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 
   SystemCallHandler handler_;
+  std::vector<MockRuntime *> mock_runtime_stack_;
 };
 
 constexpr ForeignHostFnResult
@@ -117,6 +141,9 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     return unrecoverable_error();
   }
 
+  auto *mock_runtime = handler->get_mock_runtime();
+  assert(mock_runtime != nullptr);
+
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   return [&]<size_t... Is>(
@@ -130,8 +157,14 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     auto inner_res =
         wrap_after_parse<Syscall, InnerSyscallFunc, InputArg, OutputArg>(
             handler->to_handler(),
-            WrappedGasAmount{std::numeric_limits<uint64_t>::max()},
+            WrappedGasAmount{mock_runtime->get_available_gas()},
             std::move(parsed_args));
+
+    auto gas_consumed = inner_res.second;
+    if (!mock_runtime->consume_gas(gas_consumed)) {
+      return {.result_code = 0,
+              .panic = std::to_underlying(HostFnErrorCode::kHostOutOfGas)};
+    }
 
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

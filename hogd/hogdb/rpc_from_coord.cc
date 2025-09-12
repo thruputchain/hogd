@@ -23,6 +23,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"
@@ -39,15 +40,6 @@
 namespace hogd {
 
 namespace {
-
-ItemKey
-make_item_key(const AddressAndKey &addr)
-{
-  if (addr.key.key_type() ==
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-    return ItemKey(addr.address, {}, true);
-  return ItemKey(addr.address, addr.key.contract_data_key());
-}
 
 template<typename T>
 DbResult
@@ -81,18 +73,21 @@ HogDBCoordServer::commit_block(BlockID id)
     return HogDBError(HogDBCode::kExists);
   }
 
+  // write all the changes in the block TX.
+  BlockTX *btx = ctx_.get_block_tx(id);
+  HogDBStatus<void> ret = btx->commit();
+  if (!ret)
+    return ret.error();
+
+  // destroy the block TX.
+  ctx_.close_block_tx(id);
+
   // update the DbTip.
   ctx_.get_trie().generate_top_level_hashes();
   ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
   ctx_.get_tip().height = ctx_.get_tip().height + 1;
   ctx_.get_tip().id = id;
-  HogDBStatus<void> ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
-  if (!ret)
-    return ret.error();
-
-  // write all the changes in the block TX.
-  BlockTX *btx = ctx_.get_block_tx(id);
-  ret = btx->commit();
+  ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
   if (!ret)
     return ret.error();
 
@@ -101,11 +96,9 @@ HogDBCoordServer::commit_block(BlockID id)
   if (!lsn)
     return lsn.error();
 
-  // destroy the block TX.
-  ctx_.close_block_tx(id);
-
   info("committed block {}: hash='{}', height='{}', lsn='{}", id,
        ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
+  assert(ctx_.get_tip().height != 0);
   return {};
 }
 
@@ -237,11 +230,10 @@ x23::Async<DbResult>
 HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 {
   constexpr static BlockID kGenesisBlockID = 0;
-  if (is_initialized_) {
+  if (ctx_.get_tip().height != 0) {
+    error("Genesis block can only be loaded if the database has no blocks");
     co_return DbResult::DbResultError;
   }
-
-  is_initialized_ = true;
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {

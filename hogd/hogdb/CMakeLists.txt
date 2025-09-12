@@ -1,6 +1,6 @@
 # Create a hogdb module library
-add_library(
-  hogdb
+
+add_library(hogdb_objects OBJECT
   block_tx.cc
   invoke_tx.cc
   item_change.cc
@@ -10,6 +10,16 @@ add_library(
   rpc_from_exec.cc
   status.cc
 )
+target_link_libraries(
+  hogdb_objects
+  hogd_interface
+)
+
+add_library(
+  hogdb
+  $<TARGET_OBJECTS:hogdb_objects>
+)
+
 target_link_libraries(
   hogdb
   ramdb

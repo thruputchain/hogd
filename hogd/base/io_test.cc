@@ -157,7 +157,7 @@ TEST(DirectoryTest, BasicUsage)
   // check that the file appears.
   list = dir->list();
   EXPECT_TRUE(list);
-  EXPECT_EQ(list->size(), 1);
+  EXPECT_EQ(list->size(), 1U);
   EXPECT_EQ(list->at(0), "test");
   EXPECT_TRUE(dir->access("test"));
 

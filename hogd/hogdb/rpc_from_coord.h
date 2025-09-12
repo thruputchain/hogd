@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <mutex>
@@ -8,12 +9,12 @@
 // generated x23 headers
 #include "db_coord.hh"
 #include "genesis.hh"
-#include "nomination.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "types.hh"
+#include "hogd/hogdb/status.h"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
@@ -69,8 +70,6 @@ private:
   RPCContext &ctx_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-  std::atomic<bool> is_initialized_ = false;
 
   // protect port_ during initialization
   std::mutex mtx_;

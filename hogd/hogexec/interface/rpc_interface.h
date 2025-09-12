@@ -13,8 +13,6 @@
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/event.h"
-#include "x23/threadpool.h"
-#include "x23/vec.h"
 
 namespace hogd {
 

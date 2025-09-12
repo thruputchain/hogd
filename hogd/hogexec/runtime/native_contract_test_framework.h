@@ -1,6 +1,7 @@
 #pragma once
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -24,7 +25,6 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
@@ -142,14 +142,6 @@ public:
   }
 
 private:
-  static ItemKey make_item_key(const AddressAndKey &addr)
-  {
-    if (addr.key.key_type() ==
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-      return ItemKey(addr.address, {}, true);
-    return ItemKey(addr.address, addr.key.contract_data_key());
-  }
-
   static HogDBDAO open_db()
   {
     Directory dir = Directory::open_temporary().value();
@@ -339,6 +331,8 @@ public:
   }
 
   void run_genesis_initialization(GenesisBlock const &genesis_block);
+
+  auto &get_coord_client() { return coord_wrapper_->client(); }
 
 private:
   void initialize(BlockExecutionMode mode)

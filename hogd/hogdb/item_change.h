@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"

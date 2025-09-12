@@ -75,7 +75,7 @@ private:
         auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
         if (!fd) {
           error("failed to connect:{} to coord on {} port {}, retrying",
-                Errno{}, server_addr_, coord_port_);
+                fd.error().what(), server_addr_, coord_port_);
           std::this_thread::sleep_for(std::chrono::milliseconds(500));
           continue;
         }
@@ -92,7 +92,7 @@ private:
         server_addr_ + ":" + std::to_string(exec_port_);
     db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(IntroExecResult{
         .exec_id = 0,
-        .shards = {ShardCard{.address = server_addrport.c_str()}}}));
+        .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
   }
 
   void start_db_server()

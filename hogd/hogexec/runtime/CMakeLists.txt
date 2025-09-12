@@ -25,6 +25,7 @@ add_library(runtime_objects OBJECT
   status.cc
   storage_snapshot_cache.cc
   snapshot_storage_item.cc
+  syscall_auth.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
@@ -83,6 +84,7 @@ add_library(runtime_test_objects OBJECT
   nnint_add_test.cc
   rcq_test.cc
   read_only_test.cc
+  reference_leak_test.cc
   revert_tests.cc
   runtime_test.cc
   serialize_roundtrip_test.cc

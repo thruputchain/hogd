@@ -107,6 +107,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     assert(err != -1);
   }
   else {
+    fdp->ready = 0; // because EPOLLERR is sticky
     if (old_mode == kActive) {
       [[maybe_unused]] int err =
           epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
@@ -223,7 +224,7 @@ CoroPollImpl::check(int timeout)
         if (WorkItem wi = state_[fd].callbacks[write].exchange({})) {
           --numcoro_;
           if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
-            coroqueue.push_back({h, wi.cpuhint});
+            coroqueue.emplace_back(h, wi.cpuhint);
         }
       }
   }

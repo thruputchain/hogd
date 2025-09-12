@@ -1,5 +1,6 @@
 #include "hogd/test_ffi/mock_runtime.h"
 
+#include <cassert>
 #include <memory>
 #include <string_view>
 
@@ -8,6 +9,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "types.hh"
 
@@ -25,7 +27,12 @@ MockRuntimeContext::set_trampoline(int32_t contract,
 InvokeStatus<void>
 MockRuntime::invoke_internal(std::string_view method_name)
 {
-  return backing_contract_.invoke(method_name);
+  auto *context = SyscallHandlerContext::get_context();
+  assert(context != nullptr);
+  context->push_mock_runtime(this);
+  auto res = backing_contract_.invoke(method_name);
+  context->pop_mock_runtime();
+  return res;
 }
 
 std::unique_ptr<Runtime>

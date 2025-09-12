@@ -5,7 +5,6 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -200,12 +199,12 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
   return true;
 }
 
-void
+bool
 BlockManager::initialize_genesis_block(GenesisBlock const &config)
 {
   std::lock_guard lock(mtx_);
   if (initialized_genesis_) {
-    throw std::runtime_error("double initialize!");
+    return false;
   }
   initialized_genesis_ = true;
 
@@ -227,6 +226,8 @@ BlockManager::initialize_genesis_block(GenesisBlock const &config)
       [&](const ContractAddress &addr, const SHA256Hash &hash) {
         base_database_->write_deployment(addr, hash);
       });
+
+  return true;
 }
 
 } // namespace hogd

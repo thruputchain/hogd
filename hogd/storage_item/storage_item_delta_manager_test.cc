@@ -8,6 +8,7 @@
 #include <tuple>
 #include <utility>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -26,6 +27,7 @@
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -1454,6 +1456,155 @@ TEST_P(DeltaManagerTest, NNIntAdd)
           });
 
   EXPECT_TRUE(pool.run_test(experiment));
+}
+
+TEST_P(DeltaManagerTest, AuthDataChangeSigner)
+{
+  auto make_pk_config = []() {
+    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                           .max_weight = Weight{1}};
+  };
+
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  // Create an auth data change delta for key ID 0
+  StorageDelta auth_delta(StorageDeltaType::kDeltaTypeAuthDataChange);
+  auth_delta.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
+
+  // Try to reserve the delta
+  auto lk1 = item.try_reserve(auth_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk1);
+
+  // Check that we can't reserve the same key ID again
+  auto lk2 = item.try_reserve(auth_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_FALSE(lk2);
+
+  // Commit the first change
+  auto storage_excess = item.commit(auth_delta, *lk1);
+  ASSERT_GE(storage_excess, 0);
+
+  // Now try to reserve a different key ID
+  StorageDelta auth_delta2(StorageDeltaType::kDeltaTypeAuthDataChange);
+  auth_delta2.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 1,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
+
+  auto lk3 = item.try_reserve(auth_delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk3);
+  item.commit(auth_delta2, *lk3);
+
+  // Check the final state
+  auto final_item = item.get_post_close_block_item();
+  ASSERT_TRUE(final_item);
+  ASSERT_EQ(final_item->type(), StorageItemType::kItemTypeAuthData);
+
+  // Verify the auth data has our changes
+  const auto &auth_data = final_item->auth_data();
+  ASSERT_TRUE(auth_data.public_keys[0]);
+  ASSERT_TRUE(auth_data.public_keys[1]);
+  ASSERT_FALSE(auth_data.public_keys[2]); // Should still be null
+}
+
+TEST_P(DeltaManagerTest, RCQFailedReservationReleasesReference)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  // First, reserve RCQ with consume to set the consumer_lock_
+  StorageDelta rcq_delta1(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  rcq_delta1.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
+  rcq_delta1.retrocausal_queue().consume.emplace(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 0,
+                                           .partial_consumed_number = 0},
+                                   .current_block_consumed = {}});
+
+  auto lk1 = item.try_reserve(rcq_delta1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk1); // Should succeed
+
+  // Now try to reserve another RCQ delta that also needs consume
+  // This should fail because consumer_lock_ is already true
+  StorageDelta rcq_delta2(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  rcq_delta2.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
+  rcq_delta2.retrocausal_queue().consume.emplace(
+      RetrocausalQueueConsumeDelta{.past_block_consume =
+                                       RetrocausalQueuePastBlockConsumeDelta{
+                                           .max_fully_consumed_block_number = 0,
+                                           .partial_consumed_number = 0},
+                                   .current_block_consumed = {}});
+
+  auto lk2 = item.try_reserve(rcq_delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_FALSE(lk2); // Should fail due to consumer_lock_ conflict
+
+  // Clean up the first reservation
+  item.revert(lk1->lock_);
+
+  // Now try to reserve a completely different type (bytestring)
+  // This should succeed if the reference was properly released
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
+  bytestring_delta.bytestring() = {1, 2, 3, 4, 5};
+
+  auto lk3 =
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk3); // Should succeed if reference was released
+
+  // Clean up
+  item.commit(bytestring_delta, *lk3);
+}
+
+TEST_P(DeltaManagerTest, AuthDataFailedReservationReleasesReference)
+{
+  auto make_pk_config = []() {
+    return PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
+                           .max_weight = Weight{1}};
+  };
+
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  // First, create a successful auth data reservation to occupy key ID 0
+  StorageDelta auth_delta1(StorageDeltaType::kDeltaTypeAuthDataChange);
+  auth_delta1.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
+
+  auto lk1 = item.try_reserve(auth_delta1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk1);
+
+  // Now try to reserve the same key ID again - this should fail
+  StorageDelta auth_delta2(StorageDeltaType::kDeltaTypeAuthDataChange);
+  auth_delta2.auth_data_change().auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = x23::Ptr<PublicKeyConfig>(
+                               new PublicKeyConfig(make_pk_config()))});
+
+  auto lk2 = item.try_reserve(auth_delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_FALSE(lk2); // Should fail due to conflict
+
+  // revert the first change to clean up
+  item.revert(lk1->lock_);
+
+  // Now try to reserve a completely different type (bytestring)
+  // This should succeed if the reference was properly released
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
+  bytestring_delta.bytestring() = {1, 2, 3, 4, 5};
+
+  auto lk3 =
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk3); // Should succeed if reference was released
+
+  // Clean up
+  item.commit(bytestring_delta, *lk3);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

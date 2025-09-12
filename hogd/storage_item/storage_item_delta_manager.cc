@@ -100,7 +100,10 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     bool requires_consume = delta.retrocausal_queue().consume != nullptr;
     if (auto *args = variant_.try_set_variant<RetrocausalQueueArgs>()) {
       if (requires_consume) {
-        return args->try_reserve_consume();
+        if (!args->try_reserve_consume()) {
+          variant_.release_reference();
+          return false;
+        }
       }
       return true;
     }
@@ -132,6 +135,35 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
       }
       variant_.release_reference();
       return false;
+    }
+    return false;
+  }
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+  {
+    const auto *prev_auth_data =
+        (committed_item_ &&
+         committed_item_->type() == StorageItemType::kItemTypeAuthData)
+            ? &committed_item_->auth_data()
+            : nullptr;
+    if (auto *args = variant_.try_set_variant<AuthDataArgs>(prev_auth_data)) {
+
+      std::set<uint32_t> cleanup_keys = {};
+      auto do_cleanup = [&]() {
+        for (auto key_id : cleanup_keys) {
+          args->undo_change_signer(key_id);
+        }
+        variant_.release_reference();
+      };
+
+      for (auto const &signer :
+           delta.auth_data_change().auth_data_change_signers) {
+        if (!args->try_reserve_change_signer(signer.public_key_id)) {
+          do_cleanup();
+          return false;
+        }
+        cleanup_keys.insert(signer.public_key_id);
+      }
+      return true;
     }
     return false;
   }
@@ -191,6 +223,14 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
     args.commit_threshold_change(delta.replay_cache_modify().minimum_threshold);
     for (auto nonce : delta.replay_cache_modify().nonces) {
       args.commit_insert(nonce);
+    }
+  } break;
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
+      args.commit_change_signer(signer.public_key_id, signer.public_key.get());
     }
   } break;
   default:
@@ -379,6 +419,14 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
   case StorageItemType::kItemTypeBytestring:
   case StorageItemType::kItemTypeDeleted:
     break;
+  case StorageItemType::kItemTypeAuthData:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
+    for (auto key_id : type_specific_lock.auth_data_lock().modified_key_ids) {
+      args.undo_change_signer(key_id);
+    }
+    break;
+  }
   default:
     throw std::runtime_error("unimplemented revert_set_typeclass_lock");
   }
@@ -498,6 +546,39 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   case StorageItemType::kItemTypeBytestring:
   case StorageItemType::kItemTypeDeleted:
     return prev_lock;
+  case StorageItemType::kItemTypeAuthData:
+  {
+    assert(variant_.has_variant_arm<AuthDataArgs>());
+    auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
+    std::set<uint32_t> cleanup_keys = {};
+
+    auto do_cleanup = [&]() {
+      for (auto key_id : cleanup_keys) {
+        args.undo_change_signer(key_id);
+      }
+    };
+
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
+      uint32_t key_id = signer.public_key_id;
+
+      // Check if this key_id is already in the previous lock
+      const auto &prev_modified_keys =
+          prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
+      bool already_locked = std::ranges::find(prev_modified_keys, key_id) !=
+                            prev_modified_keys.end();
+
+      if (!already_locked) {
+        if (!args.try_reserve_change_signer(key_id)) {
+          do_cleanup();
+          return std::nullopt;
+        }
+        cleanup_keys.insert(key_id);
+      }
+    }
+
+    return req_lock;
+  }
   default:
     throw std::runtime_error(
         "unimplemented handle_try_reserve_from_set_typeclass_lock");
@@ -607,6 +688,25 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     for (auto nonce : delta.replay_cache_modify().nonces) {
       [[maybe_unused]] auto r = args.try_reserve_insert(nonce);
+      assert(r);
+    }
+    break;
+  }
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AuthDataArgs>();
+
+    // Release the lock for this key ID, then re-acquire it
+    const auto &prev_modified_keys = lock.full_typeclass_lock()
+                                         .extra_lock_data.auth_data_lock()
+                                         .modified_key_ids;
+    for (auto const &key_id : prev_modified_keys) {
+      args.undo_change_signer(key_id);
+    }
+    for (auto const &signer :
+         delta.auth_data_change().auth_data_change_signers) {
+      [[maybe_unused]] auto r =
+          args.try_reserve_change_signer(signer.public_key_id);
       assert(r);
     }
     break;

@@ -42,7 +42,7 @@ function(add_wasm_build target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
-        # --locked
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -75,7 +75,7 @@ function(add_spec_json target_name)
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
         cargo +nightly run
         --features spec
-        #--locked
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_spec
