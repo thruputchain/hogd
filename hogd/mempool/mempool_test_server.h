@@ -292,7 +292,7 @@ create_clients(const MempoolTestServer &server)
         db_coord_cp->tcpconnect(MempoolTestServer::kAddress,
                                 std::to_string(server.db_coordinator_port()))();
     if (!fd) {
-      throw std::runtime_error("Failed to connect to db server");
+      throw std::runtime_error("Failed to connect to db coord server");
     }
     auto client_config = x23::rpc_stream_logged(*db_coord_cp, *fd);
     return client_config.template client<DbCoord1>();
@@ -305,7 +305,7 @@ create_clients(const MempoolTestServer &server)
         db_sched_cp->tcpconnect(MempoolTestServer::kAddress,
                                 std::to_string(server.db_scheduler_port()))();
     if (!fd) {
-      throw std::runtime_error("Failed to connect to db server");
+      throw std::runtime_error("Failed to connect to db sched server");
     }
     auto client_config = x23::rpc_stream_logged(*db_sched_cp, *fd);
     return client_config.template client<DbSched1>();
