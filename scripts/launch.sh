@@ -69,7 +69,7 @@ wait_port 11222
   --in-addr :7888                \
   --loadgen-addr localhost:11222 \
   --num-accts 10000              \
-  --num-txs 1000000              \
+  --num-txs 100000               \
   --exec-batch 100               \
   --exec-par 10                  \
   --max-msg-size 200000000 &
