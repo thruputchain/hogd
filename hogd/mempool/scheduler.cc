@@ -646,13 +646,28 @@ Scheduler::find_and_remove_from_runqueue(
     // is stranded. We need to remove it from the correct data structures
     // accordingly.
     if (account_to_tx_[it->second.account].erase(&it->second) == 1UL) {
+      if (account_to_tx_[it->second.account].empty()) {
+        CHECK_EQ(account_to_tx_.erase(it->second.account), 1UL);
+      }
       CHECK_EQ(age_to_tx_[it->second.age].erase(&it->second), 1UL);
+      if (age_to_tx_[it->second.age].empty()) {
+        CHECK_EQ(age_to_tx_.erase(it->second.age), 1UL);
+      }
     }
     else {
       CHECK_EQ(
           stranded_[it->second.account][it->second.tx.tx.invocation.gas_limit]
               .erase(&it->second),
           1UL);
+      if (stranded_[it->second.account][it->second.tx.tx.invocation.gas_limit]
+              .empty()) {
+        CHECK_EQ(stranded_[it->second.account].erase(
+                     it->second.tx.tx.invocation.gas_limit),
+                 1UL);
+      }
+      if (stranded_[it->second.account].empty()) {
+        CHECK_EQ(stranded_.erase(it->second.account), 1UL);
+      }
     }
   }
   return true;
