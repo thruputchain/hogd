@@ -48,9 +48,11 @@ x23::Async<ExecProposeResult>
 ExecutorRpcInterface::executorcoord_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
-  auto ctx = executor_states_.get_executor_context(block_id,
-                                                   ExecutionMode::kProposing);
+  auto ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+  if (ctx->mode() != ExecutionMode::kProposing) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
@@ -61,9 +63,11 @@ x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
-  auto ctx = executor_states_.get_executor_context(block_id,
-                                                   ExecutionMode::kValidating);
+  auto ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
+    co_return ExecResult::ExecResultSystemError;
+  }
+  if (ctx->mode() != ExecutionMode::kValidating) {
     co_return ExecResult::ExecResultSystemError;
   }
 
@@ -74,9 +78,13 @@ x23::Async<ExecProposeBatchResult>
 ExecutorRpcInterface::executorcoord_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
-  auto ctx = executor_states_.get_executor_context(block_id,
-                                                   ExecutionMode::kProposing);
+  auto ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+  if (ctx->mode() != ExecutionMode::kProposing) {
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
@@ -96,9 +104,12 @@ x23::Async<ExecValidateBatchResult>
 ExecutorRpcInterface::executorcoord_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
-  auto ctx = executor_states_.get_executor_context(block_id,
-                                                   ExecutionMode::kValidating);
+  auto ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
+  if (ctx->mode() != ExecutionMode::kValidating) {
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
   }
@@ -122,8 +133,7 @@ ExecutorRpcInterface::executorcoord_open_proposal_block(BlockID id)
 x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_open_validation_block(BlockID id)
 {
-  executor_states_.open_validation(id, main_worker_pool_);
-  co_return ExecResult::ExecResultOK;
+  co_return executor_states_.open_validation(id, main_worker_pool_);
 }
 
 x23::Async<void>

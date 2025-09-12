@@ -14,14 +14,12 @@ namespace hogd {
 
 std::shared_ptr<ExecutorContext>
 ExecutorStateManager::get_executor_context(
-    BlockID block_id, ExecutionMode mode) // NOLINT(misc-unused-parameters)
+    BlockID block_id) // NOLINT(misc-unused-parameters)
 {
   auto active_blocks = active_blocks_.take();
 
   if (auto it = active_blocks->find(block_id); it != active_blocks->end()) {
-    auto out = it->second;
-    assert(out.context->mode() == mode);
-    return out.context;
+    return it->second.context;
   }
   return nullptr;
 }
