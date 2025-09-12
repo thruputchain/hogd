@@ -30,7 +30,8 @@ class GenesisBlockUnfurlTest : public ::testing::TestWithParam<TestDB>,
 public:
   GenesisBlockUnfurlTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
+          false)
   {}
 
 protected:
