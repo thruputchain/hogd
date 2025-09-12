@@ -194,8 +194,8 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
     // 1. Cycling will increase the average age of the [kHogAgeGroupToSchedule]
     //    group.
     // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
-    //    schedule [tx], but cycling will add enough hogs to the group to
-    //    schedule [tx].
+    //    schedule tx that requires [gas_limit] hogs, but cycling will add
+    //    enough hogs to the group to schedule it.
     if (already_scheduled_average_older || combined_averages_older ||
         (account_to_tx_[account].empty() && gas_limit > to_schedule)) {
       cycle_groups(account);
@@ -280,7 +280,7 @@ Scheduler::dump_runqueue() const
 }
 
 void
-Scheduler::process_received_hogs(const ContractAddress &account_address,
+Scheduler::process_received_hogs(const ContractAddress &account,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
@@ -288,8 +288,8 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
     return;
   }
 
-  CHECK(read_average_hog_age({account_address}, /*force=*/false));
-  const HogAge &averages = cached_hogs_[account_address];
+  CHECK(read_average_hog_age({account}, /*force=*/false));
+  const HogAge &averages = cached_hogs_[account];
   HogAge new_averages = averages;
 
   const uint128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
@@ -306,14 +306,23 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
         compute_average_age(from_xdr(received_hogs), received_age,
                             from_xdr(num_received), current_block);
   }
+  cached_hogs_[account] = new_averages;
 
-  cached_hogs_[account_address] = new_averages;
-
-  // TODO(jhumphri): I don't think this is right. What if an account has all of
-  // its txs stranded? We need to get them on the runqueue.
-  // No need to call [update_accounts({account_address})] because receiving hogs
-  // does not affect the [kHogAgeGroupReceived] group. So in other words,
-  // receiving hogs does not affect the order in which txs are scheduled.
+  // TODO(jhumphri): Add a test for this.
+  // No need to call [update_accounts({account})] because receiving hogs does
+  // not affect the [kHogAgeGroupToSchedule] group. So in other words, receiving
+  // hogs does not affect the order in which txs are scheduled.
+  //
+  // *However*, if there are no txs on the runqueue _and_ there are stranded
+  // txs, then we may be able to add those txs to the runqueue with the newly
+  // received hogs. We call [cycle_groups()] in this case to move the received
+  // hogs into the other groups and then potentially add stranded txs to the
+  // runqueue. We need to call [cycle_groups()] twice to get the
+  // [kHogAgeGroupReceived] hogs into the [kHogAgeGroupToSchedule] group.
+  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+    cycle_groups(account);
+    cycle_groups(account);
+  }
 }
 
 void
@@ -511,6 +520,8 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   return {hashes, txs};
 }
 
+// TODO(jhumphri): We should remove the [block] parameter. We should know the
+// current block number based on the block number passed to [schedule()].
 void
 Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                              BlockHeight block)

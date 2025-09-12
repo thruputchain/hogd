@@ -545,6 +545,60 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 }
 
+TEST(Scheduler, ProcessReceivedHogsSchedule)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddresses[0]},
+                                     /*force=*/false));
+  HogAge &age =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  age.average_ages[kHogAgeGroupToSchedule] = 1;
+  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
+
+  scheduler.add_txs({txs[0]});
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  }
+
+  scheduler.process_received_hogs(
+      MempoolTestServer::kAccountAddresses[0],
+      /*num_received=*/to_xdr(static_cast<uint128_t>(5'000'000'000)),
+      /*current_block=*/2);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 2);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  {
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_height=*/3, kBlockSize);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0], txs[0]);
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/3);
+
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+              5'000'000'000);
+    EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 3);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  }
+}
+
 TEST(Scheduler, Fairness)
 {
   constexpr size_t kNumRounds = 100;
@@ -1466,20 +1520,31 @@ TEST(Scheduler, ExpiredStranded)
       scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   age.average_ages[kHogAgeGroupToSchedule] = 1;
   age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-  age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
 
   txs[0].tx.uniquifier.block_expiry_height = 5;
   scheduler.add_txs({txs[0]});
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
 
-  const auto &[_, scheduled] =
-      scheduler.schedule(/*block_height=*/6, kBlockSize);
-  EXPECT_TRUE(scheduled.empty());
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/6, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  }
 
-  scheduler.process_received_hogs(MempoolTestServer::kAccountAddresses[0],
-                                  /*num_received=*/5'000'000'000,
-                                  /*current_block=*/7);
+  // The tx should have been discarded because it has expired. We check that
+  // adding enough hogs to run the tx does not cause it to be scheduled.
+  scheduler.process_received_hogs(
+      MempoolTestServer::kAccountAddresses[0],
+      /*num_received=*/to_xdr(static_cast<uint128_t>(5'000'000'000)),
+      /*current_block=*/7);
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/8, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000);
+  }
 }
 
 } // namespace hogd

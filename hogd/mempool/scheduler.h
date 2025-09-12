@@ -50,7 +50,7 @@ public:
   // Call this method when account [account_address] receives [num_received]
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
-  void process_received_hogs(const ContractAddress &account_address,
+  void process_received_hogs(const ContractAddress &account,
                              uint128_xdr num_received,
                              BlockHeight current_block);
 
