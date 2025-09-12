@@ -1,6 +1,6 @@
 // -*-C++-*-
 
-// Common types used by both synchronous and asynchronous coroutines.
+// Common types used by both synchronous and asynchronous RPC.
 
 #pragma once
 

@@ -25,8 +25,8 @@
 //     lot of things.
 //
 //   - You can convert between vectors of signed and unsigned bytes by
-//     means of the destructive Uvec::reinterpret method, which is
-//     kind of like reinterpret_cast for vector.  For example:
+//     means of the destructive Vec::reinterpret method, which is kind
+//     of like reinterpret_cast for vector.  For example:
 //
 //        Str x = "Hello world\n"_ustr;
 //        auto y = auto(x).reinterpret<Vec<unsigned char>>();
@@ -423,7 +423,7 @@ public:
   constexpr decltype(auto) at(this auto &&self, size_type i)
   {
     if (i >= self.size())
-      throw std::out_of_range(std::format("at({}) exceeds size {} in {} Uvec",
+      throw std::out_of_range(std::format("at({}) exceeds size {} in {} Vec",
                                           i, self.size(), tname()));
     return (self.data()[i]);
   }
@@ -561,7 +561,7 @@ public:
     size_type nsz = size() + rsz;
     if (nsz < rsz) [[unlikely]]
       throw XdrLengthError{std::format("Cannot append_range {} elements in "
-                                       "Uvec<{}, {}> of size {}",
+                                       "Vec<{}, {}> of size {}",
                                        rsz, tname(), max_size(), size())};
     // In case we are appending ourselves, reserve space first, then
     // reacquire iterators that may have been invalidated.
@@ -582,10 +582,10 @@ public:
     return {data() + offset, new_size};
   }
 
-  // Clear the current Uvec and return a new Uvec (or derived type
-  // such as Str) in which the pointers have been reinterpret_casted
-  // to a new value_type of the same size and no greater alignment.
-  // For instance, you can cast between Uvec<unsigned char> and Str.
+  // Clear the current Vec and return a new Vec (or derived type such
+  // as Str) in which the pointers have been reinterpret_casted to a
+  // new value_type of the same size and no greater alignment.  For
+  // instance, you can cast between Vec<unsigned char> and Str.
   template<typename Vec> requires requires(typename Vec::value_type *p) {
     typename Vec::value_type;
     typename Vec::Buf{.begin = p, .end = p, .bufend = p};
@@ -742,7 +742,7 @@ protected:
   constexpr void check_size(size_type n)
   {
     if (n > max_size()) [[unlikely]]
-      throw XdrLengthError{std::format("{} exceeds max size in Uvec<{}, {}>", n,
+      throw XdrLengthError{std::format("{} exceeds max size in Vec<{}, {}>", n,
                                        tname(), max_size())};
   }
 };
@@ -754,7 +754,7 @@ template<typename T> Vec(std::initializer_list<T>) -> Vec<T>;
 
 template<typename T> Vec(size_t, const T &) -> Vec<T>;
 
-//! Concept matching Uvec types and types derived from Uvec.
+//! Concept matching Vec types and types derived from Vec.
 template<typename T>
 concept is_vec = std::derived_from<
     T, Vec<typename T::value_type, T::kMaxSize, typename T::allocator_type>>;

@@ -17,6 +17,7 @@ namespace x23 {
 
 using std::source_location;
 
+// Convert a source_location to a string in "filename:line" format.
 inline std::string
 to_string(const source_location &s)
 {
@@ -25,6 +26,11 @@ to_string(const source_location &s)
 
 #if HAVE_STD_STACKTRACE
 
+// Get the calling location by walking the stack trace and finding the
+// first frame that's not from this file or the specified
+// ignore_file. Returns a string prefixed with '*' to indicate it came
+// from stack trace analysis.  Falls back to the provided
+// source_location if no suitable frame is found.
 inline std::string
 get_callsite(std::string_view ignore_file,
              source_location fallback = source_location::current())

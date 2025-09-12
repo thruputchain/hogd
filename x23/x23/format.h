@@ -7,6 +7,7 @@
 
 namespace x23 {
 
+// Convert an XDR type to a human-readable string representation.
 template<is_xdr_type X0, is_bytevec Out = std::string>
 Out
 show(const X0 &x, size_t indent = 0, Out ret = {})
