@@ -115,7 +115,8 @@ TEST(Scheduler, Single)
   Scheduler &scheduler = clients.interface->scheduler();
 
   scheduler.add_txs({txs[0]});
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestServer::kAccountAddresses[0]);
@@ -149,7 +150,8 @@ TEST(Scheduler, TxFailed)
 
   {
     scheduler.add_txs({txs[0]});
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
@@ -168,7 +170,8 @@ TEST(Scheduler, TxFailed)
   // Check that the correct number of hogs was deducted again.
   {
     scheduler.add_txs({txs[0]});
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
@@ -197,7 +200,8 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
                   /*num_hogs=*/5'000'000'000);
   {
     scheduler.add_txs({txs[0], txs[1]});
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
@@ -209,7 +213,8 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
 
   {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 
@@ -218,7 +223,8 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
   {
-    const auto &[hashes, _] = scheduler.schedule(kBlockSize);
+    const auto &[hashes, _] =
+        scheduler.schedule(/*block_height=*/2, kBlockSize);
     ASSERT_EQ(hashes.size(), 1);
     EXPECT_EQ(hashes[0], sha256(txs[1]));
   }
@@ -228,7 +234,8 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
   age = scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
   {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/3, kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 }
@@ -242,7 +249,8 @@ TEST(Scheduler, Empty)
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   EXPECT_TRUE(scheduled.empty());
 }
 
@@ -259,7 +267,8 @@ TEST(Scheduler, MultipleOneBlock)
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 * kBlockSize);
   scheduler.add_txs(txs);
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   ASSERT_EQ(scheduled.size(), kBlockSize);
   for (const SignedTransaction &signed_tx : scheduled) {
     EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
@@ -284,7 +293,8 @@ TEST(Scheduler, MultipleMultipleBlocks)
                   /*num_hogs=*/5'000'000'000 * kBlockSize * kNumBlocks);
   scheduler.add_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
     for (const SignedTransaction &signed_tx : scheduled) {
       EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
@@ -294,7 +304,8 @@ TEST(Scheduler, MultipleMultipleBlocks)
 
   {
     // Now check that no transactions remain.
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 }
@@ -318,7 +329,8 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
                       (kBlockSize * kNumBlocks + kRemainder));
   scheduler.add_txs(txs);
   for (size_t i = 0; i < kNumBlocks; i++) {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     ASSERT_EQ(scheduled.size(), kBlockSize);
     for (const SignedTransaction &signed_tx : scheduled) {
       EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
@@ -328,7 +340,8 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
 
   {
     // Now check the remainder.
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
     ASSERT_EQ(scheduled.size(), kRemainder);
     for (const SignedTransaction &signed_tx : scheduled) {
       EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
@@ -338,7 +351,8 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
 
   {
     // Now check that no transactions remain.
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/2, kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 }
@@ -365,7 +379,8 @@ TEST(Scheduler, NotEnoughHogs)
   // Calling [scheduler.update_accounts()] is unnecessary here, but we do it
   // anyway to test that it is a no-op.
   scheduler.update_accounts({MempoolTestServer::kAccountAddresses[0]});
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   EXPECT_TRUE(scheduled.empty());
 }
 
@@ -382,7 +397,8 @@ TEST(Scheduler, TwoAccounts)
   Scheduler &scheduler = clients.interface->scheduler();
 
   scheduler.add_txs({txs_a[0], txs_b[0]});
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   ASSERT_EQ(scheduled.size(), 2);
   EXPECT_TRUE(txs_a[0] == scheduled[0] || txs_a[0] == scheduled[1]);
   EXPECT_TRUE(txs_b[0] == scheduled[0] || txs_b[0] == scheduled[1]);
@@ -404,7 +420,8 @@ TEST(Scheduler, MultipleAccounts)
   for (const SignedTransactionBatch &tx : txs) {
     scheduler.add_txs({tx[0]});
   }
-  const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/0, kBlockSize);
   ASSERT_EQ(scheduled.size(), MempoolTestServer::kAccountAddresses.size());
 }
 
@@ -421,7 +438,8 @@ TEST(Scheduler, UpdateGroupsBasic)
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1, /*num_hogs=*/0);
   scheduler.add_txs({txs[0]});
   {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     EXPECT_TRUE(scheduled.empty());
   }
 
@@ -434,7 +452,8 @@ TEST(Scheduler, UpdateGroupsBasic)
   scheduler.cycle_groups(MempoolTestServer::kAccountAddresses[0]);
 
   {
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
@@ -527,6 +546,60 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 }
 
+TEST(Scheduler, ProcessReceivedHogsSchedule)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddresses[0]},
+                                     /*force=*/false));
+  HogAge &age =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  age.average_ages[kHogAgeGroupToSchedule] = 1;
+  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
+
+  scheduler.add_txs({txs[0]});
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/1, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  }
+
+  scheduler.process_received_hogs(
+      MempoolTestServer::kAccountAddresses[0],
+      /*num_received=*/to_xdr(static_cast<uint128_t>(5'000'000'000)),
+      /*current_block=*/2);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 2);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  {
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_height=*/3, kBlockSize);
+    ASSERT_EQ(scheduled.size(), 1);
+    EXPECT_EQ(scheduled[0], txs[0]);
+    scheduler.mark_txs_executed(scheduled_hashes, /*block=*/3);
+
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+              5'000'000'000);
+    EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 3);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+  }
+}
+
 TEST(Scheduler, Fairness)
 {
   constexpr size_t kNumRounds = 100;
@@ -567,7 +640,8 @@ TEST(Scheduler, Fairness)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_height=*/i, kBlockSize);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
@@ -622,7 +696,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] =
-        scheduler.schedule(/*block_size=*/1);
+        scheduler.schedule(/*block_height=*/i, /*block_size=*/1);
     EXPECT_EQ(scheduled.size(), 1UL);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
@@ -680,7 +754,8 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[scheduled_hashes, scheduled] =
+        scheduler.schedule(/*block_height=*/i, kBlockSize);
     EXPECT_LE(scheduled.size(), kBlockSize);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
@@ -748,7 +823,7 @@ TEST(Scheduler, YoungHogStarvation)
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] =
-        scheduler.schedule(/*block_size=*/1);
+        scheduler.schedule(/*block_height=*/i, /*block_size=*/1);
     EXPECT_EQ(scheduled.size(), 1);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
@@ -761,7 +836,8 @@ TEST(Scheduler, YoungHogStarvation)
 
   {
     // The next tx scheduled should have been submitted by account 1.
-    const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/1);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/kNumRounds + 1, /*block_size=*/1);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[1]);
@@ -1370,7 +1446,8 @@ TEST(Scheduler, AlreadyScheduledRoundUp)
 
   {
     scheduler.add_txs({txs[0]});
-    const auto &[_, scheduled] = scheduler.schedule(kBlockSize);
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/0, kBlockSize);
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestServer::kAccountAddresses[0]);
@@ -1400,6 +1477,75 @@ TEST(Scheduler, AlreadyScheduledRoundUp)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
             static_cast<uint128_t>(0));
   EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
+}
+
+TEST(Scheduler, Expired)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  txs[0].tx.uniquifier.block_expiry_height = 5;
+  scheduler.add_txs({txs[0]});
+
+  // Check that the correct number of hogs was deducted.
+  const HogAge &age =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+
+  const auto &[_, scheduled] =
+      scheduler.schedule(/*block_height=*/6, kBlockSize);
+  EXPECT_TRUE(scheduled.empty());
+
+  // Check that the correct number of hogs was added back to the
+  // [kHogAgeGroupToSchedule] group.
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
+}
+
+TEST(Scheduler, ExpiredStranded)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddresses[0]},
+                                     /*force=*/false));
+  HogAge &age =
+      scheduler.get_cached_hog_age(MempoolTestServer::kAccountAddresses[0]);
+  age.average_ages[kHogAgeGroupToSchedule] = 1;
+  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
+
+  txs[0].tx.uniquifier.block_expiry_height = 5;
+  scheduler.add_txs({txs[0]});
+  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/6, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+  }
+
+  // The tx should have been discarded because it has expired. We check that
+  // adding enough hogs to run the tx does not cause it to be scheduled.
+  scheduler.process_received_hogs(
+      MempoolTestServer::kAccountAddresses[0],
+      /*num_received=*/to_xdr(static_cast<uint128_t>(5'000'000'000)),
+      /*current_block=*/7);
+  {
+    const auto &[_, scheduled] =
+        scheduler.schedule(/*block_height=*/8, kBlockSize);
+    EXPECT_TRUE(scheduled.empty());
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
+    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000);
+  }
 }
 
 } // namespace hogd

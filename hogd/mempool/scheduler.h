@@ -50,7 +50,7 @@ public:
   // Call this method when account [account_address] receives [num_received]
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
-  void process_received_hogs(const ContractAddress &account_address,
+  void process_received_hogs(const ContractAddress &account,
                              uint128_xdr num_received,
                              BlockHeight current_block);
 
@@ -60,11 +60,12 @@ public:
   // before calling this function, [cached_hogs_[account]] must be updated.
   void update_accounts(const x23::Vec<ContractAddress> &accounts);
 
-  // Chooses txs to schedule in the next block. [block_size] is the maximum
-  // number of txs that will be included in the next block, though fewer txs
-  // than [block_size] may be included.
+  // Chooses txs to schedule in the next block. [block_height] is the height of
+  // the block that is being scheduled. [block_size] is the maximum number of
+  // txs that will be included in the next block, though fewer txs than
+  // [block_size] may be included.
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-  schedule(size_t block_size);
+  schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed*. This method just removes the remaining tx state
@@ -97,9 +98,13 @@ public:
   // remove their state entirely from the scheduler. Specifically, information
   // about the txs is still held in [hash_to_tx_]. The caller needs to
   // ultimately call [mark_txs_executed()] to remove this state.
+  // TODO(jhumphri): We should pass a set instead of a vector, both here and in
+  // [mark_txs_executed()] and the other functions. Otherwise, a malicious
+  // nomination could crash a node by including the same hash twice and
+  // triggering a CHECK failure.
   bool
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> &ret);
+                                x23::Vec<SignedTransaction> *ret);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -177,6 +182,18 @@ private:
                       x23::Vec<SignedTransactionHash> &hashes,
                       x23::Vec<SignedTransaction> &txs);
 
+  // Discards all txs that have expired before [current_height]. In other words,
+  // if [current_height] is the height of the current block being scheduled,
+  // then all txs that expire at heights [current_height - 1] and smaller are
+  // discarded.
+  void discard_expired_txs(BlockHeight current_height);
+
+  bool on_runqueue(TxInfo &info)
+  {
+    return account_to_tx_.contains(info.account) &&
+           account_to_tx_[info.account].contains(&info);
+  }
+
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
@@ -186,11 +203,18 @@ private:
   // does not need to make as many RPC calls to the database.
   std::unordered_map<ContractAddress, HogAge> cached_hogs_;
 
-  // Runqueue data structures. We maintain several data structures to make it
-  // easy to order the runqueue and look up txs with several key types.
-
   // Maps a tx hash to information about the tx.
   std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
+
+  // ---------------
+  // Runqueue data structures. We maintain several data structures to make it
+  // easy to order the runqueue and look up txs with several key types.
+  //
+  // These data structures *only* hold txs that are currently on the runqueue,
+  // i.e., eligible to be scheduled! Txs that are not eligible to be scheduled,
+  // such as due to an insuffucient hog balance on the submitting account, are
+  // stored in [stranded_] below.
+
   // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
       account_to_tx_;
@@ -198,6 +222,10 @@ private:
   // average hog age. The scheduler uses this map to find the txs with the
   // largest hog age as those txs are scheduled with the highest priority.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
+
+  // ---------------
+  // Stranded txs.
+
   // Holds all txs that cannot be scheduled, typically because an account does
   // not have enough hogs. Maps an account to its stranded txs. This makes it
   // easy to look up which stranded txs correspond to an account, since we will
@@ -205,6 +233,20 @@ private:
   std::unordered_map<ContractAddress,
                      std::map<GasAmount, std::unordered_set<TxInfo *>>>
       stranded_;
+
+  // ---------------
+  // Other data structures for txs.
+
+  // Maps a block expiry height to a set of txs that expire at that height. So
+  // in other words, if a set of txs expire at block height 10, those txs can be
+  // included in block 10 and all blocks with smaller heights, but they cannot
+  // be included in blocks 11+.
+  //
+  // This data structure holds *all* txs. So in other words, it holds all txs on
+  // the runqueue and all txs in [stranded_]. When we advance past a block
+  // height, we want to discard all txs that expire at that block height,
+  // regardless of whether they are on the runqueue or stranded.
+  std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
 };
 
 } // namespace hogd
