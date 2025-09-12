@@ -148,36 +148,6 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
   co_return ret;
 }
 
-x23::Async<HogAgeResult>
-HogDBCoordServer::dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
-{
-  HogDBDAO &db = ctx_.get_db();
-  HogAgeResult ret(DbResult::DbResultOK);
-  ret.hog_age_batch().reserve(addresses.size());
-
-  for (const ContractAddress &address : addresses) {
-    HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
-    if (!status) {
-      co_return HogAgeResult(DbResult::DbResultError);
-    }
-    // TODO(jhumphri): Include the address in each index.
-    ret.hog_age_batch().push_back(status.value());
-  }
-  co_return ret;
-}
-
-x23::Async<DbResult>
-HogDBCoordServer::dbcoord_write_hog_ages(const HogAgeBatch &ages)
-{
-  HogDBDAO &db = ctx_.get_db();
-  for (const HogAge &age : ages) {
-    if (!db.write_address_average_hog_age(age)) {
-      co_return DbResult::DbResultError;
-    }
-  }
-  co_return DbResult::DbResultOK;
-}
-
 namespace {
 
 template<typename T> requires std::is_trivially_copyable_v<T>

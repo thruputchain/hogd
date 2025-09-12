@@ -54,11 +54,6 @@ public:
 
   x23::Async<DbTipResult> dbcoord_get_tip();
 
-  x23::Async<HogAgeResult>
-  dbcoord_get_hog_ages(const ContractAddressBatch &addresses);
-
-  x23::Async<DbResult> dbcoord_write_hog_ages(const HogAgeBatch &ages);
-
   x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock genesis_block);
 
   static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height);
