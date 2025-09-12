@@ -19,7 +19,6 @@
 #include "rpc_types.hh"
 #include "types.hh"
 
-#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
