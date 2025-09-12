@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <future>
 #include <print>
 #include <string>
 #include <unistd.h>
@@ -85,15 +86,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   uint16_t actual_port = start_result.value();
   hogd::info("Loadgen server started successfully on port {}", actual_port);
-  std::println("Loadgen server listening on port {}", actual_port);
-  std::println("Press Enter to stop the server...");
 
-  // Wait for user input to stop the server
-  char buf;
-  if (read(STDIN_FILENO, &buf, 1) > 0) {
-    hogd::info("Stopping loadgen server");
-    std::println("Server stopped");
-  }
+  // block forever
+  std::promise<void>().get_future().wait();
 
   return EXIT_SUCCESS;
 }
