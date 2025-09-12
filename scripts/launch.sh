@@ -1,9 +1,10 @@
 #!/bin/bash
 
 CHUCKD_BINARY=~/go/bin/chuckd
-LOADGEN_BINARY=/home/local/jhumphri/build/hogd/loadgen/loadgen_server
-HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
-HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
+BUILD_DIR=/home/local/jhumphri/build/
+LOADGEN_BINARY=${BUILD_DIR}hogd/loadgen/loadgen_server
+HOGEXEC_BINARY=${BUILD_DIR}hogd/hogexec/hogexec
+HOGDB_BINARY=${BUILD_DIR}hogd/hogdb/hogdb
 
 X23TRACE=1
 
