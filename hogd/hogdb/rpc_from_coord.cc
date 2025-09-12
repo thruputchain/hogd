@@ -17,6 +17,7 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 
+#include "hogd/base/compiler.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -136,6 +137,9 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_close(id);
+  }
   // TODO(abelay): rename this to finish_snapshot. It will be called before
   // either commit_snapshot or abort_snapshot because the merkle root is needed
   // to create a proposal block.
@@ -283,6 +287,10 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   if (failure) {
     error("genesis block initialization failed");
     co_return DbResult::DbResultError;
+  }
+
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }
 
   itx->commit();

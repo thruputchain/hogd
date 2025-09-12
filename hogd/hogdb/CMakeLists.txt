@@ -2,6 +2,7 @@
 
 add_library(hogdb_objects OBJECT
   block_tx.cc
+  block_id_manager.cc
   invoke_tx.cc
   item_change.cc
   hogdb_dao.cc

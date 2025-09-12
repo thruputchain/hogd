@@ -4,10 +4,14 @@
 #include <condition_variable>
 #include <mutex>
 #include <optional>
+#include <type_traits>
+#include <variant>
 
 // generated x23 headers
 #include "db_coord.hh"
 #include "genesis.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/hogdb/block_id_manager.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -38,10 +42,7 @@ public:
   x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id,
                                                BlockID new_id,
                                                BlockExecutionMode mode);
-  static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id)
-  {
-    co_return DbResult::DbResultError; // TODO(geoff): unimplemented
-  }
+
   x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
   x23::Async<DbResult> dbcoord_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbcoord_close_snapshot(BlockID id);
@@ -74,6 +75,8 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
+
+  std::conditional_t<is_debug_build(), BlockIDStateManager, std::monostate> block_id_state_manager_;
 
   // commit_block is a helper function that performs all the steps necessary to
   // commit.
