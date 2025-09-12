@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <type_traits>
@@ -31,7 +32,14 @@ public:
 
   // TODO(geoff): Some kind of check on ctx, to determine whether
   // the ledger has been initialized or do we have a truly empty database
-  explicit HogDBCoordServer(RPCContext &ctx) : ctx_(ctx) {}
+  explicit HogDBCoordServer(RPCContext &ctx) : ctx_(ctx)
+  {
+    if constexpr (is_debug_build()) {
+      if (ctx_.get_tip().id != UINT64_MAX) {
+        block_id_state_manager_.log_block_id_tip(ctx_.get_tip().id);
+      }
+    }
+  }
 
   // Start the server on the specified port
   void start_server(uint16_t port);
