@@ -66,7 +66,7 @@ HogDBSchedServer::dbsched_write_hog_ages(const HogAgeBatch &ages)
 
 x23::Async<DbAccountAuthDataBatchResult>
 HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
-                                                ContractAddressBatch addresses)
+                                                ContractAddressBatch accounts)
 {
   co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
 }
