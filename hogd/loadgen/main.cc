@@ -1,10 +1,10 @@
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <future>
 #include <print>
 #include <string>
-#include <unistd.h>
 
 #include "hogd/base/log.h"
 #include "hogd/init.h"
