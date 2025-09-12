@@ -187,14 +187,14 @@ public:
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB test_db = TestDB::kMockInMemory)
+      TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     if (log) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode);
+    initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();
   }
 
@@ -329,12 +329,28 @@ public:
                                        allocate_txid());
   }
 
-  void run_genesis_initialization(GenesisBlock const &genesis_block);
+  void run_genesis_initialization(
+      GenesisBlock const &genesis_block,
+      BlockExecutionMode mode =
+          BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto &get_coord_client() { return coord_wrapper_->client(); }
 
 private:
-  void initialize(BlockExecutionMode mode)
+  void open_block(BlockExecutionMode mode)
+  {
+    auto r = coord_wrapper_->client().dbcoord_create_snapshot(block_number_,
+                                                              block_number_ + 1,
+                                                              mode)();
+    if (r != DbResult::DbResultOK) {
+      throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
+    }
+    block_number_++;
+    storage_snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  }
+
+  void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
     test::reset_module_cache();
 
@@ -349,14 +365,20 @@ private:
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
 
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(0, 1, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("initialize: dbcoord_create_snapshot failed");
+    if (!empty_genesis) {
+      return;
     }
 
-    block_number_++;
-    storage_snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+    {
+      auto r =
+          coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{})();
+      if (r != DbResult::DbResultOK) {
+        throw std::runtime_error(
+            "initialize: dbcoord_load_genesis_block failed");
+      }
+    }
+
+    open_block(mode);
   }
 
   TransactionID allocate_txid() { return next_tx_id_++; }
