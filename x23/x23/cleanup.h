@@ -160,6 +160,22 @@ concept is_nullable = requires(T t) {
   ();
 };
 
+// RAII utility for deferred execution of an action that can be
+// invoked with no argument.  The action will be executed when the
+// Defer is destroyed or when the .reset() method is called, whichever
+// is sooner.  You can also disable the action from being run by
+// calling the .releas() method.
+//
+// It is slightly more efficient to construct a Defer directly from a
+// lambda expression, as in:
+//
+//     Defer _cleanup{[m]{ m.unlock(); }};
+//
+// That means functions returning a Defer would need to return auto
+// (since you can't write the type of a lambda).  On the other hand,
+// if you want to initialize a Defer after creating it, or return a
+// Defer from a function, the default template argument of
+// std::function<void()> will work, too.
 template<typename Action = std::function<void()>>
 requires std::same_as<Action, std::remove_cvref_t<Action>>
 class [[nodiscard]] Defer {

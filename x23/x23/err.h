@@ -13,14 +13,16 @@
 namespace x23 {
 
 // ErrorBase provides a wrapper for all error types. It provides
-// pretty-printing through std::format, automatic conversion to unexpected when
-// returning from functions with std::expected, and compatibility with the std
-// library's error handling. It can also be thrown as a std::system_error via
-// raise().
+// pretty-printing through std::format, automatic conversion to
+// unexpected when returning from functions with std::expected, and
+// compatibility with the std library's error handling. It can also be
+// thrown as a std::system_error via raise().
 //
-// ErrorBase uses explicit object parameters to avoid the overhead of a vtable.
+// ErrorBase uses explicit object parameters to avoid the overhead of
+// a vtable.
 //
-// The error class must inherit ErrorBase and provide the following methods:
+// The error class must inherit ErrorBase and provide the following
+// methods:
 // 1. int raw_code()
 // 2. std::error_category category() // usually static
 //
