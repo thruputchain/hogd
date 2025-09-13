@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "coord.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -42,6 +43,8 @@ ExecCoordServer::connect_to_coord_allocate_service(
 {
   auto fd = cp_.tcpconnect(coord_address, coord_allocate_port)();
   if (!fd) {
+    error("Failed to connect to coord allocate service on {}:{}, error={}",
+          coord_address, coord_allocate_port, fd.error().what());
     return std::nullopt;
   }
 

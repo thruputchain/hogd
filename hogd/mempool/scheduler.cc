@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -56,8 +56,8 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     return true;
   }
 
-  HogAgeResult res = db_client_.dbcoord_get_hog_ages(to_send)();
-  if (res.result() != DbResult::DbResultOK) {
+  HogAgeResult res = db_sched_client_.dbsched_get_hog_ages(to_send)();
+  if (res.result() != DbSchedResult::DbSchedResultOK) {
     return false;
   }
   for (const HogAge &age : res.hog_age_batch()) {
@@ -86,7 +86,8 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
     }
     ages.push_back(it->second);
   }
-  return db_client_.dbcoord_write_hog_ages(ages)() == DbResult::DbResultOK;
+  return db_sched_client_.dbsched_write_hog_ages(ages)() ==
+         DbSchedResult::DbSchedResultOK;
 }
 
 void

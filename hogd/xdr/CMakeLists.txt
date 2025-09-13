@@ -9,6 +9,7 @@ add_xdr(
 	../../protocol/coord.x
 	../../protocol/coord_sched.x
 	../../protocol/db_coord.x
+	../../protocol/db_sched.x
 	../../protocol/discovery.x
 	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x

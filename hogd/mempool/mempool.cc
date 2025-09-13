@@ -57,15 +57,16 @@ x23::Async<bool>
 Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
-  DbResult res = co_await db_client_.dbcoord_create_snapshot(prev_block_id,
-                                                             block_id, mode);
+  DbResult res =
+      co_await db_coord_client_.dbcoord_create_snapshot(prev_block_id, block_id,
+                                                        mode);
   co_return res == DbResult::DbResultOK;
 }
 
 x23::Async<void>
 Mempool::abandon_snapshot(BlockID block_id)
 {
-  DbResult res = co_await db_client_.dbcoord_abandon_snapshot(block_id);
+  DbResult res = co_await db_coord_client_.dbcoord_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbResultOK], but this could
   // change in the future. In the case of a failure, we need to clean up db
   // state.
@@ -76,7 +77,8 @@ Mempool::abandon_snapshot(BlockID block_id)
 x23::Async<void>
 Mempool::close_snapshot(BlockID block_id)
 {
-  DbBlockResult res = co_await db_client_.dbcoord_close_snapshot(block_id);
+  DbBlockResult res =
+      co_await db_coord_client_.dbcoord_close_snapshot(block_id);
   // [dbcoord_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbResult::DbResultOK);
