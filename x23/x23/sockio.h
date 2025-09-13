@@ -77,11 +77,6 @@ sockaddr_len(const sockaddr_storage &ss)
   }
 }
 
-// Create a TCP connection.  You can bind the socket or make the file
-// descriptor non-blocking in prep_fd.
-UniqueFd tcpconnect(const sockaddr_storage &ss,
-                    std::function<void(int)> prep_fd = nullptr);
-
 sockaddr_storage local_addr(BorrowedFd s);
 sockaddr_storage remote_addr(BorrowedFd s);
 
@@ -101,9 +96,12 @@ struct HostPort {
   Str port;
 
   constexpr HostPort() noexcept = default;
-  HostPort(Str h, Str p) : host(std::move(h)), port(std::move(p)) {}
+  HostPort(Str h, Str p) noexcept : host(std::move(h)), port(std::move(p)) {}
   HostPort(Str h, uint16_t p)
     : host(std::move(h)), port(std::to_string(p).c_str())
+  {}
+  HostPort(const char *h, uint16_t p) : host(h), port(p) {}
+  HostPort(const std::string &h, uint16_t p) : host(std::from_range, h), port(p)
   {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
@@ -142,3 +140,22 @@ struct std::formatter<x23::HostPort> : std::formatter<std::string_view> {
     return super::format(hp.show(), ctx);
   }
 };
+
+namespace x23 {
+
+// Create a TCP connection.  You can bind the socket or make the file
+// descriptor non-blocking in prep_fd.
+UniqueFd tcpconnect(const sockaddr_storage &ss,
+                    std::function<void(int)> prep_fd = nullptr);
+inline UniqueFd
+tcpconnect(auto host, auto port,
+           std::function<void(int)> prep_fd = nullptr)
+  requires requires { HostPort{std::move(host), std::move(port)}; }
+{
+  if (auto addr = HostPort{host, port}.to_addr())
+    return tcpconnect(*addr, std::move(prep_fd));
+  else
+    throw addr.error();
+}
+
+} // namespace x23
