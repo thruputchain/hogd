@@ -97,13 +97,10 @@ struct HostPort {
 
   constexpr HostPort() noexcept = default;
   HostPort(Str h, Str p) noexcept : host(std::move(h)), port(std::move(p)) {}
-  HostPort(Str h, uint16_t p)
-    : host(std::move(h)), port(std::to_string(p).c_str())
-  {}
-  HostPort(const char *h, uint16_t p) : host(h), port(std::to_string(p).c_str())
-  {}
+  HostPort(Str h, uint16_t p) : host(std::move(h)), port(uformat("{}", p)) {}
+  HostPort(const char *h, uint16_t p) : HostPort(Str(h), p) {}
   HostPort(const std::string &h, uint16_t p)
-    : host(std::from_range, h), port(std::to_string(p).c_str())
+    : HostPort(Str(std::from_range, h), p)
   {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
