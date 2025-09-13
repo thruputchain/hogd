@@ -17,12 +17,14 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 
+#include "hogd/base/compiler.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/block_tx.h"
@@ -39,15 +41,6 @@
 namespace hogd {
 
 namespace {
-
-ItemKey
-make_item_key(const AddressAndKey &addr)
-{
-  if (addr.key.key_type() ==
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-    return ItemKey(addr.address, {}, true);
-  return ItemKey(addr.address, addr.key.contract_data_key());
-}
 
 template<typename T>
 DbResult
@@ -81,18 +74,21 @@ HogDBCoordServer::commit_block(BlockID id)
     return HogDBError(HogDBCode::kExists);
   }
 
+  // write all the changes in the block TX.
+  BlockTX *btx = ctx_.get_block_tx(id);
+  HogDBStatus<void> ret = btx->commit();
+  if (!ret)
+    return ret.error();
+
+  // destroy the block TX.
+  ctx_.close_block_tx(id);
+
   // update the DbTip.
   ctx_.get_trie().generate_top_level_hashes();
   ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
   ctx_.get_tip().height = ctx_.get_tip().height + 1;
   ctx_.get_tip().id = id;
-  HogDBStatus<void> ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
-  if (!ret)
-    return ret.error();
-
-  // write all the changes in the block TX.
-  BlockTX *btx = ctx_.get_block_tx(id);
-  ret = btx->commit();
+  ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
   if (!ret)
     return ret.error();
 
@@ -100,9 +96,6 @@ HogDBCoordServer::commit_block(BlockID id)
   HogDBStatus<uint64_t> lsn = ctx_.get_db().commit();
   if (!lsn)
     return lsn.error();
-
-  // destroy the block TX.
-  ctx_.close_block_tx(id);
 
   info("committed block {}: hash='{}', height='{}', lsn='{}", id,
        ctx_.get_tip().hash, ctx_.get_tip().height, *lsn);
@@ -114,6 +107,9 @@ x23::Async<DbResult>
 HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
                                           BlockExecutionMode mode)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_open(parent_id, new_id);
+  }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
   co_return to_db_result(ctx_.open_block_tx(new_id));
@@ -122,6 +118,9 @@ HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_commit(id);
+  }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
@@ -131,6 +130,9 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_abandon(id);
+  }
   BlockTX *ret = ctx_.get_block_tx(id);
   if (!ret)
     co_return DbResult::DbResultError;
@@ -144,6 +146,9 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 {
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_close(id);
+  }
   // TODO(abelay): rename this to finish_snapshot. It will be called before
   // either commit_snapshot or abort_snapshot because the merkle root is needed
   // to create a proposal block.
@@ -154,36 +159,6 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
-}
-
-x23::Async<HogAgeResult>
-HogDBCoordServer::dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
-{
-  HogDBDAO &db = ctx_.get_db();
-  HogAgeResult ret(DbResult::DbResultOK);
-  ret.hog_age_batch().reserve(addresses.size());
-
-  for (const ContractAddress &address : addresses) {
-    HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
-    if (!status) {
-      co_return HogAgeResult(DbResult::DbResultError);
-    }
-    // TODO(jhumphri): Include the address in each index.
-    ret.hog_age_batch().push_back(status.value());
-  }
-  co_return ret;
-}
-
-x23::Async<DbResult>
-HogDBCoordServer::dbcoord_write_hog_ages(const HogAgeBatch &ages)
-{
-  HogDBDAO &db = ctx_.get_db();
-  for (const HogAge &age : ages) {
-    if (!db.write_address_average_hog_age(age)) {
-      co_return DbResult::DbResultError;
-    }
-  }
-  co_return DbResult::DbResultOK;
 }
 
 namespace {
@@ -291,6 +266,10 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   if (failure) {
     error("genesis block initialization failed");
     co_return DbResult::DbResultError;
+  }
+
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }
 
   itx->commit();

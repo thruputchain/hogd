@@ -77,10 +77,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
     benchmark::DoNotOptimize(result.value());
   }
 
-  // Report throughput metrics
-  state.counters["txs_per_sec"] =
-      benchmark::Counter(static_cast<double>(num_txs),
-                         benchmark::Counter::kIsIterationInvariantRate);
+  state.SetItemsProcessed(state.iterations() * num_txs);
 }
 
 } // namespace
@@ -92,12 +89,14 @@ bm_erc20_extend_experiment(benchmark::State &state)
 namespace {
 // Test experiment generation scaling with number of accounts
 BENCHMARK(hogd::bm_erc20_generate_experiment)
+    ->UseRealTime()
     ->RangeMultiplier(2)
     ->Range(hogd::kMinAccounts, hogd::kMaxAccounts)
     ->Unit(benchmark::kMillisecond); // NOLINT
 
 // Test transaction generation scaling with batch size
 BENCHMARK(hogd::bm_erc20_extend_experiment)
+    ->UseRealTime()
     ->RangeMultiplier(2)
     ->Range(hogd::kMinTxs, hogd::kMaxTxs)
     ->Unit(benchmark::kMillisecond); // NOLINT

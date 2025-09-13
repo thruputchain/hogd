@@ -2,12 +2,14 @@
 
 add_library(hogdb_objects OBJECT
   block_tx.cc
+  block_id_manager.cc
   invoke_tx.cc
   item_change.cc
   hogdb_dao.cc
   rpc_context.cc
   rpc_from_coord.cc
   rpc_from_exec.cc
+  rpc_from_sched.cc
   status.cc
 )
 target_link_libraries(

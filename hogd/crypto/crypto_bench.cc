@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdlib>
-#include <exception>
 #include <span>
 #include <vector>
 
@@ -20,13 +19,11 @@ constexpr size_t kMax = 8 << 10;
 
 template<typename Func>
 void
-bench_hash(benchmark::State &state, Func hash_fn)
+bench_func(benchmark::State &state, Func fn)
 {
-  if (!crypto_init())
-    std::terminate();
   std::vector<std::byte> in(state.range(0));
   for (auto _ : state)
-    hash_fn(in);
+    fn(in);
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
                           static_cast<int64_t>(state.range(0)));
 }
@@ -34,32 +31,54 @@ bench_hash(benchmark::State &state, Func hash_fn)
 void
 bm_sha256(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return sha256(buf); });
+  bench_func(state, [](std::span<std::byte> buf) { return sha256(buf); });
 }
 BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
 bm_blake3(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return blake3(buf); });
+  bench_func(state, [](std::span<std::byte> buf) { return blake3(buf); });
 }
 BENCHMARK(bm_blake3)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
 bm_crc32c(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return crc32c(buf); });
+  bench_func(state, [](std::span<std::byte> buf) { return crc32c(buf); });
 }
 BENCHMARK(bm_crc32c)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
 bm_siphash24(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) {
+  bench_func(state, [](std::span<std::byte> buf) {
     return SipHash24::get_default()(buf);
   });
 }
 BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+
+void
+bm_ed25519_sign(benchmark::State &state)
+{
+  auto [pk, sk] = ed25519_keygen();
+  bench_func(state,
+             [sk](std::span<std::byte> buf) { return ed25519_sign(sk, buf); });
+}
+BENCHMARK(bm_ed25519_sign)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+
+void
+bm_ed25519_sign_and_verify(benchmark::State &state)
+{
+  auto [pk, sk] = ed25519_keygen();
+  bench_func(state, [pk, sk](std::span<std::byte> buf) {
+    auto sig = ed25519_sign(sk, buf);
+    return ed25519_verify(pk, sig, buf);
+  });
+}
+BENCHMARK(bm_ed25519_sign_and_verify)
+    ->RangeMultiplier(2)
+    ->Range(kMin, kMax); // NOLINT
 
 } // namespace
 

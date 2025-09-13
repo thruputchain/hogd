@@ -21,8 +21,8 @@
 #include "db_coord.hh"
 
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -30,6 +30,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -46,6 +47,7 @@ namespace {
 // port numbers used by servers hosted inside hogdb.
 constexpr uint16_t kCoordServerPort = 8080;
 constexpr uint16_t kExecServerPort = 8081;
+constexpr uint16_t kSchedServerPort = 8082;
 
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
@@ -106,11 +108,12 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
-  ErrnoStatus<void> ret = exec_server.start_server(kExecServerPort);
-  if (!ret) {
-    critical("Failed to start executor server: {}", ret.error());
-    return EXIT_FAILURE;
-  }
+  exec_server.start_server(kExecServerPort);
+
+  // start the scheduler server.
+  info("starting scheduler server.");
+  HogDBSchedServer sched_server(ctx);
+  sched_server.start_server(kSchedServerPort);
 
   // TODO(jhumphri): Check this and clean it up.
   x23::ThreadPool x23_pool(/*nthreads=*/1);
@@ -124,12 +127,20 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     const std::string host = {host_port.host.begin(), host_port.host.end()};
     const std::string port = {host_port.port.begin(), host_port.port.end()};
 
-    auto fd = cp.tcpconnect(host, port)();
-    if (!fd) {
-      return EXIT_FAILURE;
-    }
+    auto fd = [&cp, host = std::move(host), port = std::move(port),
+               &coordinator_addr]() {
+      while (true) {
+        auto fd = cp.tcpconnect(host, port)();
+        if (fd) {
+          return *fd;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        warn_every_n_sec(5.0F, "waiting for coordinator address {}",
+                         *coordinator_addr);
+      }
+    }();
 
-    auto client_config = x23::rpc_stream_logged(cp, *fd);
+    auto client_config = x23::rpc_stream_logged(cp, fd);
     while (true) {
       auto client =
           std::make_optional(client_config.template client<Coordinator1>());
@@ -138,16 +149,25 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         continue;
       }
 
-      const std::string address =
+      const std::string coord_address =
           "127.0.0.1:" + std::to_string(kCoordServerPort);
+      const std::string exec_address =
+          "127.0.0.1:" + std::to_string(kExecServerPort);
+      const std::string sched_address =
+          "127.0.0.1:" + std::to_string(kSchedServerPort);
       ShardCard card{.protocol = "blah",
                      .upid = {},
                      .block_height = 0,
                      .shard_count = 1,
-                     .address = address.c_str()};
+                     .address_for_coord = coord_address.c_str(),
+                     .address_for_exec = exec_address.c_str(),
+                     .address_for_sched = sched_address.c_str()};
       client->coordinator_intro_shard(card)();
       break;
     }
+  }
+  else {
+    warn("no coordinator address provided, skipping coordinator connection");
   }
 
   // block forever

@@ -20,7 +20,8 @@ class ERC20ExperimentTest : public ::testing::TestWithParam<TestDB>,
 public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
+          false)
   {}
 
 protected:

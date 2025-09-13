@@ -28,7 +28,6 @@ public:
     CHECK(accounts_.contains(tx.tx.invocation.invoked_address));
     const AccountAuthData &auth_data =
         accounts_[tx.tx.invocation.invoked_address];
-
     const AuthSignaturePreimage preimage{.signature_weight =
                                              tx.signature_weight,
                                          .message = x23::serialize(tx.tx)};

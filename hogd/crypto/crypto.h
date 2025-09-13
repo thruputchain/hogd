@@ -11,6 +11,7 @@ extern "C" {
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <span>
 #include <version>
 
@@ -129,6 +130,20 @@ SipHash24::operator()(x23::is_bytespan auto buf)
   return out;
 }
 
+// ed25519_keygen generates a new ed25519 keypair.
+inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
+ed25519_keygen()
+{
+  Ed25519PublicKey pk;
+  Ed25519SecretKey sk;
+  static_assert(sizeof(Ed25519PublicKey) == crypto_sign_ed25519_PUBLICKEYBYTES);
+  static_assert(sizeof(Ed25519SecretKey) == crypto_sign_ed25519_SECRETKEYBYTES);
+  [[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(), sk.data());
+  // this libsodium call cannot fail (V1.20).
+  assert(ret == 0);
+  return {pk, sk};
+}
+
 inline bool
 ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
@@ -151,27 +166,15 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                                              msg.size(), publickey.data()) == 0;
 }
 
-// ed25519_keygen generates a new ed25519 keypair.
-inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
-ed25519_keygen()
-{
-  Ed25519PublicKey pk;
-  Ed25519SecretKey sk;
-  static_assert(sizeof(Ed25519PublicKey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-  static_assert(sizeof(Ed25519SecretKey) == crypto_sign_ed25519_SECRETKEYBYTES);
-  [[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(), sk.data());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
-  return {pk, sk};
-}
-
 // ed25519_sign signs a message with a secret key.
 inline Ed25519Signature
 ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
   [[maybe_unused]]
-  int ret = crypto_sign_ed25519_detached(sig.data(), nullptr, msg.data(),
+  int ret = crypto_sign_ed25519_detached(sig.data(), nullptr,
+                                         reinterpret_cast<const uint8_t *>(
+                                             msg.data()),
                                          msg.size(), sk.data());
   // this libsodium call cannot fail (V1.20).
   assert(ret == 0);
@@ -195,22 +198,3 @@ crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
 }
 
 } // namespace hogd
-
-#if (__cpp_lib_format_ranges < 202207L)
-
-#include "hogd/base/string.h"
-#include <format>
-
-template<> struct std::formatter<hogd::SHA256Hash> {
-  static constexpr auto parse(std::format_parse_context &ctx)
-  {
-    return ctx.begin();
-  }
-  static auto format(const hogd::SHA256Hash &hash, std::format_context &ctx)
-  {
-    return std::format_to(ctx.out(), "{}",
-                          hogd::encode_hex(std::as_bytes(std::span(hash))));
-  }
-};
-
-#endif

@@ -8,6 +8,7 @@
 
 // xdr types
 #include "db_coord.hh"
+#include "db_sched.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"
@@ -38,6 +39,7 @@ constexpr std::string kGlobalTipKey = ">DBTIP";
 enum class Prefix : char {
   kHogAge = 'A',
   kBalance = 'B',
+  kAccountAuthData = 'D',
   kWasmHash = 'H',
   kWasmCode = 'C',
 };

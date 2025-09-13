@@ -57,15 +57,16 @@ x23::Async<bool>
 Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
-  DbResult res = co_await db_client_.dbcoord_create_snapshot(prev_block_id,
-                                                             block_id, mode);
+  DbResult res =
+      co_await db_coord_client_.dbcoord_create_snapshot(prev_block_id, block_id,
+                                                        mode);
   co_return res == DbResult::DbResultOK;
 }
 
 x23::Async<void>
 Mempool::abandon_snapshot(BlockID block_id)
 {
-  DbResult res = co_await db_client_.dbcoord_abandon_snapshot(block_id);
+  DbResult res = co_await db_coord_client_.dbcoord_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbResultOK], but this could
   // change in the future. In the case of a failure, we need to clean up db
   // state.
@@ -76,7 +77,8 @@ Mempool::abandon_snapshot(BlockID block_id)
 x23::Async<void>
 Mempool::close_snapshot(BlockID block_id)
 {
-  DbBlockResult res = co_await db_client_.dbcoord_close_snapshot(block_id);
+  DbBlockResult res =
+      co_await db_coord_client_.dbcoord_close_snapshot(block_id);
   // [dbcoord_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbResult::DbResultOK);
@@ -206,7 +208,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
-      scheduler_.schedule(kMaxBlockSize);
+      scheduler_.schedule(/*block_height=*/nomination.block_height,
+                          kMaxBlockSize);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -293,7 +296,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   {
     x23::Vec<SignedTransaction> signed_txs;
     if (!scheduler_.find_and_remove_from_runqueue(nomination.transaction_hashes,
-                                                  signed_txs)) {
+                                                  &signed_txs)) {
       co_await finish_block(block_id);
       co_await abandon_snapshot(block_id);
       co_return SchedulerValidationResult(
