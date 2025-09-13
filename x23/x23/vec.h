@@ -423,8 +423,8 @@ public:
   constexpr decltype(auto) at(this auto &&self, size_type i)
   {
     if (i >= self.size())
-      throw std::out_of_range(std::format("at({}) exceeds size {} in {} Vec",
-                                          i, self.size(), tname()));
+      throw std::out_of_range(std::format("at({}) exceeds size {} in {} Vec", i,
+                                          self.size(), tname()));
     return (self.data()[i]);
   }
   constexpr decltype(auto) operator[](this auto &&self, size_type i) noexcept

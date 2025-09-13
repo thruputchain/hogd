@@ -100,8 +100,10 @@ struct HostPort {
   HostPort(Str h, uint16_t p)
     : host(std::move(h)), port(std::to_string(p).c_str())
   {}
-  HostPort(const char *h, uint16_t p) : host(h), port(p) {}
-  HostPort(const std::string &h, uint16_t p) : host(std::from_range, h), port(p)
+  HostPort(const char *h, uint16_t p) : host(h), port(std::to_string(p).c_str())
+  {}
+  HostPort(const std::string &h, uint16_t p)
+    : host(std::from_range, h), port(std::to_string(p).c_str())
   {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
@@ -148,9 +150,8 @@ namespace x23 {
 UniqueFd tcpconnect(const sockaddr_storage &ss,
                     std::function<void(int)> prep_fd = nullptr);
 inline UniqueFd
-tcpconnect(auto host, auto port,
-           std::function<void(int)> prep_fd = nullptr)
-  requires requires { HostPort{std::move(host), std::move(port)}; }
+tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
+    requires requires { HostPort{std::move(host), std::move(port)}; }
 {
   if (auto addr = HostPort{host, port}.to_addr())
     return tcpconnect(*addr, std::move(prep_fd));
