@@ -217,29 +217,13 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-SystemStatus<void>
-DatabaseProxy::commit_contract_create(BlockID block_id,
-                                      Contract const &contract)
-{
-  auto res = client_.commit_contract_create(block_id, contract);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
-SystemStatus<void>
-DatabaseProxy::commit_contract_deploy(BlockID block_id,
-                                      ContractAddress const &addr,
-                                      SHA256Hash const &hash)
-{
-  auto res = client_.commit_contract_deploy(block_id, addr, hash);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
 SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
-                                           StorageDeltaBatch const &delta_batch)
+                                           StorageDeltaBatch delta_batch,
+                                           ContractDeployDeltaBatch contract_deploy_batch)
 {
-  auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
+  auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch, contract_deploy_batch);
   return to_system_error_code<false>(res, [] { return true; });
 }
 

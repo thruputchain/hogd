@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/srpc.h"
@@ -68,18 +70,12 @@ public:
 
   SystemStatus<bool>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                              StorageDeltaBatch const &delta_batch);
+                              StorageDeltaBatch delta_batch,
+                              ContractDeployDeltaBatch contract_deploy_batch);
 
   SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id);
 
   SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
-
-  SystemStatus<void> commit_contract_create(BlockID block_id,
-                                            Contract const &contract);
-
-  SystemStatus<void> commit_contract_deploy(BlockID block_id,
-                                            ContractAddress const &addr,
-                                            SHA256Hash const &hash);
 
   SystemStatus<void> pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                          uint32_t count);
@@ -107,6 +103,31 @@ private:
   std::vector<FlaggedStorageDelta> storage_deltas_;
 };
 
+class ContractDeployBatchBuilder {
+public:
+  const ContractDeployDeltaBatch &build() const{
+    return contract_deploy_deltas_;
+  }
+
+  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash, std::shared_ptr<const Contract> const& contract)
+  {
+    ContractDeployDelta delta{.contract_address = addr, .contract_hash = hash, .contract = nullptr};
+    if (contract != nullptr && !new_contract_is_already_created(hash)) {
+      delta.contract.emplace(*contract);
+      contract_hashes_.insert(hash);
+    }
+    contract_deploy_deltas_.push_back(delta);
+  }
+
+private:
+  bool new_contract_is_already_created(SHA256Hash const &hash) const {
+    return contract_hashes_.contains(hash);
+  }
+
+  std::unordered_set<SHA256Hash> contract_hashes_;
+  ContractDeployDeltaBatch contract_deploy_deltas_;
+};
+
 // A DatabaseProxy that is scoped to a single transaction.
 class PerTransactionDatabaseProxy {
 public:
@@ -126,15 +147,29 @@ public:
     current_subtransaction_batch_builder_->add_delta(addrkey, delta, flags);
   }
 
+  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash, std::shared_ptr<const Contract> const& contract)
+  {
+    if (!current_contract_deploy_batch_builder_) {
+      current_contract_deploy_batch_builder_ = ContractDeployBatchBuilder();
+    }
+    current_contract_deploy_batch_builder_->add_contract_deploy(addr, hash, contract);
+  }
+
   SystemStatus<bool> try_push_current_subtransaction()
   {
-    StorageDeltaBatch batch;
+    StorageDeltaBatch batch{};
     if (current_subtransaction_batch_builder_) {
       batch = current_subtransaction_batch_builder_->build();
       current_subtransaction_batch_builder_ = std::nullopt;
     }
 
-    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch);
+    ContractDeployDeltaBatch contract_deploy_batch{};
+    if (current_contract_deploy_batch_builder_) {
+      contract_deploy_batch = current_contract_deploy_batch_builder_->build();
+      current_contract_deploy_batch_builder_ = std::nullopt;
+    }
+
+    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch, contract_deploy_batch);
   }
 
   SystemStatus<void> pop_subtransactions(uint32_t count)
@@ -154,23 +189,12 @@ public:
     return db_proxy_.abort_transaction(block_id_, tx_id_);
   }
 
-  SystemStatus<void> commit_contract_create(Contract const &contract)
-  {
-    assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_contract_create(block_id_, contract);
-  }
-
-  SystemStatus<void> commit_contract_deploy(ContractAddress const &addr,
-                                            SHA256Hash const &hash)
-  {
-    assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_contract_deploy(block_id_, addr, hash);
-  }
-
 private:
   DatabaseProxy &db_proxy_;
   std::optional<StorageDeltaBatchBuilder>
       current_subtransaction_batch_builder_ = std::nullopt;
+  std::optional<ContractDeployBatchBuilder>
+      current_contract_deploy_batch_builder_ = std::nullopt;
   const BlockID block_id_;
   const TransactionID tx_id_;
 };

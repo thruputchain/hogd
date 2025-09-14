@@ -27,6 +27,7 @@
 #include "hogd/db_interface/block_state.h"
 #include "hogd/rpc/rpc.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -51,14 +52,12 @@ public:
   // Increases subtransaction count by 1 IF SUCCESSFUL.
   // Otherwise does not change subtransaction count, and is a no-op.
   RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                       StorageDeltaBatch const &batch);
+                                       StorageDeltaBatch const& batch,
+                                       ContractDeployDeltaBatch contract_deploy_batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
   ExpectedStorageItem get_snapshot_item(BlockID block,
                                         AddressAndKey const &addrkey);
-  RPCError commit_contract_create(BlockID block, Contract const &contract);
-  RPCError commit_contract_deploy(BlockID block, ContractAddress const &addr,
-                                  SHA256Hash const &hash);
   ExpectedContract get_contract(BlockID block, SHA256Hash const &contract_hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);

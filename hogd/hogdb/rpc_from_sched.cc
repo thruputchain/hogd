@@ -15,7 +15,6 @@
 
 // generated x23 headers
 #include "db_sched.hh"
-
 #include "rpc_types.hh"
 #include "types.hh"
 

@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -40,8 +42,22 @@ public:
   ContractAddress const &address() const { return address_; }
   Calldata const &calldata() const { return calldata_; }
 
-  // new deployments that were created during this (and child) call frames
-  std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
+  void add_new_contract_deployment(ContractAddress const &contract_address,
+                                   SHA256Hash const &contract_hash,
+                                   std::shared_ptr<const Contract> new_contract)
+  {
+    [[maybe_unused]]
+    auto [_, inserted] = new_contract_deployments_.emplace(contract_address, NewContractDeployment{.contract_hash = contract_hash, .contract = std::move(new_contract)});
+    assert(inserted);
+  }
+  std::optional<SHA256Hash> lookup_new_contract_deployment(ContractAddress const &contract_address) const
+  {
+    auto it = new_contract_deployments_.find(contract_address);
+    if (it != new_contract_deployments_.end()) {
+      return it->second.contract_hash;
+    }
+    return std::nullopt;
+  }
 
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
@@ -122,6 +138,13 @@ private:
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
+
+  struct NewContractDeployment {
+    SHA256Hash contract_hash;
+    std::shared_ptr<const Contract> contract;
+  };
+
+  std::map<ContractAddress, NewContractDeployment> new_contract_deployments_;
 };
 
 // Stack of invocation frames.

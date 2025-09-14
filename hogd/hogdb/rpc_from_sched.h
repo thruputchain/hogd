@@ -7,13 +7,11 @@
 
 // generated x23 headers
 #include "db_sched.hh"
-#include "genesis.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/status.h"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
@@ -25,8 +23,6 @@ class HogDBSchedServer {
 public:
   using rpc_service = DbSched1;
 
-  // TODO(geoff): Some kind of check on ctx, to determine whether
-  // the ledger has been initialized or do we have a truly empty database
   explicit HogDBSchedServer(RPCContext &ctx) : ctx_(ctx) {}
 
   // Start the server on the specified port

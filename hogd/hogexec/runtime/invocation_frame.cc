@@ -103,6 +103,10 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     }
   }
 
+  for (auto const &[addr, deploy] : new_contract_deployments_) {
+    db_proxy.add_contract_deploy(addr, deploy.contract_hash, deploy.contract);
+  }
+
   auto res = db_proxy.try_push_current_subtransaction();
   if (!res.has_value()) {
     return res.error();
@@ -234,12 +238,11 @@ std::optional<SHA256Hash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
+  // The order that we search frames here does not matter,
+  // as two different contracts will always be deployed to different addresses.
   for (auto const &frame : frame_stack_) {
-    auto it = frame.new_contract_deployments_.find(addr);
-    if (it != frame.new_contract_deployments_.end()) {
-      // contract was deployed at `addr` during a frame earlier on the frame
-      // stack. Thus, deployment exists during the current view.
-      return it->second;
+    if (auto hash = frame.lookup_new_contract_deployment(addr)) {
+      return hash;
     }
   }
   return std::nullopt;

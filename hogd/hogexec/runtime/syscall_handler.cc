@@ -248,27 +248,6 @@ SystemCallHandler::try_commit_transaction()
     return res.error();
   }
 
-  std::unordered_set<SHA256Hash> committed_contracts;
-  for (auto const &[addr, hash] :
-       last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-           .value()
-           .new_contract_deployments_) {
-    auto contract_entry = newly_created_contracts_.find(hash);
-    assert(contract_entry != newly_created_contracts_.end());
-
-    auto res = db_proxy_.commit_contract_deploy(addr, hash);
-    if (!res.has_value()) {
-      return res.error();
-    }
-    if (committed_contracts.insert(hash).second) {
-      // contract that wasn't already created within the transaction
-      res = db_proxy_.commit_contract_create(*contract_entry->second);
-      if (!res.has_value()) {
-        return res.error();
-      }
-    }
-  }
-
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
@@ -491,6 +470,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return load_contract_status.error();
   }
   auto &load_contract = *load_contract_status;
+  std::shared_ptr<const Contract> new_contract = nullptr;
 
   if (!load_contract) {
     // try loading from local context
@@ -501,6 +481,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
     }
+    new_contract = it->second;
   }
 
   auto deploy_addr =
@@ -526,7 +507,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto &frame = invocation_frame_stack_.get_active_frame();
 
   // deploy new contract
-  frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
+  frame.add_new_contract_deployment(deploy_addr, contract_hash, std::move(new_contract));
 
   return deploy_addr;
 }
