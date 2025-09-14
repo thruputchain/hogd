@@ -68,7 +68,19 @@ x23::Async<DbAccountAuthDataBatchResult>
 HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
                                                 ContractAddressBatch accounts)
 {
-  co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+  HogDBDAO &db = ctx_.get_db();
+  DbAccountAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
+  ret.account_auth_data_batch().reserve(accounts.size());
+
+  for (const ContractAddress &account : accounts) {
+    HogDBStatus<AccountAuthData> status =
+        db.read_address_account_auth_data(account);
+    if (!status) {
+      co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+    }
+    ret.account_auth_data_batch().push_back(status.value());
+  }
+  co_return ret;
 }
 
 namespace {
