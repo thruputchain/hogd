@@ -129,7 +129,7 @@ private:
 static_assert(is_bytevec<VecQ<std::uint8_t>>);
 
 // This is a vector of buffers that can be turned into an array of
-// iovec structures for use with writev.  Let's you trim an arbitrary
+// iovec structures for use with writev.  Lets you trim an arbitrary
 // number of bytes off the front.  Copies Bufs less than
 // kCopyThreshold, but will assume ownership of larger Bufs moved in.
 struct BufVec {

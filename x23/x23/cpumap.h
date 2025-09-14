@@ -27,6 +27,8 @@ namespace x23 {
 // std::thread::hardware_concurrency().
 unsigned nproc();
 
+// Get the current CPU number. Uses sched_getcpu() if available,
+// otherwise falls back to hashing the thread ID.
 inline unsigned
 cpuid() noexcept
 {
@@ -46,11 +48,16 @@ std::string get_field(std::string_view field, std::filesystem::path file);
 
 extern const class CpuSet *allowed_cpus;
 
+// CPU affinity set wrapper around Linux cpu_set_t.  Provides bitwise
+// &, |, ^ operators.  The size is set at compile time and defaults to
+// CPU_SETSIZE, but for exotic machines with more than this many cores
+// can be increased by defining X23_CPUSET_NCPUS.
 class CpuSet {
 public:
   static constexpr unsigned kNCPUs =
       X23_CPUSET_NCPUS ? X23_CPUSET_NCPUS : CPU_SETSIZE;
   static constexpr auto kSize = CPU_ALLOC_SIZE(kNCPUs);
+  // Tag type to construct uninitialized CpuSet for performance.
   struct uninitialized {};
 
   constexpr CpuSet(uninitialized) noexcept {}
@@ -62,25 +69,32 @@ public:
     return reinterpret_cast<const cpu_set_t *>(buf_);
   }
 
+  // Size of the cpu_set_t in bytes.
   static constexpr size_t size() noexcept { return kSize; }
+  // Maximum number of CPUs this set can represent.
   static constexpr unsigned num_cpus() noexcept { return kNCPUs; }
 
+  // Clear all CPUs from the set.
   void zero() noexcept { CPU_ZERO_S(kSize, set()); }
+  // Add a CPU to the set.
   void set(unsigned cpu) noexcept
   {
     assert(cpu < kNCPUs);
     CPU_SET_S(cpu, kSize, set());
   }
+  // Remove a CPU from the set.
   void clr(unsigned cpu) noexcept
   {
     assert(cpu < kNCPUs);
     CPU_CLR_S(cpu, kSize, set());
   }
+  // Check if a CPU is in the set.
   bool isset(unsigned cpu) const noexcept
   {
     assert(cpu < kNCPUs);
     return CPU_ISSET_S(cpu, kSize, set());
   }
+  // Count the number of CPUs in the set.
   int count() const noexcept { return CPU_COUNT_S(kSize, set()); }
 
 #define MAKE_BITOP(op, text)                                                   \
@@ -106,13 +120,13 @@ public:
   }
 
   // True if the set contains at least one CPU we are allowed to run
-  // on in our cgroup.
+  // on in our cgroup (or in the specified CpuSet).
   bool valid(const CpuSet *allowed = allowed_cpus) const noexcept
   {
     return allowed ? (*this & *allowed).count() : count();
   }
 
-  // Set thread to run in a particular CpuSet.  If pid == 0 affects
+  // Set thread to run in a particular CpuSet.  If pid == 0, affects
   // the current thread.  Otherwise, pid must be the value returned by
   // gettid() in the thread, which you might not be able to obtain
   // from a std::thread.
@@ -157,8 +171,10 @@ template<> struct std::formatter<x23::CpuSet> {
 
 namespace x23 {
 
+// Parse CPU list string (e.g., "0,2-4,6") into a CpuSet.
 CpuSet parse_cpuset(std::string_view list);
 
+// Get the CpuSet of CPUs this process is allowed to run on.
 inline CpuSet
 get_allowed_cpus()
 {
@@ -167,7 +183,6 @@ get_allowed_cpus()
 
 #else // !HAVE_SCHED_SETAFFINITY
 
-// Dummy version if we don't have CPU sets
 class CpuSet {
 public:
   static constexpr unsigned kNCPUs = 1;
@@ -177,8 +192,13 @@ public:
 
 #endif // !HAVE_SCHED_SETAFFINITY
 
+// Maps CPU numbers to logical buckets for CPU-aware data structures.
+// Supports grouping CPUs by cache topology (L1, L2, L3) or core
+// sharing.  Provides CpuSet objects for each bucket to enable CPU
+// affinity control.
 class CpuMap {
 public:
+  // Construct CpuMap from a vector mapping CPU numbers to bucket IDs.
   explicit CpuMap(Vec<int> map) noexcept
     : map_(std::move(map)), nbuckets_(1 + std::ranges::max(map_))
   {
@@ -186,10 +206,14 @@ public:
     compute_cpusets();
 #endif // HAVE_SCHED_SETAFFINITY
   }
+  // Construct invalid/null CpuMap.
   explicit constexpr CpuMap(std::nullptr_t) : nbuckets_(-1) {}
 
+  // Number of distinct buckets in this mapping.
   int nbuckets() const { return nbuckets_; }
+  // Get the raw CPU-to-bucket mapping vector.
   const Vec<int> &get_map() const { return map_; }
+  // Get the bucket ID for a given CPU (defaults to current CPU).
   int bucket(int n = cpuid()) const noexcept
   {
 #if HAVE_SCHED_GETCPU
@@ -199,6 +223,7 @@ public:
     return map_[size_t(n) % map_.size()];
   }
 
+  // Get the CpuSet containing all CPUs in the given bucket.
   const CpuSet &cpuset(int i) const
   {
     assert(i >= 0 && i < nbuckets_);
@@ -216,6 +241,7 @@ private:
 #if HAVE_SCHED_SETAFFINITY
   Vec<CpuSet> cpusets_;
 
+  // Populate cpusets_ based on the CPU-to-bucket mapping.
   void compute_cpusets();
 #endif // HAVE_SCHED_SETAFFINITY
 };
@@ -346,7 +372,7 @@ private:
 //      L2 cache - "cache/index2/shared_cpu_map"
 //      L3 cache - "cache/index3/shared_cpu_map"
 //
-// Note that it doesn't actually parse the shared_cpu_map, files, just
+// Note that it doesn't actually parse the shared_cpu_map files, just
 // expects them to be unique per bucket.  Some linux machines have a
 // "cache/index[0-3]/id", but this seems to be relatively recent, so
 // it's safer to go by the shared_cpu_map file.
@@ -358,14 +384,17 @@ CpuMap make_cpu_map(std::string_view path);
 // cache/index3/shared_cpu_map or cache/index2/shared_cpu_map.
 CpuMap make_llc_map();
 
-extern const CpuMap *core_map;
-extern const CpuMap *llc_map;
+// Global CPU topology mappings initialized at startup.
+extern const CpuMap *core_map; // Groups CPUs by physical core
+extern const CpuMap *llc_map;  // Groups CPUs by last-level cache
 
-// Call this function to ensure core_map and llc_map are initialized
-// during static initialization.  Once main starts, they will be
-// initialized anyway.
+// Initialize global CPU topology mappings during static
+// initialization.  Called automatically before main() starts, but can
+// be called explicitly to ensure early initialization.
 void init_cpumaps();
 
+// Wrapper that aligns type T to cache line boundaries to prevent
+// false sharing between CPU cores.
 template<typename T>
 struct alignas(hardware_destructive_interference_size) CacheAligned : T {
   using T::T;
