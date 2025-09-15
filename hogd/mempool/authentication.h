@@ -14,32 +14,37 @@ namespace hogd {
 // TODO(jhumphri): Handle [block_expiry_height].
 class Authentication {
 public:
-  Authentication(db_sched_client_t &db_sched_client)
-    : db_sched_client_(db_sched_client)
+  Authentication(BlockID current_block_id, db_sched_client_t &db_sched_client)
+    : current_block_id_(current_block_id), db_sched_client_(db_sched_client)
   {}
 
-  AccountAuthData *get_account(BlockID block_id, const ContractAddress &account)
+  void update_block_id(BlockID block_id)
   {
-    auto it = accounts_.find(account);
-    if (it != accounts_.end()) {
-      return &it->second;
+    current_block_id_ = block_id;
+
+    x23::Vec<ContractAddress> accounts;
+    accounts.reserve(accounts_.size());
+    for (auto &[account, _] : accounts_) {
+      accounts.push_back(account);
     }
 
     DbAccountAuthDataBatchResult res =
-        db_sched_client_.dbsched_get_account_auth_data(block_id, {account})();
-    if (res.result() != DbSchedResult::DbSchedResultOK) {
-      return nullptr;
+        db_sched_client_.dbsched_get_account_auth_data(current_block_id_,
+                                                       accounts)();
+    CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
+    CHECK_EQ(res.account_auth_data_batch().size(), accounts.size());
+    for (size_t i = 0; i < res.account_auth_data_batch().size(); i++) {
+      const ContractAddress &account = accounts[i];
+      // TODO(jhumphri): We only need to reauthenticate the txs for [account] if
+      // the refreshed auth data differs from the auth data we already have.
+      accounts_[account] = res.account_auth_data_batch()[i];
     }
-    CHECK_EQ(res.account_auth_data_batch().size(), 1UL);
-    accounts_[account] = res.account_auth_data_batch()[0];
-    return &accounts_[account];
   }
 
-  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
-  bool authenticate(BlockID block_id, const SignedTransaction &tx)
+  bool authenticate(const SignedTransaction &tx)
   {
     AccountAuthData *auth_data =
-        get_account(block_id, tx.tx.invocation.invoked_address);
+        get_account(current_block_id_, tx.tx.invocation.invoked_address);
     if (!auth_data) {
       return false;
     }
@@ -97,7 +102,8 @@ public:
     }
 
     for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
-      AccountAuthData *aux_auth_data = get_account(block_id, aux.address);
+      AccountAuthData *aux_auth_data =
+          get_account(current_block_id_, aux.address);
       if (!aux_auth_data) {
         return false;
       }
@@ -192,6 +198,24 @@ private:
     return true;
   }
 
+  AccountAuthData *get_account(BlockID block_id, const ContractAddress &account)
+  {
+    auto it = accounts_.find(account);
+    if (it != accounts_.end()) {
+      return &it->second;
+    }
+
+    DbAccountAuthDataBatchResult res =
+        db_sched_client_.dbsched_get_account_auth_data(block_id, {account})();
+    if (res.result() != DbSchedResult::DbSchedResultOK) {
+      return nullptr;
+    }
+    CHECK_EQ(res.account_auth_data_batch().size(), 1UL);
+    accounts_[account] = res.account_auth_data_batch()[0];
+    return &accounts_[account];
+  }
+
+  BlockID current_block_id_;
   db_sched_client_t &db_sched_client_;
   std::unordered_map<ContractAddress, AccountAuthData> accounts_;
 };
