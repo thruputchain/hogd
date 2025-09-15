@@ -369,8 +369,14 @@ void
 Mempool::mark_block_committed(BlockID block_id)
 {
   current_block_id_ = block_id;
-  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
-  authentication_.update_block_id(current_block_id_);
+  x23::Vec<ContractAddress> changed_accounts =
+      authentication_.update_block_id(current_block_id_);
+  static const std::function<bool(const SignedTransaction &tx)> kFilter =
+      std::bind(&Authentication::authenticate, &authentication_,
+                std::placeholders::_1);
+  for (const ContractAddress &account : changed_accounts) {
+    scheduler_.filter_txs_for_account(account, kFilter);
+  }
 }
 
 x23::Async<void>

@@ -449,29 +449,46 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 void
 Scheduler::discard_expired_txs(BlockHeight current_height)
 {
-  std::unordered_set<ContractAddress> accounts;
-  for (auto it = expiry_to_tx_.begin(); it != expiry_to_tx_.end();) {
-    BlockHeight height = it->first;
+  x23::Vec<SignedTransactionHash> to_discard;
+  for (const auto &[height, tx_infos] : expiry_to_tx_) {
     if (height >= current_height) {
       break;
     }
 
-    x23::Vec<SignedTransactionHash> tx_hashes;
-    for (TxInfo *info : it->second) {
-      tx_hashes.push_back(info->tx_hash);
+    for (TxInfo *info : tx_infos) {
+      to_discard.push_back(info->tx_hash);
+    }
+  }
+  discard_txs(to_discard);
+}
 
-      if (on_runqueue(*info)) {
-        accounts.insert(info->tx.tx.invocation.invoked_address);
-        cached_hogs_[info->tx.tx.invocation.invoked_address]
-            .num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(from_xdr(cached_hogs_[info->tx.tx.invocation.invoked_address]
-                                .num_hogs[kHogAgeGroupToSchedule]) +
-                   info->tx.tx.invocation.gas_limit);
+void
+Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
+{
+  std::unordered_set<ContractAddress> accounts;
+  for (const SignedTransactionHash &tx_hash : tx_hashes) {
+    CHECK(hash_to_tx_.contains(tx_hash));
+    TxInfo &info = hash_to_tx_[tx_hash];
+
+    if (on_runqueue(info)) {
+      accounts.insert(info.tx.tx.invocation.invoked_address);
+      cached_hogs_[info.tx.tx.invocation.invoked_address]
+          .num_hogs[kHogAgeGroupToSchedule] =
+          to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
+                              .num_hogs[kHogAgeGroupToSchedule]) +
+                 info.tx.tx.invocation.gas_limit);
+    }
+
+    CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
+    {
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
+      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
+      if (expiry_to_tx_[expiry_height].empty()) {
+        CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
       }
     }
-    CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
-
-    it = expiry_to_tx_.erase(it);
+    CHECK_EQ(hash_to_tx_.erase(tx_hash), 1UL);
   }
 
   // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
@@ -672,6 +689,44 @@ Scheduler::find_and_remove_from_runqueue(
     }
   }
   return true;
+}
+
+void
+Scheduler::filter_txs_for_account(
+    const ContractAddress &account,
+    const std::function<bool(const SignedTransaction &tx)> &filter)
+{
+  x23::Vec<SignedTransactionHash> to_discard;
+  {
+    // Iterate through [account]'s txs that are on the runqueue.
+    auto it = account_to_tx_.find(account);
+    if (it != account_to_tx_.end()) {
+      const std::unordered_set<TxInfo *> &txs = it->second;
+      for (const TxInfo *info : txs) {
+        const SignedTransaction &tx = info->tx;
+        if (!filter(tx)) {
+          to_discard.push_back(info->tx_hash);
+        }
+      }
+    }
+  }
+  {
+    // Iterate through [account]'s txs that are stranded.
+    auto it = stranded_.find(account);
+    if (it != stranded_.end()) {
+      const std::map<GasAmount, std::unordered_set<TxInfo *>> &gas_txs =
+          it->second;
+      for (const auto &[_, txs] : gas_txs) {
+        for (const TxInfo *info : txs) {
+          const SignedTransaction &tx = info->tx;
+          if (!filter(tx)) {
+            to_discard.push_back(info->tx_hash);
+          }
+        }
+      }
+    }
+  }
+  discard_txs(to_discard);
 }
 
 } // namespace hogd
