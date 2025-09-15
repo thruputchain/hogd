@@ -74,7 +74,7 @@ HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
 
   for (const ContractAddress &account : accounts) {
     HogDBStatus<AccountAuthData> status =
-        db.read_address_account_auth_data(account);
+        db.read_address_account_auth_data(block_id, account);
     if (!status) {
       co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }
