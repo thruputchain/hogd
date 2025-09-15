@@ -29,6 +29,9 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
+  // The maximum number of txs in a block.
+  static constexpr size_t kMaxBlockSize = 128;
+
   Mempool(BlockID current_block_id, coord_client_t &&coord_client,
           db_coord_client_t &&db_coord_client,
           db_sched_client_t &&db_sched_client, exec_client_t &&exec_client)
@@ -67,10 +70,6 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  // TODO(jhumphri): This should probably be an RPC call initiated by the
-  // coordinator?
-  void mark_block_committed(BlockID block_id);
-
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
   x23::Async<void> schedulercoord_shutdown();
@@ -78,8 +77,6 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 128;
   // To compute the block hash, we insert tx hashes into a Merkle Trie. We make
   // insertion faster with multiple threads. Using a lot of threads could cause
   // worse performance if each thread has few hashes to insert. Thus, to
@@ -118,6 +115,8 @@ private:
                                   const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<bool> open_validation_block(BlockID block_id);
+
+  void mark_block_committed(BlockID block_id);
 
   coord_client_t coord_client_;
   db_coord_client_t db_coord_client_;

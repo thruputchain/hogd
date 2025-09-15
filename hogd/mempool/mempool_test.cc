@@ -22,11 +22,24 @@ TEST(Mempool, SubmitUnvetted)
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
+
   AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
 
-  clients.interface->schedulercoord_submit_unvetted({txs[0]})();
+  const SignedTransaction tx =
+      hogd::Authentication::sign(txs[0].tx, /*signature_weight=*/1,
+                                 {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  clients.interface->schedulercoord_submit_unvetted({tx})();
 }
 
 TEST(Mempool, SubmitVetted)
@@ -212,6 +225,27 @@ TEST(Mempool, ValidateBatchMissingTx)
     EXPECT_EQ(res_validate.outcome(),
               SchedulerValidationResult::SchedulerValidationMissingTxs);
   }
+}
+
+TEST(Mempool, AuthInvalidated)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  const SignedTransactionBatch txs =
+      generate_txs(fib_client, Mempool::kMaxBlockSize + 1);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  AccountAuthData auth_data = get_default_account();
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
+
+  clients.interface->schedulercoord_submit_unvetted(txs)();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
+            Mempool::kMaxBlockSize);
 }
 
 } // namespace hogd

@@ -362,4 +362,38 @@ get_default_account()
                          .nonce_config = kNonceConfig};
 }
 
+inline Ed25519SecretKey
+create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
+{
+  const auto [public_key, private_key] = ed25519_keygen();
+  x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
+  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
+  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config->key.ed25519() = public_key;
+  pk_config->max_weight = weight;
+  return private_key;
+}
+
+inline void
+set_nonce_key(AccountAuthData &auth_data, size_t idx)
+{
+  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
+  auth_data.nonce_config.accepted_keys |= (1 << idx);
+}
+
+inline void
+add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+               const x23::Vec<size_t> &keys, Weight required_weight)
+{
+  CHECK_LT(auth_data.gas_permissions.size(),
+           static_cast<size_t>(MAX_GAS_CONFIGS));
+  GasPermissionConfig config{.limit = gas,
+                             .accepted_keys = 0,
+                             .required_weight = required_weight};
+  for (const size_t idx : keys) {
+    config.accepted_keys |= (1 << idx);
+  }
+  auth_data.gas_permissions.push_back(config);
+}
+
 } // namespace hogd
