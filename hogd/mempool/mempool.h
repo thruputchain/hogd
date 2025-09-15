@@ -29,12 +29,15 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  Mempool(coord_client_t &&coord_client, db_coord_client_t &&db_coord_client,
+  Mempool(BlockID most_recent_block, coord_client_t &&coord_client,
+          db_coord_client_t &&db_coord_client,
           db_sched_client_t &&db_sched_client, exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)),
       db_coord_client_(std::move(db_coord_client)),
       db_sched_client_(std::move(db_sched_client)),
-      exec_client_(std::move(exec_client)), scheduler_(db_sched_client_)
+      exec_client_(std::move(exec_client)),
+      most_recent_block_(most_recent_block), scheduler_(db_sched_client_),
+      authentication_(db_sched_client_)
   {}
 
   // Disable copy and move.
@@ -117,6 +120,7 @@ private:
   exec_client_t exec_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
+  BlockID most_recent_block_;
   Scheduler scheduler_;
   Authentication authentication_;
 

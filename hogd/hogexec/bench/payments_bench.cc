@@ -152,7 +152,8 @@ run_payments_bench(std::string const &server_addr, uint32_t exec_port,
     assert(offset + 10000 * 5 <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 100 * nthread * 5),
+                                                                 100 * nthread *
+                                                                     5),
                   nthread, 100 * nthread, 5);
     // offset += 10000 * 10;
   }

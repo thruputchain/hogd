@@ -37,7 +37,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   SignedTransactionBatch authenticated;
   authenticated.reserve(batch.size());
   for (const SignedTransaction &tx : batch) {
-    if (authentication_.authenticate(tx)) {
+    if (authentication_.authenticate(most_recent_block_, tx)) {
       authenticated.push_back(tx);
     }
   }
@@ -235,6 +235,7 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
 
+  most_recent_block_ = block_id;
   co_return result;
 }
 
@@ -346,6 +347,8 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   result.db_tip() = DbTip{.height = nomination.block_height,
                           .hash = nomination.block_hash,
                           .id = block_id};
+
+  most_recent_block_ = block_id;
   co_return result;
 }
 

@@ -85,7 +85,7 @@ TEST(Authentication, SignAndVerify)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_TRUE(auth.authenticate(signed_tx));
+  EXPECT_TRUE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyNotEnoughSignatureWeight)
@@ -113,7 +113,7 @@ TEST(Authentication, SignAndVerifyNotEnoughSignatureWeight)
       hogd::Authentication::sign(tx, /*signature_weight=*/10,
                                  {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
@@ -142,7 +142,7 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyWrongNonceIndex)
@@ -171,7 +171,7 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyNoGasIndices)
@@ -202,7 +202,7 @@ TEST(Authentication, SignAndVerifyNoGasIndices)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyNotEnoughGas)
@@ -233,7 +233,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGas)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyGasWrongIndex)
@@ -264,7 +264,7 @@ TEST(Authentication, SignAndVerifyGasWrongIndex)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
@@ -295,7 +295,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyGasMultipleConfigs)
@@ -330,7 +330,7 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigs)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_TRUE(auth.authenticate(signed_tx));
+  EXPECT_TRUE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMismatch)
@@ -356,7 +356,7 @@ TEST(Authentication, SignAndVerifyMismatch)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyWrongIndex)
@@ -383,7 +383,7 @@ TEST(Authentication, SignAndVerifyWrongIndex)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSig)
@@ -420,7 +420,7 @@ TEST(Authentication, SignAndVerifyMultiSig)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_TRUE(auth.authenticate(signed_tx));
+  EXPECT_TRUE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
@@ -459,7 +459,7 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_TRUE(auth.authenticate(signed_tx));
+  EXPECT_TRUE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
@@ -498,7 +498,7 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
@@ -537,7 +537,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
@@ -568,7 +568,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/10, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
@@ -603,7 +603,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
@@ -639,7 +639,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/5, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigMismatch)
@@ -669,7 +669,7 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
@@ -699,7 +699,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
@@ -733,7 +733,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
   const SignedTransaction signed_tx =
       hogd::Authentication::sign(tx, /*signature_weight=*/1, private_keys,
                                  /*auxiliary_private_keys=*/{});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
@@ -774,7 +774,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_TRUE(auth.authenticate(signed_tx));
+  EXPECT_TRUE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughSignatureWeight)
@@ -808,7 +808,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughSignatureWeight)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
@@ -846,7 +846,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
@@ -884,7 +884,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
@@ -919,7 +919,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
@@ -955,7 +955,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
@@ -993,7 +993,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
@@ -1034,7 +1034,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
-  EXPECT_FALSE(auth.authenticate(signed_tx));
+  EXPECT_FALSE(auth.authenticate(/*block_id=*/0, signed_tx));
 }
 
 } // namespace hogd

@@ -316,7 +316,8 @@ create_clients(const MempoolTestServer &server)
       x23::rpc_stream_logged(*exec_cp, exec_fd.release())
           ->client(ExecutorCoord1{});
 
-  auto interface = std::make_unique<Mempool>(std::move(coord_client),
+  auto interface = std::make_unique<Mempool>(/*most_recent_block-*/ 0,
+                                             std::move(coord_client),
                                              std::move(db_coord_client),
                                              std::move(db_sched_client),
                                              std::move(exec_client));
