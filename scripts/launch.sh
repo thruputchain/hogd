@@ -1,12 +1,12 @@
 #!/bin/bash
 
-CHUCKD_BINARY=~/go/bin/chuckd
+CHUCKD_BINARY=~/chuckd/chuckd/chuckd
 BUILD_DIR=/home/local/jhumphri/build/
 LOADGEN_BINARY=${BUILD_DIR}hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${BUILD_DIR}hogd/hogexec/hogexec
 HOGDB_BINARY=${BUILD_DIR}hogd/hogdb/hogdb
 
-X23TRACE=1
+X23TRACE=0
 
 killall -9 chuckd > /dev/null 2>&1
 killall -9 loadgen_server > /dev/null 2>&1
@@ -70,17 +70,17 @@ wait_port 11222
   --in-addr :7888                \
   --loadgen-addr localhost:11222 \
   --num-accts 10000              \
-  --num-txs 100000               \
+  --num-txs 20000 \
   --exec-batch 100               \
-  --exec-par 10                  \
-  --max-msg-size 200000000 &
+  --exec-par 1                   \
+  --max-msg-size 400000000 &
 wait_port 7888
 
 sleep 1
 
 # Start hogexec.
 echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1 7888 1 &
+"$HOGEXEC_BINARY" 127.0.0.1 7888 50 &
 
 sleep 1
 
