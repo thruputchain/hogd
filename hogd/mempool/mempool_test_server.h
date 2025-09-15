@@ -163,6 +163,12 @@ public:
     EXPECT_TRUE(db_.write_address_average_hog_age({average}));
   }
 
+  void set_account_auth_data(BlockID block_id, const ContractAddress &account,
+                             const AccountAuthData &auth_data)
+  {
+    db_.write_address_account_auth_data(block_id, account, auth_data);
+  }
+
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
   uint16_t coordinator_port() const { return coordinator_port_; }

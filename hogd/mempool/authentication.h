@@ -18,13 +18,6 @@ public:
     : db_sched_client_(db_sched_client)
   {}
 
-  // TODO(jhumphri): Remove this.
-  void add_account(const ContractAddress &account, const AccountAuthData &data)
-  {
-    CHECK(!accounts_.contains(account));
-    accounts_[account] = data;
-  }
-
   AccountAuthData *get_account(BlockID block_id, const ContractAddress &account)
   {
     auto it = accounts_.find(account);
