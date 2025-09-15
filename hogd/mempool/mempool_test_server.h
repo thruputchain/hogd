@@ -166,7 +166,7 @@ public:
   void set_account_auth_data(BlockID block_id, const ContractAddress &account,
                              const AccountAuthData &auth_data)
   {
-    db_.write_address_account_auth_data(block_id, account, auth_data);
+    db_.write_address_account_auth_data(account, auth_data);
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }

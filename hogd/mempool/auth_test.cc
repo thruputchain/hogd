@@ -1152,8 +1152,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   std::array<AccountAuthData, 3> auth_datas = {get_default_account(),
-                                              get_default_account(),
-                                              get_default_account()};
+                                               get_default_account(),
+                                               get_default_account()};
   for (size_t i = 0; i < 3; i++) {
     AccountAuthData &auth_data = auth_datas[i];
     if (i == 0) {

@@ -141,13 +141,13 @@ public:
   HogDBStatus<int128_t> read_address_balance(const Address &addr);
   HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
   HogDBStatus<AccountAuthData>
-  read_address_account_auth_data(BlockID block_id, const Address &addr);
+  read_address_account_auth_data(const Address &addr);
   HogDBStatus<SHA256Hash> read_address_wasm_hash(const Address &addr);
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
   HogDBStatus<void>
-  write_address_account_auth_data(BlockID block_id, const Address &addr,
+  write_address_account_auth_data(const Address &addr,
                                   const AccountAuthData &auth);
   HogDBStatus<void> write_address_wasm_hash(const Address &addr,
                                             const SHA256Hash &hash);

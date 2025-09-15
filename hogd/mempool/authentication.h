@@ -180,13 +180,13 @@ private:
   }
 
   // TODO(jhumphri): Populate [public_key] properly.
-  bool get_public_key(const AccountAuthData &auth_data, size_t idx,
-                      Weight &max_weight, Ed25519PublicKey &public_key)
+  static bool get_public_key(const AccountAuthData &auth_data, size_t idx,
+                             Weight &max_weight, Ed25519PublicKey &public_key)
   {
     if (idx >= auth_data.public_keys.size()) {
       return false;
     }
-    auto &pk_config = auth_data.public_keys[idx];
+    const auto &pk_config = auth_data.public_keys[idx];
     if (!pk_config) {
       return false;
     }

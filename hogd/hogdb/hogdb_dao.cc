@@ -7,8 +7,10 @@
 #include <string>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
+#include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"
@@ -151,7 +153,7 @@ HogDBDAO::read_address_average_hog_age(const Address &addr)
 
 // TODO(jhumphri): Handle [block_id].
 HogDBStatus<AccountAuthData>
-HogDBDAO::read_address_account_auth_data(BlockID block_id, const Address &addr)
+HogDBDAO::read_address_account_auth_data(const Address &addr)
 {
   auto key = make_address_key(addr, Prefix::kAccountAuthData);
   HogDBStatus<OwningSpan<const std::byte>> raw =
@@ -226,7 +228,7 @@ HogDBDAO::write_address_average_hog_age(const HogAge &age)
 
 // TODO(jhumphri): Handle [block_id].
 HogDBStatus<void>
-HogDBDAO::write_address_account_auth_data(BlockID block_id, const Address &addr,
+HogDBDAO::write_address_account_auth_data(const Address &addr,
                                           const AccountAuthData &auth)
 {
   auto key = make_address_key(addr, Prefix::kAccountAuthData);

@@ -14,6 +14,7 @@
 #include <utility>
 
 // generated x23 headers
+#include "account.hh"
 #include "db_sched.hh"
 
 #include "rpc_types.hh"
@@ -69,12 +70,22 @@ HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
                                                 ContractAddressBatch accounts)
 {
   HogDBDAO &db = ctx_.get_db();
+  {
+    // Check that [block_id] is the last committed block observed by hogdb. We
+    // do this check to ensure that the scheduler and hogdb are in sync with
+    // each other.
+    HogDBStatus<DbTip> ret = db.read_dbtip();
+    if (!ret || ret->id != block_id) {
+      co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+    }
+  }
+
   DbAccountAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
   ret.account_auth_data_batch().reserve(accounts.size());
 
   for (const ContractAddress &account : accounts) {
     HogDBStatus<AccountAuthData> status =
-        db.read_address_account_auth_data(block_id, account);
+        db.read_address_account_auth_data(account);
     if (!status) {
       co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }
