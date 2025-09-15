@@ -102,6 +102,7 @@ private:
                                    BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
+  x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
   static SHA256Hash

@@ -86,6 +86,17 @@ Mempool::close_snapshot(BlockID block_id)
 }
 
 x23::Async<void>
+Mempool::commit_snapshot(BlockID block_id)
+{
+  DbBlockResult res =
+      co_await db_coord_client_.dbcoord_commit_snapshot(block_id);
+  // [dbcoord_commit_snapshot] will always succeed as long as we provide a valid
+  // block ID.
+  CHECK_EQ(res.result(), DbResult::DbResultOK);
+  co_return;
+}
+
+x23::Async<void>
 Mempool::finish_block(BlockID block_id)
 {
   return exec_client_.executorcoord_finish_block(block_id);
@@ -234,6 +245,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
+  co_await commit_snapshot(block_id);
+  mark_block_committed(block_id);
 
   co_return result;
 }
@@ -340,6 +353,8 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
                                nomination.block_height);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
+  co_await commit_snapshot(block_id);
+  mark_block_committed(block_id);
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
