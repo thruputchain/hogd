@@ -10,7 +10,6 @@
 #include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
-#include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"

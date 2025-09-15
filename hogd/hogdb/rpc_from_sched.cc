@@ -15,6 +15,7 @@
 
 // generated x23 headers
 #include "account.hh"
+#include "db_coord.hh"
 #include "db_sched.hh"
 
 #include "rpc_types.hh"
