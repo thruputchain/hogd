@@ -7,6 +7,7 @@
 #include <string>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
 #include "types.hh"
@@ -149,6 +150,25 @@ HogDBDAO::read_address_average_hog_age(const Address &addr)
   return age;
 }
 
+// TODO(jhumphri): Handle [block_id].
+HogDBStatus<AccountAuthData>
+HogDBDAO::read_address_account_auth_data(const Address &addr)
+{
+  auto key = make_address_key(addr, Prefix::kAccountAuthData);
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0);
+  if (!raw)
+    return raw.error();
+
+  AccountAuthData auth;
+  try {
+    x23::deserialize(&auth, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return auth;
+}
+
 HogDBStatus<SHA256Hash>
 HogDBDAO::read_address_wasm_hash(const Address &addr)
 {
@@ -201,6 +221,17 @@ HogDBDAO::write_address_average_hog_age(const HogAge &age)
 {
   auto key = make_address_key(age.address, Prefix::kHogAge);
   auto buf = x23::serialize(age);
+  return db_.put(std::as_bytes(std::span(key)), 0,
+                 std::as_bytes(std::span(buf)));
+}
+
+// TODO(jhumphri): Handle [block_id].
+HogDBStatus<void>
+HogDBDAO::write_address_account_auth_data(const Address &addr,
+                                          const AccountAuthData &auth)
+{
+  auto key = make_address_key(addr, Prefix::kAccountAuthData);
+  auto buf = x23::serialize(auth);
   return db_.put(std::as_bytes(std::span(key)), 0,
                  std::as_bytes(std::span(buf)));
 }

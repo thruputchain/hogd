@@ -29,12 +29,15 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  Mempool(coord_client_t &&coord_client, db_coord_client_t &&db_coord_client,
+  Mempool(BlockID current_block_id, coord_client_t &&coord_client,
+          db_coord_client_t &&db_coord_client,
           db_sched_client_t &&db_sched_client, exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)),
       db_coord_client_(std::move(db_coord_client)),
       db_sched_client_(std::move(db_sched_client)),
-      exec_client_(std::move(exec_client)), scheduler_(db_sched_client_)
+      exec_client_(std::move(exec_client)), current_block_id_(current_block_id),
+      scheduler_(db_sched_client_),
+      authentication_(current_block_id_, db_sched_client_)
   {}
 
   // Disable copy and move.
@@ -64,9 +67,13 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
+  // TODO(jhumphri): This should probably be an RPC call initiated by the
+  // coordinator?
+  void mark_block_committed(BlockID block_id);
+
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> executorcoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown();
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
@@ -117,6 +124,7 @@ private:
   exec_client_t exec_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
+  BlockID current_block_id_;
   Scheduler scheduler_;
   Authentication authentication_;
 

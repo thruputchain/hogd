@@ -7,7 +7,6 @@
 #include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
 #include "nomination.hh"
@@ -23,9 +22,9 @@ TEST(Mempool, SubmitUnvetted)
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
   AccountAuthData auth_data = get_default_account();
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   clients.interface->schedulercoord_submit_unvetted({txs[0]})();
 }
