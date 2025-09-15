@@ -90,6 +90,7 @@ public:
 
       db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
       ctx_ = std::make_unique<RPCContext>(db_, trie_);
+      set_dbtip({.height = 0, .hash = {}, .id = 0});
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
@@ -167,6 +168,11 @@ public:
                              const AccountAuthData &auth_data)
   {
     db_.write_address_account_auth_data(account, auth_data);
+  }
+
+  void set_dbtip(const DbTip &db_tip)
+  {
+    CHECK(db_.write_dbtip(db_tip).has_value());
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
@@ -322,11 +328,11 @@ create_clients(const MempoolTestServer &server)
       x23::rpc_stream_logged(*exec_cp, exec_fd.release())
           ->client(ExecutorCoord1{});
 
-  auto interface = std::make_unique<Mempool>(/*most_recent_block-*/ 0,
-                                             std::move(coord_client),
-                                             std::move(db_coord_client),
-                                             std::move(db_sched_client),
-                                             std::move(exec_client));
+  auto interface =
+      std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
+                                std::move(db_coord_client),
+                                std::move(db_sched_client),
+                                std::move(exec_client));
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_coord_pool = std::move(db_coord_pool),

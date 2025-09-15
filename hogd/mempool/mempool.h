@@ -67,9 +67,13 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
+  // TODO(jhumphri): This should probably be an RPC call initiated by the
+  // coordinator?
+  void mark_block_committed(BlockID block_id);
+
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> executorcoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown();
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 

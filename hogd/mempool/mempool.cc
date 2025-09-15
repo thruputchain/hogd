@@ -235,9 +235,6 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
 
-  current_block_id_ = block_id;
-  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
-  authentication_.update_block_id(current_block_id_);
   co_return result;
 }
 
@@ -350,14 +347,19 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
                           .hash = nomination.block_hash,
                           .id = block_id};
 
-  current_block_id_ = block_id;
-  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
-  authentication_.update_block_id(current_block_id_);
   co_return result;
 }
 
+void
+Mempool::mark_block_committed(BlockID block_id)
+{
+  current_block_id_ = block_id;
+  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
+  authentication_.update_block_id(current_block_id_);
+}
+
 x23::Async<void>
-Mempool::executorcoord_shutdown()
+Mempool::schedulercoord_shutdown()
 {
   shutdown_flag_.store(true, std::memory_order_release);
   co_return;
