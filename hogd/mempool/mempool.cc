@@ -346,11 +346,20 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   result.db_tip() = DbTip{.height = nomination.block_height,
                           .hash = nomination.block_hash,
                           .id = block_id};
+
   co_return result;
 }
 
+void
+Mempool::mark_block_committed(BlockID block_id)
+{
+  current_block_id_ = block_id;
+  // TODO(jhumphri): Need to re-authenticate txs at the start of each new block.
+  authentication_.update_block_id(current_block_id_);
+}
+
 x23::Async<void>
-Mempool::executorcoord_shutdown()
+Mempool::schedulercoord_shutdown()
 {
   shutdown_flag_.store(true, std::memory_order_release);
   co_return;
