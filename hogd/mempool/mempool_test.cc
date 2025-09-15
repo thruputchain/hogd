@@ -23,8 +23,7 @@ TEST(Mempool, SubmitUnvetted)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   AccountAuthData auth_data = get_default_account();
-  server.set_account_auth_data(/*block_id=*/0,
-                               MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
 
   clients.interface->schedulercoord_submit_unvetted({txs[0]})();
