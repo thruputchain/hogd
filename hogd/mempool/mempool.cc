@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <functional>
 #include <future>
 #include <span>
 #include <tuple>
@@ -373,7 +372,7 @@ Mempool::mark_block_committed(BlockID block_id)
   x23::Vec<ContractAddress> changed_accounts =
       authentication_.update_block_id(current_block_id_);
   for (const ContractAddress &account : changed_accounts) {
-    scheduler_.filter_txs_for_account(account, auth_filter);
+    scheduler_.filter_txs_for_account(account, auth_filter_);
   }
 }
 

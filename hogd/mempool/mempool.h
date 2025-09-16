@@ -84,7 +84,7 @@ private:
   // has at least [kMinHashesPerThread] hashes to insert.
   static constexpr size_t kMinHashesPerThread = 16'384;
 
-  const std::function<bool(const SignedTransaction &tx)> auth_filter =
+  const std::function<bool(const SignedTransaction &tx)> auth_filter_ =
       [&](const SignedTransaction &tx) {
         return authentication_.authenticate(tx);
       };
