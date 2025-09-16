@@ -84,6 +84,11 @@ private:
   // has at least [kMinHashesPerThread] hashes to insert.
   static constexpr size_t kMinHashesPerThread = 16'384;
 
+  const std::function<bool(const SignedTransaction &tx)> auth_filter =
+      [&](const SignedTransaction &tx) {
+        return authentication_.authenticate(tx);
+      };
+
   // TODO(jhumphri): We are using this function to generate unique block IDs.
   // This will need to be reworked if/when we have multiple threads processing
   // blocks.

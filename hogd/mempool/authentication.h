@@ -54,7 +54,6 @@ public:
     AccountAuthData *auth_data =
         get_account(current_block_id_, tx.tx.invocation.invoked_address);
     if (!auth_data) {
-      printf("A auth\n");
       return false;
     }
     const AuthSignaturePreimage preimage{.signature_weight =
@@ -70,15 +69,12 @@ public:
       Ed25519PublicKey public_key;
       if (!get_public_key(*auth_data, dec_sig.public_key_id, weight,
                           public_key)) {
-        printf("B auth\n");
         return false;
       }
       if (!check_decorated_signature(dec_sig, public_key, msg)) {
-        printf("C auth\n");
         return false;
       }
       if (dec_sig.public_key_id >= MAX_SIGNERS) {
-        printf("D auth\n");
         return false;
       }
       total_weight += weight;
@@ -97,7 +93,6 @@ public:
     // that submitted the tx can contribute its key weights to the nonce weight.
     // Auxiliary accounts cannot do this.
     if (nonce_weight < auth_data->nonce_config.required_weight) {
-      printf("E auth\n");
       return false;
     }
     // Similarly, we check if we have enough gas available here rather than
@@ -111,7 +106,6 @@ public:
       }
     }
     if (gas_available < tx.tx.invocation.gas_limit) {
-      printf("F auth\n");
       return false;
     }
 
@@ -119,7 +113,6 @@ public:
       AccountAuthData *aux_auth_data =
           get_account(current_block_id_, aux.address);
       if (!aux_auth_data) {
-        printf("G auth\n");
         return false;
       }
 
@@ -128,17 +121,14 @@ public:
         Ed25519PublicKey public_key;
         if (!get_public_key(*aux_auth_data, dec_sig.public_key_id, weight,
                             public_key)) {
-          printf("H auth\n");
           return false;
         }
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
-          printf("I auth\n");
           return false;
         }
         total_weight += weight;
       }
     }
-    printf("J auth\n");
     // We check [total_weight] down here rather than above with the nonce weight
     // because we need to include the weight of the auxiliary keys.
     return total_weight >= tx.signature_weight;

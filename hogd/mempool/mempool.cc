@@ -39,11 +39,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   authenticated.reserve(batch.size());
   for (const SignedTransaction &tx : batch) {
     if (authentication_.authenticate(tx)) {
-      printf("Good\n");
       authenticated.push_back(tx);
-    }
-    else {
-      printf("Nope\n");
     }
   }
   scheduler_.add_txs(authenticated);
@@ -201,13 +197,11 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
-    printf("A\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
-    printf("B\n");
     co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -230,7 +224,6 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
                           kMaxBlockSize);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
-    printf("C\n");
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
@@ -250,7 +243,6 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     }
   }
 
-  printf("D\n");
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
@@ -380,12 +372,8 @@ Mempool::mark_block_committed(BlockID block_id)
   current_block_id_ = block_id;
   x23::Vec<ContractAddress> changed_accounts =
       authentication_.update_block_id(current_block_id_);
-  static const std::function<bool(const SignedTransaction &tx)> filter =
-      [&](const SignedTransaction &tx) {
-        return authentication_.authenticate(tx);
-      };
   for (const ContractAddress &account : changed_accounts) {
-    scheduler_.filter_txs_for_account(account, filter);
+    scheduler_.filter_txs_for_account(account, auth_filter);
   }
 }
 
