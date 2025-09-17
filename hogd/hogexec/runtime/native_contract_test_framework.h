@@ -275,7 +275,8 @@ public:
                                             sdk_input.data()),
                                         sdk_input.size()))};
   }
-  static AddressAndKey make_contract_data_addrkey_matching_static_key_sdk_macro(
+  constexpr static AddressAndKey
+  make_contract_data_addrkey_matching_static_key_sdk_macro(
       ContractAddress const &address, std::string_view str)
   {
     StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
@@ -283,7 +284,7 @@ public:
         make_storage_key_matching_static_key_sdk_macro(str);
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
-  static AddressAndKey
+  constexpr static AddressAndKey
   make_contract_data_addrkey(ContractAddress const &address,
                              std::string_view str)
   {
@@ -292,11 +293,21 @@ public:
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
 
-  static AddressAndKey
+  constexpr static AddressAndKey
+  make_account_auth_data_addrkey(ContractAddress const &address)
+  {
+    return AddressAndKey{.address = address,
+                         .key = StorageKey(
+                             StorageKeyType::kStorageKeyTypeAccountAuthData)};
+  }
+
+  constexpr static AddressAndKey
   make_free_native_token_balance_addrkey(ContractAddress const &address)
   {
-    StorageKey key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-    return AddressAndKey{.address = address, .key = std::move(key)};
+    return AddressAndKey{
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
   }
 
   static Bytestring make_bytestring(std::string_view str)
