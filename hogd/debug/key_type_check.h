@@ -44,6 +44,7 @@ check_item_key_type(StorageKeyType key_type, StorageItemType item_type)
       }
       break;
     default:
+      return;
       // item type is valid for key type
     }
   }
@@ -85,6 +86,7 @@ check_delta_type(StorageKeyType key_type, StorageDeltaType delta_type)
       }
       break;
     default:
+      return;
       // delta type is valid for key type
     }
   }
