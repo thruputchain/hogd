@@ -25,7 +25,10 @@ public:
                      StorageCostModel const *cost_model);
   StorageItemWrapper(AccountAuthData auth_data,
                      StorageCostModel const *cost_model);
-
+  StorageItemWrapper(AddressMetadata addr_meta,
+                     StorageCostModel const *cost_model);
+  StorageItemWrapper(DeploymentSponsorRecord deploy_record,
+                     StorageCostModel const *cost_model);
   auto &bytestring(this auto &self)
   {
     return std::get<BytestringWrapper>(self.storage_item_).bytestring_;
@@ -49,6 +52,16 @@ public:
   auto &auth_data(this auto &self)
   {
     return std::get<AuthDataWrapper>(self.storage_item_).auth_data_;
+  }
+
+  auto &addr_meta(this auto &self)
+  {
+    return std::get<AddressMetadataWrapper>(self.storage_item_).addr_meta_;
+  }
+
+  auto& sponsored_deployment_record(this auto &self)
+  {
+    return std::get<DeploymentSponsorRecordWrapper>(self.storage_item_).deploy_record;
   }
 
   StorageItemType type() const;
@@ -117,8 +130,31 @@ private:
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
 
+  struct AddressMetadataWrapper {
+    AddressMetadata addr_meta_;
+
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeAddressMetadata;
+
+    StorageItem to_wire_item() const;
+
+    int128_t storage_cost(StorageCostModel const *cost_model) const;
+  };
+
+  struct DeploymentSponsorRecordWrapper {
+    DeploymentSponsorRecord deploy_record_;
+
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeDeploymentSponsorshipRecord;
+
+    StorageItem to_wire_item() const;
+
+    int128_t storage_cost(StorageCostModel const *cost_model) const;
+  };
+
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper, ReplayCacheWrapper, AuthDataWrapper>
+               RetrocausalQueueWrapper, ReplayCacheWrapper, AuthDataWrapper,
+               AddressMetadataWrapper, DeploymentSponsorRecordWrapper>
       storage_item_;
   const StorageCostModel *cost_model_;
 };

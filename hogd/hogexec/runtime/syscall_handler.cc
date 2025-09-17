@@ -507,7 +507,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto &frame = invocation_frame_stack_.get_active_frame();
 
   // deploy new contract
-  frame.add_new_contract_deployment(deploy_addr, contract_hash, std::move(new_contract));
+  frame.add_new_contract_deployment(deploy_addr, contract_hash,
+                                    std::move(new_contract));
 
   return deploy_addr;
 }
@@ -842,9 +843,9 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
 {
   assert(!invocation_frame_stack_.empty());
   auto addr = invocation_frame_stack_.get_active_frame().address();
-  AddressAndKey addrkey{.address = addr,
-                        .key = StorageKey(
-                            StorageKeyType::kStorageKeyTypeAccountAuthData)};
+  AddressAndKey addrkey{
+      .address = addr,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthMetadata)};
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);

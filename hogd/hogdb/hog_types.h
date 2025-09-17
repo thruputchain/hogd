@@ -98,10 +98,12 @@ public:
     : item_key_{.addr = addr, .key = key}, key_type_(key_type),
       memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
   {}
+
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
     if (key_type_ == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance ||
-        key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData)
+        key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthMetadata ||
+        key_type_ == StorageKeyType::kStorageKeyTypeContractDeploymentMetadata)
       return item_key_.addr.as_bytes();
     return byte_view(item_key_);
   }
@@ -111,9 +113,11 @@ public:
       return false;
     switch (key_type_) {
     case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-    case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    case StorageKeyType::kStorageKeyTypeAccountAuthMetadata:
+    case StorageKeyType::kStorageKeyTypeAddressMetadata:
       return item_key_.addr == key.item_key_.addr;
     case StorageKeyType::kStorageKeyTypeContractData:
+    case StorageKeyType::kStorageKeyTypeContractDeploymentMetadata:
       return item_key_.addr == key.item_key_.addr &&
              item_key_.key == key.item_key_.key;
     }
@@ -126,7 +130,7 @@ public:
   }
   constexpr bool is_account_auth_data() const
   {
-    return key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData;
+    return key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthMetadata;
   }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
   [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
@@ -175,15 +179,35 @@ make_account_auth_data_item_key(const Address &addr)
 }
 
 [[nodiscard]] constexpr ItemKey
+make_address_metadata_key(const Address &addr)
+{
+  RawKey buf{};
+  return ItemKey(addr, buf,
+                 StorageKeyType::kStorageKeyTypeAddressMetadata);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_deployment_sponsorship_record_key(const Address &addr, SHA256Hash const& contract_hash)
+{
+  return ItemKey(addr, contract_hash,
+                 StorageKeyType::kStorageKeyTypeContractDeploymentMetadata);
+}
+
+
+[[nodiscard]] constexpr ItemKey
 make_item_key(const AddressAndKey &addrkey)
 {
   switch (addrkey.key.key_type()) {
   case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
     return make_address_balance_item_key(addrkey.address);
-  case StorageKeyType::kStorageKeyTypeAccountAuthData:
+  case StorageKeyType::kStorageKeyTypeAccountAuthMetadata:
     return make_account_auth_data_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeContractData:
     return ItemKey(addrkey.address, addrkey.key.contract_data_key());
+  case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    return make_address_metadata_key(addrkey.address);
+  case StorageKeyType::kStorageKeyTypeContractDeploymentMetadata:
+    return make_deployment_sponsorship_record_key(addrkey.address, addrkey.key.contract_hash());
   }
   std::unreachable();
 }

@@ -21,6 +21,11 @@ struct StorageCostModel {
   int128_t get_retrocausal_queue_cost(int64_t active_queue_size,
                                       uint64_t active_block_count) const;
   int128_t get_replay_cache_cost(size_t replay_cache_size) const;
+  int128_t get_contract_cost(size_t contract_len) const
+  {
+    // TODO(geoff): proper config
+    return 100 + (kBytestringCostPerByte * contract_len);
+  }
 
   StorageCostModel(const StorageCostModel &) = delete;
   StorageCostModel &operator=(const StorageCostModel &) = delete;

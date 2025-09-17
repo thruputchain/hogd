@@ -50,6 +50,8 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
     return {};
   }
 
+  // TODO(geoff): this is where we swap in logic to do fine grained lock control
+
   ItemChange tmp = lock.change;
   tmp.undo_merge(old_change);
   HogDBStatus<void> ret = tmp.merge(new_change);

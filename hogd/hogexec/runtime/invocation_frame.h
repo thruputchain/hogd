@@ -46,11 +46,14 @@ public:
                                    SHA256Hash const &contract_hash,
                                    std::shared_ptr<const Contract> new_contract)
   {
-    [[maybe_unused]]
-    auto [_, inserted] = new_contract_deployments_.emplace(contract_address, NewContractDeployment{.contract_hash = contract_hash, .contract = std::move(new_contract)});
+    [[maybe_unused]] auto [_, inserted] = new_contract_deployments_.emplace(
+        contract_address,
+        NewContractDeployment{.contract_hash = contract_hash,
+                              .contract = std::move(new_contract)});
     assert(inserted);
   }
-  std::optional<SHA256Hash> lookup_new_contract_deployment(ContractAddress const &contract_address) const
+  std::optional<SHA256Hash>
+  lookup_new_contract_deployment(ContractAddress const &contract_address) const
   {
     auto it = new_contract_deployments_.find(contract_address);
     if (it != new_contract_deployments_.end()) {

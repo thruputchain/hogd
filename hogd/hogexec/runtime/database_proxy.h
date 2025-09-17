@@ -105,13 +105,17 @@ private:
 
 class ContractDeployBatchBuilder {
 public:
-  const ContractDeployDeltaBatch &build() const{
+  const ContractDeployDeltaBatch &build() const
+  {
     return contract_deploy_deltas_;
   }
 
-  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash, std::shared_ptr<const Contract> const& contract)
+  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash,
+                           std::shared_ptr<const Contract> const &contract)
   {
-    ContractDeployDelta delta{.contract_address = addr, .contract_hash = hash, .contract = nullptr};
+    ContractDeployDelta delta{.contract_address = addr,
+                              .contract_hash = hash,
+                              .contract = nullptr};
     if (contract != nullptr && !new_contract_is_already_created(hash)) {
       delta.contract.emplace(*contract);
       contract_hashes_.insert(hash);
@@ -120,7 +124,8 @@ public:
   }
 
 private:
-  bool new_contract_is_already_created(SHA256Hash const &hash) const {
+  bool new_contract_is_already_created(SHA256Hash const &hash) const
+  {
     return contract_hashes_.contains(hash);
   }
 
@@ -147,12 +152,14 @@ public:
     current_subtransaction_batch_builder_->add_delta(addrkey, delta, flags);
   }
 
-  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash, std::shared_ptr<const Contract> const& contract)
+  void add_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash,
+                           std::shared_ptr<const Contract> const &contract)
   {
     if (!current_contract_deploy_batch_builder_) {
       current_contract_deploy_batch_builder_ = ContractDeployBatchBuilder();
     }
-    current_contract_deploy_batch_builder_->add_contract_deploy(addr, hash, contract);
+    current_contract_deploy_batch_builder_->add_contract_deploy(addr, hash,
+                                                                contract);
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
@@ -169,7 +176,8 @@ public:
       current_contract_deploy_batch_builder_ = std::nullopt;
     }
 
-    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch, contract_deploy_batch);
+    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch,
+                                                 contract_deploy_batch);
   }
 
   SystemStatus<void> pop_subtransactions(uint32_t count)

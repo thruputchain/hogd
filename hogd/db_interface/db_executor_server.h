@@ -51,9 +51,10 @@ public:
   RPCError abort_transaction(BlockID block, TransactionID tx);
   // Increases subtransaction count by 1 IF SUCCESSFUL.
   // Otherwise does not change subtransaction count, and is a no-op.
-  RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                       StorageDeltaBatch const& batch,
-                                       ContractDeployDeltaBatch contract_deploy_batch);
+  RPCError
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch const &batch,
+                              ContractDeployDeltaBatch contract_deploy_batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
   ExpectedStorageItem get_snapshot_item(BlockID block,

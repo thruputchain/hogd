@@ -39,6 +39,17 @@ StorageItemWrapper::StorageItemWrapper(AccountAuthData auth_data,
   : storage_item_(AuthDataWrapper{.auth_data_ = std::move(auth_data)}),
     cost_model_(cost_model)
 {}
+StorageItemWrapper::StorageItemWrapper(AddressMetadata addr_meta,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(AddressMetadataWrapper{.addr_meta_ = std::move(addr_meta)}),
+    cost_model_(cost_model)
+{}
+StorageItemWrapper::StorageItemWrapper(DeploymentSponsorRecord deploy_record,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(DeploymentSponsorRecordWrapper{.deploy_record_ =
+                                                     std::move(deploy_record)}),
+    cost_model_(cost_model)
+{}
 
 StorageItemType
 StorageItemWrapper::type() const
@@ -91,6 +102,22 @@ StorageItemWrapper::AuthDataWrapper::to_wire_item() const
   return item;
 }
 
+StorageItem
+StorageItemWrapper::AddressMetadataWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeAddressMetadata);
+  item.address_meta() = addr_meta_;
+  return item;
+}
+
+StorageItem
+StorageItemWrapper::DeploymentSponsorRecordWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeDeploymentSponsorshipRecord);
+  item.deploy_record() = deploy_record_;
+  return item;
+}
+
 int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost(
     StorageCostModel const *cost_model) const
@@ -132,6 +159,24 @@ StorageItemWrapper::AuthDataWrapper::storage_cost( // NOLINT
       ->kBaseItemCost; // TODO(geoff): vary size based on number of signers
                        // cost_model->get_auth_data_cost(auth_data_.size());
 }
+
+int128_t
+StorageItemWrapper::AddressMetadataWrapper::storage_cost(
+    StorageCostModel const *cost_model) const
+{
+  if (addr_meta_.self_deployment_metadata.sponsor.self_sponsored()) {
+    return cost_model->get_contract_cost(
+        addr_meta_.self_deployment_metadata.sponsor.contract_length());
+  }
+  return 0;
+}
+
+int128_t
+StorageItemWrapper::DeploymentSponsorRecordWrapper::storage_cost(StorageCostModel const* cost_model) const {
+
+  return deploy_record_.deploy_count * cost_model->get_contract_cost(deploy_record_.contract_size);
+}
+
 
 int128_t
 StorageItemWrapper::storage_cost(StorageCostModel const *cost_model) const

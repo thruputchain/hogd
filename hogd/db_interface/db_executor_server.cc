@@ -49,7 +49,7 @@ SyncDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 
 RPCError
 SyncDBExecutorServer::try_push_new_subtransaction(
-    BlockID block, TransactionID tx, StorageDeltaBatch const& batch,
+    BlockID block, TransactionID tx, StorageDeltaBatch const &batch,
     ContractDeployDeltaBatch contract_deploy_batch)
 {
   auto block_data = block_manager_->get_block_data(block);

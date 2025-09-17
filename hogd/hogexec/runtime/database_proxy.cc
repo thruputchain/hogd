@@ -218,12 +218,12 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 }
 
 SystemStatus<bool>
-DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
-                                           TransactionID tx_id,
-                                           StorageDeltaBatch delta_batch,
-                                           ContractDeployDeltaBatch contract_deploy_batch)
+DatabaseProxy::try_push_new_subtransaction(
+    BlockID block_id, TransactionID tx_id, StorageDeltaBatch delta_batch,
+    ContractDeployDeltaBatch contract_deploy_batch)
 {
-  auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch, contract_deploy_batch);
+  auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch,
+                                                 contract_deploy_batch);
   return to_system_error_code<false>(res, [] { return true; });
 }
 
