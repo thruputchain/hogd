@@ -53,7 +53,7 @@ enum class Prefix : char {
 constexpr bool
 is_state_item(std::span<const std::byte> key)
 {
-  if (key.size() == 0) {
+  if (key.empty()) {
     return false;
   }
 
@@ -98,7 +98,7 @@ make_wasm_code_key(const SHA256Hash &hash)
   return ret;
 }
 
-auto
+constexpr auto
 make_contract_data_key(std::span<const std::byte> key)
 {
   x23::Vec<std::byte> buf;
