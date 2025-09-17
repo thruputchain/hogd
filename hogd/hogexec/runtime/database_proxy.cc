@@ -13,8 +13,10 @@
 #include "contract.hh"
 #include "coord.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -239,6 +241,11 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
+  if constexpr (is_debug_build()) {
+    for (auto const &delta : delta_batch) {
+      check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
+    }
+  }
   auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
   return to_system_error_code<false>(res, [] { return true; });
 }
