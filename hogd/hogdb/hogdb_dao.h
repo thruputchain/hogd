@@ -167,26 +167,17 @@ public:
 
   HogDBStatus<int128_t> read_nnint128(const ItemKey &key);
   HogDBStatus<OwningSpan<const std::byte>> read_bytes(const ItemKey &key);
+  // read any of the item types
+  HogDBStatus<DBItem> read_contract_data_item(const ItemKey &key);
 
   HogDBStatus<void> write_nnint128(const ItemKey &key, int128_t val);
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t> get_item_size(const ItemKey &key)
-  {
-    return db_.get_size(key.as_bytes());
-  }
+  HogDBStatus<size_t> get_item_size(const ItemKey &key);
+  HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
-  HogDBStatus<int8_t> get_item_type(const ItemKey &key)
-  {
-    return db_.get_type(key.as_bytes());
-  }
-
-  HogDBStatus<void> remove_item(const ItemKey &key)
-  {
-    assert(!key.is_address_balance());
-    return db_.remove(key.as_bytes());
-  }
+  HogDBStatus<void> remove_item(const ItemKey &key);
 
 private:
   RAMDB db_;

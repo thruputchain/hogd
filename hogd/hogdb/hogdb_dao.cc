@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <span>
 #include <string>
@@ -10,6 +11,8 @@
 #include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
+#include "hogd/base/log.h"
+#include "hogd/ramdb/db_status.h"
 #include "types.hh"
 
 #include "hogd/base/bits.h"
@@ -41,6 +44,8 @@ enum class Prefix : char {
   kHogAge = 'A',
   kBalance = 'B',
   kAccountAuthData = 'D',
+  kAddressMetadata = 'M',
+  kContractDataKey = 'K',
   kWasmHash = 'H',
   kWasmCode = 'C',
 };
@@ -49,38 +54,59 @@ enum class Prefix : char {
 constexpr bool
 is_state_item(std::span<const std::byte> key)
 {
+  if (key.empty()) {
+    return false;
+  }
+
   // skip global state.
   if (static_cast<char>(key[0]) == '>')
     return false;
 
-  // we infer an ItemKey based on this size.
-  if (key.size() == kAddressSize + kItemKeySize)
+  auto prefix = static_cast<Prefix>(key[0]);
+
+  switch (prefix) {
+  case Prefix::kHogAge:
+    return false;
+  case Prefix::kBalance:
+  case Prefix::kAccountAuthData:
+  case Prefix::kAddressMetadata:
+  case Prefix::kContractDataKey:
+  case Prefix::kWasmHash:
+  case Prefix::kWasmCode:
     return true;
-
-  // we infer an Address with prefix based on this size.
-  if (key.size() == kAddressSize + 1)
-    return static_cast<char>(key[0]) != static_cast<char>(Prefix::kHogAge);
-
-  return false;
+  default:
+    return false;
+  }
 }
 
 constexpr auto
 make_address_key(const Address &addr, Prefix p)
 {
-  std::array<uint8_t, kAddressSize + 1> ret;
+  std::array<std::byte, kAddressSize + 1> ret;
   std::ranges::copy(addr.as_bytes(),
                     std::begin(std::as_writable_bytes(std::span(ret))) + 1);
-  ret[0] = static_cast<char>(p);
+  ret[0] = static_cast<std::byte>(p);
   return ret;
 }
 
 constexpr auto
 make_wasm_code_key(const SHA256Hash &hash)
 {
-  std::array<uint8_t, hash.size() + 1> ret;
-  std::ranges::copy(hash, std::begin(std::span(ret)) + 1);
-  ret[0] = static_cast<char>(Prefix::kWasmCode);
+  std::array<std::byte, hash.size() + 1> ret;
+  std::ranges::copy(std::as_bytes(std::span(hash)),
+                    std::begin(std::span(ret)) + 1);
+  ret[0] = static_cast<std::byte>(Prefix::kWasmCode);
   return ret;
+}
+
+constexpr auto
+make_contract_data_key(std::span<const std::byte> key)
+{
+  x23::Vec<std::byte> buf;
+  buf.resize_uninitialized(key.size() + 1);
+  buf[0] = static_cast<std::byte>(Prefix::kContractDataKey);
+  std::ranges::copy(key, std::begin(std::span(buf)) + 1);
+  return buf;
 }
 
 } // namespace
@@ -196,7 +222,8 @@ HogDBDAO::read_nnint128(const ItemKey &key)
 
   int128_t val;
   HogDBStatus<void> ret =
-      db_.get_if_type(key.as_bytes(), kNNInt128, writable_byte_view(val));
+      db_.get_if_type(make_contract_data_key(key.as_bytes()), kNNInt128,
+                      writable_byte_view(val));
   if (!ret)
     return ret.error();
   return le_to_cpu(val);
@@ -205,7 +232,7 @@ HogDBDAO::read_nnint128(const ItemKey &key)
 HogDBStatus<OwningSpan<const std::byte>>
 HogDBDAO::read_bytes(const ItemKey &key)
 {
-  return db_.get_if_type(key.as_bytes(), kBytes);
+  return db_.get_if_type(make_contract_data_key(key.as_bytes()), kBytes);
 }
 
 HogDBStatus<void>
@@ -257,13 +284,66 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
   if (key.is_address_balance())
     return write_address_balance(key.get_address(), val);
 
-  return db_.put(key.as_bytes(), kNNInt128, byte_view(cpu_to_le(val)));
+  return db_.put(make_contract_data_key(key.as_bytes()), kNNInt128,
+                 byte_view(cpu_to_le(val)));
 }
 
 HogDBStatus<void>
 HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
 {
-  return db_.put(key.as_bytes(), kBytes, buf);
+  return db_.put(make_contract_data_key(key.as_bytes()), kBytes, buf);
+}
+
+HogDBStatus<size_t>
+HogDBDAO::get_item_size(const ItemKey &key)
+{
+  switch (key.key_type()) {
+  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    assert(key.is_address_balance());
+    return db_.get_size(make_address_key(key.get_address(), Prefix::kBalance));
+  case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    assert(key.is_account_auth_data());
+    return db_.get_size(
+        make_address_key(key.get_address(), Prefix::kAccountAuthData));
+  case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    assert(key.is_address_metadata());
+    return db_.get_size(
+        make_address_key(key.get_address(), Prefix::kAddressMetadata));
+  case StorageKeyType::kStorageKeyTypeContractData:
+    return db_.get_size(make_contract_data_key(key.as_bytes()));
+  }
+  error("unknown item key type: {}", key.key_type());
+  return HogDBError(HogDBCode::kInternal);
+}
+
+HogDBStatus<int8_t>
+HogDBDAO::get_item_type(const ItemKey &key)
+{
+  if (!key.is_contract_data()) [[unlikely]] {
+    error("item key is not contract data: {}", key.key_type());
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return db_.get_type(make_contract_data_key(key.as_bytes()));
+}
+
+HogDBStatus<DBItem>
+HogDBDAO::read_contract_data_item(const ItemKey &key)
+{
+  if (!key.is_contract_data()) [[unlikely]] {
+    error("item key is not contract data: {}", key.key_type());
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return db_.get(make_contract_data_key(key.as_bytes()));
+}
+
+HogDBStatus<void>
+HogDBDAO::remove_item(const ItemKey &key)
+{
+  if (!key.is_contract_data()) [[unlikely]] {
+    error("item key is not contract data: {}", key.key_type());
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return db_.remove(make_contract_data_key(key.as_bytes()));
 }
 
 } // namespace hogd

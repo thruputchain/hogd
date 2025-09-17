@@ -6,9 +6,11 @@
 #include <atomic>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <functional>
 #include <mutex>
 #include <ranges>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
+#include "hogd/ramdb/loglet.h"
 
 namespace hogd {
 
