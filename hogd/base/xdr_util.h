@@ -9,6 +9,7 @@
 #include <functional>
 #include <string_view>
 #include <utility>
+#include <version>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/types.h"
@@ -149,6 +150,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
                                 addrkey.key.contract_data_key().size());
       case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
       case hogd::StorageKeyType::kStorageKeyTypeAccountAuthData:
+      case hogd::StorageKeyType::kStorageKeyTypeAddressMetadata:
         return std::string_view();
       }
       assert(false);

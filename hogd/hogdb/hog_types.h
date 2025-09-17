@@ -100,10 +100,15 @@ public:
   {}
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
-    if (key_type_ == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance ||
-        key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData)
+    switch (key_type_) {
+    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    case StorageKeyType::kStorageKeyTypeAddressMetadata:
       return item_key_.addr.as_bytes();
-    return byte_view(item_key_);
+    case StorageKeyType::kStorageKeyTypeContractData:
+      return byte_view(item_key_);
+    }
+    std::unreachable();
   }
   constexpr bool operator==(const ItemKey &key) const
   {
@@ -112,6 +117,7 @@ public:
     switch (key_type_) {
     case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
     case StorageKeyType::kStorageKeyTypeAccountAuthData:
+    case StorageKeyType::kStorageKeyTypeAddressMetadata:
       return item_key_.addr == key.item_key_.addr;
     case StorageKeyType::kStorageKeyTypeContractData:
       return item_key_.addr == key.item_key_.addr &&
@@ -128,8 +134,18 @@ public:
   {
     return key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData;
   }
+  constexpr bool is_address_metadata() const
+  {
+    return key_type_ == StorageKeyType::kStorageKeyTypeAddressMetadata;
+  }
+  constexpr bool is_contract_data() const
+  {
+    return key_type_ == StorageKeyType::kStorageKeyTypeContractData;
+  }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
   [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
+
+  constexpr StorageKeyType key_type() const { return key_type_; }
 
 private:
   friend struct std::formatter<ItemKey>;
@@ -175,6 +191,13 @@ make_account_auth_data_item_key(const Address &addr)
 }
 
 [[nodiscard]] constexpr ItemKey
+make_address_metadata_item_key(const Address &addr)
+{
+  RawKey buf{};
+  return ItemKey(addr, buf, StorageKeyType::kStorageKeyTypeAddressMetadata);
+}
+
+[[nodiscard]] constexpr ItemKey
 make_item_key(const AddressAndKey &addrkey)
 {
   switch (addrkey.key.key_type()) {
@@ -182,6 +205,8 @@ make_item_key(const AddressAndKey &addrkey)
     return make_address_balance_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeAccountAuthData:
     return make_account_auth_data_item_key(addrkey.address);
+  case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    return make_address_metadata_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeContractData:
     return ItemKey(addrkey.address, addrkey.key.contract_data_key());
   }
