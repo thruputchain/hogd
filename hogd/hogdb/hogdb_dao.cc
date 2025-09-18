@@ -197,9 +197,9 @@ HogDBDAO::read_address_account_auth_data(const Address &addr)
 }
 
 HogDBStatus<DeployedContractHash>
-HogDBDAO::read_address_wasm_hash(const Address &addr)
+HogDBDAO::read_address_metadata(const Address &addr)
 {
-  auto key = make_address_key(addr, Prefix::kWasmHash);
+  auto key = make_address_key(addr, Prefix::kAddressMetadata);
   HogDBStatus<OwningSpan<const std::byte>> raw =
       db_.get_if_type(std::as_bytes(std::span(key)), 0);
 
@@ -272,10 +272,10 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 }
 
 HogDBStatus<void>
-HogDBDAO::write_address_wasm_hash(Address const &addr,
-                                  const DeployedContractHash &hash)
+HogDBDAO::write_address_metadata(Address const &addr,
+                                 const DeployedContractHash &hash)
 {
-  auto key = make_address_key(addr, Prefix::kWasmHash);
+  auto key = make_address_key(addr, Prefix::kAddressMetadata);
   auto buf = x23::serialize(hash);
   return db_.put(std::as_bytes(std::span(key)), 0,
                  std::as_bytes(std::span(buf)));
@@ -323,9 +323,11 @@ HogDBDAO::get_item_size(const ItemKey &key)
   case ItemKeyType::kItemKeyTypeContractData:
     return db_.get_size(make_contract_data_key(key.as_bytes()));
   case ItemKeyType::kItemKeyTypeContractCode:
-    return db_.get_size(make_address_key(key.get_contract_code_hash(), Prefix::kWasmCode));
+    return db_.get_size(
+        make_address_key(key.get_contract_code_hash(), Prefix::kWasmCode));
   case ItemKeyType::kItemKeyTypeContractRefcount:
-    return db_.get_size(make_address_key(key.get_contract_code_hash(), Prefix::kWasmCodeRefcount));
+    return db_.get_size(make_address_key(key.get_contract_code_hash(),
+                                         Prefix::kWasmCodeRefcount));
   }
   error("unknown item key type: {}", std::to_underlying(key.key_type()));
   return HogDBError(HogDBCode::kInternal);

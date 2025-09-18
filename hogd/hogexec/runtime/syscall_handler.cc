@@ -243,7 +243,8 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
 
-  auto new_contract_hashes = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+  auto new_contract_hashes =
+      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .get_committed_contracts();
   NewContractBatch new_contracts;

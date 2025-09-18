@@ -151,9 +151,9 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
   }
 }
 
-// Test that the genesis block unfurls correctly both when proposing and validating.
-// This catches an early bug in which contract deployments and creations were not included
-// in the db blocktx workflow
+// Test that the genesis block unfurls correctly both when proposing and
+// validating. This catches an early bug in which contract deployments and
+// creations were not included in the db blocktx workflow
 TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
 {
   auto fibonacci_contract = load_contract("fibonacci.wasm");
@@ -224,9 +224,9 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
   // contracts should now exist
   EXPECT_TRUE(lookup_contract_from_db(sha256(*fibonacci_contract)));
   EXPECT_TRUE(lookup_contract_from_db(sha256(*caller_contract)));
-  
+
   auto caller_client = ContractTraitClient<fibonacci_call::FibonacciCaller>(
-    expected_caller_address);
+      expected_caller_address);
 
   {
     auto handler = make_new_system_call_handler(

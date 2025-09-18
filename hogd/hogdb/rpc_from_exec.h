@@ -33,7 +33,8 @@ public:
   // Start the server on the specified port
   void start_server(uint16_t port);
 
-  RPCError commit_transaction(BlockID block, TransactionID tx, NewContractBatch new_contracts);
+  RPCError commit_transaction(BlockID block, TransactionID tx,
+                              NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
   RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
                                        StorageDeltaBatch const &batch);

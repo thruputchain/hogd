@@ -95,7 +95,7 @@ to_system_error_code(auto err, auto &&f)
         return SystemError{SystemErrorCode::kUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::kAbortTransaction};    
+      return SystemError{SystemErrorCode::kAbortTransaction};
     default:
       error("Received unhandled error type from RPC: {}", err_code);
       return SystemError{SystemErrorCode::kUnrecoverable};
@@ -208,7 +208,8 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
 }
 
 SystemStatus<void>
-DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id, NewContractBatch const& new_contracts)
+DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
+                                  NewContractBatch const &new_contracts)
 {
   auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
   return to_system_error_code<VoidMarker{}>(res, [] {});

@@ -71,7 +71,8 @@ public:
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch);
 
-  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id, NewContractBatch const& new_contracts);
+  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id,
+                                        NewContractBatch const &new_contracts);
 
   SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
 
@@ -136,7 +137,7 @@ public:
     return db_proxy_.pop_subtransactions(block_id_, tx_id_, count);
   }
 
-  SystemStatus<void> commit_transaction(NewContractBatch const& new_contracts)
+  SystemStatus<void> commit_transaction(NewContractBatch const &new_contracts)
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);

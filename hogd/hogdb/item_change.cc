@@ -157,7 +157,7 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
 {
   assert(key.is_address_metadata());
   HogDBStatus<void> ret =
-      db.write_address_wasm_hash(key.get_address(), deployed_contract_hash_);
+      db.write_address_metadata(key.get_address(), deployed_contract_hash_);
   if (ret) {
     auto buf = x23::serialize(deployed_contract_hash_);
     CHECK(
@@ -166,6 +166,15 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
             .has_value());
   }
   return ret;
+}
+
+inline HogDBStatus<void>
+NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
+                        const ItemKey &key) const
+{
+  auto buf = x23::serialize(new_contract_);
+  return db.write_wasm_code(key.get_contract_code_hash(),
+                            std::as_bytes(std::span(buf)));
 }
 
 namespace {

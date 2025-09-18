@@ -232,10 +232,10 @@ public:
   // Commits the current block and creates a new one.
   void advance_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
-  
+
   // Discards the current block and creates a new one.
   void discard_block(BlockExecutionMode mode =
-                          BlockExecutionMode::kBlockExecutionModeProposal);
+                         BlockExecutionMode::kBlockExecutionModeProposal);
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
@@ -402,9 +402,9 @@ private:
   void open_block(BlockExecutionMode mode)
   {
     block_number_++;
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
-                                                              block_number_,
-                                                              mode)();
+    auto r =
+        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
     }

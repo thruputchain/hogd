@@ -14,7 +14,7 @@
 namespace hogd {
 
 class DirectNNIntTest : public ::testing::TestWithParam<TestDB>,
-                            public NativeContractTestFramework {
+                        public NativeContractTestFramework {
 public:
   DirectNNIntTest()
     : NativeContractTestFramework(

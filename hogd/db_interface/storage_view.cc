@@ -220,7 +220,8 @@ StorageView::commit_contract_create(Contract contract)
 {
   assert(!closed_);
   auto hash = sha256(contract);
-  contract_creates_->emplace(hash, std::make_shared<const Contract>(std::move(contract)));
+  contract_creates_->emplace(hash, std::make_shared<const Contract>(
+                                       std::move(contract)));
 }
 
 Nondeterministic<std::optional<QueueEntry>>

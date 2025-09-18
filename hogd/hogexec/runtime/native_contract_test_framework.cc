@@ -45,9 +45,9 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
   block_number_++;
 
   {
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
-                                                              block_number_,
-                                                              mode)();
+    auto r =
+        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
     }
@@ -70,9 +70,9 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   block_number_++;
 
   {
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
-                                                              block_number_,
-                                                              mode)();
+    auto r =
+        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
     }
@@ -225,7 +225,7 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
                                DeployedContractHash const &deployment,
                                StorageCostModel const * /*unused*/)
 {
-  auto ret = db_.write_address_wasm_hash(addr, deployment);
+  auto ret = db_.write_address_metadata(addr, deployment);
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
   }

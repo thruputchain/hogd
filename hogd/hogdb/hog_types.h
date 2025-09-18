@@ -106,24 +106,24 @@ enum class ItemKeyType {
 
 } // namespace hogd
 
-template <>
-struct std::formatter<hogd::ItemKeyType> {
+template<> struct std::formatter<hogd::ItemKeyType> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  static auto format(const hogd::ItemKeyType &type, format_context &ctx) {
+  static auto format(const hogd::ItemKeyType &type, format_context &ctx)
+  {
     switch (type) {
-      case hogd::ItemKeyType::kItemKeyTypeContractData:
-        return format_to(ctx.out(), "kItemKeyTypeContractData");
-      case hogd::ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
-        return format_to(ctx.out(), "kItemKeyTypeFreeNativeTokenBalance");
-      case hogd::ItemKeyType::kItemKeyTypeAccountAuthData:
-        return format_to(ctx.out(), "kItemKeyTypeAccountAuthData");
-      case hogd::ItemKeyType::kItemKeyTypeAddressMetadata:
-        return format_to(ctx.out(), "kItemKeyTypeAddressMetadata");
-      case hogd::ItemKeyType::kItemKeyTypeContractCode:
-        return format_to(ctx.out(), "kItemKeyTypeContractCode");
-      case hogd::ItemKeyType::kItemKeyTypeContractRefcount:
-        return format_to(ctx.out(), "kItemKeyTypeContractRefcount");
+    case hogd::ItemKeyType::kItemKeyTypeContractData:
+      return format_to(ctx.out(), "kItemKeyTypeContractData");
+    case hogd::ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
+      return format_to(ctx.out(), "kItemKeyTypeFreeNativeTokenBalance");
+    case hogd::ItemKeyType::kItemKeyTypeAccountAuthData:
+      return format_to(ctx.out(), "kItemKeyTypeAccountAuthData");
+    case hogd::ItemKeyType::kItemKeyTypeAddressMetadata:
+      return format_to(ctx.out(), "kItemKeyTypeAddressMetadata");
+    case hogd::ItemKeyType::kItemKeyTypeContractCode:
+      return format_to(ctx.out(), "kItemKeyTypeContractCode");
+    case hogd::ItemKeyType::kItemKeyTypeContractRefcount:
+      return format_to(ctx.out(), "kItemKeyTypeContractRefcount");
     }
     return format_to(ctx.out(), "Unknown");
   }
@@ -204,9 +204,10 @@ public:
   }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
 
-  [[nodiscard]] constexpr SHA256Hash get_contract_code_hash() const { 
+  [[nodiscard]] constexpr SHA256Hash get_contract_code_hash() const
+  {
     assert(is_contract_code() || is_contract_refcount());
-    return item_key_.addr.get_raw(); 
+    return item_key_.addr.get_raw();
   }
   [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
 
@@ -243,16 +244,14 @@ make_item_key(const Address &addr, std::integral auto val)
 make_address_balance_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf,
-                 ItemKeyType::kItemKeyTypeFreeNativeTokenBalance);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeFreeNativeTokenBalance);
 }
 
 [[nodiscard]] constexpr ItemKey
 make_account_auth_data_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf,
-                 ItemKeyType::kItemKeyTypeAccountAuthData);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeAccountAuthData);
 }
 
 [[nodiscard]] constexpr ItemKey
@@ -275,7 +274,6 @@ make_contract_refcount_item_key(SHA256Hash const &hash)
   RawKey buf{};
   return ItemKey(hash, buf, ItemKeyType::kItemKeyTypeContractRefcount);
 }
-
 
 [[nodiscard]] constexpr ItemKey
 make_item_key(const AddressAndKey &addrkey)

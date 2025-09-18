@@ -99,7 +99,7 @@ BlockSnapshotServer::pop_subtransactions(BlockID /*unused*/,
 RPCError
 BlockSnapshotServer::commit_transaction(BlockID /*unused*/,
                                         TransactionID /*unused*/,
-                                        NewContractBatch const& /*unused*/)
+                                        NewContractBatch const & /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented
 }

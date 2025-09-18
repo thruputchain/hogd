@@ -137,29 +137,24 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
 }
 
 RPCError
-HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx, NewContractBatch new_contracts)
+HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                        NewContractBatch new_contracts)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
 
-  // NOLINTNEXTLINE
-  auto write_contract = [this] (Contract contract) {
+  auto write_contract = [itx](Contract contract) {
     assert(contract.contract_type() == ContractType::kWasmi);
-    auto data = x23::serialize(contract);
-    const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-    auto buf = std::span<const std::byte>(cptr, data.size());
-    SHA256Hash hash = sha256(buf);
-    return ctx_.get_db().write_wasm_code(hash, buf);
+    return itx->request_new_contract(std::move(contract));
   };
 
-  for (auto& contract: new_contracts) {
+  for (auto &contract : new_contracts) {
     // write contract should be infallible
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
       return RPCError::kRPCUnrecoverable;
     }
   }
-  // TODO(geoff): write contracts here
   itx->commit();
   ctx_.close_invoke_tx(block, tx);
 
@@ -291,7 +286,7 @@ HogDBExecutorServer::get_deployment(BlockID /*unused*/,
 {
 
   HogDBStatus<DeployedContractHash> hash =
-      ctx_.get_db().read_address_wasm_hash(contract_address);
+      ctx_.get_db().read_address_metadata(contract_address);
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
 

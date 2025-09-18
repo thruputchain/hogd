@@ -89,7 +89,6 @@ public:
   // Does NOT update the refcount on the contract.
   HogDBStatus<void> request_new_contract(Contract contract);
 
-
 private:
   struct ItemVersion {
     ItemChange change;
@@ -165,6 +164,5 @@ InvokeTX::request_new_contract(Contract contract)
   return request_change(make_contract_code_item_key(sha256(contract)),
                         NewContractData(std::move(contract)));
 }
-
 
 } // namespace hogd

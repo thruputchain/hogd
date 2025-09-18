@@ -121,7 +121,8 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 }
 
 void
-BlockState::commit_transaction(TransactionID txid, NewContractBatch new_contracts)
+BlockState::commit_transaction(TransactionID txid,
+                               NewContractBatch new_contracts)
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
@@ -160,8 +161,8 @@ BlockState::commit_transaction(TransactionID txid, NewContractBatch new_contract
   }
   tx_manager_.increment_closed();
 
-  for (auto& contract : new_contracts) {
-    storage_view_.commit_contract_create( std::move(contract));
+  for (auto &contract : new_contracts) {
+    storage_view_.commit_contract_create(std::move(contract));
   }
 }
 

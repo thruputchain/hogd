@@ -77,7 +77,8 @@ public:
 
   static void db_snapshot_read_null();
 
-  static RPCError commit_transaction(BlockID block, TransactionID tx, NewContractBatch const& new_contracts);
+  static RPCError commit_transaction(BlockID block, TransactionID tx,
+                                     NewContractBatch const &new_contracts);
   static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.

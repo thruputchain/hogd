@@ -30,7 +30,8 @@ SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
 }
 
 RPCError
-SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx, NewContractBatch new_contracts)
+SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                         NewContractBatch new_contracts)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
