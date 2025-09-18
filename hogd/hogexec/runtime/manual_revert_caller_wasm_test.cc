@@ -41,14 +41,14 @@ protected:
     auto target_contract = hogd::load_contract("manual_revert_test.wasm");
     target_contract_addr_ = make_contract_address(0);
     write_contract(target_contract);
-    write_deployment(target_contract_addr_, sha256(*target_contract));
+    write_deployment(target_contract_addr_, target_contract);
     setup_grant_storage_token(target_contract_addr_, 1'000'000'000);
 
     // Load and deploy the manual_revert_caller contract
     auto caller_contract = hogd::load_contract("manual_revert_caller.wasm");
     caller_contract_addr_ = make_contract_address(1);
     write_contract(caller_contract);
-    write_deployment(caller_contract_addr_, sha256(*caller_contract));
+    write_deployment(caller_contract_addr_, caller_contract);
     setup_grant_storage_token(caller_contract_addr_, 1'000'000'000);
   }
 

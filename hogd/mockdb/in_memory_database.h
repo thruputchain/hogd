@@ -1,13 +1,18 @@
 
 #pragma once
 
+#include <cassert>
 #include <memory>
 #include <optional>
 #include <unordered_map>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "types.hh"
 #include "x23/mvar.h"
@@ -52,17 +57,46 @@ public:
   }
 
   void write_deployment(ContractAddress const &addr,
-                        SHA256Hash const &contract_hash)
+                        DeployedContractHash const &deployment,
+                        StorageCostModel const *cost_model)
   {
-    contract_deployments_->emplace(addr, contract_hash);
+    write_item(
+        AddressAndKey{.address = addr,
+                      .key = StorageKey(
+                          StorageKeyType::kStorageKeyTypeAddressMetadata)},
+        std::make_shared<const StorageItemWrapper>(deployment, cost_model));
+  }
+
+  void write_deployment(ContractAddress const &addr,
+                        std::shared_ptr<const Contract> const &contract)
+  {
+    auto contract_hash = sha256(*contract);
+    uint32_t contract_size = 0;
+
+    switch (contract->contract_type()) {
+    case ContractType::kNative:
+    case ContractType::kMockTest:
+      contract_size = 0;
+      break;
+    case ContractType::kWasmi:
+      contract_size = static_cast<uint32_t>(contract->wasmi_contract().size());
+      break;
+    default:
+      assert(false);
+      contract_size = 0;
+      break;
+    }
+
+    write_deployment(addr,
+                     DeployedContractHash{.hash = contract_hash,
+                                          .contract_size = contract_size},
+                     nullptr);
   }
 
 private:
   x23::MVar<std::unordered_map<AddressAndKey,
                                std::shared_ptr<const StorageItemWrapper>>>
       items_;
-  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
-      contract_deployments_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_creates_;
 };

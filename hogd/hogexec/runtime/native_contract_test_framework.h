@@ -13,6 +13,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "db_coord.hh"
 #include "genesis.hh"
@@ -75,9 +76,14 @@ public:
   }
 
   void write_deployment(ContractAddress const &addr,
-                        SHA256Hash const &deployment)
+                        DeployedContractHash const &deployment,
+                        StorageCostModel const *cost_model)
   {
-    in_memory_db_.write_deployment(addr, deployment);
+    in_memory_db_.write_item(
+        AddressAndKey{.address = addr,
+                      .key = StorageKey(
+                          StorageKeyType::kStorageKeyTypeAddressMetadata)},
+        std::make_shared<const StorageItemWrapper>(deployment, cost_model));
   }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount)
@@ -129,7 +135,8 @@ public:
   void write_contract(ContractAddress const &addr,
                       std::shared_ptr<const Contract> const &contract);
   void write_deployment(ContractAddress const &addr,
-                        SHA256Hash const &deployment);
+                        DeployedContractHash const &deployment,
+                        StorageCostModel const *cost_model);
 
   // different storage cost models unimplemented currently
   const StorageCostModel kDefaultCostModel = StorageCostModel(0, 0, 0, 0, 0);
@@ -323,8 +330,9 @@ public:
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item);
   void write_contract(std::shared_ptr<const Contract> const &contract);
+
   void write_deployment(ContractAddress const &addr,
-                        SHA256Hash const &deployment);
+                        std::shared_ptr<const Contract> const &contract);
 
   const StorageCostModel *get_default_cost_model() const
   {
@@ -347,7 +355,35 @@ public:
 
   auto &get_coord_client() { return coord_wrapper_->client(); }
 
+  static DeployedContractHash
+  make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
+  {
+    auto contract_hash = sha256(*contract);
+    uint32_t contract_size = 0;
+
+    switch (contract->contract_type()) {
+    case ContractType::kNative:
+    case ContractType::kMockTest:
+      contract_size = 0;
+      break;
+    case ContractType::kWasmi:
+      contract_size = static_cast<uint32_t>(contract->wasmi_contract().size());
+      break;
+    default:
+      assert(false);
+      contract_size = 0;
+      break;
+    }
+
+    return DeployedContractHash{.hash = contract_hash,
+                                .contract_size = contract_size};
+  }
+
 private:
+  void write_deployment(ContractAddress const &addr,
+                        DeployedContractHash const &deployment,
+                        StorageCostModel const *cost_model);
+
   void open_block(BlockExecutionMode mode)
   {
     auto r = coord_wrapper_->client().dbcoord_create_snapshot(block_number_,

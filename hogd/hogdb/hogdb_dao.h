@@ -15,6 +15,7 @@
 #include <utility>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/os.h"
@@ -142,15 +143,15 @@ public:
   HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
   HogDBStatus<AccountAuthData>
   read_address_account_auth_data(const Address &addr);
-  HogDBStatus<SHA256Hash> read_address_wasm_hash(const Address &addr);
+  HogDBStatus<DeployedContractHash> read_address_wasm_hash(const Address &addr);
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
   HogDBStatus<void>
   write_address_account_auth_data(const Address &addr,
                                   const AccountAuthData &auth);
-  HogDBStatus<void> write_address_wasm_hash(const Address &addr,
-                                            const SHA256Hash &hash);
+  HogDBStatus<void> write_address_wasm_hash(Address const &addr,
+                                            const DeployedContractHash &hash);
 
   //
   // WASM Operations

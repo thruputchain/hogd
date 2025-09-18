@@ -16,6 +16,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -148,6 +149,23 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
   CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, key, type_ret.value())
             .has_value());
   return {};
+}
+
+inline HogDBStatus<void>
+DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                             const ItemKey &key) const
+{
+  assert(key.is_address_metadata());
+  HogDBStatus<void> ret =
+      db.write_address_wasm_hash(key.get_address(), deployed_contract_hash_);
+  if (ret) {
+    auto buf = x23::serialize(deployed_contract_hash_);
+    CHECK(
+        MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  }
+  return ret;
 }
 
 namespace {

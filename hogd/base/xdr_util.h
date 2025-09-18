@@ -11,9 +11,11 @@
 #include <utility>
 #include <version>
 
+#include "contract.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 

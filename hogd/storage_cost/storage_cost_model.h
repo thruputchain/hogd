@@ -21,6 +21,11 @@ struct StorageCostModel {
   int128_t get_retrocausal_queue_cost(int64_t active_queue_size,
                                       uint64_t active_block_count) const;
   int128_t get_replay_cache_cost(size_t replay_cache_size) const;
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  int128_t get_contract_size_cost(size_t contract_size) const
+  {
+    return contract_size * kContractSizeCostPerByte;
+  }
 
   StorageCostModel(const StorageCostModel &) = delete;
   StorageCostModel &operator=(const StorageCostModel &) = delete;
@@ -32,6 +37,9 @@ struct StorageCostModel {
   const int128_t kRCQCostPerEntry;
   const int128_t kRCQCostPerBlock;
   const int128_t kReplayCacheCostPerEntry;
+
+  // TODO(geoff): make this configurable
+  constexpr static int128_t kContractSizeCostPerByte = 1;
 };
 
 } // namespace hogd

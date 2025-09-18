@@ -181,14 +181,6 @@ BlockState::commit_contract_create(Contract const &contract)
 }
 
 void
-BlockState::commit_contract_deploy(ContractAddress const &addr,
-                                   SHA256Hash const &contract_hash)
-{
-  assert(!is_closed());
-  storage_view_.commit_contract_deploy(addr, contract_hash);
-}
-
-void
 BlockState::push_subtransaction(TransactionID txid)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);

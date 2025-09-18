@@ -25,6 +25,8 @@ public:
                      StorageCostModel const *cost_model);
   StorageItemWrapper(AccountAuthData auth_data,
                      StorageCostModel const *cost_model);
+  StorageItemWrapper(DeployedContractHash deployed_contract_hash,
+                     StorageCostModel const *cost_model);
 
   auto &bytestring(this auto &self)
   {
@@ -49,6 +51,11 @@ public:
   auto &auth_data(this auto &self)
   {
     return std::get<AuthDataWrapper>(self.storage_item_).auth_data_;
+  }
+  auto &deployed_contract_hash(this auto &self)
+  {
+    return std::get<DeployedContractHashWrapper>(self.storage_item_)
+        .deployed_contract_hash_;
   }
 
   StorageItemType type() const;
@@ -117,8 +124,19 @@ private:
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
 
+  struct DeployedContractHashWrapper {
+    DeployedContractHash deployed_contract_hash_;
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeDeployedContractHash;
+    // Converts to wire format for network transmission
+    StorageItem to_wire_item() const;
+    // Returns storage cost based on deployed contract hash size
+    int128_t storage_cost(StorageCostModel const *cost_model) const;
+  };
+
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper, ReplayCacheWrapper, AuthDataWrapper>
+               RetrocausalQueueWrapper, ReplayCacheWrapper, AuthDataWrapper,
+               DeployedContractHashWrapper>
       storage_item_;
   const StorageCostModel *cost_model_;
 };

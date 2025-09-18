@@ -80,7 +80,7 @@ TEST_P(RevertTest, RootFrameReverts)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke the contract method
@@ -253,7 +253,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke method 0

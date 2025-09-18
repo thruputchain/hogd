@@ -16,6 +16,8 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -101,6 +103,17 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
     if (delta) {
       db_proxy.add_delta(addrkey, *delta, flags);
     }
+  }
+
+  for (auto const &[addr, deployment] : new_contract_deployments_) {
+    AddressAndKey addrkey = {
+        .address = addr,
+        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)};
+    StorageDelta delta =
+        StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+    delta.deployed_contract_hash() = deployment;
+    db_proxy.add_delta(addrkey, delta,
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone));
   }
 
   auto res = db_proxy.try_push_current_subtransaction();
@@ -235,11 +248,9 @@ InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
   for (auto const &frame : frame_stack_) {
-    auto it = frame.new_contract_deployments_.find(addr);
-    if (it != frame.new_contract_deployments_.end()) {
-      // contract was deployed at `addr` during a frame earlier on the frame
-      // stack. Thus, deployment exists during the current view.
-      return it->second;
+    if (auto out = frame.lookup_locally_deployed_contract(addr)) {
+      assert(out.has_value());
+      return out;
     }
   }
   return std::nullopt;

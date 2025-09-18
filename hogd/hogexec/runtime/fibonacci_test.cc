@@ -56,7 +56,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
   auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   fib_client_t client(contract_addr);
@@ -80,7 +80,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
   auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   fib_client_t client(contract_addr);
@@ -106,7 +106,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   auto contract = hogd::load_contract("fibonacci.wasm");
   auto fib_contract_addr = make_contract_address(0);
   write_contract(contract);
-  write_deployment(fib_contract_addr, sha256(*contract));
+  write_deployment(fib_contract_addr, contract);
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
 
   NativeContractBuilder builder;
@@ -139,7 +139,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

@@ -157,8 +157,8 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
   write_contract(contract_a_obj);
   write_contract(contract_b_obj);
-  write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_deployment(contract_a_addr, contract_a_obj);
+  write_deployment(contract_b_addr, contract_b_obj);
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 
@@ -367,9 +367,9 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
   write_contract(contract_a_obj);
   write_contract(contract_b_obj);
   write_contract(contract_c_obj);
-  write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  write_deployment(contract_b_addr, sha256(*contract_b_obj));
-  write_deployment(contract_c_addr, sha256(*contract_c_obj));
+  write_deployment(contract_a_addr, contract_a_obj);
+  write_deployment(contract_b_addr, contract_b_obj);
+  write_deployment(contract_c_addr, contract_c_obj);
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
   setup_grant_storage_token(contract_c_addr, 1'000'000'000);
@@ -504,8 +504,8 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
   auto contract_b_obj = make_native_contract(1);
   write_contract(contract_a_obj);
   write_contract(contract_b_obj);
-  write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_deployment(contract_a_addr, contract_a_obj);
+  write_deployment(contract_b_addr, contract_b_obj);
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 

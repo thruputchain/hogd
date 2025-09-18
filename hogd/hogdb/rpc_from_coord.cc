@@ -14,6 +14,7 @@
 #include <utility>
 
 // generated x23 headers
+#include "account.hh"
 #include "db_coord.hh"
 #include "genesis.hh"
 
@@ -255,7 +256,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
           failure = true;
         }
       },
-      [&](ContractAddress const &addr, SHA256Hash const &hash) {
+      [&](ContractAddress const &addr, DeployedContractHash const &hash) {
         auto r = ctx_.get_db().write_address_wasm_hash(addr, hash);
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());

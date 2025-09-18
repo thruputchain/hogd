@@ -68,7 +68,7 @@ int setup_create_contract(void *context, void *db,
 // setup_create_contract creates a contract that is _visible_ in the current
 // block.
 int setup_deploy_contract(void *db, const uint8_t *deployment_addr,
-                          const uint8_t *contract_hash);
+                          const uint8_t *contract_hash, uint32_t contract_size);
 
 void setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                          int64_t tokens);

@@ -116,20 +116,6 @@ SyncDBExecutorServer::commit_contract_create(BlockID block,
   return RPCError::kRPCNone;
 }
 
-RPCError
-SyncDBExecutorServer::commit_contract_deploy(BlockID block,
-                                             ContractAddress const &addr,
-                                             SHA256Hash const &hash)
-{
-  auto block_data = block_manager_->get_block_data(block);
-  if (!block_data) {
-    return RPCError::kRPCBadBlockID;
-  }
-
-  block_data->commit_contract_deploy(addr, hash);
-  return RPCError::kRPCNone;
-}
-
 ExpectedContract
 SyncDBExecutorServer::get_contract(BlockID block,
                                    SHA256Hash const &contract_hash)

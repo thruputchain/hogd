@@ -104,7 +104,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke the contract
@@ -234,7 +234,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke parent method
@@ -335,7 +335,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Test manual revert (method 0) - should succeed
@@ -443,7 +443,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke with limited gas
@@ -600,7 +600,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke level 1
@@ -747,7 +747,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Test error types 0-2 (should all trigger manual revert and succeed)

@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "x23/format.h"
+#include <format>
 extern "C" {
 #include "blake3.h"
 }
@@ -23,6 +25,7 @@ extern "C" {
 
 #include "hogd/base/compiler.h"
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "types.hh"
 

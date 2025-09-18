@@ -163,7 +163,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
       std::make_shared<NativeContext>(std::move(contract_map));
   // mark the contract as existing and deployed within the database
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_address, sha256(*native_contract_xdr));
+  write_deployment(native_contract_address, native_contract_xdr);
 
   // now invoke the contract
   {

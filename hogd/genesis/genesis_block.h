@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
@@ -65,7 +66,7 @@ public:
       std::function<void(std::shared_ptr<const Contract>)> const
           &write_contract,
       std::function<void(ContractAddress const &contract_address,
-                         SHA256Hash const &contract_hash)> const
+                         DeployedContractHash const &contract_hash)> const
           &write_deployment);
 
   // Calculate storage key for a genesis entry

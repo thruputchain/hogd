@@ -195,16 +195,23 @@ HogDBDAO::read_address_account_auth_data(const Address &addr)
   return auth;
 }
 
-HogDBStatus<SHA256Hash>
+HogDBStatus<DeployedContractHash>
 HogDBDAO::read_address_wasm_hash(const Address &addr)
 {
-  SHA256Hash val;
   auto key = make_address_key(addr, Prefix::kWasmHash);
-  HogDBStatus<void> ret = db_.get_if_type(std::as_bytes(std::span(key)), 0,
-                                          writable_byte_view(val));
-  if (!ret)
-    return ret.error();
-  return val;
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0);
+
+  if (!raw)
+    return raw.error();
+
+  DeployedContractHash deployed_contract_hash;
+  try {
+    x23::deserialize(&deployed_contract_hash, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return deployed_contract_hash;
 }
 
 HogDBStatus<OwningSpan<const std::byte>>
@@ -264,10 +271,13 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 }
 
 HogDBStatus<void>
-HogDBDAO::write_address_wasm_hash(const Address &addr, const SHA256Hash &hash)
+HogDBDAO::write_address_wasm_hash(Address const &addr,
+                                  const DeployedContractHash &hash)
 {
   auto key = make_address_key(addr, Prefix::kWasmHash);
-  return db_.put(std::as_bytes(std::span(key)), 0, byte_view(hash));
+  auto buf = x23::serialize(hash);
+  return db_.put(std::as_bytes(std::span(key)), 0,
+                 std::as_bytes(std::span(buf)));
 }
 
 HogDBStatus<void>

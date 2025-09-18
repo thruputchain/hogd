@@ -7,8 +7,10 @@
 #include "hogd/base/types.h"
 #include "hogd/db_interface/storage_view.h"
 #include "hogd/db_interface/transaction_state.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -72,8 +74,6 @@ public:
   void abort_transaction(TransactionID txid);
 
   void commit_contract_create(Contract const &contract);
-  void commit_contract_deploy(ContractAddress const &addr,
-                              SHA256Hash const &contract_hash);
 
   // parent block view is a read-only view of storage items.
   auto *get_snapshot_view() { return storage_view_.as_snapshot(); }

@@ -180,13 +180,13 @@ protected:
     auto test_contract = make_test_contract();
     auto test_contract_xdr = make_native_contract(0);
     write_contract(test_contract_xdr);
-    write_deployment(test_contract_addr_, sha256(*test_contract_xdr));
+    write_deployment(test_contract_addr_, test_contract_xdr);
 
     // Create and deploy the caller contract (calls methods from test contract)
     auto caller_contract = make_caller_contract(test_contract_addr_);
     auto caller_contract_xdr = make_native_contract(1);
     write_contract(caller_contract_xdr);
-    write_deployment(caller_contract_addr_, sha256(*caller_contract_xdr));
+    write_deployment(caller_contract_addr_, caller_contract_xdr);
 
     // Set up the native contract map and runtime context
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
