@@ -51,6 +51,7 @@
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -121,7 +122,7 @@ public:
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
         uint32_t contract_size = bytes.size();
-        ret = db_.write_address_wasm_hash(
+        ret = db_.write_address_metadata(
             address, DeployedContractHash{.hash = contract_hash,
                                           .contract_size = contract_size});
         if (!ret) {
