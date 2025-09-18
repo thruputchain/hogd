@@ -2,15 +2,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
@@ -38,6 +41,24 @@ make_native_contract(HogexecPrecompiledNativeContracts contract_id)
   out->native_contract_id() = std::to_underlying(contract_id);
   return out;
 }
+
+DeployedContractHash
+make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
+{
+  assert(contract);
+  switch (contract->contract_type()) {
+  case ContractType::kNative:
+  case ContractType::kMockTest:
+    return DeployedContractHash{.hash = sha256(*contract), .contract_size = 0};
+  case ContractType::kWasmi:
+    return DeployedContractHash{.hash = sha256(*contract),
+                                .contract_size = static_cast<uint32_t>(
+                                    contract->wasmi_contract().size())};
+  default:
+    throw std::runtime_error(
+        "make_deployed_contract_hash: unsupported contract type");
+  }
+}
 } // namespace
 
 void
@@ -47,12 +68,13 @@ GenesisBlockLoader::load_genesis_block(
     std::function<void(std::shared_ptr<const Contract> contract)> const
         &write_contract,
     std::function<void(ContractAddress const &contract_address,
-                       SHA256Hash const &contract_hash)> const
+                       DeployedContractHash const &contract_hash)> const
         &write_deployment)
 {
   auto deploy_contract = load_contract("initial_token_claim.wasm");
   write_contract(deploy_contract);
-  write_deployment(kDeployContractAddress, sha256(*deploy_contract));
+  write_deployment(kDeployContractAddress,
+                   make_deployed_contract_hash(deploy_contract));
 
   // write the initial token allocation
   StorageKey allocation_key(
@@ -78,7 +100,7 @@ GenesisBlockLoader::load_genesis_block(
       HogexecPrecompiledNativeContracts::kNativeContractHogToken);
   write_contract(precompiled_token_contract);
   write_deployment(kPresetNativeTokenAddress,
-                   sha256(*precompiled_token_contract));
+                   make_deployed_contract_hash(precompiled_token_contract));
 }
 
 std::vector<SignedTransaction>

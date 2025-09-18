@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -75,6 +76,12 @@ public:
   // request_deletion requests to delete the key.
   HogDBStatus<void> request_deletion(const ItemKey &key);
 
+  // request_deploy_contract requests to deploy a contract.
+  // Note that this does NOT create the contract, or update a refcount on that
+  // contract.
+  HogDBStatus<void> request_deploy_contract(Address const &addr,
+                                            const DeployedContractHash &hash);
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -134,6 +141,14 @@ inline HogDBStatus<void>
 InvokeTX::request_deletion(const ItemKey &key)
 {
   return request_change(key, Deletion{});
+}
+
+inline HogDBStatus<void>
+InvokeTX::request_deploy_contract(Address const &addr,
+                                  const DeployedContractHash &hash)
+{
+  return request_change(make_address_metadata_item_key(addr),
+                        DeployedContractData(hash));
 }
 
 } // namespace hogd

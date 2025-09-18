@@ -3,13 +3,14 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <map>
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -39,9 +40,6 @@ public:
 
   ContractAddress const &address() const { return address_; }
   Calldata const &calldata() const { return calldata_; }
-
-  // new deployments that were created during this (and child) call frames
-  std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
 
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
@@ -100,6 +98,33 @@ public:
   void set_should_revert() { manual_revert_ = true; }
   bool should_revert() const { return manual_revert_; }
 
+  void deploy_contract(ContractAddress const &addr,
+                       DeployedContractHash const &hash)
+  {
+    [[maybe_unused]] auto [_, inserted] =
+        new_contract_deployments_.emplace(addr, hash);
+    assert(inserted);
+  }
+
+  std::optional<SHA256Hash>
+  lookup_locally_deployed_contract(ContractAddress const &addr) const
+  {
+    auto it = new_contract_deployments_.find(addr);
+    if (it != new_contract_deployments_.end()) {
+      return it->second.hash;
+    }
+    return std::nullopt;
+  }
+
+  std::unordered_set<SHA256Hash> get_committed_contracts() const
+  {
+    std::unordered_set<SHA256Hash> committed_contracts;
+    for (auto const &[addr, deployment] : new_contract_deployments_) {
+      committed_contracts.insert(deployment.hash);
+    }
+    return committed_contracts;
+  }
+
 private:
   const ContractAddress address_;
   const Calldata calldata_;
@@ -122,6 +147,10 @@ private:
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
+
+  // newly deployed contracts during the current call frame (and child frames)
+  std::unordered_map<ContractAddress, DeployedContractHash>
+      new_contract_deployments_;
 };
 
 // Stack of invocation frames.

@@ -54,6 +54,13 @@ delta_to_typeclass(StorageDelta const &delta,
     return StorageItemTypeClass(StorageItemType::kItemTypeReplayCache);
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     return StorageItemTypeClass(StorageItemType::kItemTypeAuthData);
+  case StorageDeltaType::kDeltaTypeDeployContract:
+  {
+    auto out =
+        StorageItemTypeClass(StorageItemType::kItemTypeDeployedContractHash);
+    out.deployed_contract_hash() = delta.deployed_contract_hash();
+    return out;
+  }
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -128,6 +135,10 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
         auth_data_lock;
     return lock;
   }
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeDeployedContractHash);
+    return lock;
   default:
     throw std::runtime_error("unimplemented");
   }

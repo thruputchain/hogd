@@ -11,7 +11,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -79,7 +78,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
   write_contract(test_contract_xdr);
-  write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+  write_deployment(ContractAddress{}, test_contract_xdr);
 
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);

@@ -2,8 +2,10 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_state.h"
+#include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -20,6 +22,9 @@ SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
                                         StorageDelta const &delta,
                                         StorageItemRPCFlagSet flags)
 {
+  if constexpr (is_debug_build()) {
+    check_delta_type(addrkey.key.key_type(), delta.type());
+  }
   return block_state->try_reserve_storage_delta(tx, addrkey, delta, flags);
 }
 
@@ -113,20 +118,6 @@ SyncDBExecutorServer::commit_contract_create(BlockID block,
   }
 
   block_data->commit_contract_create(contract);
-  return RPCError::kRPCNone;
-}
-
-RPCError
-SyncDBExecutorServer::commit_contract_deploy(BlockID block,
-                                             ContractAddress const &addr,
-                                             SHA256Hash const &hash)
-{
-  auto block_data = block_manager_->get_block_data(block);
-  if (!block_data) {
-    return RPCError::kRPCBadBlockID;
-  }
-
-  block_data->commit_contract_deploy(addr, hash);
   return RPCError::kRPCNone;
 }
 

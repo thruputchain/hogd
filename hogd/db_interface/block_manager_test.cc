@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
+#include "contract.hh"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
@@ -119,7 +122,8 @@ TEST(BlockManagerTest, AccessingSnapshotData)
 {
   // edge case found from a runtime test
   InMemoryDatabase db;
-  db.write_deployment(ContractAddress{}, SHA256Hash{});
+  db.write_deployment(ContractAddress{},
+                      std::make_shared<const Contract>(ContractType::kNative));
   BlockManager m(0, &db);
 
   EXPECT_TRUE(

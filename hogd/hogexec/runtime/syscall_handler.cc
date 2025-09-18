@@ -248,21 +248,14 @@ SystemCallHandler::try_commit_transaction()
     return res.error();
   }
 
-  std::unordered_set<SHA256Hash> committed_contracts;
-  for (auto const &[addr, hash] :
-       last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-           .value()
-           .new_contract_deployments_) {
+  std::unordered_set<SHA256Hash> committed_contracts =
+      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+          .value()
+          .get_committed_contracts();
+  for (auto const &hash : committed_contracts) {
     auto contract_entry = newly_created_contracts_.find(hash);
-    assert(contract_entry != newly_created_contracts_.end());
-
-    auto res = db_proxy_.commit_contract_deploy(addr, hash);
-    if (!res.has_value()) {
-      return res.error();
-    }
-    if (committed_contracts.insert(hash).second) {
-      // contract that wasn't already created within the transaction
-      res = db_proxy_.commit_contract_create(*contract_entry->second);
+    if (contract_entry != newly_created_contracts_.end()) {
+      auto res = db_proxy_.commit_contract_create(*contract_entry->second);
       if (!res.has_value()) {
         return res.error();
       }
@@ -501,7 +494,9 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
     }
+    load_contract = it->second;
   }
+  assert(load_contract != nullptr);
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
@@ -525,8 +520,23 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 
   auto &frame = invocation_frame_stack_.get_active_frame();
 
+  auto contract_size = [&] -> uint32_t {
+    switch (load_contract->contract_type()) {
+    case ContractType::kNative:
+    case ContractType::kMockTest:
+      return 0LU;
+    case ContractType::kWasmi:
+      return load_contract->wasmi_contract().size();
+    default:
+      assert(false);
+      return 0LU;
+    }
+  }();
+
   // deploy new contract
-  frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
+  frame.deploy_contract(deploy_addr,
+                        DeployedContractHash{.hash = contract_hash,
+                                             .contract_size = contract_size});
 
   return deploy_addr;
 }

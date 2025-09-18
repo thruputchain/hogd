@@ -1,3 +1,4 @@
+#include "account.hh"
 #include "hogd/genesis/genesis_block.h"
 
 #include <algorithm>
@@ -33,7 +34,7 @@ protected:
   }
 
   void mock_write_deployment(ContractAddress const &contract_address,
-                             SHA256Hash const &contract_hash)
+                             DeployedContractHash const &contract_hash)
   {
     deployment_map_[contract_address] = contract_hash;
   }
@@ -83,7 +84,7 @@ protected:
 
   std::map<StorageKey, int128_t> storage_map_;
   std::map<SHA256Hash, std::shared_ptr<const Contract>> contract_map_;
-  std::map<ContractAddress, SHA256Hash> deployment_map_;
+  std::map<ContractAddress, DeployedContractHash> deployment_map_;
 };
 
 TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
@@ -99,7 +100,7 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
-             SHA256Hash const &contract_hash) {
+             DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
       });
 
@@ -151,7 +152,7 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
-             SHA256Hash const &contract_hash) {
+             DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
       });
 
@@ -173,7 +174,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
-             SHA256Hash const &contract_hash) {
+             DeployedContractHash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
       });
 

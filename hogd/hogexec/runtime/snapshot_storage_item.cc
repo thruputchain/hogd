@@ -39,6 +39,8 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
                         item.replay_cache_metadata()};
   case StorageItemType::kItemTypeAuthData:
     throw std::runtime_error("Auth data not yet supported");
+  case StorageItemType::kItemTypeDeployedContractHash:
+    throw std::runtime_error("Deployed contract hash cached elsewhere");
   }
   assert(false);
   throw std::runtime_error("Impossible");

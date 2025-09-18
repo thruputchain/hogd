@@ -18,6 +18,7 @@
 #include "coord.hh"
 #include "coord_sched.hh"
 #include "db_coord.hh"
+#include "db_sched.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
@@ -42,15 +43,15 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "nomination.hh"
-#include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -119,7 +120,10 @@ public:
 
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
-        ret = db_.write_address_wasm_hash(address, contract_hash);
+        uint32_t contract_size = bytes.size();
+        ret = db_.write_address_wasm_hash(
+            address, DeployedContractHash{.hash = contract_hash,
+                                          .contract_size = contract_size});
         if (!ret) {
           throw std::runtime_error("Failed to write deployment");
         }

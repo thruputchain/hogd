@@ -12,6 +12,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -589,6 +590,44 @@ AuthDataArgs::get_marginal_cost_upper_bound(
 }
 
 int128_t
+DeployedContractArgs::get_current_committed_cost(
+    StorageCostModel const *cost_model,
+    StorageItemWrapper const *base_item) const
+{
+  if (committed_) {
+    return cost_model->get_contract_size_cost(
+        deployed_contract_hash_.contract_size);
+  }
+  if (base_item) {
+    assert(base_item->type() == StorageItemType::kItemTypeDeployedContractHash);
+    if (committed_) {
+      warn("Redeploying a contract; that's not supposed to happen");
+      assert(base_item->deployed_contract_hash() == deployed_contract_hash_);
+    }
+    return cost_model->get_contract_size_cost(
+        base_item->deployed_contract_hash().contract_size);
+  }
+  return 0;
+}
+
+int128_t
+DeployedContractArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *cost_model,
+    StorageItemWrapper const * /*unused*/)
+{
+  assert(delta.type() == StorageDeltaType::kDeltaTypeDeployContract);
+  return cost_model->get_contract_size_cost(
+      delta.deployed_contract_hash().contract_size);
+}
+
+std::shared_ptr<const StorageItemWrapper>
+DeployedContractArgs::to_item(StorageCostModel const *cost_model) const
+{
+  return std::make_shared<const StorageItemWrapper>(deployed_contract_hash_,
+                                                    cost_model);
+}
+
+int128_t
 ExclusiveLockedState::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *cost_model,
     StorageItemWrapper const *base_item)
@@ -664,6 +703,11 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
           // typeclass_match signature in this implementation
           return typeclass.item_type() == StorageItemType::kItemTypeAuthData &&
                  args.typeclass_match(nullptr);
+        }
+        else if constexpr (std::same_as<args_t, DeployedContractArgs>) {
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeDeployedContractHash &&
+                 args.typeclass_match(typeclass.deployed_contract_hash());
         }
         else {
           static_assert(
