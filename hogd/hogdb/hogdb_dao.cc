@@ -46,7 +46,6 @@ enum class Prefix : char {
   kAccountAuthData = 'D',
   kAddressMetadata = 'M',
   kContractDataKey = 'K',
-  kWasmHash = 'H',
   kWasmCode = 'C',
 };
 
@@ -71,7 +70,6 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kAccountAuthData:
   case Prefix::kAddressMetadata:
   case Prefix::kContractDataKey:
-  case Prefix::kWasmHash:
   case Prefix::kWasmCode:
     return true;
   default:
@@ -196,9 +194,9 @@ HogDBDAO::read_address_account_auth_data(const Address &addr)
 }
 
 HogDBStatus<DeployedContractHash>
-HogDBDAO::read_address_wasm_hash(const Address &addr)
+HogDBDAO::read_address_metadata(const Address &addr)
 {
-  auto key = make_address_key(addr, Prefix::kWasmHash);
+  auto key = make_address_key(addr, Prefix::kAddressMetadata);
   HogDBStatus<OwningSpan<const std::byte>> raw =
       db_.get_if_type(std::as_bytes(std::span(key)), 0);
 
@@ -271,10 +269,10 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 }
 
 HogDBStatus<void>
-HogDBDAO::write_address_wasm_hash(Address const &addr,
-                                  const DeployedContractHash &hash)
+HogDBDAO::write_address_metadata(Address const &addr,
+                                 const DeployedContractHash &hash)
 {
-  auto key = make_address_key(addr, Prefix::kWasmHash);
+  auto key = make_address_key(addr, Prefix::kAddressMetadata);
   auto buf = x23::serialize(hash);
   return db_.put(std::as_bytes(std::span(key)), 0,
                  std::as_bytes(std::span(buf)));

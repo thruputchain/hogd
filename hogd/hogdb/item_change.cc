@@ -157,7 +157,7 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
 {
   assert(key.is_address_metadata());
   HogDBStatus<void> ret =
-      db.write_address_wasm_hash(key.get_address(), deployed_contract_hash_);
+      db.write_address_metadata(key.get_address(), deployed_contract_hash_);
   if (ret) {
     auto buf = x23::serialize(deployed_contract_hash_);
     CHECK(

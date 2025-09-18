@@ -280,7 +280,7 @@ HogDBExecutorServer::get_deployment(BlockID /*unused*/,
 {
 
   HogDBStatus<DeployedContractHash> hash =
-      ctx_.get_db().read_address_wasm_hash(contract_address);
+      ctx_.get_db().read_address_metadata(contract_address);
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
 
