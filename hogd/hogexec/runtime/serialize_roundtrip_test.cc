@@ -1,5 +1,6 @@
-#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
@@ -15,7 +16,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"

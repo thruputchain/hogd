@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include "x23/format.h"
-#include <format>
 extern "C" {
 #include "blake3.h"
 }
