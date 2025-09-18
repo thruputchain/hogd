@@ -23,7 +23,6 @@ extern "C" {
 
 #include "hogd/base/compiler.h"
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "types.hh"
 
