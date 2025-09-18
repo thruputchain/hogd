@@ -229,8 +229,13 @@ public:
     }
   }
 
+  // Commits the current block and creates a new one.
   void advance_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
+  
+  // Discards the current block and creates a new one.
+  void discard_block(BlockExecutionMode mode =
+                          BlockExecutionMode::kBlockExecutionModeProposal);
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
@@ -248,6 +253,16 @@ public:
     auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
     if (!r.has_value()) {
       throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
+    }
+    return *r;
+  }
+
+  std::shared_ptr<const Contract>
+  lookup_contract_from_db(SHA256Hash const &hash)
+  {
+    auto r = db_proxy_->get_contract(block_number_, hash);
+    if (!r.has_value()) {
+      throw std::runtime_error("lookup_contract_from_db: db lookup failed");
     }
     return *r;
   }
@@ -386,13 +401,13 @@ private:
 
   void open_block(BlockExecutionMode mode)
   {
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(block_number_,
-                                                              block_number_ + 1,
+    block_number_++;
+    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                              block_number_,
                                                               mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
     }
-    block_number_++;
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
@@ -432,6 +447,7 @@ private:
 
   TransactionID next_tx_id_ = 0;
   BlockID block_number_ = 0;
+  BlockID dbtip_block_id_ = 0;
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;

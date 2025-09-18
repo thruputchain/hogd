@@ -14,7 +14,7 @@
 namespace hogd {
 
 class DirectNNIntTest : public ::testing::TestWithParam<TestDB>,
-                        public NativeContractTestFramework {
+                            public NativeContractTestFramework {
 public:
   DirectNNIntTest()
     : NativeContractTestFramework(
@@ -82,7 +82,7 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   // pop last two subtransactions; keep only the first (+100)
   ASSERT_TRUE(tx.pop_subtransactions(2).has_value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -126,7 +126,7 @@ TEST_P(DirectNNIntTest,
   // Abort the positive; committing the negative is still a no-op
   // (no reservations held)
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -171,7 +171,7 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
 
   // Abort tx1; commit tx2
   ASSERT_TRUE(tx1.abort_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -248,7 +248,7 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
 
   // Abort tx2; commit tx1
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -276,7 +276,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
     auto r = tx_init.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx_init.commit_transaction().has_value());
+    ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
     advance_block();
   }
 
@@ -306,7 +306,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   // Pop both subtransactions; commit → final remains 500
   ASSERT_TRUE(tx.pop_subtransactions(2).has_value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -347,7 +347,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
     ASSERT_TRUE(r.value());
   }
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
 
   // On reference address: only create A
   auto ref_a = make_addrkey(reference_addr, "nn_keyA");
@@ -359,7 +359,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
   }
-  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -400,8 +400,8 @@ TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
     ASSERT_TRUE(r.value());
   }
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -440,7 +440,7 @@ TEST_P(DirectNNIntTest, AddAndSubOk)
     auto r2 = tx1.try_push_current_subtransaction();
     ASSERT_TRUE(r2.has_value());
     ASSERT_TRUE(r2.value());
-    ASSERT_TRUE(tx1.commit_transaction().has_value());
+    ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   }
 
   {
@@ -450,7 +450,7 @@ TEST_P(DirectNNIntTest, AddAndSubOk)
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
+    ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   }
 }
 

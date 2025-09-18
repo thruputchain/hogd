@@ -216,11 +216,11 @@ ParentBlockView::get_post_block_contract(SHA256Hash const &hash)
 }
 
 void
-StorageView::commit_contract_create(Contract const &contract)
+StorageView::commit_contract_create(Contract contract)
 {
   assert(!closed_);
   auto hash = sha256(contract);
-  contract_creates_->emplace(hash, std::make_shared<const Contract>(contract));
+  contract_creates_->emplace(hash, std::make_shared<const Contract>(std::move(contract)));
 }
 
 Nondeterministic<std::optional<QueueEntry>>

@@ -26,8 +26,6 @@
 
 namespace hogd {
 
-// TODO(geoff): This should be refactored; right now initialize() technically
-// opens a block before the genesis initialization.
 void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
@@ -43,16 +41,42 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbcoord_commit_snapshot failed");
     }
   }
+  dbtip_block_id_ = block_number_;
+  block_number_++;
 
   {
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(block_number_,
-                                                              block_number_ + 1,
+    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                              block_number_,
                                                               mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
     }
   }
+
+  storage_snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+}
+
+void
+NativeContractTestFramework::discard_block(BlockExecutionMode mode)
+{
+  {
+    auto r = coord_wrapper_->client().dbcoord_close_snapshot(block_number_)();
+    if (r.result() != DbResult::DbResultOK) {
+      throw std::runtime_error("advance_block: dbcoord_close_snapshot failed");
+    }
+  }
+
   block_number_++;
+
+  {
+    auto r = coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                              block_number_,
+                                                              mode)();
+    if (r != DbResult::DbResultOK) {
+      throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
+    }
+  }
 
   storage_snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);

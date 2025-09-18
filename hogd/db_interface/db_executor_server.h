@@ -47,7 +47,7 @@ public:
     assert(block_manager_);
   }
 
-  RPCError commit_transaction(BlockID block, TransactionID tx);
+  RPCError commit_transaction(BlockID block, TransactionID tx, NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
   // Increases subtransaction count by 1 IF SUCCESSFUL.
   // Otherwise does not change subtransaction count, and is a no-op.

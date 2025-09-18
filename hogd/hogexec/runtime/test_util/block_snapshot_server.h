@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <set>
+#include <stop_token>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
@@ -20,6 +21,7 @@
 #include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/mvar.h"
+#include "x23/sockio.h"
 #include "x23/srpc.h"
 
 namespace hogd {
@@ -75,7 +77,7 @@ public:
 
   static void db_snapshot_read_null();
 
-  static RPCError commit_transaction(BlockID block, TransactionID tx);
+  static RPCError commit_transaction(BlockID block, TransactionID tx, NewContractBatch const& new_contracts);
   static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
@@ -85,12 +87,6 @@ public:
   // Revert one or more subtransactions.
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                       uint32_t popcount);
-
-  static RPCError commit_contract_create(BlockID block,
-                                         Contract const &contract);
-  static RPCError commit_contract_deploy(BlockID block,
-                                         ContractAddress const &contract_addr,
-                                         SHA256Hash const &hash);
 
   ExpectedStorageItem get_snapshot_item(BlockID block,
                                         AddressAndKey const &addrkey);

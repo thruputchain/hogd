@@ -81,21 +81,6 @@ BlockSnapshotServer::get_deployment(BlockID block,
 }
 
 RPCError
-BlockSnapshotServer::commit_contract_create(BlockID /*unused*/,
-                                            Contract const & /*unused*/)
-{
-  return RPCError::kRPCUnimplemented; // unimplemented
-}
-
-RPCError
-BlockSnapshotServer::commit_contract_deploy(BlockID /*unused*/,
-                                            ContractAddress const & /*unused*/,
-                                            SHA256Hash const & /*unused*/)
-{
-  return RPCError::kRPCUnimplemented; // unimplemented
-}
-
-RPCError
 BlockSnapshotServer::try_push_new_subtransaction(
     BlockID /*unused*/, TransactionID /*unused*/,
     StorageDeltaBatch const & /*unused*/)
@@ -113,7 +98,8 @@ BlockSnapshotServer::pop_subtransactions(BlockID /*unused*/,
 
 RPCError
 BlockSnapshotServer::commit_transaction(BlockID /*unused*/,
-                                        TransactionID /*unused*/)
+                                        TransactionID /*unused*/,
+                                        NewContractBatch const& /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented
 }

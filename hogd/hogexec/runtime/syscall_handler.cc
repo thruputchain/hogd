@@ -13,6 +13,7 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -209,7 +210,7 @@ SystemCallHandler::try_commit_transaction()
   if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .should_revert()) {
-    auto res = db_proxy_.commit_transaction();
+    auto res = db_proxy_.commit_transaction({});
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
     if (!res.has_value()) {
@@ -228,7 +229,7 @@ SystemCallHandler::try_commit_transaction()
   }
 
   bool result = r.value();
-
+  // check if any of the 2pc database operations failed
   if (!result) {
     auto res = db_proxy_.abort_transaction();
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
@@ -242,24 +243,20 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
 
-  // check if any of the 2pc database operations failed
-  auto res = db_proxy_.commit_transaction();
-  if (!res.has_value()) {
-    return res.error();
-  }
-
-  std::unordered_set<SHA256Hash> committed_contracts =
-      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+  auto new_contract_hashes = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .get_committed_contracts();
-  for (auto const &hash : committed_contracts) {
+  NewContractBatch new_contracts;
+  for (auto const &hash : new_contract_hashes) {
     auto contract_entry = newly_created_contracts_.find(hash);
     if (contract_entry != newly_created_contracts_.end()) {
-      auto res = db_proxy_.commit_contract_create(*contract_entry->second);
-      if (!res.has_value()) {
-        return res.error();
-      }
+      new_contracts.push_back(*contract_entry->second);
     }
+  }
+
+  auto res = db_proxy_.commit_transaction(std::move(new_contracts));
+  if (!res.has_value()) {
+    return res.error();
   }
 
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,

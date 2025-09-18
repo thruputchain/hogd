@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "account.hh"
+#include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -171,7 +172,9 @@ public:
     return {};
   }
   static void undo_merge(const DeployedContractData &deployed_contract_data) {}
-  static size_t storage_size() { return 0; }
+  size_t storage_size() const {
+    return deployed_contract_hash_.contract_size;
+  }
 
   const DeployedContractHash &deployed_contract_hash() const
   {
@@ -184,6 +187,42 @@ private:
 
 static_assert(is_item<DeployedContractData>);
 
+class NewContractData {
+  public:
+    NewContractData(Contract new_contract)
+      : new_contract_(std::move(new_contract))
+    {}
+  
+    HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                             const ItemKey &key) const;
+    bool narrow(const NewContractData &new_contract_data)
+    {
+      assert(new_contract_ == new_contract_data.new_contract_);
+      return true;
+    }
+    HogDBStatus<void> merge(const NewContractData &new_contract_data)
+    {
+      assert(new_contract_ == new_contract_data.new_contract_);
+      return {};
+    }
+    static void undo_merge(const NewContractData &new_contract_data) {}
+    static size_t storage_size() { 
+      // Storage costs for new contracts are accounted for when deploying them, 
+      // not in the actual contract item
+      return 0;
+    }
+  
+    const Contract &new_contract() const
+    {
+      return new_contract_;
+    }
+  
+  private:
+    Contract new_contract_;
+  };
+  
+  static_assert(is_item<NewContractData>);
+
 // ItemChange represents a pending modification to an item.
 class ItemChange {
 public:
@@ -193,6 +232,9 @@ public:
   ItemChange(Deletion &&d) : type_(std::move(d)) {}
   ItemChange(DeployedContractData &&deployed_contract_data)
     : type_(std::move(deployed_contract_data))
+  {}
+  ItemChange(NewContractData &&new_contract_data)
+    : type_(std::move(new_contract_data))
   {}
   ~ItemChange() = default;
 
@@ -226,7 +268,7 @@ public:
 private:
   bool exclusive_{false};
   std::optional<size_t> snapshot_cost_;
-  std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData>
+  std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData, NewContractData>
       type_;
 
   size_t storage_size() const;
