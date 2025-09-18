@@ -201,7 +201,7 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
                                DeployedContractHash const &deployment,
                                StorageCostModel const * /*unused*/)
 {
-  auto ret = db_.write_address_wasm_hash(addr, deployment);
+  auto ret = db_.write_address_metadata(addr, deployment);
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
   }

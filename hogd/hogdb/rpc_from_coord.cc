@@ -257,7 +257,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
         }
       },
       [&](ContractAddress const &addr, DeployedContractHash const &hash) {
-        auto r = ctx_.get_db().write_address_wasm_hash(addr, hash);
+        auto r = ctx_.get_db().write_address_metadata(addr, hash);
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;
