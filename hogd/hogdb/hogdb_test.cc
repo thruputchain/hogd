@@ -7,6 +7,7 @@
 #include <utility>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "types.hh"
 

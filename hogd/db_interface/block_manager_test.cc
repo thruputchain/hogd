@@ -1,9 +1,8 @@
 #include <gtest/gtest.h>
+
 #include <memory>
-#include <vector>
 
 #include "contract.hh"
-#include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
