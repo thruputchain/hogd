@@ -11,9 +11,12 @@
 #include <thread>
 
 // generated x23 headers
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -115,6 +118,12 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                                             from_xdr(delta.nnint().add_value)));
   case StorageDeltaType::kDeltaTypeDelete:
     return to_rpc_error(tx.request_deletion(make_item_key(addrkey)));
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeAddressMetadata);
+    return to_rpc_error(
+        tx.request_deploy_contract(addrkey.address,
+                                   delta.deployed_contract_hash()));
   default:
     return RPCError::kRPCUnimplemented;
   }
@@ -152,6 +161,9 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
   for (auto const &delta : batch) {
+    if constexpr (is_debug_build()) {
+      check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
+    }
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
@@ -176,7 +188,7 @@ HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
+HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
                                        AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
@@ -198,7 +210,7 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
     return ret;
   }
 
-  HogDBStatus<DBItem> item = ctx_.get_db().get_ramdb().get(key.as_bytes());
+  HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
 
@@ -245,16 +257,6 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
   return to_rpc_error(ctx_.get_db().write_wasm_code(hash, buf));
 }
 
-RPCError
-HogDBExecutorServer::commit_contract_deploy(BlockID /*block*/,
-                                            ContractAddress const &addr,
-                                            SHA256Hash const &hash)
-{
-  // TODO(abelay): this must be included as part of BlockTX, not just written.
-
-  return to_rpc_error(ctx_.get_db().write_address_wasm_hash(addr, hash));
-}
-
 ExpectedContract
 HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 {
@@ -273,19 +275,18 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 }
 
 ExpectedDeployment
-HogDBExecutorServer::get_deployment(BlockID /*block*/,
+HogDBExecutorServer::get_deployment(BlockID /*unused*/,
                                     ContractAddress const &contract_address)
 {
-  // TODO(abelay): BlockID is ignored here too for the same reasons.
 
-  HogDBStatus<SHA256Hash> hash =
+  HogDBStatus<DeployedContractHash> hash =
       ctx_.get_db().read_address_wasm_hash(contract_address);
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
 
   ExpectedDeployment out;
   out.error(RPCError::kRPCNone);
-  out.deployed_hash() = *hash;
+  out.deployed_hash() = hash->hash;
   return out;
 }
 

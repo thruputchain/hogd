@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
@@ -223,8 +224,14 @@ BlockManager::initialize_genesis_block(GenesisBlock const &config)
         auto hash = sha256(*contract);
         base_database_->write_contract(hash, contract);
       },
-      [&](const ContractAddress &addr, const SHA256Hash &hash) {
-        base_database_->write_deployment(addr, hash);
+      [&](const ContractAddress &addr, const DeployedContractHash &hash) {
+        auto item =
+            std::make_shared<const StorageItemWrapper>(hash, &cost_model_);
+        base_database_->write_item(
+            AddressAndKey{.address = addr,
+                          .key = StorageKey(
+                              StorageKeyType::kStorageKeyTypeAddressMetadata)},
+            item);
       });
 
   return true;

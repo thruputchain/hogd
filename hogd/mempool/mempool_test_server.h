@@ -18,6 +18,7 @@
 #include "coord.hh"
 #include "coord_sched.hh"
 #include "db_coord.hh"
+#include "db_sched.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
@@ -42,15 +43,15 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "nomination.hh"
-#include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -120,7 +121,10 @@ public:
 
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
-        ret = db_.write_address_wasm_hash(address, contract_hash);
+        uint32_t contract_size = bytes.size();
+        ret = db_.write_address_wasm_hash(
+            address, DeployedContractHash{.hash = contract_hash,
+                                          .contract_size = contract_size});
         if (!ret) {
           throw std::runtime_error("Failed to write deployment");
         }
@@ -361,6 +365,40 @@ get_default_account()
   return AccountAuthData{.public_keys = public_keys,
                          .gas_permissions = {},
                          .nonce_config = kNonceConfig};
+}
+
+inline Ed25519SecretKey
+create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
+{
+  const auto [public_key, private_key] = ed25519_keygen();
+  x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
+  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
+  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config->key.ed25519() = public_key;
+  pk_config->max_weight = weight;
+  return private_key;
+}
+
+inline void
+set_nonce_key(AccountAuthData &auth_data, size_t idx)
+{
+  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
+  auth_data.nonce_config.accepted_keys |= (1 << idx);
+}
+
+inline void
+add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+               const x23::Vec<size_t> &keys, Weight required_weight)
+{
+  CHECK_LT(auth_data.gas_permissions.size(),
+           static_cast<size_t>(MAX_GAS_CONFIGS));
+  GasPermissionConfig config{.limit = gas,
+                             .accepted_keys = 0,
+                             .required_weight = required_weight};
+  for (const size_t idx : keys) {
+    config.accepted_keys |= (1 << idx);
+  }
+  auth_data.gas_permissions.push_back(config);
 }
 
 } // namespace hogd

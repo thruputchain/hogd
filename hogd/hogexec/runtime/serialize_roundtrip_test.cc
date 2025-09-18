@@ -1,5 +1,6 @@
-#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
@@ -15,7 +16,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -397,12 +397,12 @@ protected:
 
     auto cxs_contract = hogd::load_contract("cxs_roundtrip.wasm");
     write_contract(cxs_contract);
-    write_deployment(cxs_contract_addr_, sha256(*cxs_contract));
+    write_deployment(cxs_contract_addr_, cxs_contract);
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
     auto txs_contract = hogd::load_contract("txs_roundtrip.wasm");
     write_contract(txs_contract);
-    write_deployment(txs_contract_addr_, sha256(*txs_contract));
+    write_deployment(txs_contract_addr_, txs_contract);
     setup_grant_storage_token(txs_contract_addr_, 1'000'000'000);
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
@@ -414,7 +414,7 @@ protected:
     // deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     write_contract(native_contract_xdr);
-    write_deployment(native_contract_addr_, sha256(*native_contract_xdr));
+    write_deployment(native_contract_addr_, native_contract_xdr);
 
     multiplexed_context_ = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

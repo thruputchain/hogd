@@ -66,6 +66,8 @@ StorageItemDeltaManager::try_reserve_nnint_set_add(int128_t set_value,
   return false;
 }
 
+// Must be updated when adding a new delta type.
+// StorageLockType::kNone -> other lock types
 bool
 StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
 {
@@ -167,11 +169,15 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     }
     return false;
   }
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    return variant_.try_set_variant<DeployedContractArgs>(
+               delta.deployed_contract_hash()) != nullptr;
   default:
     throw std::runtime_error("unknown delta type: " + x23::show(delta));
   }
 }
 
+// Must be updated when adding a new delta type.
 void
 StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
                                       bool maintain_permanent_exclusive_lock)
@@ -233,6 +239,10 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
       args.commit_change_signer(signer.public_key_id, signer.public_key.get());
     }
   } break;
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    variant_.get_variant_arm_unchecked<DeployedContractArgs>().committed_ =
+        true;
+    break;
   default:
     throw std::runtime_error("unimplemented commit_delta");
   }
@@ -265,6 +275,8 @@ StorageItemDeltaManager::produce_next_round_item()
     round_committed_ = true;
   }
 }
+
+// Should not need to be updated when adding a new delta type.
 std::optional<MeteredStorageLock>
 StorageItemDeltaManager::try_acquire_exclusive_lock(
     StorageDelta const &delta, StorageLockType previous_lock_type,
@@ -387,6 +399,7 @@ StorageItemDeltaManager::revert_exclusive_lock_to_set_typeclass(
   }
 }
 
+// Must be updated when adding a new delta type.
 void
 StorageItemDeltaManager::revert_set_typeclass_lock(
     TypeSpecificLock const &type_specific_lock)
@@ -418,6 +431,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
   }
   case StorageItemType::kItemTypeBytestring:
   case StorageItemType::kItemTypeDeleted:
+  case StorageItemType::kItemTypeDeployedContractHash:
     break;
   case StorageItemType::kItemTypeAuthData:
   {
@@ -434,6 +448,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
   variant_.release_reference();
 }
 
+// Must be updated when adding a new delta type.
 std::optional<StorageLock>
 StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     StorageDelta const &delta, StorageLock const &prev_lock)
@@ -545,6 +560,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   }
   case StorageItemType::kItemTypeBytestring:
   case StorageItemType::kItemTypeDeleted:
+  case StorageItemType::kItemTypeDeployedContractHash:
     return prev_lock;
   case StorageItemType::kItemTypeAuthData:
   {
@@ -640,6 +656,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
   }
 }
 
+// Must be updated when adding a new delta type.
 void
 StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     StorageLock const &lock, StorageDelta const &delta)
@@ -711,6 +728,9 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     break;
   }
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    // nothing to do
+    break;
   default:
     throw std::runtime_error(
         "unimplemented revert_set_typeclass_lock_to_set_typeclass");
@@ -739,7 +759,6 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
     break;
   case StorageLockType::kNone:
     assert(false);
-  default:
     throw std::runtime_error("impossible");
   }
 

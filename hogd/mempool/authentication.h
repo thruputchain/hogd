@@ -18,7 +18,9 @@ public:
     : current_block_id_(current_block_id), db_sched_client_(db_sched_client)
   {}
 
-  void update_block_id(BlockID block_id)
+  // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any
+  // accounts whose [AccountAuthData] has changed.
+  x23::Vec<ContractAddress> update_block_id(BlockID block_id)
   {
     current_block_id_ = block_id;
 
@@ -33,12 +35,18 @@ public:
                                                        accounts)();
     CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
     CHECK_EQ(res.account_auth_data_batch().size(), accounts.size());
+
+    x23::Vec<ContractAddress> ret;
     for (size_t i = 0; i < res.account_auth_data_batch().size(); i++) {
       const ContractAddress &account = accounts[i];
       // TODO(jhumphri): We only need to reauthenticate the txs for [account] if
       // the refreshed auth data differs from the auth data we already have.
-      accounts_[account] = res.account_auth_data_batch()[i];
+      if (res.account_auth_data_batch()[i] != accounts_[account]) {
+        accounts_[account] = res.account_auth_data_batch()[i];
+        ret.push_back(account);
+      }
     }
+    return ret;
   }
 
   bool authenticate(const SignedTransaction &tx)

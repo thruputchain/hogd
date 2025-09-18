@@ -26,6 +26,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -33,6 +34,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -148,6 +150,40 @@ public:
 
 static_assert(is_item<Deletion>);
 
+class DeployedContractData {
+public:
+  DeployedContractData(DeployedContractHash deployed_contract_hash)
+    : deployed_contract_hash_(deployed_contract_hash)
+  {}
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
+  bool narrow(const DeployedContractData &deployed_contract_data)
+  {
+    assert(deployed_contract_hash_ ==
+           deployed_contract_data.deployed_contract_hash_);
+    return true;
+  }
+  HogDBStatus<void> merge(const DeployedContractData &deployed_contract_data)
+  {
+    assert(deployed_contract_hash_ ==
+           deployed_contract_data.deployed_contract_hash_);
+    return {};
+  }
+  static void undo_merge(const DeployedContractData &deployed_contract_data) {}
+  static size_t storage_size() { return 0; }
+
+  const DeployedContractHash &deployed_contract_hash() const
+  {
+    return deployed_contract_hash_;
+  }
+
+private:
+  DeployedContractHash deployed_contract_hash_;
+};
+
+static_assert(is_item<DeployedContractData>);
+
 // ItemChange represents a pending modification to an item.
 class ItemChange {
 public:
@@ -155,6 +191,9 @@ public:
   ItemChange(NNInt128 &&nnint) : type_(std::move(nnint)) {}
   ItemChange(Bytes &&bytes) : type_(std::move(bytes)) {}
   ItemChange(Deletion &&d) : type_(std::move(d)) {}
+  ItemChange(DeployedContractData &&deployed_contract_data)
+    : type_(std::move(deployed_contract_data))
+  {}
   ~ItemChange() = default;
 
   // getters
@@ -163,6 +202,7 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_exclusive() const { return exclusive_; }
   std::optional<NNInt128> get_raw_nnint128() const;
+  std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
 
   // setters
   void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
@@ -186,7 +226,8 @@ public:
 private:
   bool exclusive_{false};
   std::optional<size_t> snapshot_cost_;
-  std::variant<std::monostate, NNInt128, Bytes, Deletion> type_;
+  std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData>
+      type_;
 
   size_t storage_size() const;
 };

@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/srpc.h"
@@ -158,13 +159,6 @@ public:
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_contract_create(block_id_, contract);
-  }
-
-  SystemStatus<void> commit_contract_deploy(ContractAddress const &addr,
-                                            SHA256Hash const &hash)
-  {
-    assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_contract_deploy(block_id_, addr, hash);
   }
 
 private:

@@ -42,8 +42,7 @@ public:
   ExpectedStorageItem get_snapshot_item(BlockID block,
                                         AddressAndKey const &addrkey);
   RPCError commit_contract_create(BlockID block, Contract const &contract);
-  RPCError commit_contract_deploy(BlockID block, ContractAddress const &addr,
-                                  SHA256Hash const &hash);
+
   ExpectedContract get_contract(BlockID block, SHA256Hash const &hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);

@@ -8,7 +8,6 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -81,7 +80,7 @@ protected:
     // mark the contract as existing and deployed within the database
     auto contract_0 = make_native_contract(0);
     write_contract(contract_0);
-    write_deployment(contract_address_, sha256(*contract_0));
+    write_deployment(contract_address_, contract_0);
   }
 
   ContractAddress contract_address_{

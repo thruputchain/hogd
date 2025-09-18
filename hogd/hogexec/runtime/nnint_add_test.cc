@@ -10,7 +10,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -104,7 +103,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
   write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -181,7 +180,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -271,7 +270,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);

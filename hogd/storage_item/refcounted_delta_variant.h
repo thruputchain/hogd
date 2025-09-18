@@ -316,6 +316,30 @@ private:
   bool has_committed_delta_ = false;
 };
 
+// Deployed contract state
+struct DeployedContractArgs {
+  DeployedContractHash deployed_contract_hash_{};
+  bool committed_ = false;
+
+  DeployedContractArgs(DeployedContractHash deployed_contract_hash)
+    : deployed_contract_hash_(deployed_contract_hash)
+  {}
+
+  bool typeclass_match(const DeployedContractHash &hash) const
+  {
+    return hash == deployed_contract_hash_;
+  }
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
+  int128_t
+  get_current_committed_cost(StorageCostModel const *cost_model,
+                             StorageItemWrapper const *base_item) const;
+  static int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *cost_model,
+                                StorageItemWrapper const *base_item);
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState
@@ -406,7 +430,7 @@ class RefcountedDeltaVariant {
   using variant_t =
       std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
                    ExclusiveLockedState, DeleteArgs, UnmodifiedState,
-                   ReplayCacheArgs, AuthDataArgs>;
+                   ReplayCacheArgs, AuthDataArgs, DeployedContractArgs>;
 
 public:
   RefcountedDeltaVariant() = default;

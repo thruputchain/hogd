@@ -39,6 +39,13 @@ StorageItemWrapper::StorageItemWrapper(AccountAuthData auth_data,
   : storage_item_(AuthDataWrapper{.auth_data_ = std::move(auth_data)}),
     cost_model_(cost_model)
 {}
+StorageItemWrapper::StorageItemWrapper(
+    DeployedContractHash deployed_contract_hash,
+    StorageCostModel const *cost_model)
+  : storage_item_(DeployedContractHashWrapper{
+        .deployed_contract_hash_ = std::move(deployed_contract_hash)}),
+    cost_model_(cost_model)
+{}
 
 StorageItemType
 StorageItemWrapper::type() const
@@ -91,6 +98,14 @@ StorageItemWrapper::AuthDataWrapper::to_wire_item() const
   return item;
 }
 
+StorageItem
+StorageItemWrapper::DeployedContractHashWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeDeployedContractHash);
+  item.deployed_contract_hash() = deployed_contract_hash_;
+  return item;
+}
+
 int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost(
     StorageCostModel const *cost_model) const
@@ -133,6 +148,13 @@ StorageItemWrapper::AuthDataWrapper::storage_cost( // NOLINT
                        // cost_model->get_auth_data_cost(auth_data_.size());
 }
 
+int128_t
+StorageItemWrapper::DeployedContractHashWrapper::storage_cost(
+    StorageCostModel const *cost_model) const
+{
+  return cost_model->get_contract_size_cost(
+      deployed_contract_hash_.contract_size);
+}
 int128_t
 StorageItemWrapper::storage_cost(StorageCostModel const *cost_model) const
 {
