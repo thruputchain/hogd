@@ -163,7 +163,7 @@ InvokeTX::request_new_contract(Contract contract)
 {
   auto buf = x23::serialize(contract);
   auto hash = sha256(buf);
-  info("request_new_contract hash {}", hash);
+  info("request_new_contract hash {}", x23::show(hash));
   return request_change(make_contract_code_item_key(hash),
                         NewContractData(std::move(contract)));
 }
