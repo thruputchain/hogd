@@ -78,12 +78,10 @@ wait_port 11222
   --max-msg-size 400000000       \
   &
 wait_port 7888
-sleep 1
 
 # Start hogexec.
 echo "Start hogexec"
 "$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
-sleep 1
 
 # Start hogdb.
 echo "Start hogdb"
@@ -92,6 +90,16 @@ rm -rf /tmp/hogdb
 "$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
 # TODO(jhumphri): Launch the mempool.
+
+# Wait for hogexec (port 8070).
+wait_port 8070
+
+# Wait for hogdb (ports 8080, 8081, and 8082).
+wait_port 8080
+wait_port 8081
+wait_port 8082
+
+echo "Done with launch."
 
 pids=($(jobs -pr))
 for pid in "${pids[@]}"; do
