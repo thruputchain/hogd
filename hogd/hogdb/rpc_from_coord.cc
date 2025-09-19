@@ -125,7 +125,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
-    HogDBStatus<void> ret = commit_block(id);
+  HogDBStatus<void> ret = commit_block(id);
   if (!ret)
     co_return DbBlockResult(DbResult::DbResultError);
 
