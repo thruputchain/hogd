@@ -161,7 +161,10 @@ InvokeTX::request_deploy_contract(Address const &addr,
 inline HogDBStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
-  return request_change(make_contract_code_item_key(sha256(contract)),
+  auto buf = x23::serialize(contract);
+  auto hash = sha256(buf);
+  info("request_new_contract hash {}", hash);
+  return request_change(make_contract_code_item_key(hash),
                         NewContractData(std::move(contract)));
 }
 
