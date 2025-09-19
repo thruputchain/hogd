@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CHUCKD_BINARY=~/chuckd/chuckd/chuckd
+CHUCKD_BINARY=~/go/bin/chuckd
 BUILD_DIR=/home/local/jhumphri/build/
 LOADGEN_BINARY=${BUILD_DIR}hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${BUILD_DIR}hogd/hogexec/hogexec
@@ -70,10 +70,11 @@ wait_port 11222
   --in-addr :7888                \
   --loadgen-addr localhost:11222 \
   --num-accts 10000              \
-  --num-txs 20000 \
+  --num-txs 20000                \
   --exec-batch 100               \
-  --exec-par 1                   \
-  --max-msg-size 400000000 &
+  --exec-par 10                  \
+  --max-msg-size 400000000       \
+  &
 wait_port 7888
 
 sleep 1

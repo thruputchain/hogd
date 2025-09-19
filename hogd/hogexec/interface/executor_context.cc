@@ -66,14 +66,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
                                     ProposalModeData{}, make_hogexec_context());
 
-  auto [async, cb] = x23::make_async<InvokeResult>();
-
-  main_worker_pool_.submit([&syscall_handler, &cb] -> void {
-    auto res = syscall_handler.root_invoke();
-    cb(res);
-  });
-
-  auto invoke_res = co_await async;
+  auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
     auto st = proxy.abort_transaction();
