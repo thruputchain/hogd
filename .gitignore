@@ -1,13 +1,14 @@
 **/.DS_STORE
 *.a
+*.core
 *.d
 *.o
 *~
 .cache
 .cproject
+.nfs*
 .project
 .vscode
-.nfs*
 /compile_commands.json
 Testing/**
 [._]*.sw[a-p]
@@ -16,4 +17,4 @@ build/**
 /x23/benchmark
 /x23/tests/bench
 metrics_history
-
+nohup.out
