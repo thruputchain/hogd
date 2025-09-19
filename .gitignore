@@ -1,13 +1,14 @@
 **/.DS_STORE
 *.a
+*.core
 *.d
 *.o
 *~
 .cache
 .cproject
+.nfs*
 .project
 .vscode
-.nfs*
 /compile_commands.json
 Testing/**
 [._]*.sw[a-p]
