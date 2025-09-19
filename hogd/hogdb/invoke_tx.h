@@ -161,6 +161,10 @@ InvokeTX::request_deploy_contract(Address const &addr,
 inline HogDBStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
+  // TODO(geoff): For some reason, on gcc in CI (not clang locally)
+  // doing the sha256(contract) within the make_contract_code_item_key
+  // function results in what appears to be some kind of memory corruption.
+  // Address sanitizer didn't flag anything, however.
   auto hash = sha256(contract);
   return request_change(make_contract_code_item_key(hash),
                         NewContractData(std::move(contract)));

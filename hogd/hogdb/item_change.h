@@ -29,7 +29,6 @@
 #include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -196,17 +195,11 @@ public:
                            const ItemKey &key) const;
   bool narrow(const NewContractData &new_contract_data)
   {
-    if (new_contract_ != new_contract_data.new_contract_) {
-      error("new_contract_ != new_contract_data.new_contract_ {} {}", x23::show(new_contract_), x23::show(new_contract_data.new_contract_));
-    }
     assert(new_contract_ == new_contract_data.new_contract_);
     return true;
   }
   HogDBStatus<void> merge(const NewContractData &new_contract_data)
   {
-    if (new_contract_ != new_contract_data.new_contract_) {
-      error("new_contract_ != new_contract_data.new_contract_ {} {}", x23::show(new_contract_), x23::show(new_contract_data.new_contract_));
-    }
     assert(new_contract_ == new_contract_data.new_contract_);
     return {};
   }
