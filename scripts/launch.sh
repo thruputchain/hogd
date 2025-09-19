@@ -1,11 +1,13 @@
 #!/bin/bash
 
-CHUCKD_BINARY=~/go/bin/chuckd
-BUILD_DIR=/home/local/jhumphri/build/
-LOADGEN_BINARY=${BUILD_DIR}hogd/loadgen/loadgen_server
-HOGEXEC_BINARY=${BUILD_DIR}hogd/hogexec/hogexec
-HOGDB_BINARY=${BUILD_DIR}hogd/hogdb/hogdb
+BUILD_DIR=/home/local/jhumphri/build
 
+CHUCKD_BINARY=~/go/bin/chuckd
+LOADGEN_BINARY=${BUILD_DIR}/hogd/loadgen/loadgen_server
+HOGEXEC_BINARY=${BUILD_DIR}/hogd/hogexec/hogexec
+HOGDB_BINARY=${BUILD_DIR}/hogd/hogdb/hogdb
+
+# Set to 1 to enable x23 RPC logging.
 X23TRACE=0
 
 killall -9 chuckd > /dev/null 2>&1
@@ -76,17 +78,16 @@ wait_port 11222
   --max-msg-size 400000000       \
   &
 wait_port 7888
-
 sleep 1
 
 # Start hogexec.
 echo "Start hogexec"
 "$HOGEXEC_BINARY" 127.0.0.1 7888 50 &
-
 sleep 1
 
 # Start hogdb.
 echo "Start hogdb"
+# Remove any existing database so the experiment starts from a clean slate.
 rm -rf /tmp/hogdb
 "$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
