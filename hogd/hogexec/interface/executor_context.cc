@@ -65,7 +65,6 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
                                     ProposalModeData{}, make_hogexec_context());
-
   auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
