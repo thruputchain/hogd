@@ -23,11 +23,12 @@ namespace hogd {
 // coordinator.
 class ExecCoordServer {
 public:
-  ExecCoordServer(ExecCard self_card, const std::string &coord_address,
+  ExecCoordServer(ExecCard self_card, std::string coord_address,
                   uint16_t coord_port, int poll_threads)
-    : self_card_(std::move(self_card)), coord_address_(coord_address),
-      coord_port_(coord_port), main_worker_pool_(available_parallelism()),
-      x23_pool_(poll_threads), cp_(x23_pool_)
+    : self_card_(std::move(self_card)),
+      coord_address_(std::move(coord_address)), coord_port_(coord_port),
+      main_worker_pool_(available_parallelism()), x23_pool_(poll_threads),
+      cp_(x23_pool_)
   {}
 
   ~ExecCoordServer() { await_shutdown_request(); }

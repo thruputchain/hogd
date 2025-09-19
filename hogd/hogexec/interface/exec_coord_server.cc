@@ -6,7 +6,6 @@
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -17,7 +16,6 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 

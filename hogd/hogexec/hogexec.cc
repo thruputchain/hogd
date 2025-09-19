@@ -1,5 +1,7 @@
 #include <cstdlib>
+#include <format>
 #include <print>
+#include <stdexcept>
 #include <string>
 
 #include "coord.hh"
@@ -7,17 +9,18 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/init.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
 namespace {
 
 constexpr uint16_t kExecServerPort = 8070;
-const std::string kExecutorAddress =
+const std::string executor_address =
     "127.0.0.1:" + std::to_string(hogd::kExecServerPort);
-const ExecCard kCard{.protocol = "blah",
-                     .upid = {},
-                     .address = kExecutorAddress.c_str()};
+const ExecCard card{.protocol = "blah",
+                    .upid = {},
+                    .address = executor_address.c_str()};
 
 int
 hogexec_init(const std::string &coordinator_addr, int poll_threads)
@@ -32,7 +35,7 @@ hogexec_init(const std::string &coordinator_addr, int poll_threads)
   const uint16_t coordinator_port = static_cast<uint16_t>(
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
-  ExecCoordServer exec(kCard, coordinator_host, coordinator_port, poll_threads);
+  ExecCoordServer exec(card, coordinator_host, coordinator_port, poll_threads);
   // TODO(jhumphri): Replace nullptr.
   exec.init_from_coord(nullptr);
   CHECK_EQ(exec.start_server(kExecServerPort), kExecServerPort);
@@ -57,7 +60,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
-  const std::string kCoordAddress = argv[1];
+  const std::string coord_address = argv[1];
   const int poll_threads = std::stoi(argv[2]);
-  return hogd::hogexec_init(kCoordAddress, poll_threads);
+  return hogd::hogexec_init(coord_address, poll_threads);
 };

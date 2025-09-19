@@ -159,13 +159,14 @@ public:
 
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
-  bool narrow(const DeployedContractData &deployed_contract_data)
+  static bool narrow(const DeployedContractData & /*deployed_contract_data*/)
   {
     assert(deployed_contract_hash_ ==
            deployed_contract_data.deployed_contract_hash_);
     return true;
   }
-  HogDBStatus<void> merge(const DeployedContractData &deployed_contract_data)
+  static HogDBStatus<void>
+  merge(const DeployedContractData & /*deployed_contract_data*/)
   {
     assert(deployed_contract_hash_ ==
            deployed_contract_data.deployed_contract_hash_);
@@ -193,12 +194,12 @@ public:
 
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
                            const ItemKey &key) const;
-  bool narrow(const NewContractData &new_contract_data)
+  static bool narrow(const NewContractData & /*new_contract_data*/)
   {
     assert(new_contract_ == new_contract_data.new_contract_);
     return true;
   }
-  HogDBStatus<void> merge(const NewContractData &new_contract_data)
+  static HogDBStatus<void> merge(const NewContractData & /*new_contract_data*/)
   {
     assert(new_contract_ == new_contract_data.new_contract_);
     return {};
