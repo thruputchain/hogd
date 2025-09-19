@@ -38,13 +38,12 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
 }
 
 std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-ExecCoordServer::connect_to_coord_allocate_service(
-    std::string const &coord_address, std::string const &coord_allocate_port)
+ExecCoordServer::connect_to_coord_allocate_service()
 {
-  auto fd = cp_.tcpconnect(coord_address, coord_allocate_port)();
+  auto fd = cp_.tcpconnect(coord_address_, std::to_string(coord_port_))();
   if (!fd) {
     error("Failed to connect to coord allocate service on {}:{}, error={}",
-          coord_address, coord_allocate_port, fd.error().what());
+          coord_address_, coord_port_, fd.error().what());
     return std::nullopt;
   }
 
@@ -56,9 +55,7 @@ IntroExecResult
 ExecCoordServer::get_exec_result()
 {
   while (true) {
-    auto client =
-        connect_to_coord_allocate_service(coord_address_,
-                                          std::to_string(coord_port_));
+    auto client = connect_to_coord_allocate_service();
     if (!client) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;

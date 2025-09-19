@@ -66,8 +66,7 @@ private:
   connect_to_database(DatabaseIdentifier identifier);
 
   std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-  connect_to_coord_allocate_service(std::string const &coord_address,
-                                    std::string const &coord_allocate_port);
+  connect_to_coord_allocate_service();
 
   IntroExecResult get_exec_result();
 
