@@ -13,12 +13,26 @@ namespace hogd {
 namespace {
 
 constexpr uint16_t kExecServerPort = 8070;
+const std::string kExecutorAddress =
+    "127.0.0.1:" + std::to_string(hogd::kExecServerPort);
+const ExecCard kCard{.protocol = "blah",
+                     .upid = {},
+                     .address = kExecutorAddress.c_str()};
 
 int
-hogexec_init(const ExecCard &card, const std::string &coord_address,
-             uint16_t coord_port, int poll_threads)
+hogexec_init(const std::string &coordinator_addr, int poll_threads)
 {
-  ExecCoordServer exec(card, coord_address, coord_port, poll_threads);
+  x23::HostPort host_port;
+  if (!host_port.parse(coordinator_addr)) {
+    throw std::runtime_error(
+        std::format("Invalid coordinator address: {}", coordinator_addr));
+  }
+  const std::string coordinator_host = {host_port.host.begin(),
+                                        host_port.host.end()};
+  const uint16_t coordinator_port = static_cast<uint16_t>(
+      std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
+
+  ExecCoordServer exec(kCard, coordinator_host, coordinator_port, poll_threads);
   // TODO(jhumphri): Replace nullptr.
   exec.init_from_coord(nullptr);
   CHECK_EQ(exec.start_server(kExecServerPort), kExecServerPort);
@@ -38,19 +52,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogexec!");
 
-  if (argc < 4) {
-    std::println(
-        "usage: [coordinator_ip] [coordinator_port] [num_poll_threads]");
+  if (argc < 3) {
+    std::println("usage: coordinator_ip:port num_poll_threads");
     return EXIT_FAILURE;
   }
 
-  const std::string kExecutorAddress =
-      "127.0.0.1:" + std::to_string(hogd::kExecServerPort);
   const std::string kCoordAddress = argv[1];
-  const uint16_t kCoordPort = std::stoi(argv[2]);
-  const hogd::ExecCard card{.protocol = "blah",
-                            .upid = {},
-                            .address = kExecutorAddress.c_str()};
-  const int poll_threads = std::stoi(argv[3]);
-  return hogd::hogexec_init(card, kCoordAddress, kCoordPort, poll_threads);
+  const int poll_threads = std::stoi(argv[2]);
+  return hogd::hogexec_init(kCoordAddress, poll_threads);
 };

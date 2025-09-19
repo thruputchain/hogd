@@ -82,7 +82,7 @@ sleep 1
 
 # Start hogexec.
 echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1 7888 50 &
+"$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
 sleep 1
 
 # Start hogdb.
