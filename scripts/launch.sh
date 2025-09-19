@@ -75,13 +75,14 @@ wait_port 11222
   --num-txs 20000                \
   --exec-batch 100               \
   --exec-par 10                  \
-  --max-msg-size 400000000 &
+  --max-msg-size 400000000       \
+  &
 wait_port 7888
 sleep 1
 
 # Start hogexec.
 echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
+"$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
 sleep 1
 
 # Start hogdb.
