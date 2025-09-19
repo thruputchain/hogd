@@ -9,6 +9,7 @@
 #include <stop_token>
 #include <sys/socket.h>
 #include <thread>
+#include <utility>
 
 // generated x23 headers
 #include "account.hh"
@@ -26,7 +27,6 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -57,8 +57,14 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
+  case HogDBCode::kInternal:
+  case HogDBCode::kCorruption:
+  case HogDBCode::kNoMemory:
+  case HogDBCode::kIO:
+    return RPCError::kRPCUnrecoverable;
   default:
     return RPCError::kRPCTransactionFailed;
+    break;
   }
 }
 
@@ -130,13 +136,27 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
 }
 
 RPCError
-HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
+HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                        NewContractBatch new_contracts)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
+
+  auto write_contract = [itx](Contract contract) {
+    assert(contract.contract_type() == ContractType::kWasmi);
+    return itx->request_new_contract(std::move(contract));
+  };
+
+  for (auto &contract : new_contracts) {
+    // write contract should be infallible
+    if (auto r = write_contract(std::move(contract)); !r.has_value()) {
+      return RPCError::kRPCUnrecoverable;
+    }
+  }
   itx->commit();
   ctx_.close_invoke_tx(block, tx);
+
   return RPCError::kRPCNone;
 }
 
@@ -240,21 +260,6 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
   ret.error(RPCError::kRPCNone);
   ret.item() = out;
   return ret;
-}
-
-RPCError
-HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
-                                            Contract const &contract)
-{
-  // TODO(abelay): this must be included as part of BlockTX, not just written.
-  // Currently the only contract types that go through this contract create
-  // workflow are wasmi contracts.
-  assert(contract.contract_type() == ContractType::kWasmi);
-  auto data = x23::serialize(contract);
-  const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-  auto buf = std::span<const std::byte>(cptr, data.size());
-  SHA256Hash hash = sha256(buf);
-  return to_rpc_error(ctx_.get_db().write_wasm_code(hash, buf));
 }
 
 ExpectedContract

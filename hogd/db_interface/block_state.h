@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/storage_view.h"
 #include "hogd/db_interface/transaction_state.h"
@@ -70,10 +71,8 @@ public:
                                  StorageDelta delta,
                                  StorageItemRPCFlagSet flags);
 
-  void commit_transaction(TransactionID txid);
+  void commit_transaction(TransactionID txid, NewContractBatch new_contracts);
   void abort_transaction(TransactionID txid);
-
-  void commit_contract_create(Contract const &contract);
 
   // parent block view is a read-only view of storage items.
   auto *get_snapshot_view() { return storage_view_.as_snapshot(); }
