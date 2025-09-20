@@ -173,6 +173,10 @@ BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
   // can only change if we are the only tx modifying the item.
   // This is true for bytestrings and nnints; but not necessarily for all data
   // types.
+  // TODO(geoff): As it is now, there is no workflow with bytestrings or nnints
+  // in which we could successfully modify the balance but then do_modify_lock
+  // fails. That may be added later -- if so, then we need to rework this
+  // workflow.
   auto [lock, ul] = item_locks_[key];
   if (lock.ref == 1 && *old_delta != *new_delta) {
     HogDBStatus<void> ret =

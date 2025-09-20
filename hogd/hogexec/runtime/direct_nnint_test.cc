@@ -529,6 +529,56 @@ TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
+TEST_P(DirectNNIntTest, NNIntCreateCost)
+{
+  auto contract_addr_main = make_contract_address(0);
+  auto contract_addr_ref = make_contract_address(1);
+
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr_main, kInitialBalance);
+  setup_grant_storage_token(contract_addr_ref, kInitialBalance);
+
+  auto key_main = make_addrkey(contract_addr_main, "nn_key11");
+  auto key_ref = make_addrkey(contract_addr_ref, "nn_key11_ref");
+
+  // First tx creates the key, but then that tx reverts;
+  // The second tx should still pay the storage cost
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key_main, make_nnint_delta(500, 100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key_main, make_nnint_delta(500, 100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && r2.value());
+
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  // reference address
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(key_ref, make_nnint_delta(500, 100),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value() && r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto bal_main = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr_main));
+  auto bal_ref = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr_ref));
+  ASSERT_TRUE(bal_main.has_value());
+  ASSERT_TRUE(bal_ref.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_EQ(from_xdr(bal_main->nnint()), from_xdr(bal_ref->nnint()));
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
