@@ -15,7 +15,7 @@ use crate::runtime::WasmiRuntime;
 macro_rules! debug_log {
     ($e:expr) => {
         $e
-    }
+    };
 }
 
 #[cfg(not(feature = "debug_logging"))]
@@ -23,7 +23,7 @@ macro_rules! debug_log {
 macro_rules! debug_log {
     ($e:expr) => {
         ()
-    }
+    };
 }
 
 #[repr(C)]

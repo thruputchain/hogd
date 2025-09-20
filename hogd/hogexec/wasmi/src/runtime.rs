@@ -76,9 +76,15 @@ impl WasmiRuntime {
             } else {
                 let linker = context.linker();
 
-                let module = unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                    .inspect_err(|_e| debug_log!(eprintln!("Module new_unchecked error: {_e}"))).ok()?;
-                
+                let module =
+                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
+                        .inspect_err(|_e| {
+                            debug_log!(eprintln!(
+                                "Module new_unchecked error: {_e}"
+                            ))
+                        })
+                        .ok()?;
+
                 if !check_memory_limit(&module) {
                     debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
                     return None;
@@ -90,7 +96,12 @@ impl WasmiRuntime {
             let linker = context.linker();
             let module =
                 unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                .inspect_err(|_e| debug_log!(eprintln!("Module new_unchecked error: {_e}"))).ok()?;
+                    .inspect_err(|_e| {
+                        debug_log!(eprintln!(
+                            "Module new_unchecked error: {_e}"
+                        ))
+                    })
+                    .ok()?;
 
             if !check_memory_limit(&module) {
                 debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
@@ -100,15 +111,20 @@ impl WasmiRuntime {
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker.instantiate(&mut store, &module)
-            .inspect_err(|_e| debug_log!(eprintln!("Error instantiating store: {_e}"))).ok()?;
-    
-        let instance = instance_result.ensure_no_start(&mut store)
-            .inspect_err(|_e| debug_log!(eprintln!("Error ensuring no start: {_e}"))).ok()?;
-        Some(Self {
-            store,
-            instance,
-        })
+        let instance_result = linker
+            .instantiate(&mut store, &module)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Error instantiating store: {_e}"))
+            })
+            .ok()?;
+
+        let instance = instance_result
+            .ensure_no_start(&mut store)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Error ensuring no start: {_e}"))
+            })
+            .ok()?;
+        Some(Self { store, instance })
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
@@ -131,7 +147,9 @@ impl WasmiRuntime {
                 err.downcast_ref::<external_call::TrampolineError>()
                     .map_or_else(
                         || {
-                            debug_log!(eprintln!("Unknown error from func.call: {err:?}"));
+                            debug_log!(eprintln!(
+                                "Unknown error from func.call: {err:?}"
+                            ));
                             WasmiInvokeResult::error(
                                 InvokeErrorCode::kInvokeUnrecoverable,
                             )
