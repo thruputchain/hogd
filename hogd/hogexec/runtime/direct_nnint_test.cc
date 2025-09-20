@@ -485,9 +485,9 @@ TEST_P(DirectNNIntTest, NNIntProperLocksHeld)
   ASSERT_TRUE(r4.has_value());
   EXPECT_FALSE(r4.value());
 
-  EXPECT_TRUE(tx2.commit_transaction().has_value());
+  EXPECT_TRUE(tx2.commit_transaction({}).has_value());
   EXPECT_TRUE(tx1.pop_subtransactions(1).has_value());
-  EXPECT_TRUE(tx1.commit_transaction().has_value());
+  EXPECT_TRUE(tx1.commit_transaction({}).has_value());
 
   advance_block();
 
@@ -525,8 +525,8 @@ TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
   auto r3 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r3.has_value() && r3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
