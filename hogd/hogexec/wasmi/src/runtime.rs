@@ -7,6 +7,8 @@ use crate::external_call;
 use crate::ffi_enums::InvokeErrorCode;
 use crate::invoke_result::WasmiInvokeResult;
 
+// TOOD(geoff): do the debug logging optionally via a macro
+
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
 // in to provided syscalls.
@@ -45,13 +47,21 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
     if export.is_none() {
+        #[cfg(feature="debug_logging")]
+        eprintln!("\"memory\" not exported from module");
         return false;
     }
     let export_unwrapped = export.unwrap();
 
     if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
+        #[cfg(feature="debug_logging")]
+        if memory_type.initial_pages() > 1.into() {
+            eprintln!("Wasm initial memory exceeds limit: {:?}", memory_type)
+        }
         return memory_type.initial_pages() <= 1.into();
     }
+    #[cfg(feature="debug_logging")]
+    eprintln!("\"memory\" not exported as wasm memory");
     false
 }
 
@@ -69,8 +79,12 @@ impl WasmiRuntime {
             } else {
                 let linker = context.linker();
                 let module =
-                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                        .ok()?;
+                    unsafe { Module::new_unchecked(linker.engine(), bytes) };
+                #[cfg(feature="debug_logging")]
+                let module = module.map_err(|e|
+                    eprintln!("Module new_unchecked error: {}", e));
+                let module = module.ok()?;
+                
                 if !check_memory_limit(&module) {
                     #[cfg(feature = "debug_logging")]
                     eprintln!("Module instantiation failed: Memory export verification failed");
@@ -82,8 +96,11 @@ impl WasmiRuntime {
         } else {
             let linker = context.linker();
             let module =
-                unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                    .ok()?;
+                unsafe { Module::new_unchecked(linker.engine(), bytes) };
+            #[cfg(feature="debug_logging")]
+            let module = module.map_err(|e|
+                eprintln!("Module new_unchecked error: {}", e));
+            let module = module.ok()?;
 
             if !check_memory_limit(&module) {
                 #[cfg(feature = "debug_logging")]
