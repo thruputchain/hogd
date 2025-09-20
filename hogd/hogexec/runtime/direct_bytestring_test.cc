@@ -589,7 +589,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
 TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179";
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
     return;
   }
   auto contract_addr = make_contract_address(0);

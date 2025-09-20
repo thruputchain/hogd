@@ -3,10 +3,17 @@
 #pragma once
 
 #include <bit>
+#include <string>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+
+#ifdef __APPLE__
+#include <sys/param.h>
+#include <unistd.h> // for gethostname
+#define HOST_NAME_MAX MAXHOSTNAMELEN
+#endif
 
 namespace hogd {
 
