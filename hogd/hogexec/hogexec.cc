@@ -6,6 +6,7 @@
 
 #include "coord.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/init.h"
@@ -16,11 +17,14 @@ namespace hogd {
 namespace {
 
 constexpr uint16_t kExecServerPort = 8070;
-const std::string executor_address =
-    "127.0.0.1:" + std::to_string(hogd::kExecServerPort);
-const ExecCard card{.protocol = "blah",
-                    .upid = {},
-                    .address = executor_address.c_str()};
+
+std::string
+get_executor_address()
+{
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return std::format("{}:{}", hostname, kExecServerPort);
+}
 
 int
 hogexec_init(const std::string &coordinator_addr, int poll_threads)
@@ -35,6 +39,10 @@ hogexec_init(const std::string &coordinator_addr, int poll_threads)
   const uint16_t coordinator_port = static_cast<uint16_t>(
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
+  const std::string executor_address = get_executor_address();
+  const ExecCard card{.protocol = "blah",
+                      .upid = {},
+                      .address = executor_address.c_str()};
   ExecCoordServer exec(card, coordinator_host, coordinator_port, poll_threads);
   // TODO(jhumphri): Replace nullptr.
   exec.init_from_coord(nullptr);
