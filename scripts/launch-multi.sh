@@ -45,15 +45,14 @@ if [ ! -x "$CHUCKD_BINARY" ]; then
 fi
 
 wait_port() {
-  local port=$1
-  for i in {1..50}; do
-    if ss -ltnp 2>/dev/null | grep -q ":$port "; then
+  local host=$1
+  local port=$2
+  while true; do
+    if nc -z "$host" "$port" 2>/dev/null; then
       return 0
     fi
     sleep 0.2
   done
-  echo "Timed out waiting for port $port to open" >&2
-  return 1
 }
 
 # Start hogd loadgen. loadgen exits when either (1) a character is passed to
@@ -62,7 +61,7 @@ wait_port() {
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
 setsid -w "$LOADGEN_BINARY" -p 11222 < /dev/tty &
-wait_port 11222
+wait_port localhost 11222
 
 # Start chuckd.
 "$CHUCKD_BINARY"                 \
@@ -77,14 +76,13 @@ wait_port 11222
   --exec-par 10                  \
   --max-msg-size 400000000       \
   &
-wait_port 7888
+wait_port localhost 7888
 
 # Start hogexec.
 echo "Start hogexec"
 # "$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
 
-echo "Now sleep for one minute"
-sleep 60
+sleep 10
 
 # Start hogdb.
 echo "Start hogdb"
@@ -95,12 +93,12 @@ rm -rf /tmp/hogdb
 # TODO(jhumphri): Launch the mempool.
 
 # Wait for hogexec (port 8070).
-wait_port 8070
+wait_port hog4 8070
 
 # Wait for hogdb (ports 8080, 8081, and 8082).
-wait_port 8080
-wait_port 8081
-wait_port 8082
+wait_port localhost 8080
+wait_port localhost 8081
+wait_port localhost 8082
 
 echo "Done with launch."
 
