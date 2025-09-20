@@ -18,7 +18,7 @@ class DirectNNIntTest : public ::testing::TestWithParam<TestDB>,
 public:
   DirectNNIntTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          true, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
@@ -286,9 +286,8 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   // -200 (allowed)
   {
-    StorageDelta d(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-    d.nnint_add() = to_xdr(int128_t{-200});
-    tx.add_delta(key, d, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx.add_delta(key, make_nnint_add_delta(-200),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -296,9 +295,8 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   // -400 (updates last delta; allowed relative to base 500)
   {
-    StorageDelta d(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-    d.nnint_add() = to_xdr(int128_t{-400});
-    tx.add_delta(key, d, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx.add_delta(key, make_nnint_add_delta(-400),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -452,6 +450,83 @@ TEST_P(DirectNNIntTest, AddAndSubOk)
     ASSERT_TRUE(r.value());
     ASSERT_TRUE(tx2.commit_transaction().has_value());
   }
+}
+
+TEST_P(DirectNNIntTest, NNIntProperLocksHeld)
+{
+  auto contract_addr = make_contract_address(0);
+
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto key = make_addrkey(contract_addr, "nn_key9");
+
+  // tx1 holds a sub entire entry lock, then try_reserves a smaller subtraction
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_nnint_delta(500, -500),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+
+  tx1.add_delta(key, make_nnint_delta(500, -100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && r2.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_nnint_delta(500, 0),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value() && r3.value());
+
+  tx2.add_delta(key, make_nnint_delta(500, -1),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r4 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r4.has_value());
+  EXPECT_FALSE(r4.value());
+
+  EXPECT_TRUE(tx2.commit_transaction().has_value());
+  EXPECT_TRUE(tx1.pop_subtransactions(1).has_value());
+  EXPECT_TRUE(tx1.commit_transaction().has_value());
+
+  advance_block();
+
+  auto res = lookup_storage_item_from_db(key);
+  ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
+  ASSERT_EQ(from_xdr(res->nnint()), 0);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
+{
+  auto contract_addr = make_contract_address(0);
+
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto key = make_addrkey(contract_addr, "nn_key10");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key, make_nnint_delta(500, -100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value() && r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_nnint_delta(500, -200),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value() && r2.value());
+
+  tx1.add_delta(key, make_nnint_delta(500, 100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value() && r3.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
