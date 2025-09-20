@@ -21,6 +21,7 @@
 #include "db_coord.hh"
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
@@ -48,6 +49,14 @@ namespace {
 constexpr uint16_t kCoordServerPort = 8080;
 constexpr uint16_t kExecServerPort = 8081;
 constexpr uint16_t kSchedServerPort = 8082;
+
+std::string
+create_address(uint16_t port)
+{
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return std::format("{}:{}", hostname, port);
+}
 
 int
 hogdb_init(std::string_view path, size_t ram_bytes,
@@ -149,12 +158,9 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         continue;
       }
 
-      const std::string coord_address =
-          "127.0.0.1:" + std::to_string(kCoordServerPort);
-      const std::string exec_address =
-          "127.0.0.1:" + std::to_string(kExecServerPort);
-      const std::string sched_address =
-          "127.0.0.1:" + std::to_string(kSchedServerPort);
+      const std::string coord_address = create_address(kCoordServerPort);
+      const std::string exec_address = create_address(kExecServerPort);
+      const std::string sched_address = create_address(kSchedServerPort);
       ShardCard card{.protocol = "blah",
                      .upid = {},
                      .block_height = 0,

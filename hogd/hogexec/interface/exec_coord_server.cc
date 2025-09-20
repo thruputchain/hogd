@@ -6,7 +6,6 @@
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -17,7 +16,6 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -38,13 +36,12 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
 }
 
 std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-ExecCoordServer::connect_to_coord_allocate_service(
-    std::string const &coord_address, std::string const &coord_allocate_port)
+ExecCoordServer::connect_to_coord_allocate_service()
 {
-  auto fd = cp_.tcpconnect(coord_address, coord_allocate_port)();
+  auto fd = cp_.tcpconnect(coord_address_, std::to_string(coord_port_))();
   if (!fd) {
     error("Failed to connect to coord allocate service on {}:{}, error={}",
-          coord_address, coord_allocate_port, fd.error().what());
+          coord_address_, coord_port_, fd.error().what());
     return std::nullopt;
   }
 
@@ -53,12 +50,10 @@ ExecCoordServer::connect_to_coord_allocate_service(
 }
 
 IntroExecResult
-ExecCoordServer::get_exec_result(std::string const &coord_address,
-                                 std::string const &coord_allocate_port)
+ExecCoordServer::get_exec_result()
 {
   while (true) {
-    auto client =
-        connect_to_coord_allocate_service(coord_address, coord_allocate_port);
+    auto client = connect_to_coord_allocate_service();
     if (!client) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
@@ -71,16 +66,7 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 void
 ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
 {
-  x23::HostPort host_port;
-  if (!host_port.parse(self_card_.address)) {
-    throw std::runtime_error(
-        std::format("Invalid coord address: {}", self_card_.address));
-  }
-
-  std::string host = {host_port.host.begin(), host_port.host.end()};
-  std::string port = {host_port.port.begin(), host_port.port.end()};
-
-  IntroExecResult exec_result = get_exec_result(host, port);
+  IntroExecResult exec_result = get_exec_result();
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
   if (mock_db) {
     start_rpc_service(*mock_db, exec_result.exec_id);

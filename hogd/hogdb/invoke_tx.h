@@ -6,12 +6,15 @@
 #include <cstddef>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "account.hh"
+#include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
@@ -82,6 +85,10 @@ public:
   HogDBStatus<void> request_deploy_contract(Address const &addr,
                                             const DeployedContractHash &hash);
 
+  // request_new_contract requests to create a new contract.
+  // Does NOT update the refcount on the contract.
+  HogDBStatus<void> request_new_contract(Contract contract);
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -149,6 +156,18 @@ InvokeTX::request_deploy_contract(Address const &addr,
 {
   return request_change(make_address_metadata_item_key(addr),
                         DeployedContractData(hash));
+}
+
+inline HogDBStatus<void>
+InvokeTX::request_new_contract(Contract contract)
+{
+  // TODO(geoff): For some reason, on gcc in CI (not clang locally)
+  // doing the sha256(contract) within the make_contract_code_item_key
+  // function results in what appears to be some kind of memory corruption.
+  // Address sanitizer didn't flag anything, however.
+  auto hash = sha256(contract);
+  return request_change(make_contract_code_item_key(hash),
+                        NewContractData(std::move(contract)));
 }
 
 } // namespace hogd

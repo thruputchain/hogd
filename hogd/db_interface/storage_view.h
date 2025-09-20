@@ -193,7 +193,7 @@ public:
   get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  void commit_contract_create(Contract const &contract);
+  void commit_contract_create(Contract contract);
 
   bool has_bad_item() const { return invalid_state_flag_.is_invalid(); }
 

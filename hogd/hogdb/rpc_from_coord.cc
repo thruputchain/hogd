@@ -125,7 +125,13 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
-  co_return DbBlockResult(to_db_result(commit_block(id)));
+  HogDBStatus<void> ret = commit_block(id);
+  if (!ret)
+    co_return DbBlockResult(DbResult::DbResultError);
+
+  DbBlockResult result(DbResult::DbResultOK);
+  result.block_hash() = ctx_.get_tip().hash;
+  co_return result;
 }
 
 x23::Async<DbResult>
@@ -157,6 +163,8 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
   // TODO(abelay): we could potential free memory here too.
 
   DbBlockResult ret(DbResult::DbResultOK);
+  // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
+  // hash is invalid. Discuss with Geoff and David about how to resolve this.
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
