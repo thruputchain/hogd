@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <format>
@@ -68,6 +69,8 @@ public:
   }
   constexpr bool operator==(const Address &addr) const = default;
 
+  [[nodiscard]] constexpr auto get_raw() const { return addr_; }
+
 private:
   friend struct std::formatter<Address>;
 
@@ -89,23 +92,67 @@ make_address(std::integral auto val)
   return Address(buf);
 }
 
-// ItemKey identifies an on-chain storage item for an Address.
+// This is a superset of the StorageKeyTypes.
+// Every StorageKeyType belongs to an Address,
+// but some ItemTypes, like wasm code, do not.
+enum class ItemKeyType {
+  kItemKeyTypeContractData = 0,
+  kItemKeyTypeFreeNativeTokenBalance = 1,
+  kItemKeyTypeAccountAuthData = 2,
+  kItemKeyTypeAddressMetadata = 3,
+  kItemKeyTypeContractCode = 4,
+  kItemKeyTypeContractRefcount = 5,
+};
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::ItemKeyType> {
+  constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::ItemKeyType &type, format_context &ctx)
+  {
+    switch (type) {
+    case hogd::ItemKeyType::kItemKeyTypeContractData:
+      return format_to(ctx.out(), "kItemKeyTypeContractData");
+    case hogd::ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
+      return format_to(ctx.out(), "kItemKeyTypeFreeNativeTokenBalance");
+    case hogd::ItemKeyType::kItemKeyTypeAccountAuthData:
+      return format_to(ctx.out(), "kItemKeyTypeAccountAuthData");
+    case hogd::ItemKeyType::kItemKeyTypeAddressMetadata:
+      return format_to(ctx.out(), "kItemKeyTypeAddressMetadata");
+    case hogd::ItemKeyType::kItemKeyTypeContractCode:
+      return format_to(ctx.out(), "kItemKeyTypeContractCode");
+    case hogd::ItemKeyType::kItemKeyTypeContractRefcount:
+      return format_to(ctx.out(), "kItemKeyTypeContractRefcount");
+    }
+    return format_to(ctx.out(), "Unknown");
+  }
+};
+
+namespace hogd {
+
+// ItemKey identifies an on-chain storage item.
 class ItemKey {
 public:
   constexpr ItemKey(
       Address addr, RawKey key,
-      StorageKeyType key_type = StorageKeyType::kStorageKeyTypeContractData)
+      ItemKeyType key_type = ItemKeyType::kItemKeyTypeContractData)
     : item_key_{.addr = addr, .key = key}, key_type_(key_type),
       memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
   {}
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
     switch (key_type_) {
-    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-    case StorageKeyType::kStorageKeyTypeAccountAuthData:
-    case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    // ItemKeyTypes that do not use the .key field
+    case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
+    case ItemKeyType::kItemKeyTypeAccountAuthData:
+    case ItemKeyType::kItemKeyTypeAddressMetadata:
+    // These ItemKeyTypes use the .addr field, but as a SHA256Hash,
+    // not an Address.
+    case ItemKeyType::kItemKeyTypeContractCode:
+    case ItemKeyType::kItemKeyTypeContractRefcount:
       return item_key_.addr.as_bytes();
-    case StorageKeyType::kStorageKeyTypeContractData:
+    case ItemKeyType::kItemKeyTypeContractData:
       return byte_view(item_key_);
     }
     std::unreachable();
@@ -115,11 +162,16 @@ public:
     if (key_type_ != key.key_type_)
       return false;
     switch (key_type_) {
-    case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-    case StorageKeyType::kStorageKeyTypeAccountAuthData:
-    case StorageKeyType::kStorageKeyTypeAddressMetadata:
+    // ItemKeyTypes that do not use the .key field
+    case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
+    case ItemKeyType::kItemKeyTypeAccountAuthData:
+    case ItemKeyType::kItemKeyTypeAddressMetadata:
+    // These ItemKeyTypes use the .addr field, but as a SHA256Hash,
+    // not an Address.
+    case ItemKeyType::kItemKeyTypeContractCode:
+    case ItemKeyType::kItemKeyTypeContractRefcount:
       return item_key_.addr == key.item_key_.addr;
-    case StorageKeyType::kStorageKeyTypeContractData:
+    case ItemKeyType::kItemKeyTypeContractData:
       return item_key_.addr == key.item_key_.addr &&
              item_key_.key == key.item_key_.key;
     }
@@ -128,24 +180,38 @@ public:
 
   constexpr bool is_address_balance() const
   {
-    return key_type_ == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance;
+    return key_type_ == ItemKeyType::kItemKeyTypeFreeNativeTokenBalance;
   }
   constexpr bool is_account_auth_data() const
   {
-    return key_type_ == StorageKeyType::kStorageKeyTypeAccountAuthData;
+    return key_type_ == ItemKeyType::kItemKeyTypeAccountAuthData;
   }
   constexpr bool is_address_metadata() const
   {
-    return key_type_ == StorageKeyType::kStorageKeyTypeAddressMetadata;
+    return key_type_ == ItemKeyType::kItemKeyTypeAddressMetadata;
   }
   constexpr bool is_contract_data() const
   {
-    return key_type_ == StorageKeyType::kStorageKeyTypeContractData;
+    return key_type_ == ItemKeyType::kItemKeyTypeContractData;
+  }
+  constexpr bool is_contract_code() const
+  {
+    return key_type_ == ItemKeyType::kItemKeyTypeContractCode;
+  }
+  constexpr bool is_contract_refcount() const
+  {
+    return key_type_ == ItemKeyType::kItemKeyTypeContractRefcount;
   }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
+
+  [[nodiscard]] constexpr SHA256Hash get_contract_code_hash() const
+  {
+    assert(is_contract_code() || is_contract_refcount());
+    return item_key_.addr.get_raw();
+  }
   [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
 
-  constexpr StorageKeyType key_type() const { return key_type_; }
+  constexpr auto key_type() const { return key_type_; }
 
 private:
   friend struct std::formatter<ItemKey>;
@@ -155,7 +221,7 @@ private:
     Address addr;
     RawKey key;
   } item_key_;
-  StorageKeyType key_type_;
+  ItemKeyType key_type_;
   const size_t memoized_hash_;
 };
 
@@ -178,23 +244,35 @@ make_item_key(const Address &addr, std::integral auto val)
 make_address_balance_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf,
-                 StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeFreeNativeTokenBalance);
 }
 
 [[nodiscard]] constexpr ItemKey
 make_account_auth_data_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf,
-                 StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeAccountAuthData);
 }
 
 [[nodiscard]] constexpr ItemKey
 make_address_metadata_item_key(const Address &addr)
 {
   RawKey buf{};
-  return ItemKey(addr, buf, StorageKeyType::kStorageKeyTypeAddressMetadata);
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeAddressMetadata);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_contract_code_item_key(SHA256Hash const &hash)
+{
+  RawKey buf{};
+  return ItemKey(hash, buf, ItemKeyType::kItemKeyTypeContractCode);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_contract_refcount_item_key(SHA256Hash const &hash)
+{
+  RawKey buf{};
+  return ItemKey(hash, buf, ItemKeyType::kItemKeyTypeContractRefcount);
 }
 
 [[nodiscard]] constexpr ItemKey

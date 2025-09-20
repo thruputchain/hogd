@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <span>
 #include <string>
+#include <utility>
 
 // xdr types
 #include "account.hh"
@@ -47,6 +48,7 @@ enum class Prefix : char {
   kAddressMetadata = 'M',
   kContractDataKey = 'K',
   kWasmCode = 'C',
+  kWasmCodeRefcount = 'R',
 };
 
 // Warning: you may have to update this if you make changes to Prefix.
@@ -70,6 +72,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kAccountAuthData:
   case Prefix::kAddressMetadata:
   case Prefix::kContractDataKey:
+  case Prefix::kWasmCodeRefcount:
   case Prefix::kWasmCode:
     return true;
   default:
@@ -306,21 +309,27 @@ HogDBStatus<size_t>
 HogDBDAO::get_item_size(const ItemKey &key)
 {
   switch (key.key_type()) {
-  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+  case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
     assert(key.is_address_balance());
     return db_.get_size(make_address_key(key.get_address(), Prefix::kBalance));
-  case StorageKeyType::kStorageKeyTypeAccountAuthData:
+  case ItemKeyType::kItemKeyTypeAccountAuthData:
     assert(key.is_account_auth_data());
     return db_.get_size(
         make_address_key(key.get_address(), Prefix::kAccountAuthData));
-  case StorageKeyType::kStorageKeyTypeAddressMetadata:
+  case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
     return db_.get_size(
         make_address_key(key.get_address(), Prefix::kAddressMetadata));
-  case StorageKeyType::kStorageKeyTypeContractData:
+  case ItemKeyType::kItemKeyTypeContractData:
     return db_.get_size(make_contract_data_key(key.as_bytes()));
+  case ItemKeyType::kItemKeyTypeContractCode:
+    return db_.get_size(
+        make_address_key(key.get_contract_code_hash(), Prefix::kWasmCode));
+  case ItemKeyType::kItemKeyTypeContractRefcount:
+    return db_.get_size(make_address_key(key.get_contract_code_hash(),
+                                         Prefix::kWasmCodeRefcount));
   }
-  error("unknown item key type: {}", key.key_type());
+  error("unknown item key type: {}", std::to_underlying(key.key_type()));
   return HogDBError(HogDBCode::kInternal);
 }
 

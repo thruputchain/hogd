@@ -1,9 +1,19 @@
 #!/bin/bash
 
+BUILD_DIR=/home/local/jhumphri/build
+
 CHUCKD_BINARY=~/go/bin/chuckd
-LOADGEN_BINARY=/home/local/jhumphri/build/hogd/loadgen/loadgen_server
-HOGDB_BINARY=/home/local/jhumphri/build/hogd/hogdb/hogdb
-HOGEXEC_BINARY=/home/local/jhumphri/build/hogd/hogexec/hogexec
+LOADGEN_BINARY=${BUILD_DIR}/hogd/loadgen/loadgen_server
+HOGEXEC_BINARY=${BUILD_DIR}/hogd/hogexec/hogexec
+HOGDB_BINARY=${BUILD_DIR}/hogd/hogdb/hogdb
+
+# Set to 1 to enable x23 RPC logging.
+X23TRACE=0
+
+killall -9 chuckd > /dev/null 2>&1
+killall -9 loadgen_server > /dev/null 2>&1
+killall -9 hogexec > /dev/null 2>&1
+killall -9 hogdb > /dev/null 2>&1
 
 set -Eeuo pipefail
 
@@ -62,21 +72,34 @@ wait_port 11222
   --in-addr :7888                \
   --loadgen-addr localhost:11222 \
   --num-accts 10000              \
-  --num-txs 1000000              \
+  --num-txs 20000                \
   --exec-batch 100               \
   --exec-par 10                  \
-  --max-msg-size 200000000 &
+  --max-msg-size 400000000       \
+  &
 wait_port 7888
-
-# Start hogdb.
-echo "Start hogdb"
-"$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
 # Start hogexec.
 echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1:7888 1 &
+"$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
+
+# Start hogdb.
+echo "Start hogdb"
+# Remove any existing database so the experiment starts from a clean slate.
+rm -rf /tmp/hogdb
+"$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
 
 # TODO(jhumphri): Launch the mempool.
+
+# Wait for hogexec (port 8070).
+wait_port 8070
+
+# Wait for hogdb (ports 8080, 8081, and 8082).
+wait_port 8080
+wait_port 8081
+wait_port 8082
+
+echo "Done with launch."
 
 pids=($(jobs -pr))
 for pid in "${pids[@]}"; do

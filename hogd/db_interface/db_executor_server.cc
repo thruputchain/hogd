@@ -1,6 +1,5 @@
 #include "hogd/db_interface/db_executor_server.h"
 
-#include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -10,6 +9,7 @@
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include <utility>
 
 namespace hogd {
 
@@ -29,14 +29,15 @@ SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
 }
 
 RPCError
-SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
+SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                         NewContractBatch new_contracts)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
     return RPCError::kRPCBadBlockID;
   }
 
-  block_data->commit_transaction(tx);
+  block_data->commit_transaction(tx, std::move(new_contracts));
   return RPCError::kRPCNone;
 }
 
@@ -106,19 +107,6 @@ SyncDBExecutorServer::get_snapshot_item(BlockID block,
   out.error(RPCError::kRPCNone);
   out.item() = item->to_wire_item();
   return out;
-}
-
-RPCError
-SyncDBExecutorServer::commit_contract_create(BlockID block,
-                                             Contract const &contract)
-{
-  auto block_data = block_manager_->get_block_data(block);
-  if (!block_data) {
-    return RPCError::kRPCBadBlockID;
-  }
-
-  block_data->commit_contract_create(contract);
-  return RPCError::kRPCNone;
 }
 
 ExpectedContract

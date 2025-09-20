@@ -168,6 +168,15 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
   return ret;
 }
 
+inline HogDBStatus<void>
+NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
+                        const ItemKey &key) const
+{
+  auto buf = x23::serialize(new_contract_);
+  return db.write_wasm_code(key.get_contract_code_hash(),
+                            std::as_bytes(std::span(buf)));
+}
+
 namespace {
 
 template<typename T>
