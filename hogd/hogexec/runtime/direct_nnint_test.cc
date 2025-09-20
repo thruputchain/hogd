@@ -18,7 +18,7 @@ class DirectNNIntTest : public ::testing::TestWithParam<TestDB>,
 public:
   DirectNNIntTest()
     : NativeContractTestFramework(
-          true, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
