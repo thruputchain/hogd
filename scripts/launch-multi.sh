@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# -------------------------------
+# These parameters are CONFIGURABLE.
 BUILD_DIR=/home/local/jhumphri/build
 
 CHUCKD_BINARY=~/go/bin/chuckd
@@ -8,32 +10,45 @@ HOGEXEC_BINARY=${BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${BUILD_DIR}/hogd/hogdb/hogdb
 
 procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
+loadgen_server="hog3"
 chuckd_server="hog3"
 hogexec_servers=("hog4" "hog5")
 hogdb_servers=("hog6")
-all_servers=("$chuckd_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}")
 
 # Set to 1 to enable x23 RPC logging.
+# TODO(jhumphri): Do this properly (sometimes does not work). Also set this on
+# the remote machines.
 X23TRACE=0
+# -------------------------------
 
+# -------------------------------
+# The parameters below here are NOT CONFIGURABLE.
+binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
+all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}")
+# -------------------------------
 
+# The code starts below.
+
+# Kills all of the processes on all of the servers.
 kill_everything() {
   killall -9 "${procs[@]}" > /dev/null 2>&1
   for s in "${all_servers[@]}"; do
-    ssh "$s" 'killall -9 "${procs[@]}" > /dev/null 2>&1 || true'
+    ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true"
   done
 }
 
+echo "Killing stale processes..."
 kill_everything
 
 set -Eeuo pipefail
 
-# Kill the whole process group on exit or when interrupted.
+# Kill all processes on all servers on exit or when interrupted.
 cleanup() {
-  status=$?                                # remember why we’re exiting
+  status=$?
 
   kill_everything
-  trap - EXIT INT TERM                     # prevent re-entry
+  # prevent re-entry into the trap handler.
+  trap - EXIT INT TERM
   exit $status
 }
 trap cleanup EXIT INT TERM
@@ -50,6 +65,46 @@ if [ ! -x "$CHUCKD_BINARY" ]; then
   go install github.com/groundhogchain/chuckd/chuckd@latest
 fi
 
+build_all() {
+  for s in "${all_servers[@]}"; do
+    ssh "$s" "bash -lc 'make -C \"$BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
+  done
+  wait
+}
+build_all
+
+# Checks that the binaries are the same on all servers.
+check_binaries() {
+  for b in "${binaries[@]}"; do
+    local reference_hash=""
+
+    for s in "${all_servers[@]}"; do
+      # Run ssh as the condition so set -e won't kill the script on failure
+      if remote_output=$(ssh -o BatchMode=yes -o ConnectTimeout=5 \
+           "$s" "sha256sum '${b}'" 2>/dev/null); then
+        remote_hash=${remote_output%% *}
+        if [ -z "$remote_hash" ]; then
+          echo "$s: empty hash for file '${b}'."
+          exit 1
+        fi
+        if [ -z "$reference_hash" ]; then
+          reference_hash="$remote_hash"
+        elif [ "$remote_hash" != "$reference_hash" ]; then
+          echo "$s: hash mismatch for file '${b}'"
+          exit 1
+        fi
+      else
+       echo "$s: Missing file '${b}'."
+       exit 1
+      fi
+    done
+  done
+}
+
+echo "Checking binaries..."
+check_binaries
+
+# Wait for the port to open on the remote machine.
 wait_port() {
   local host=$1
   local port=$2
@@ -66,41 +121,42 @@ wait_port() {
 # background with ["$LOADGEN_BINARY" -p 11222 &], stdin gets closed immediately,
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
-setsid -w "$LOADGEN_BINARY" -p 11222 < /dev/tty &
+echo "Start loadgen..."
+setsid -w "$LOADGEN_BINARY" -p 11222 < /dev/tty > /tmp/loadgen.log &
 wait_port localhost 11222
 
+echo "Start chuckd..."
 # Start chuckd.
-"$CHUCKD_BINARY"                 \
-  bench loadgen                  \
-  --stack                        \
-  --level info                   \
-  --in-addr :7888                \
-  --loadgen-addr localhost:11222 \
-  --num-accts 10000              \
-  --num-txs 20000                \
-  --exec-batch 100               \
-  --exec-par 10                  \
-  --max-msg-size 400000000       \
-  &
-wait_port localhost 7888
+ssh "$chuckd_server" "nohup \"$CHUCKD_BINARY\" \
+  bench loadgen                                \
+  --stack                                      \
+  --level info                                 \
+  --in-addr :7888                              \
+  --loadgen-addr \"$loadgen_server\":11222     \
+  --num-accts 10000                            \
+  --num-txs 20000                              \
+  --exec-batch 100                             \
+  --exec-par 10                                \
+  --max-msg-size 400000000                     \
+  > /tmp/chuckd.log 2>&1 &"
+wait_port "$chuckd_server" 7888
 
 # Start hogexec.
-echo "Start hogexec"
+echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  ssh "$s" "nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/dev/null 2>&1 &"
+  ssh "$s" "nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/tmp/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
-echo "Start hogdb"
+echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "$s" "rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 >/dev/null 2>&1 &"
+  ssh "$s" "rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 > /tmp/hogdb.log 2>&1 &"
 done
 
 # TODO(jhumphri): Launch the mempool.
 
 # Wait for hogexec (port 8070).
-wait_port localhost 8070
 for s in "${hogexec_servers[@]}"; do
   wait_port "$s" 8070
 done
@@ -113,6 +169,18 @@ for s in "${hogdb_servers[@]}"; do
 done
 
 echo "Done with launch."
+
+# Stream the logs from each server.
+ssh "$loadgen_server" "tail -f /tmp/loadgen.log" | sed "s/^/[$loadgen_server] /" &
+ssh "$chuckd_server" "tail -f /tmp/chuckd.log" | sed "s/^/[$chuckd_server] /" &
+
+for s in "${hogexec_servers[@]}"; do
+  ssh "$s" "tail -f /tmp/hogexec.log" | sed "s/^/[$s] /" &
+done
+
+for s in "${hogdb_servers[@]}"; do
+  ssh "$s" "tail -f /tmp/hogdb.log" | sed "s/^/[$s] /" &
+done
 
 pids=($(jobs -pr))
 for pid in "${pids[@]}"; do
