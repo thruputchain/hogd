@@ -7,20 +7,19 @@ LOADGEN_BINARY=${BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${BUILD_DIR}/hogd/hogdb/hogdb
 
+procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
+chuckd_server="hog3"
+hogexec_servers=("hog4" "hog5")
+hogdb_servers=("hog6")
+all_servers=("$chuckd_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}")
+
 # Set to 1 to enable x23 RPC logging.
 X23TRACE=0
 
-killall -9 chuckd > /dev/null 2>&1
-killall -9 loadgen_server > /dev/null 2>&1
-killall -9 hogexec > /dev/null 2>&1
-killall -9 hogdb > /dev/null 2>&1
-
-procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
-remote_servers=("hog4" "hog5")
 
 kill_everything() {
   killall -9 "${procs[@]}" > /dev/null 2>&1
-  for s in "${remote_servers[@]}"; do
+  for s in "${all_servers[@]}"; do
     ssh "$s" 'killall -9 "${procs[@]}" > /dev/null 2>&1 || true'
   done
 }
@@ -87,30 +86,31 @@ wait_port localhost 7888
 
 # Start hogexec.
 echo "Start hogexec"
-"$HOGEXEC_BINARY" 127.0.0.1:7888 50 &
-for s in "${remote_servers[@]}"; do
-  echo $s
-  ssh "$s" "nohup \"$HOGEXEC_BINARY\" hog3:7888 50 >/dev/null 2>&1 &"
+for s in "${hogexec_servers[@]}"; do
+  ssh "$s" "nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/dev/null 2>&1 &"
 done
 
 # Start hogdb.
 echo "Start hogdb"
-# Remove any existing database so the experiment starts from a clean slate.
-rm -rf /tmp/hogdb
-"$HOGDB_BINARY" /tmp/hogdb 10000000000 127.0.0.1:7888 &
+for s in "${hogdb_servers[@]}"; do
+  # Remove any existing database so the experiment starts from a clean slate.
+  ssh "$s" "rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 >/dev/null 2>&1 &"
+done
 
 # TODO(jhumphri): Launch the mempool.
 
 # Wait for hogexec (port 8070).
 wait_port localhost 8070
-for s in "${remote_servers[@]}"; do
+for s in "${hogexec_servers[@]}"; do
   wait_port "$s" 8070
 done
 
 # Wait for hogdb (ports 8080, 8081, and 8082).
-wait_port localhost 8080
-wait_port localhost 8081
-wait_port localhost 8082
+for s in "${hogdb_servers[@]}"; do
+  wait_port "$s" 8080
+  wait_port "$s" 8081
+  wait_port "$s" 8082
+done
 
 echo "Done with launch."
 
