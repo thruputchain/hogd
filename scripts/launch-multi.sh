@@ -47,7 +47,7 @@ cleanup() {
   status=$?
 
   kill_everything
-  # prevent re-entry into the trap handler.
+  # Prevent re-entry into the trap handler.
   trap - EXIT INT TERM
   exit $status
 }
