@@ -67,10 +67,11 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     * `make -C build -j$(nproc)`
 
 1. Tidy and format scripts require the following:
-    * clang-tidy
     * clang-format
-    * flake8 (for python)
+    * clang-tidy
     * clippy (for rust)
+    * flake8 (for python)
+    * shfmt
 
 ## Update instructions
 

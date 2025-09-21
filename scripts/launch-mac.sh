@@ -8,20 +8,20 @@
 # Set to 1 to enable x23 RPC logging.
 X23TRACE=0
 
-killall -9 chuckd > /dev/null 2>&1
-killall -9 loadgen_server > /dev/null 2>&1
-killall -9 hogexec > /dev/null 2>&1
-killall -9 hogdb > /dev/null 2>&1
+killall -9 chuckd >/dev/null 2>&1
+killall -9 loadgen_server >/dev/null 2>&1
+killall -9 hogexec >/dev/null 2>&1
+killall -9 hogdb >/dev/null 2>&1
 
 set -Eeuo pipefail
 
 # Kill the whole process group on exit or when interrupted.
 cleanup() {
-  status=$?                                # remember why we’re exiting
-  trap - EXIT INT TERM                     # prevent re-entry
+  status=$?            # remember why we’re exiting
+  trap - EXIT INT TERM # prevent re-entry
   # Send SIGTERM to *entire* process group (children + grandchildren)
-  kill -TERM -0 2>/dev/null || true        # no-op: touches PG, helps set $? on some shells
-  kill -TERM -- -$$ 2>/dev/null || true    # polite stop
+  kill -TERM -0 2>/dev/null || true     # no-op: touches PG, helps set $? on some shells
+  kill -TERM -- -$$ 2>/dev/null || true # polite stop
   # Give them a moment to exit gracefully
   sleep 1
   # Anything stubborn gets SIGKILL
@@ -72,21 +72,21 @@ wait_port() {
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
 # setsid -w "$LOADGEN_BINARY" -p 11222 < /dev/tty &
-nohup "$LOADGEN_BINARY" -p 11222 < /dev/tty &
+nohup "$LOADGEN_BINARY" -p 11222 </dev/tty &
 wait_port 11222
 
 # Start chuckd.
-"$CHUCKD_BINARY"                 \
-  bench loadgen                  \
-  --stack                        \
-  --level info                   \
-  --in-addr :7888                \
+"$CHUCKD_BINARY" \
+  bench loadgen \
+  --stack \
+  --level info \
+  --in-addr :7888 \
   --loadgen-addr localhost:11222 \
-  --num-accts 10000              \
-  --num-txs 20000                \
-  --exec-batch 100               \
-  --exec-par 10                  \
-  --max-msg-size 400000000       \
+  --num-accts 10000 \
+  --num-txs 20000 \
+  --exec-batch 100 \
+  --exec-par 10 \
+  --max-msg-size 400000000 \
   &
 wait_port 7888
 

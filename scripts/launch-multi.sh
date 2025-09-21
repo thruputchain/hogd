@@ -31,7 +31,7 @@ all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb
 
 # Kills all of the processes on all of the servers.
 kill_everything() {
-  killall -9 "${procs[@]}" > /dev/null 2>&1
+  killall -9 "${procs[@]}" >/dev/null 2>&1
   for s in "${all_servers[@]}"; do
     ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true"
   done
@@ -81,7 +81,7 @@ check_binaries() {
     for s in "${all_servers[@]}"; do
       # Run ssh as the condition so set -e won't kill the script on failure
       if remote_output=$(ssh -o BatchMode=yes -o ConnectTimeout=5 \
-           "$s" "sha256sum '${b}'" 2>/dev/null); then
+        "$s" "sha256sum '${b}'" 2>/dev/null); then
         remote_hash=${remote_output%% *}
         if [ -z "$remote_hash" ]; then
           echo "$s: empty hash for file '${b}'."
@@ -94,8 +94,8 @@ check_binaries() {
           exit 1
         fi
       else
-       echo "$s: Missing file '${b}'."
-       exit 1
+        echo "$s: Missing file '${b}'."
+        exit 1
       fi
     done
   done
@@ -122,7 +122,7 @@ wait_port() {
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
 echo "Start loadgen..."
-setsid -w "$LOADGEN_BINARY" -p 11222 < /dev/tty > /tmp/loadgen.log &
+setsid -w "$LOADGEN_BINARY" -p 11222 </dev/tty >/tmp/loadgen.log &
 wait_port localhost 11222
 
 echo "Start chuckd..."
