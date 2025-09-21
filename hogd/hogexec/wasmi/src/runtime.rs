@@ -29,6 +29,8 @@ pub struct WasmiRuntime {
     pub instance: Instance,
 }
 
+use crate::debug_log;
+
 fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // all of the wasmi trap codes, in version 0.36,
     // are raised deterministically.
@@ -45,13 +47,18 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
     if export.is_none() {
+        debug_log!(eprintln!("\"memory\" not exported from module"));
         return false;
     }
     let export_unwrapped = export.unwrap();
 
     if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
+        debug_log!(if memory_type.initial_pages() > 1.into() {
+            eprintln!("Wasm initial memory exceeds limit: {memory_type:?}")
+        });
         return memory_type.initial_pages() <= 1.into();
     }
+    debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
     false
 }
 
@@ -68,12 +75,18 @@ impl WasmiRuntime {
                 (module.module, module.linker)
             } else {
                 let linker = context.linker();
+
                 let module =
                     unsafe { Module::new_unchecked(linker.engine(), bytes) }
+                        .inspect_err(|_e| {
+                            debug_log!(eprintln!(
+                                "Module new_unchecked error: {_e}"
+                            ))
+                        })
                         .ok()?;
+
                 if !check_memory_limit(&module) {
-                    #[cfg(feature = "debug_logging")]
-                    eprintln!("Module instantiation failed: Memory export verification failed");
+                    debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
                     return None;
                 }
                 context.put_cached_module(hash, &module, &linker);
@@ -83,39 +96,42 @@ impl WasmiRuntime {
             let linker = context.linker();
             let module =
                 unsafe { Module::new_unchecked(linker.engine(), bytes) }
+                    .inspect_err(|_e| {
+                        debug_log!(eprintln!(
+                            "Module new_unchecked error: {_e}"
+                        ))
+                    })
                     .ok()?;
 
             if !check_memory_limit(&module) {
-                #[cfg(feature = "debug_logging")]
-                eprintln!("Module instantiation failed: Memory export verification failed");
+                debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
                 return None;
             }
             (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker.instantiate(&mut store, &module);
-        #[cfg(feature = "debug_logging")]
-        let instance_result = instance_result.map_err(|e| {
-            eprintln!("Error instantiating store: {}", e);
-            e
-        });
-        let instance = instance_result.ok()?.ensure_no_start(&mut store);
-        #[cfg(feature = "debug_logging")]
-        let instance = instance.map_err(|e| {
-            eprintln!("Error ensuring no start: {}", e);
-            e
-        });
-        Some(Self {
-            store,
-            instance: instance.ok()?,
-        })
+        let instance_result = linker
+            .instantiate(&mut store, &module)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Error instantiating store: {_e}"))
+            })
+            .ok()?;
+
+        let instance = instance_result
+            .ensure_no_start(&mut store)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Error ensuring no start: {_e}"))
+            })
+            .ok()?;
+        Some(Self { store, instance })
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
         let func = match self.instance.get_func(&self.store, method) {
             Some(v) => v,
             _ => {
+                debug_log!(eprintln!("Function {method} not found"));
                 return WasmiInvokeResult::error(
                     InvokeErrorCode::kInvokeDeterministic,
                 );
@@ -131,6 +147,9 @@ impl WasmiRuntime {
                 err.downcast_ref::<external_call::TrampolineError>()
                     .map_or_else(
                         || {
+                            debug_log!(eprintln!(
+                                "Unknown error from func.call: {err:?}"
+                            ));
                             WasmiInvokeResult::error(
                                 InvokeErrorCode::kInvokeUnrecoverable,
                             )

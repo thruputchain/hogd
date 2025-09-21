@@ -10,6 +10,22 @@ pub mod runtime;
 
 use crate::runtime::WasmiRuntime;
 
+#[cfg(feature = "debug_logging")]
+#[macro_export]
+macro_rules! debug_log {
+    ($e:expr) => {
+        $e
+    };
+}
+
+#[cfg(not(feature = "debug_logging"))]
+#[macro_export]
+macro_rules! debug_log {
+    ($e:expr) => {
+        ()
+    };
+}
+
 #[repr(C)]
 pub struct WasmiMemorySlice {
     mem: *mut u8,

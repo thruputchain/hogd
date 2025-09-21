@@ -294,6 +294,7 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
 {
   if (key.is_address_balance())
     return write_address_balance(key.get_address(), val);
+  assert(key.is_contract_data());
 
   return db_.put(make_contract_data_key(key.as_bytes()), kNNInt128,
                  byte_view(cpu_to_le(val)));
