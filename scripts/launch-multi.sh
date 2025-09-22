@@ -28,6 +28,15 @@ all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
   "${hogdb_servers[@]}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5)
+
+results_only=false
+
+for arg in "$@"; do
+  if [[ $arg == "--results-only" ]]; then
+    results_only=true
+    break
+  fi
+done
 # -------------------------------
 
 # The code starts below.
@@ -213,21 +222,28 @@ done
 
 echo "Done with launch."
 
-# Stream the logs from each server.
-ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-  "tail -f /tmp/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
-ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  "tail -f /tmp/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+if $results_only; then
+  # Stream only the results.
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -f /tmp/chuckd.log | grep --line-buffered obtain_delay_msec" |
+    sed "s/^/[${chuckd_server}\/chuckd] /" &
+else
+  # Stream the logs from each server.
+  ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
+    "tail -f /tmp/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -f /tmp/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
 
-for s in "${hogexec_servers[@]}"; do
-  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "tail -f /tmp/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
-done
+  for s in "${hogexec_servers[@]}"; do
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "tail -f /tmp/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
+  done
 
-for s in "${hogdb_servers[@]}"; do
-  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "tail -f /tmp/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
-done
+  for s in "${hogdb_servers[@]}"; do
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "tail -f /tmp/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
+  done
+fi
 
 ssh_pids=($(jobs -pr))
 
