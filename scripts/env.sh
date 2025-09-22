@@ -17,8 +17,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
   NPROC=$(nproc)
 fi
+SH_FORMAT=shfmt
 
 # enable custom environment setup if file conf.sh is present
 if [ -f ${SCRIPT_DIR}/conf.sh ]; then
-    source ${SCRIPT_DIR}/conf.sh
+  source ${SCRIPT_DIR}/conf.sh
 fi
