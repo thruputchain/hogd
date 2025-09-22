@@ -24,7 +24,8 @@ HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
 
 binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
-all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}")
+all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
+  "${hogdb_servers[@]}")
 # -------------------------------
 
 # The code starts below.
@@ -72,7 +73,8 @@ trap cleanup EXIT INT TERM
 build_all() {
   for s in "${all_servers[@]}"; do
     ssh "$s" "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
-    ssh "$s" "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
+    ssh "$s" \
+      "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
   done
   wait
 }
@@ -122,7 +124,8 @@ check_binaries() {
       if [[ -z $reference_hash ]]; then
         reference_hash="$remote_hash"
       elif [[ $remote_hash != "$reference_hash" ]]; then
-        echo "$s: hash mismatch for '$b' (got $remote_hash, expected $reference_hash)."
+        echo "$s: hash mismatch for '$b' \
+          (got $remote_hash, expected $reference_hash)."
         return 1
       fi
     done
@@ -150,10 +153,10 @@ wait_port() {
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
 echo "Start loadgen..."
-# TODO(jhumphri): Start on remove server.
-# TODO(jhumphri): Set X23TRACE for loadgen on remote server.
-setsid -w "$LOADGEN_BINARY" -p 11222 </dev/tty >/tmp/loadgen.log &
-wait_port localhost 11222
+ssh "$loadgen_server" \
+  "export X23TRACE=$X23TRACE; \
+  nohup \"$LOADGEN_BINARY\" -p 11222 >/tmp/loadgen.log 2>&1 &"
+wait_port "$loadgen_server" 11222
 
 echo "Start chuckd..."
 # Start chuckd.
@@ -174,14 +177,21 @@ wait_port "$chuckd_server" 7888
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  ssh "$s" "export X23TRACE=$X23TRACE; nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/tmp/hogexec.log 2>&1 &"
+  ssh "$s" \
+    "export X23TRACE=$X23TRACE; \
+    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 \
+    > /tmp/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
 echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "$s" "export X23TRACE=$X23TRACE; rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 > /tmp/hogdb.log 2>&1 &"
+  ssh "$s" \
+    "export X23TRACE=$X23TRACE; \
+    rm -rf /tmp/hogdb; \
+    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 \
+    > /tmp/hogdb.log 2>&1 &"
 done
 
 # TODO(jhumphri): Launch the mempool.
@@ -201,7 +211,8 @@ done
 echo "Done with launch."
 
 # Stream the logs from each server.
-ssh "$loadgen_server" "tail -f /tmp/loadgen.log" | sed "s/^/[$loadgen_server] /" &
+ssh "$loadgen_server" \
+  "tail -f /tmp/loadgen.log" | sed "s/^/[$loadgen_server] /" &
 ssh "$chuckd_server" "tail -f /tmp/chuckd.log" | sed "s/^/[$chuckd_server] /" &
 
 for s in "${hogexec_servers[@]}"; do
