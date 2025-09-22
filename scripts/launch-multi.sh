@@ -215,18 +215,18 @@ echo "Done with launch."
 
 # Stream the logs from each server.
 ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-  "tail -f /tmp/loadgen.log" | sed "s/^/[$loadgen_server] /" &
+  "tail -f /tmp/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  "tail -f /tmp/chuckd.log" | sed "s/^/[$chuckd_server] /" &
+  "tail -f /tmp/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
 
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "tail -f /tmp/hogexec.log" | sed "s/^/[$s] /" &
+    "tail -f /tmp/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
 done
 
 for s in "${hogdb_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "tail -f /tmp/hogdb.log" | sed "s/^/[$s] /" &
+    "tail -f /tmp/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
 done
 
 ssh_pids=($(jobs -pr))
