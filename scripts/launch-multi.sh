@@ -31,14 +31,18 @@ all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb
 
 # Kills all of the processes on all of the servers.
 kill_everything() {
+  local do_wait=$1
+
   for s in "${all_servers[@]}"; do
     ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true" &
   done
-  wait
+  if [[ $do_wait == true ]]; then
+    wait
+  fi
 }
 
 echo "Killing stale processes..."
-kill_everything
+kill_everything true #do_wait=true
 
 set -Eeuo pipefail
 
@@ -53,10 +57,13 @@ cleanup() {
   # Kill the ssh sessions that print the log statements from the servers.
   kill -9 "${ssh_pids[@]}"
 
-  # Now kill the chuckd and hogd processes on the servers.
-  echo
-  echo "Killing processes on all servers (please wait one moment)..."
-  kill_everything
+  # Now kill the chuckd and hogd processes on the servers. [kill_everything()]
+  # issues the ssh commands as background processes, so these ssh commands will
+  # continue to run after the script exits. I prefer to let the script exit
+  # before the ssh commands complete so that it is not tempting to force quit
+  # the script by hitting Ctrl-C multiple times. The processes will still get
+  # killed on all of the servers.
+  kill_everything false #do_wait=false
 
   exit $status
 }
