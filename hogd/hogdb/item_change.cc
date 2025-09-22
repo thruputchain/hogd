@@ -136,6 +136,10 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
   HogDBStatus<int8_t> type_ret = db.get_item_type(key);
   if (!type_ret) {
+    // Deleting an item that does not exist is not an error.
+    if (type_ret.error() == HogDBCode::kNotFound) {
+      return {};
+    }
     return type_ret.error();
   }
 
@@ -276,7 +280,7 @@ ItemChange::storage_cost_delta(HogDBDAO &db, const ItemKey &key)
 
   // calculate the delta between the size of the changed item and its snapshot.
   ssize_t cost = is_deletion() ? 0 : storage_cost(storage_size());
-  return cost - static_cast<ssize_t>(*snapshot_cost_);
+  return static_cast<ssize_t>(*snapshot_cost_) - cost;
 }
 
 } // namespace hogd

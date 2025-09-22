@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <print>
 #include <string_view>
 #include <utility>
 
@@ -112,10 +111,6 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
 
 TEST_P(DirectBytestringTest, BytestringStorageCosts)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr1 = make_contract_address(0);
   auto contract_addr2 = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -168,10 +163,6 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
 
 TEST_P(DirectBytestringTest, RevertStorageCosts)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   // Create bytestring twice, but first one reverts.
   // The bytestring is still created, and so the cost should reflect
   // one bytestring.
@@ -219,10 +210,6 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
 
 TEST_P(DirectBytestringTest, LengthIncreaseCost)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -278,11 +265,6 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
 
 TEST_P(DirectBytestringTest, DecreaseLengthCost)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
-
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -435,10 +417,6 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
 
 TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -485,10 +463,6 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
 
 TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -588,10 +562,6 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
 
 TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -640,10 +610,6 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
 
 TEST_P(DirectBytestringTest, TransferKeyCosts)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -700,7 +666,8 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
 TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb cost sign fix";
+    GTEST_SKIP() << "Assertion failed: (base_ + minus_ >= 0), function "
+                    "assert_is_valid, file item_change.h, line 103.";
     return;
   }
   auto contract_addr = make_contract_address(0);
@@ -724,7 +691,6 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   int128_t ref_bal_int = from_xdr(ref_bal.value().nnint());
   EXPECT_LT(ref_bal_int, kInitialBalance);
   int128_t required_balance = kInitialBalance - ref_bal_int;
-  std::println("required_balance: {}", required_balance);
   setup_grant_storage_token(contract_addr, required_balance);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -744,6 +710,12 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   EXPECT_EQ(initial_bal_int, 0);
 
   // Now the test begins.
+
+  // This test has two txs:
+  // The first deletes the key, which should free up the storage cost.
+  // However, that cost release cannot occur util the tx commits;
+  // hence, the call to tx3.try_push fails the first time,
+  // and succeeds the second time (after tx2.commit)
 
   // tx2: just delete the key
   auto tx2 = make_new_per_tx_db_proxy();
@@ -784,7 +756,6 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
 
 TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
 {
-
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);
@@ -814,11 +785,10 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
 
 TEST_P(DirectBytestringTest, DeleteThenSetConflict)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 "
-                    "(modify_lock under shared lock)";
-    return;
-  }
+  // This test has two txs.
+  // First two txs delete a key.  But before committing,
+  // the first tx tries to set a new value (which fails).
+  // The first tx commits (the deletion) and the second aborts.
 
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -836,6 +806,19 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
     ASSERT_TRUE(r_init.has_value());
     ASSERT_TRUE(r_init.value());
     ASSERT_TRUE(tx_init.commit_transaction({}).has_value());
+
+    // initialize the reference address
+
+    auto tx_init_ref = make_new_per_tx_db_proxy();
+    tx_init_ref.add_delta(make_addrkey(reference_addr, "test"),
+                          make_bytestring_delta("value"),
+                          std::to_underlying(
+                              StorageItemRPCFlags::kStorageNone));
+    auto r_init_ref = tx_init_ref.try_push_current_subtransaction();
+    ASSERT_TRUE(r_init_ref.has_value());
+    ASSERT_TRUE(r_init_ref.value());
+    ASSERT_TRUE(tx_init_ref.commit_transaction({}).has_value());
+
     advance_block();
   }
 
@@ -881,11 +864,6 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
 
 TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Deletion of non-existent key gives an assertion failure";
-    return;
-  }
-
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);

@@ -126,8 +126,10 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
   HogDBStatus<void> ret = commit_block(id);
-  if (!ret)
+  if (!ret) {
+    error("failed to commit block id {}: error {}", id, ret.error());
     co_return DbBlockResult(DbResult::DbResultError);
+  }
 
   DbBlockResult result(DbResult::DbResultOK);
   result.block_hash() = ctx_.get_tip().hash;

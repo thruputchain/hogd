@@ -109,6 +109,8 @@ BlockTX::modify_balance(const Address &addr, int128_t old_delta,
   if (!nnint) [[unlikely]]
     throw std::runtime_error("locked balance not a nnint128");
 
+  // TODO(geoff): among the other things that need to be changed here is that
+  // this doesn't guarantee that you can always rollback to a savepoint
   ItemChange old_change(NNInt128(nnint->base(), old_delta));
   ItemChange new_change(NNInt128(nnint->base(), new_delta));
   return do_modify_lock(ul, lock, old_change, new_change);
@@ -232,6 +234,7 @@ BlockTX::commit(WorkerPool &pool)
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
+          std::println("failed to commit item change: {}", tmp.error());
           ret = tmp;
         }
       },
@@ -244,6 +247,7 @@ BlockTX::commit(WorkerPool &pool)
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
+          std::println("failed to commit address balance: {}", tmp.error());
           ret = tmp;
         }
       });
