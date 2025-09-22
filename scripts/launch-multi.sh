@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# -------------------------------
 # These parameters are CONFIGURABLE.
+# -------------------------------
 CHUCKD_BUILD_DIR=~/chuckd/chuckd
 HOGD_BUILD_DIR=/home/local/jhumphri/build
 
@@ -14,8 +14,8 @@ hogdb_servers=("hog6")
 export X23TRACE=0
 # -------------------------------
 
-# -------------------------------
 # The parameters below here are NOT CONFIGURABLE.
+# -------------------------------
 CHUCKD_BINARY=${CHUCKD_BUILD_DIR}/chuckd
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
@@ -31,10 +31,10 @@ all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb
 
 # Kills all of the processes on all of the servers.
 kill_everything() {
-  killall -9 "${procs[@]}" >/dev/null 2>&1
   for s in "${all_servers[@]}"; do
-    ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true"
+    ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true" &
   done
+  wait
 }
 
 echo "Killing stale processes..."
@@ -43,12 +43,21 @@ kill_everything
 set -Eeuo pipefail
 
 # Kill all processes on all servers on exit or when interrupted.
+ssh_pids=()
 cleanup() {
   status=$?
 
-  kill_everything
   # Prevent re-entry into the trap handler.
   trap - EXIT INT TERM
+
+  # Kill the ssh sessions that print the log statements from the servers.
+  kill -9 "${ssh_pids[@]}"
+
+  # Now kill the chuckd and hogd processes on the servers.
+  echo
+  echo "Killing processes on all servers (please wait one moment)..."
+  kill_everything
+
   exit $status
 }
 trap cleanup EXIT INT TERM
@@ -171,10 +180,7 @@ for s in "${hogdb_servers[@]}"; do
   ssh "$s" "tail -f /tmp/hogdb.log" | sed "s/^/[$s] /" &
 done
 
-pids=($(jobs -pr))
-for pid in "${pids[@]}"; do
-  if ! wait "$pid"; then
-    # Causes EXIT trap to run, which kills the rest.
-    exit 1
-  fi
-done
+ssh_pids=($(jobs -pr))
+
+# The script just waits forever until Ctrl-C is pressed.
+tail -f /dev/null
