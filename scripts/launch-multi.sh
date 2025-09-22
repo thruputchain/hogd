@@ -2,27 +2,27 @@
 
 # -------------------------------
 # These parameters are CONFIGURABLE.
-BUILD_DIR=/home/local/jhumphri/build
+CHUCKD_BUILD_DIR=~/chuckd/chuckd
+HOGD_BUILD_DIR=/home/local/jhumphri/build
 
-CHUCKD_BINARY=~/go/bin/chuckd
-LOADGEN_BINARY=${BUILD_DIR}/hogd/loadgen/loadgen_server
-HOGEXEC_BINARY=${BUILD_DIR}/hogd/hogexec/hogexec
-HOGDB_BINARY=${BUILD_DIR}/hogd/hogdb/hogdb
-
-procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
 loadgen_server="hog3"
 chuckd_server="hog3"
 hogexec_servers=("hog4" "hog5")
 hogdb_servers=("hog6")
 
 # Set to 1 to enable x23 RPC logging.
-# TODO(jhumphri): Do this properly (sometimes does not work). Also set this on
-# the remote machines.
-X23TRACE=0
+export X23TRACE=0
 # -------------------------------
 
 # -------------------------------
 # The parameters below here are NOT CONFIGURABLE.
+CHUCKD_BINARY=${CHUCKD_BUILD_DIR}/chuckd
+LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
+HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
+HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
+
+procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
+
 binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}")
 # -------------------------------
@@ -53,21 +53,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [ ! -x "$CHUCKD_BINARY" ]; then
-  # Tell [go install] where the groundhog private repositories are.
-  go env -w GOPRIVATE=github.com/groundhogchain/*
-  # Tell [go install] to use SSH to access GitHub rather than HTTPS. This allows
-  # it to use private key SSH authentication rather than requiring a private API
-  # token from GitHub.
-  git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
-  # Install chuckd. This compiles the chuckd binary and places it at
-  # [~/go/bin/chuckd].
-  go install github.com/groundhogchain/chuckd/chuckd@latest
-fi
-
 build_all() {
   for s in "${all_servers[@]}"; do
-    ssh "$s" "bash -lc 'make -C \"$BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
+    ssh "$s" "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
+    ssh "$s" "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
   done
   wait
 }
