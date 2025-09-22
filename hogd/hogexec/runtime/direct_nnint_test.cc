@@ -602,7 +602,7 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   auto key = make_addrkey(query_addr, "nn_key12");
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_nnint_delta(0, 100),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r = tx.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
@@ -613,13 +613,14 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   ASSERT_TRUE(bal.has_value());
   int128_t bal_int = from_xdr(bal.value().nnint());
   EXPECT_LE(bal_int, kInitialBalance);
-  int128_t cost  = kInitialBalance - bal_int;
+  int128_t cost = kInitialBalance - bal_int;
 
   // Now for the test itself.
 
   // The first tx creates a key, and then deletes it.
-  // The second creates a different key, and does try_push_current_subtransaction.  This should fail.
-  // The first tx then rolls back to its initial savepoint, and commits.
+  // The second creates a different key, and does
+  // try_push_current_subtransaction.  This should fail. The first tx then rolls
+  // back to its initial savepoint, and commits.
 
   auto contract_addr = make_contract_address(1);
   setup_grant_storage_token(contract_addr, cost);
@@ -633,11 +634,11 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   ASSERT_TRUE(r1.has_value());
   EXPECT_TRUE(r1.value());
 
-  tx1.add_delta(key_contract, make_delete_delta(), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx1.add_delta(key_contract, make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   EXPECT_TRUE(r2.value());
-
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key_contract_2, make_nnint_delta(0, 200),

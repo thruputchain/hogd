@@ -145,7 +145,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   // take the lock and charge storage cost.
   auto [lock, ul] = item_locks_[key];
   if (lock.ref == 0 && *delta != 0) {
-    HogDBStatus<void> ret = lock_balance(key.get_address(), *delta);
+    HogDBStatus<void> ret = lock_balance(key.get_address(), -*delta);
     if (!ret)
       return ret.error();
   }
@@ -181,8 +181,10 @@ BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
   // workflow.
   auto [lock, ul] = item_locks_[key];
   if (lock.ref == 1 && *old_delta != *new_delta) {
+    // Cost delta reflects the change in storage _cost_, but we are changing
+    // here the amount of remaining available balance (i.e. -cost).
     HogDBStatus<void> ret =
-        modify_balance(key.get_address(), *old_delta, *new_delta);
+        modify_balance(key.get_address(), -*old_delta, -*new_delta);
     if (!ret)
       return ret.error();
   }

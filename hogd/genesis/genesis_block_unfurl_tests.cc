@@ -51,6 +51,12 @@ protected:
 
 TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Genesis block unfurling requires receiving and using "
+                    "storage in same tx";
+    return;
+  }
+
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 
@@ -156,6 +162,12 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 // creations were not included in the db blocktx workflow
 TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Genesis block unfurling requires receiving and using "
+                    "storage in same tx";
+    return;
+  }
+
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 

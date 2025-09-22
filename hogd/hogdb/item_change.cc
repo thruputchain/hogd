@@ -280,7 +280,7 @@ ItemChange::storage_cost_delta(HogDBDAO &db, const ItemKey &key)
 
   // calculate the delta between the size of the changed item and its snapshot.
   ssize_t cost = is_deletion() ? 0 : storage_cost(storage_size());
-  return static_cast<ssize_t>(*snapshot_cost_) - cost;
+  return cost - static_cast<ssize_t>(*snapshot_cost_);
 }
 
 } // namespace hogd

@@ -32,6 +32,12 @@ protected:
 
 TEST_P(ERC20ExperimentTest, Basic)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "ERC20Experiment requires receiving and using storage in same tx";
+    return;
+  }
+
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_accounts = 10,
   });
