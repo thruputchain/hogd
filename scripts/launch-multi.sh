@@ -2,8 +2,8 @@
 
 # These parameters are CONFIGURABLE.
 # -------------------------------
-CHUCKD_BUILD_DIR=~/chuckd/chuckd
-HOGD_BUILD_DIR=/home/local/jhumphri/build
+CHUCKD_BUILD_DIR="/home/hog12/$(whoami)/chuckd/chuckd"
+HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
@@ -26,6 +26,8 @@ procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
 binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
   "${hogdb_servers[@]}")
+
+COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5)
 # -------------------------------
 
 # The code starts below.
@@ -35,7 +37,8 @@ kill_everything() {
   local do_wait=$1
 
   for s in "${all_servers[@]}"; do
-    ssh "$s" "killall -9 ${procs[@]} > /dev/null 2>&1 || true" &
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "killall -9 ${procs[@]} > /dev/null 2>&1 || true" &
   done
   if [[ $do_wait == true ]]; then
     wait
@@ -72,8 +75,9 @@ trap cleanup EXIT INT TERM
 
 build_all() {
   for s in "${all_servers[@]}"; do
-    ssh "$s" "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
-    ssh "$s" \
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
       "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
   done
   wait
@@ -86,9 +90,11 @@ check_binaries() {
     for b in "${binaries[@]}"; do
       for s in "${all_servers[@]}"; do
         {
-          if remote_output=$(ssh "$s" "sha256sum -- '${b}'" 2>/dev/null); then
+          if remote_output=$(ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+            "sha256sum -- '${b}'" 2>/dev/null); then
             remote_hash=${remote_output%% *}
-            [[ -n $remote_hash ]] && echo "$s $b $remote_hash" || echo "$s ERROR"
+            [[ -n $remote_hash ]] &&
+              echo "$s $b $remote_hash" || echo "$s ERROR"
           else
             echo "$s ERROR"
           fi
@@ -147,20 +153,17 @@ wait_port() {
   done
 }
 
-# Start hogd loadgen. loadgen exits when either (1) a character is passed to
-# stdin or (2) stdin is closed. If we just launch the loadgen process in the
-# background with ["$LOADGEN_BINARY" -p 11222 &], stdin gets closed immediately,
-# so the loadgen process immediately exits. To keep stdin open, we run the
-# loadgen process in its own shell.
 echo "Start loadgen..."
-ssh "$loadgen_server" \
+ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
   "export X23TRACE=$X23TRACE; \
   nohup \"$LOADGEN_BINARY\" -p 11222 >/tmp/loadgen.log 2>&1 &"
 wait_port "$loadgen_server" 11222
 
 echo "Start chuckd..."
 # Start chuckd.
-ssh "$chuckd_server" "export X23TRACE=$X23TRACE; nohup \"$CHUCKD_BINARY\" \
+ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+  "export X23TRACE=$X23TRACE;                  \
+  nohup \"$CHUCKD_BINARY\"                     \
   bench loadgen                                \
   --stack                                      \
   --level info                                 \
@@ -177,7 +180,7 @@ wait_port "$chuckd_server" 7888
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  ssh "$s" \
+  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
     nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 \
     > /tmp/hogexec.log 2>&1 &"
@@ -187,7 +190,7 @@ done
 echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "$s" \
+  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
     rm -rf /tmp/hogdb; \
     nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 \
@@ -211,16 +214,19 @@ done
 echo "Done with launch."
 
 # Stream the logs from each server.
-ssh "$loadgen_server" \
-  "tail -f /tmp/loadgen.log" | sed "s/^/[$loadgen_server] /" &
-ssh "$chuckd_server" "tail -f /tmp/chuckd.log" | sed "s/^/[$chuckd_server] /" &
+ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
+  "tail -f /tmp/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
+ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+  "tail -f /tmp/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
 
 for s in "${hogexec_servers[@]}"; do
-  ssh "$s" "tail -f /tmp/hogexec.log" | sed "s/^/[$s] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+    "tail -f /tmp/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
 done
 
 for s in "${hogdb_servers[@]}"; do
-  ssh "$s" "tail -f /tmp/hogdb.log" | sed "s/^/[$s] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+    "tail -f /tmp/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
 done
 
 ssh_pids=($(jobs -pr))
