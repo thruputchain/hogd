@@ -223,6 +223,9 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 void
 BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
 {
+  // TODO(geoff): In many cases we can evaluate here whether or not the item
+  // change commit_change is a no-op.  In such cases, we can avoid acquiring the
+  // lock.
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_[key.get_address()];
     lock.change.commit_change(change);
