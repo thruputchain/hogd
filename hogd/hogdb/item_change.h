@@ -256,6 +256,9 @@ public:
   HogDBStatus<void> merge(const ItemChange &change);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
+  // commit_change marks a change as committed.
+  // The change MUST have been previously merged.
+  void commit_change(const ItemChange &change);
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).

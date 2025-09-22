@@ -247,6 +247,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
+        info("requesting nnint128 for genesis block: {} {}", item_key, value);
         auto r = itx->request_nnint128(item_key, value);
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());

@@ -44,6 +44,8 @@ public:
                                 ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemKey &key, ItemChange &change);
+  // commit_change marks a change as committed.
+  void commit_change(const ItemKey &key, ItemChange const &change);
 
 private:
   struct ItemLock {
