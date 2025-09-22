@@ -234,7 +234,6 @@ BlockTX::commit(WorkerPool &pool)
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
-          std::println("failed to commit item change: {}", tmp.error());
           ret = tmp;
         }
       },
@@ -247,7 +246,6 @@ BlockTX::commit(WorkerPool &pool)
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
-          std::println("failed to commit address balance: {}", tmp.error());
           ret = tmp;
         }
       });
