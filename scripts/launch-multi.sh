@@ -73,38 +73,42 @@ build_all
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
-  for b in "${binaries[@]}"; do
-    local reference_hash=""
-
-    mapfile -t lines < <(
+  mapfile -t lines < <(
+    for b in "${binaries[@]}"; do
       for s in "${all_servers[@]}"; do
         {
           if remote_output=$(ssh -o BatchMode=yes -o ConnectTimeout=5 \
-                               "$s" "sha256sum -- '${b}'" 2>/dev/null); then
+            "$s" "sha256sum -- '${b}'" 2>/dev/null); then
             remote_hash=${remote_output%% *}
-            [[ -n $remote_hash ]] && echo "$s $remote_hash" || echo "$s ERROR"
+            [[ -n $remote_hash ]] && echo "$s $b $remote_hash" || echo "$s ERROR"
           else
             echo "$s ERROR"
           fi
         } &
       done
-      wait
-    )
-    echo "${lines[@]}"
-
-    # Parse results into a per-binary map
-    declare -A hashes_for_bin=()
-    for line in "${lines[@]}"; do
-      read -r srv val <<<"$line"
-      if [[ $val == "ERROR" ]]; then
-        echo "$srv: Missing file or empty hash for '$b'."
-        return 1
-      fi
-      hashes_for_bin["$srv"]="$val"
     done
+    wait
+  )
+
+  # Parse results into a map with [binary-server] as the key.
+  declare -A hashes=()
+  for line in "${lines[@]}"; do
+    read -r srv bin val <<<"$line"
+    if [[ $val == "ERROR" ]]; then
+      echo "$srv: Missing file or empty hash for '$b'."
+      return 1
+    fi
+    hashes["$bin-$srv"]="$val"
+  done
+  for key in "${!hashes[@]}"; do
+    echo "$key => ${hashes[$key]}"
+  done
+
+  for b in "${binaries[@]}"; do
+    local reference_hash=""
 
     for s in "${all_servers[@]}"; do
-      remote_hash="${hashes_for_bin[$s]}"
+      remote_hash="${hashes[$b - $s]}"
       if [[ -z $remote_hash ]]; then
         echo "$s: No result for '$b'."
         return 1
@@ -116,26 +120,6 @@ check_binaries() {
         return 1
       fi
     done
-
-     #for s in "${all_servers[@]}"; do
-     #  # Run ssh as the condition so set -e won't kill the script on failure
-     #  if remote_output=$(ssh "$s" "sha256sum '${b}'" 2>/dev/null); then
-     #    remote_hash=${remote_output%% *}
-     #    if [ -z "$remote_hash" ]; then
-     #      echo "$s: empty hash for file '${b}'."
-     #      exit 1
-     #    fi
-     #    if [ -z "$reference_hash" ]; then
-     #      reference_hash="$remote_hash"
-     #    elif [ "$remote_hash" != "$reference_hash" ]; then
-     #      echo "$s: hash mismatch for file '${b}'"
-     #      exit 1
-     #    fi
-     #  else
-     #    echo "$s: Missing file '${b}'."
-     #    exit 1
-     #  fi
-     #done
   done
 }
 
