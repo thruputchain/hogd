@@ -507,11 +507,70 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
+TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_1.has_value());
+  ASSERT_TRUE(r1_1.value());
+
+  // now tx1 holds the exclusive lock
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_FALSE(r2.value()); // should fail because tx1 holds the exclusive lock
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // now the exclusive lock is no longer held
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_1 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_1.has_value());
+  ASSERT_TRUE(r2_1.value());
+
+  // but tx2 cannot write a different value
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_even_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_2.has_value());
+  ASSERT_FALSE(r2_2.value());
+
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto item = lookup_storage_item_from_db(
+      make_contract_data_addrkey(contract_addr, "test"));
+  ASSERT_TRUE(item.has_value());
+  EXPECT_EQ(item.value().bytestring(), make_bytestring("value_longer"));
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
 TEST_P(DirectBytestringTest, TryInvokeWithRegular)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP()
-        << "Pending hogdb cost sign fix and hogdb exclusive lock release";
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
     return;
   }
   auto contract_addr = make_contract_address(0);

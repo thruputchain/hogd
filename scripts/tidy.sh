@@ -14,13 +14,14 @@ print_usage() {
 
 while getopts 'd:f' flag; do
   case "${flag}" in
-    d) BUILD_DIR="${OPTARG}" ;;
-    f) FIX_FLAG="-fix" ;;
-    *) print_usage
-       exit 1 ;;
-    esac
+  d) BUILD_DIR="${OPTARG}" ;;
+  f) FIX_FLAG="-fix" ;;
+  *)
+    print_usage
+    exit 1
+    ;;
+  esac
 done
-
 
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
@@ -29,9 +30,9 @@ CLIPPY_PID=$!
 
 # Run clang-tidy
 cd ${ROOT_DIR}
-find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
-xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
+find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
+  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
+    -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
   exit 1
@@ -54,7 +55,3 @@ if [ -n "$PYTHON_FILES" ]; then
     exit 1
   fi
 fi
-
-
-
-
