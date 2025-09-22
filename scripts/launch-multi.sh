@@ -150,12 +150,14 @@ wait_port() {
 # so the loadgen process immediately exits. To keep stdin open, we run the
 # loadgen process in its own shell.
 echo "Start loadgen..."
+# TODO(jhumphri): Start on remove server.
+# TODO(jhumphri): Set X23TRACE for loadgen on remote server.
 setsid -w "$LOADGEN_BINARY" -p 11222 </dev/tty >/tmp/loadgen.log &
 wait_port localhost 11222
 
 echo "Start chuckd..."
 # Start chuckd.
-ssh "$chuckd_server" "nohup \"$CHUCKD_BINARY\" \
+ssh "$chuckd_server" "export X23TRACE=$X23TRACE; nohup \"$CHUCKD_BINARY\" \
   bench loadgen                                \
   --stack                                      \
   --level info                                 \
@@ -172,14 +174,14 @@ wait_port "$chuckd_server" 7888
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  ssh "$s" "nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/tmp/hogexec.log 2>&1 &"
+  ssh "$s" "export X23TRACE=$X23TRACE; nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 >/tmp/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
 echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "$s" "rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 > /tmp/hogdb.log 2>&1 &"
+  ssh "$s" "export X23TRACE=$X23TRACE; rm -rf /tmp/hogdb; nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 > /tmp/hogdb.log 2>&1 &"
 done
 
 # TODO(jhumphri): Launch the mempool.
