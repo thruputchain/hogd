@@ -77,8 +77,7 @@ check_binaries() {
     for b in "${binaries[@]}"; do
       for s in "${all_servers[@]}"; do
         {
-          if remote_output=$(ssh -o BatchMode=yes -o ConnectTimeout=5 \
-            "$s" "sha256sum -- '${b}'" 2>/dev/null); then
+          if remote_output=$(ssh "$s" "sha256sum -- '${b}'" 2>/dev/null); then
             remote_hash=${remote_output%% *}
             [[ -n $remote_hash ]] && echo "$s $b $remote_hash" || echo "$s ERROR"
           else
@@ -93,12 +92,12 @@ check_binaries() {
   # Parse results into a map with [binary-server] as the key.
   declare -A hashes=()
   for line in "${lines[@]}"; do
-    read -r srv bin val <<<"$line"
+    read -r s b val <<<"$line"
     if [[ $val == "ERROR" ]]; then
-      echo "$srv: Missing file or empty hash for '$b'."
+      echo "$s: Missing file or empty hash for '$b'."
       return 1
     fi
-    hashes["$bin-$srv"]="$val"
+    hashes["$b-$s"]="$val"
   done
   for key in "${!hashes[@]}"; do
     echo "$key => ${hashes[$key]}"
@@ -108,7 +107,7 @@ check_binaries() {
     local reference_hash=""
 
     for s in "${all_servers[@]}"; do
-      remote_hash="${hashes[$b - $s]}"
+      remote_hash="${hashes["$b-$s"]}"
       if [[ -z $remote_hash ]]; then
         echo "$s: No result for '$b'."
         return 1
