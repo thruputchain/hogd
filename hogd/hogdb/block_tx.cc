@@ -220,7 +220,7 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   // release the lock and refund storage cost.
   auto [lock, ul] = item_locks_[key];
   if (lock.ref == 1 && *delta != 0)
-    unlock_balance(key.get_address(), *delta);
+    unlock_balance(key.get_address(), -*delta);
   do_unlock_item(ul, key, lock, change);
 }
 
