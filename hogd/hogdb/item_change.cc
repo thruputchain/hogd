@@ -244,6 +244,19 @@ ItemChange::undo_merge(const ItemChange &change)
       type_);
 }
 
+void
+ItemChange::commit_change(const ItemChange &change)
+{
+  assert(type_.index() == change.type_.index());
+  // In the future, we will forward the change
+  // to the variant.
+  if (change.exclusive_) {
+    // Committing the change that held the exclusive lock allows
+    // us to release that lock.
+    exclusive_ = false;
+  }
+}
+
 size_t
 ItemChange::storage_size() const
 {

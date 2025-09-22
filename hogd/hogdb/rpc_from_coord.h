@@ -6,7 +6,6 @@
 #include <mutex>
 #include <optional>
 #include <type_traits>
-#include <variant>
 
 // generated x23 headers
 #include "db_coord.hh"
