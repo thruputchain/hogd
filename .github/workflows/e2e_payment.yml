@@ -73,6 +73,7 @@ jobs:
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -105,8 +106,12 @@ jobs:
         ./scripts/wait-port.sh hog8 11111
     - name: launch loadgen
       run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start ./release/hogd/loadgen/loadgen_server -p 11222
+    - name: launch hogexec
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start ./release/hogd/hogexec/hogexec localhost:7888 50
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
+    - name: wait for hogexec
+      run: ./scripts/wait-port.sh hog8 8070
 
     - name: cleanup control servers
       if: always()
