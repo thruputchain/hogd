@@ -75,9 +75,6 @@ fi
 ./metrics_history/scripts/make_metric_file.sh payments-bench-10 $branch $commit $commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-10/$branch/${commit_time}_$commit
 
-# shut down the other CI control server
-$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 11111 shutdown
-
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 
