@@ -10,7 +10,6 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -48,7 +47,7 @@ protected:
     auto contract = hogd::load_contract("manual_revert_test.wasm");
     contract_addr_ = make_contract_address(0);
     write_contract(contract);
-    write_deployment(contract_addr_, sha256(*contract));
+    write_deployment(contract_addr_, contract);
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
@@ -123,7 +122,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -207,7 +206,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -277,7 +276,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -351,7 +350,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
     write_contract(native_contract_xdr);
-    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+    write_deployment(native_contract_addr, native_contract_xdr);
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -423,7 +422,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -496,7 +495,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
     write_contract(native_contract_xdr);
-    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+    write_deployment(native_contract_addr, native_contract_xdr);
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -555,7 +554,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
     write_contract(native_contract_xdr);
-    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+    write_deployment(native_contract_addr, native_contract_xdr);
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

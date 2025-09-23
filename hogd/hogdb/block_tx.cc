@@ -169,6 +169,14 @@ BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
     return new_delta.error();
 
   // modify the lock and the storage cost.
+  // TODO(geoff): The limitation here is that this design assumes storage costs
+  // can only change if we are the only tx modifying the item.
+  // This is true for bytestrings and nnints; but not necessarily for all data
+  // types.
+  // TODO(geoff): As it is now, there is no workflow with bytestrings or nnints
+  // in which we could successfully modify the balance but then do_modify_lock
+  // fails. That may be added later -- if so, then we need to rework this
+  // workflow.
   auto [lock, ul] = item_locks_[key];
   if (lock.ref == 1 && *old_delta != *new_delta) {
     HogDBStatus<void> ret =
@@ -176,8 +184,18 @@ BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
     if (!ret)
       return ret.error();
   }
-  assert(lock.ref == 1 || *old_delta == *new_delta);
-  return do_modify_lock(ul, lock, old_change, new_change);
+
+  // @abelay left the assertion as
+  // assert(lock.ref == 1 || *old_delta == *new_delta);
+  // For the bytestring type, this assertion could be triggered
+  // if multiple txs set a bytestring value and then one of those
+  // tries to set a different value (while the other txs still hold the
+  // reference). The behavior is still correct in that case, as do_modify_lock
+  // will fail.
+
+  auto res = do_modify_lock(ul, lock, old_change, new_change);
+  assert(lock.ref == 1 || *old_delta == *new_delta || !res.has_value());
+  return res;
 }
 
 void
@@ -200,6 +218,21 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   if (lock.ref == 1 && *delta != 0)
     unlock_balance(key.get_address(), *delta);
   do_unlock_item(ul, key, lock, change);
+}
+
+void
+BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
+{
+  // TODO(geoff): In many cases we can evaluate here whether or not the item
+  // change commit_change is a no-op.  In such cases, we can avoid acquiring the
+  // lock.
+  if (key.is_address_balance()) {
+    auto [lock, ul] = addr_balance_locks_[key.get_address()];
+    lock.change.commit_change(change);
+    return;
+  }
+  auto [lock, ul] = item_locks_[key];
+  lock.change.commit_change(change);
 }
 
 HogDBStatus<void>

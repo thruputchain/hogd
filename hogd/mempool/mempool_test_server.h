@@ -18,6 +18,7 @@
 #include "coord.hh"
 #include "coord_sched.hh"
 #include "db_coord.hh"
+#include "db_sched.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
@@ -42,15 +43,16 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "nomination.hh"
-#include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -71,7 +73,8 @@ public:
                  .upid = {},
                  .address =
                      x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
-      executor_coord_server_(exec_card_, /*poll_threads=*/1)
+      executor_coord_server_(exec_card_, kAddress, coordinator_port_,
+                             /*poll_threads=*/1)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -90,6 +93,7 @@ public:
 
       db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
       ctx_ = std::make_unique<RPCContext>(db_, trie_);
+      set_dbtip({.height = 0, .hash = {}, .id = 0});
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
@@ -118,7 +122,10 @@ public:
 
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
-        ret = db_.write_address_wasm_hash(address, contract_hash);
+        uint32_t contract_size = bytes.size();
+        ret = db_.write_address_metadata(
+            address, DeployedContractHash{.hash = contract_hash,
+                                          .contract_size = contract_size});
         if (!ret) {
           throw std::runtime_error("Failed to write deployment");
         }
@@ -161,6 +168,17 @@ public:
     average.average_ages[group] = age;
     average.num_hogs[group] = to_xdr(num_hogs);
     EXPECT_TRUE(db_.write_address_average_hog_age({average}));
+  }
+
+  void set_account_auth_data(const ContractAddress &account,
+                             const AccountAuthData &auth_data)
+  {
+    CHECK(db_.write_address_account_auth_data(account, auth_data).has_value());
+  }
+
+  void set_dbtip(const DbTip &db_tip)
+  {
+    CHECK(db_.write_dbtip(db_tip).has_value());
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
@@ -316,10 +334,11 @@ create_clients(const MempoolTestServer &server)
       x23::rpc_stream_logged(*exec_cp, exec_fd.release())
           ->client(ExecutorCoord1{});
 
-  auto interface = std::make_unique<Mempool>(std::move(coord_client),
-                                             std::move(db_coord_client),
-                                             std::move(db_sched_client),
-                                             std::move(exec_client));
+  auto interface =
+      std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
+                                std::move(db_coord_client),
+                                std::move(db_sched_client),
+                                std::move(exec_client));
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_coord_pool = std::move(db_coord_pool),
@@ -347,6 +366,40 @@ get_default_account()
   return AccountAuthData{.public_keys = public_keys,
                          .gas_permissions = {},
                          .nonce_config = kNonceConfig};
+}
+
+inline Ed25519SecretKey
+create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
+{
+  const auto [public_key, private_key] = ed25519_keygen();
+  x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
+  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
+  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config->key.ed25519() = public_key;
+  pk_config->max_weight = weight;
+  return private_key;
+}
+
+inline void
+set_nonce_key(AccountAuthData &auth_data, size_t idx)
+{
+  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
+  auth_data.nonce_config.accepted_keys |= (1 << idx);
+}
+
+inline void
+add_gas_config(AccountAuthData &auth_data, GasAmount gas,
+               const x23::Vec<size_t> &keys, Weight required_weight)
+{
+  CHECK_LT(auth_data.gas_permissions.size(),
+           static_cast<size_t>(MAX_GAS_CONFIGS));
+  GasPermissionConfig config{.limit = gas,
+                             .accepted_keys = 0,
+                             .required_weight = required_weight};
+  for (const size_t idx : keys) {
+    config.accepted_keys |= (1 << idx);
+  }
+  auth_data.gas_permissions.push_back(config);
 }
 
 } // namespace hogd

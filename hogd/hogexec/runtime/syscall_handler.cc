@@ -7,12 +7,12 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 
 #include "account.hh"
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -209,7 +209,7 @@ SystemCallHandler::try_commit_transaction()
   if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
           .value()
           .should_revert()) {
-    auto res = db_proxy_.commit_transaction();
+    auto res = db_proxy_.commit_transaction({});
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
     if (!res.has_value()) {
@@ -228,7 +228,7 @@ SystemCallHandler::try_commit_transaction()
   }
 
   bool result = r.value();
-
+  // check if any of the 2pc database operations failed
   if (!result) {
     auto res = db_proxy_.abort_transaction();
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
@@ -242,31 +242,21 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
 
-  // check if any of the 2pc database operations failed
-  auto res = db_proxy_.commit_transaction();
-  if (!res.has_value()) {
-    return res.error();
+  auto new_contract_hashes =
+      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+          .value()
+          .get_committed_contracts();
+  NewContractBatch new_contracts;
+  for (auto const &hash : new_contract_hashes) {
+    auto contract_entry = newly_created_contracts_.find(hash);
+    if (contract_entry != newly_created_contracts_.end()) {
+      new_contracts.push_back(*contract_entry->second);
+    }
   }
 
-  std::unordered_set<SHA256Hash> committed_contracts;
-  for (auto const &[addr, hash] :
-       last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-           .value()
-           .new_contract_deployments_) {
-    auto contract_entry = newly_created_contracts_.find(hash);
-    assert(contract_entry != newly_created_contracts_.end());
-
-    auto res = db_proxy_.commit_contract_deploy(addr, hash);
-    if (!res.has_value()) {
-      return res.error();
-    }
-    if (committed_contracts.insert(hash).second) {
-      // contract that wasn't already created within the transaction
-      res = db_proxy_.commit_contract_create(*contract_entry->second);
-      if (!res.has_value()) {
-        return res.error();
-      }
-    }
+  auto res = db_proxy_.commit_transaction(std::move(new_contracts));
+  if (!res.has_value()) {
+    return res.error();
   }
 
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
@@ -501,7 +491,9 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
     }
+    load_contract = it->second;
   }
+  assert(load_contract != nullptr);
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
@@ -525,8 +517,23 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 
   auto &frame = invocation_frame_stack_.get_active_frame();
 
+  auto contract_size = [&] -> uint32_t {
+    switch (load_contract->contract_type()) {
+    case ContractType::kNative:
+    case ContractType::kMockTest:
+      return 0LU;
+    case ContractType::kWasmi:
+      return load_contract->wasmi_contract().size();
+    default:
+      assert(false);
+      return 0LU;
+    }
+  }();
+
   // deploy new contract
-  frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
+  frame.deploy_contract(deploy_addr,
+                        DeployedContractHash{.hash = contract_hash,
+                                             .contract_size = contract_size});
 
   return deploy_addr;
 }

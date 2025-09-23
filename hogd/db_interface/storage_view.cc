@@ -161,10 +161,6 @@ StorageView::commit_to_database()
   for (auto &[hash, contract] : *contract_creates) {
     base_database->write_contract(hash, contract);
   }
-  auto contract_deployments = contract_deployments_.take();
-  for (auto &[addr, hash] : *contract_deployments) {
-    base_database->write_deployment(addr, hash);
-  }
 }
 
 std::optional<SHA256Hash>
@@ -193,13 +189,16 @@ ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
 {
   assert(closed_);
   {
-    auto m = contract_deployments_.take();
-    if (auto it = m->find(addr); it != m->end()) {
-      return it->second;
+    auto item = get_post_block_storage_item(AddressAndKey{
+        .address = addr,
+        .key = StorageKey(StorageKeyType::kStorageKeyTypeAddressMetadata)});
+    if (!item) {
+      return std::nullopt;
     }
+    assert(item->type() == StorageItemType::kItemTypeDeployedContractHash);
+    return item->deployed_contract_hash().hash;
+    ;
   }
-
-  return get_snapshot_deployment(addr);
 }
 
 std::shared_ptr<const Contract>
@@ -217,19 +216,12 @@ ParentBlockView::get_post_block_contract(SHA256Hash const &hash)
 }
 
 void
-StorageView::commit_contract_create(Contract const &contract)
+StorageView::commit_contract_create(Contract contract)
 {
   assert(!closed_);
   auto hash = sha256(contract);
-  contract_creates_->emplace(hash, std::make_shared<const Contract>(contract));
-}
-
-void
-StorageView::commit_contract_deploy(ContractAddress const &addr,
-                                    SHA256Hash const &contract_hash)
-{
-  assert(!closed_);
-  contract_deployments_->emplace(addr, contract_hash);
+  contract_creates_->emplace(hash, std::make_shared<const Contract>(
+                                       std::move(contract)));
 }
 
 Nondeterministic<std::optional<QueueEntry>>

@@ -1,10 +1,13 @@
 **/.DS_STORE
 *.a
+*.core
 *.d
 *.o
+*.out
 *~
 .cache
 .cproject
+.nfs*
 .project
 .vscode
 /compile_commands.json
@@ -15,4 +18,3 @@ build/**
 /x23/benchmark
 /x23/tests/bench
 metrics_history
-

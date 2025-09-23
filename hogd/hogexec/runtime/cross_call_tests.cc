@@ -7,7 +7,6 @@
 #include "built_contracts/fibonacci_call.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -35,9 +34,9 @@ protected:
 
     write_contract(fibonacci_contract);
     write_contract(fibonacci_caller_contract);
-    write_deployment(fibonacci_contract_address_, sha256(*fibonacci_contract));
+    write_deployment(fibonacci_contract_address_, fibonacci_contract);
     write_deployment(fibonacci_caller_contract_address_,
-                     sha256(*fibonacci_caller_contract));
+                     fibonacci_caller_contract);
 
     setup_grant_storage_token(fibonacci_contract_address_, 1'000'000'000);
     setup_grant_storage_token(fibonacci_caller_contract_address_,

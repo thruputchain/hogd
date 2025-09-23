@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/srpc.h"
@@ -70,16 +71,10 @@ public:
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch);
 
-  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id);
+  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id,
+                                        NewContractBatch const &new_contracts);
 
   SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
-
-  SystemStatus<void> commit_contract_create(BlockID block_id,
-                                            Contract const &contract);
-
-  SystemStatus<void> commit_contract_deploy(BlockID block_id,
-                                            ContractAddress const &addr,
-                                            SHA256Hash const &hash);
 
   SystemStatus<void> pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                          uint32_t count);
@@ -142,29 +137,16 @@ public:
     return db_proxy_.pop_subtransactions(block_id_, tx_id_, count);
   }
 
-  SystemStatus<void> commit_transaction()
+  SystemStatus<void> commit_transaction(NewContractBatch const &new_contracts)
   {
     assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_transaction(block_id_, tx_id_);
+    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
   }
 
   SystemStatus<void> abort_transaction()
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.abort_transaction(block_id_, tx_id_);
-  }
-
-  SystemStatus<void> commit_contract_create(Contract const &contract)
-  {
-    assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_contract_create(block_id_, contract);
-  }
-
-  SystemStatus<void> commit_contract_deploy(ContractAddress const &addr,
-                                            SHA256Hash const &hash)
-  {
-    assert(!current_subtransaction_batch_builder_);
-    return db_proxy_.commit_contract_deploy(block_id_, addr, hash);
   }
 
 private:

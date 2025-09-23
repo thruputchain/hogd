@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "db_coord.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
@@ -15,6 +16,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -24,8 +26,6 @@
 
 namespace hogd {
 
-// TODO(geoff): This should be refactored; right now initialize() technically
-// opens a block before the genesis initialization.
 void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
@@ -41,16 +41,42 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbcoord_commit_snapshot failed");
     }
   }
+  dbtip_block_id_ = block_number_;
+  block_number_++;
 
   {
-    auto r = coord_wrapper_->client().dbcoord_create_snapshot(block_number_,
-                                                              block_number_ + 1,
-                                                              mode)();
+    auto r =
+        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
     }
   }
+
+  storage_snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+}
+
+void
+NativeContractTestFramework::discard_block(BlockExecutionMode mode)
+{
+  {
+    auto r = coord_wrapper_->client().dbcoord_close_snapshot(block_number_)();
+    if (r.result() != DbResult::DbResultOK) {
+      throw std::runtime_error("advance_block: dbcoord_close_snapshot failed");
+    }
+  }
+
   block_number_++;
+
+  {
+    auto r =
+        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+                                                         block_number_, mode)();
+    if (r != DbResult::DbResultOK) {
+      throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
+    }
+  }
 
   storage_snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
@@ -100,12 +126,24 @@ NativeContractTestFramework::write_contract(
       db_wrapper_);
 }
 void
-NativeContractTestFramework::write_deployment(ContractAddress const &addr,
-                                              SHA256Hash const &deployment)
+NativeContractTestFramework::write_deployment(
+    ContractAddress const &addr, DeployedContractHash const &deployment,
+    StorageCostModel const *cost_model)
 {
   std::visit(
-      [&](auto &db_wrapper) { db_wrapper.write_deployment(addr, deployment); },
+      [&](auto &db_wrapper) {
+        db_wrapper.write_deployment(addr, deployment, cost_model);
+      },
       db_wrapper_);
+}
+
+void
+NativeContractTestFramework::write_deployment(
+    ContractAddress const &addr,
+    std::shared_ptr<const Contract> const &contract)
+{
+  write_deployment(addr, make_deployed_contract_hash(contract),
+                   get_default_cost_model());
 }
 
 void
@@ -184,9 +222,10 @@ HogdbWrapper::write_contract(ContractAddress const &addr,
 
 void
 HogdbWrapper::write_deployment(ContractAddress const &addr,
-                               SHA256Hash const &deployment)
+                               DeployedContractHash const &deployment,
+                               StorageCostModel const * /*unused*/)
 {
-  auto ret = db_.write_address_wasm_hash(addr, deployment);
+  auto ret = db_.write_address_metadata(addr, deployment);
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
   }

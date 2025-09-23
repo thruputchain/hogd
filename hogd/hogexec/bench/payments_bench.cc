@@ -70,6 +70,9 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 {
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
+  if (total_work_txs.size() < num_txs_per_rep * num_reps) {
+    throw std::runtime_error("not enough transactions to run the benchmark");
+  }
   assert((total_work_txs.size() % num_reps) == 0);
   assert(num_txs_per_rep == total_work_txs.size() / num_reps);
 
@@ -130,27 +133,28 @@ run_payments_bench(std::string const &server_addr, uint32_t exec_port,
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
-  uint32_t num_total_txs = (204800 * 10);
+  uint32_t num_total_txs = std::max(100000 * 5, 204800 * 10);
   BenchmarkState bs(server_addr, exec_port, coord_port, num_accounts);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
 
   // strong scaling
-  for (auto nthread : {1, 16, 64, 128, 256, 512, 2048}) {
-    assert(offset + 10000 * 10 <= work_txs.size());
+  for (auto nthread : {16, 64, 128, 256, 512, 1024, 2048}) {
+    assert(offset + 100000 * 5 <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 10000 * 10),
-                  nthread, 10000, 10);
+                                                                 100000 * 5),
+                  nthread, 100000, 5);
     // offset += 10000 * 10;
   }
   // weak scaling
   for (auto nthread : {1, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
-    assert(offset + 10000 * 10 <= work_txs.size());
+    assert(offset + 10000 * 5 <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 10000 * 10),
-                  nthread, 100 * nthread, 10);
+                                                                 100 * nthread *
+                                                                     5),
+                  nthread, 100 * nthread, 5);
     // offset += 10000 * 10;
   }
 }

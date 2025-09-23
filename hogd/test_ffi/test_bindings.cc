@@ -10,6 +10,7 @@
 #include <span>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -296,7 +297,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
 
 int
 setup_deploy_contract(void *db, const uint8_t *deployment_addr,
-                      const uint8_t *contract_hash)
+                      const uint8_t *contract_hash, uint32_t contract_size)
 {
   if (db == nullptr) {
     return 1;
@@ -307,8 +308,17 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   std::memcpy(h.data(), contract_hash, h.size());
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), deployment_addr, addr.size());
+  std::shared_ptr<hogd::StorageItemWrapper> item =
+      std::make_shared<hogd::StorageItemWrapper>(
+          hogd::DeployedContractHash{.hash = h, .contract_size = contract_size},
+          &hogd::kCostModel);
 
-  db_cast->get_base_db().write_deployment(std::move(addr), std::move(h));
+  db_cast->get_base_db().write_item(
+      hogd::AddressAndKey{
+          .address = addr,
+          .key = hogd::StorageKey(
+              hogd::StorageKeyType::kStorageKeyTypeAddressMetadata)},
+      std::move(item));
   return 0;
 }
 

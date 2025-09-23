@@ -15,6 +15,7 @@
 #include <utility>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/os.h"
@@ -140,12 +141,17 @@ public:
 
   HogDBStatus<int128_t> read_address_balance(const Address &addr);
   HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
-  HogDBStatus<SHA256Hash> read_address_wasm_hash(const Address &addr);
+  HogDBStatus<AccountAuthData>
+  read_address_account_auth_data(const Address &addr);
+  HogDBStatus<DeployedContractHash> read_address_metadata(const Address &addr);
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
-  HogDBStatus<void> write_address_wasm_hash(const Address &addr,
-                                            const SHA256Hash &hash);
+  HogDBStatus<void>
+  write_address_account_auth_data(const Address &addr,
+                                  const AccountAuthData &auth);
+  HogDBStatus<void> write_address_metadata(Address const &addr,
+                                           const DeployedContractHash &hash);
 
   //
   // WASM Operations
@@ -162,26 +168,17 @@ public:
 
   HogDBStatus<int128_t> read_nnint128(const ItemKey &key);
   HogDBStatus<OwningSpan<const std::byte>> read_bytes(const ItemKey &key);
+  // read any of the item types
+  HogDBStatus<DBItem> read_contract_data_item(const ItemKey &key);
 
   HogDBStatus<void> write_nnint128(const ItemKey &key, int128_t val);
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t> get_item_size(const ItemKey &key)
-  {
-    return db_.get_size(key.as_bytes());
-  }
+  HogDBStatus<size_t> get_item_size(const ItemKey &key);
+  HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
-  HogDBStatus<int8_t> get_item_type(const ItemKey &key)
-  {
-    return db_.get_type(key.as_bytes());
-  }
-
-  HogDBStatus<void> remove_item(const ItemKey &key)
-  {
-    assert(!key.is_address_balance());
-    return db_.remove(key.as_bytes());
-  }
+  HogDBStatus<void> remove_item(const ItemKey &key);
 
 private:
   RAMDB db_;

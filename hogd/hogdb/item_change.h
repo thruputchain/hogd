@@ -26,6 +26,8 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
+#include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -33,6 +35,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -148,6 +151,74 @@ public:
 
 static_assert(is_item<Deletion>);
 
+class DeployedContractData {
+public:
+  DeployedContractData(DeployedContractHash deployed_contract_hash)
+    : deployed_contract_hash_(deployed_contract_hash)
+  {}
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
+  bool narrow(const DeployedContractData &deployed_contract_data)
+  {
+    assert(deployed_contract_hash_ ==
+           deployed_contract_data.deployed_contract_hash_);
+    return true;
+  }
+  HogDBStatus<void> merge(const DeployedContractData &deployed_contract_data)
+  {
+    assert(deployed_contract_hash_ ==
+           deployed_contract_data.deployed_contract_hash_);
+    return {};
+  }
+  static void undo_merge(const DeployedContractData &deployed_contract_data) {}
+  size_t storage_size() const { return deployed_contract_hash_.contract_size; }
+
+  const DeployedContractHash &deployed_contract_hash() const
+  {
+    return deployed_contract_hash_;
+  }
+
+private:
+  DeployedContractHash deployed_contract_hash_;
+};
+
+static_assert(is_item<DeployedContractData>);
+
+class NewContractData {
+public:
+  NewContractData(Contract new_contract)
+    : new_contract_(std::move(new_contract))
+  {}
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
+                           const ItemKey &key) const;
+  bool narrow(const NewContractData &new_contract_data)
+  {
+    assert(new_contract_ == new_contract_data.new_contract_);
+    return true;
+  }
+  HogDBStatus<void> merge(const NewContractData &new_contract_data)
+  {
+    assert(new_contract_ == new_contract_data.new_contract_);
+    return {};
+  }
+  static void undo_merge(const NewContractData &new_contract_data) {}
+  static size_t storage_size()
+  {
+    // Storage costs for new contracts are accounted for when deploying them,
+    // not in the actual contract item
+    return 0;
+  }
+
+  const Contract &new_contract() const { return new_contract_; }
+
+private:
+  Contract new_contract_;
+};
+
+static_assert(is_item<NewContractData>);
+
 // ItemChange represents a pending modification to an item.
 class ItemChange {
 public:
@@ -155,6 +226,12 @@ public:
   ItemChange(NNInt128 &&nnint) : type_(std::move(nnint)) {}
   ItemChange(Bytes &&bytes) : type_(std::move(bytes)) {}
   ItemChange(Deletion &&d) : type_(std::move(d)) {}
+  ItemChange(DeployedContractData &&deployed_contract_data)
+    : type_(std::move(deployed_contract_data))
+  {}
+  ItemChange(NewContractData &&new_contract_data)
+    : type_(std::move(new_contract_data))
+  {}
   ~ItemChange() = default;
 
   // getters
@@ -163,6 +240,7 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_exclusive() const { return exclusive_; }
   std::optional<NNInt128> get_raw_nnint128() const;
+  std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
 
   // setters
   void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
@@ -178,6 +256,9 @@ public:
   HogDBStatus<void> merge(const ItemChange &change);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
+  // commit_change marks a change as committed.
+  // The change MUST have been previously merged.
+  void commit_change(const ItemChange &change);
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).
@@ -186,7 +267,9 @@ public:
 private:
   bool exclusive_{false};
   std::optional<size_t> snapshot_cost_;
-  std::variant<std::monostate, NNInt128, Bytes, Deletion> type_;
+  std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
+               NewContractData>
+      type_;
 
   size_t storage_size() const;
 };

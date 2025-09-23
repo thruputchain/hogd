@@ -33,7 +33,8 @@ public:
   // Start the server on the specified port
   void start_server(uint16_t port);
 
-  RPCError commit_transaction(BlockID block, TransactionID tx);
+  RPCError commit_transaction(BlockID block, TransactionID tx,
+                              NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
   RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
                                        StorageDeltaBatch const &batch);
@@ -41,9 +42,7 @@ public:
                                uint32_t popcount);
   ExpectedStorageItem get_snapshot_item(BlockID block,
                                         AddressAndKey const &addrkey);
-  RPCError commit_contract_create(BlockID block, Contract const &contract);
-  RPCError commit_contract_deploy(BlockID block, ContractAddress const &addr,
-                                  SHA256Hash const &hash);
+
   ExpectedContract get_contract(BlockID block, SHA256Hash const &hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);

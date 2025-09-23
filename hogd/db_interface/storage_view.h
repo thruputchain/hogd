@@ -18,6 +18,7 @@
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -79,8 +80,6 @@ protected:
   StorageCostModel const *cost_model_;
 
   // simple impl, for now
-  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
-      contract_deployments_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_creates_;
 
@@ -194,9 +193,7 @@ public:
   get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  void commit_contract_create(Contract const &contract);
-  void commit_contract_deploy(ContractAddress const &addr,
-                              SHA256Hash const &contract_hash);
+  void commit_contract_create(Contract contract);
 
   bool has_bad_item() const { return invalid_state_flag_.is_invalid(); }
 

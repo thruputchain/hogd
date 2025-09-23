@@ -9,11 +9,15 @@
 #include <stop_token>
 #include <sys/socket.h>
 #include <thread>
+#include <utility>
 
 // generated x23 headers
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -23,7 +27,6 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -54,8 +57,14 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCStorageWriteFailed;
+  case HogDBCode::kInternal:
+  case HogDBCode::kCorruption:
+  case HogDBCode::kNoMemory:
+  case HogDBCode::kIO:
+    return RPCError::kRPCUnrecoverable;
   default:
     return RPCError::kRPCTransactionFailed;
+    break;
   }
 }
 
@@ -115,19 +124,39 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                                             from_xdr(delta.nnint().add_value)));
   case StorageDeltaType::kDeltaTypeDelete:
     return to_rpc_error(tx.request_deletion(make_item_key(addrkey)));
+  case StorageDeltaType::kDeltaTypeDeployContract:
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeAddressMetadata);
+    return to_rpc_error(
+        tx.request_deploy_contract(addrkey.address,
+                                   delta.deployed_contract_hash()));
   default:
     return RPCError::kRPCUnimplemented;
   }
 }
 
 RPCError
-HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
+HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                        NewContractBatch new_contracts)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
+
+  auto write_contract = [itx](Contract contract) {
+    assert(contract.contract_type() == ContractType::kWasmi);
+    return itx->request_new_contract(std::move(contract));
+  };
+
+  for (auto &contract : new_contracts) {
+    // write contract should be infallible
+    if (auto r = write_contract(std::move(contract)); !r.has_value()) {
+      return RPCError::kRPCUnrecoverable;
+    }
+  }
   itx->commit();
   ctx_.close_invoke_tx(block, tx);
+
   return RPCError::kRPCNone;
 }
 
@@ -152,6 +181,9 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
   for (auto const &delta : batch) {
+    if constexpr (is_debug_build()) {
+      check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
+    }
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
@@ -176,7 +208,7 @@ HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
+HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
                                        AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
@@ -198,7 +230,7 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
     return ret;
   }
 
-  HogDBStatus<DBItem> item = ctx_.get_db().get_ramdb().get(key.as_bytes());
+  HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
 
@@ -230,31 +262,6 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
   return ret;
 }
 
-RPCError
-HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
-                                            Contract const &contract)
-{
-  // TODO(abelay): this must be included as part of BlockTX, not just written.
-  // Currently the only contract types that go through this contract create
-  // workflow are wasmi contracts.
-  assert(contract.contract_type() == ContractType::kWasmi);
-  auto data = x23::serialize(contract);
-  const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-  auto buf = std::span<const std::byte>(cptr, data.size());
-  SHA256Hash hash = sha256(buf);
-  return to_rpc_error(ctx_.get_db().write_wasm_code(hash, buf));
-}
-
-RPCError
-HogDBExecutorServer::commit_contract_deploy(BlockID /*block*/,
-                                            ContractAddress const &addr,
-                                            SHA256Hash const &hash)
-{
-  // TODO(abelay): this must be included as part of BlockTX, not just written.
-
-  return to_rpc_error(ctx_.get_db().write_address_wasm_hash(addr, hash));
-}
-
 ExpectedContract
 HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 {
@@ -273,19 +280,18 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 }
 
 ExpectedDeployment
-HogDBExecutorServer::get_deployment(BlockID /*block*/,
+HogDBExecutorServer::get_deployment(BlockID /*unused*/,
                                     ContractAddress const &contract_address)
 {
-  // TODO(abelay): BlockID is ignored here too for the same reasons.
 
-  HogDBStatus<SHA256Hash> hash =
-      ctx_.get_db().read_address_wasm_hash(contract_address);
+  HogDBStatus<DeployedContractHash> hash =
+      ctx_.get_db().read_address_metadata(contract_address);
   if (!hash)
     return ExpectedDeployment(to_rpc_error(hash.error()));
 
   ExpectedDeployment out;
   out.error(RPCError::kRPCNone);
-  out.deployed_hash() = *hash;
+  out.deployed_hash() = hash->hash;
   return out;
 }
 

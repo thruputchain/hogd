@@ -13,8 +13,11 @@
 #include "contract.hh"
 #include "coord.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -94,6 +97,7 @@ to_system_error_code(auto err, auto &&f)
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kAbortTransaction};
     default:
+      error("Received unhandled error type from RPC: {}", err_code);
       return SystemError{SystemErrorCode::kUnrecoverable};
     }
   }();
@@ -204,9 +208,10 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
 }
 
 SystemStatus<void>
-DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
+DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
+                                  NewContractBatch const &new_contracts)
 {
-  auto res = client_.commit_transaction(block_id, tx_id);
+  auto res = client_.commit_transaction(block_id, tx_id, new_contracts);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -217,28 +222,16 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-SystemStatus<void>
-DatabaseProxy::commit_contract_create(BlockID block_id,
-                                      Contract const &contract)
-{
-  auto res = client_.commit_contract_create(block_id, contract);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
-SystemStatus<void>
-DatabaseProxy::commit_contract_deploy(BlockID block_id,
-                                      ContractAddress const &addr,
-                                      SHA256Hash const &hash)
-{
-  auto res = client_.commit_contract_deploy(block_id, addr, hash);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
 SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
+  if constexpr (is_debug_build()) {
+    for (auto const &delta : delta_batch) {
+      check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
+    }
+  }
   auto res = client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
   return to_system_error_code<false>(res, [] { return true; });
 }

@@ -15,47 +15,8 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
-
-namespace {
-
-Ed25519SecretKey
-create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
-{
-  const auto [public_key, private_key] = ed25519_keygen();
-  auto &pk_config = auth_data.public_keys[idx];
-  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
-  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
-  pk_config->key.ed25519() = public_key;
-  pk_config->max_weight = weight;
-  return private_key;
-}
-
-void
-set_nonce_key(AccountAuthData &auth_data, size_t idx)
-{
-  CHECK_LT(idx, sizeof(auth_data.nonce_config.accepted_keys));
-  auth_data.nonce_config.accepted_keys |= (1 << idx);
-}
-
-void
-add_gas_config(AccountAuthData &auth_data, GasAmount gas,
-               const x23::Vec<size_t> &keys, Weight required_weight)
-{
-  CHECK_LT(auth_data.gas_permissions.size(),
-           static_cast<size_t>(MAX_GAS_CONFIGS));
-  GasPermissionConfig config{.limit = gas,
-                             .accepted_keys = 0,
-                             .required_weight = required_weight};
-  for (const size_t idx : keys) {
-    config.accepted_keys |= (1 << idx);
-  }
-  auth_data.gas_permissions.push_back(config);
-}
-
-} // namespace
 
 TEST(Authentication, SignAndVerify)
 {
@@ -79,7 +40,8 @@ TEST(Authentication, SignAndVerify)
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -106,7 +68,8 @@ TEST(Authentication, SignAndVerifyNotEnoughSignatureWeight)
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -136,7 +99,8 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   set_nonce_key(auth_data, /*idx=*/0);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -165,7 +129,8 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   set_nonce_key(auth_data, /*idx=*/2);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -196,7 +161,8 @@ TEST(Authentication, SignAndVerifyNoGasIndices)
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -227,7 +193,8 @@ TEST(Authentication, SignAndVerifyNotEnoughGas)
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -258,7 +225,8 @@ TEST(Authentication, SignAndVerifyGasWrongIndex)
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -289,7 +257,8 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
                  /*required_weight=*/2);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -324,7 +293,8 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigs)
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -348,8 +318,8 @@ TEST(Authentication, SignAndVerifyMismatch)
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Authentication &auth = clients.interface->authentication();
-  auth.add_account(MempoolTestServer::kAccountAddresses[0],
-                   get_default_account());
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               get_default_account());
   const Ed25519SecretKey private_key = ed25519_keygen().second;
 
   const Transaction &tx = txs[0];
@@ -377,7 +347,8 @@ TEST(Authentication, SignAndVerifyWrongIndex)
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -414,7 +385,8 @@ TEST(Authentication, SignAndVerifyMultiSig)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -453,7 +425,8 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -492,7 +465,8 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -531,7 +505,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -562,7 +537,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -597,7 +573,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -633,7 +610,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
       // We deliberately set [idx] to 3 below to test that everything works even
       // when public keys do not have contiguous indices.
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/3)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -662,7 +640,8 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)},
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/1)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
   private_keys[3] = ed25519_keygen().second;
 
   const Transaction &tx = txs[0];
@@ -693,7 +672,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)},
       // We set the key to 4 but we pass 3 as the [idx] to [create_key_pair()].
       {4, create_key_pair(auth_data, /*idx=*/3, /*weight=*/1)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
@@ -722,7 +702,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
       {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)},
       {3, create_key_pair(auth_data, /*idx=*/3, /*weight=*/1)}};
-  auth.add_account(MempoolTestServer::kAccountAddresses[0], auth_data);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
 
   const Ed25519SecretKey &private_key_1 = private_keys[1];
   const Ed25519SecretKey &private_key_3 = private_keys[3];
@@ -765,7 +746,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
 
   const Transaction &tx = txs[0];
@@ -799,7 +781,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughSignatureWeight)
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
 
   const Transaction &tx = txs[0];
@@ -837,7 +820,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
 
   const Transaction &tx = txs[0];
@@ -875,7 +859,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
 
   const Transaction &tx = txs[0];
@@ -909,7 +894,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
     private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
                        {1,
                         create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
   private_keys[2][0] = ed25519_keygen().second;
 
@@ -944,7 +930,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
     private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
                        {1,
                         create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
   private_keys[1][2] = private_keys[1][1];
   CHECK_EQ(private_keys[1].erase(1), 1UL);
@@ -980,7 +967,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
     private_keys[i] = {{0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
                        {1,
                         create_key_pair(auth_data, /*idx=*/1, /*weight=*/1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
   const Ed25519SecretKey private_key_0 = private_keys[1][0];
   const Ed25519SecretKey private_key_1 = private_keys[1][1];
@@ -1025,7 +1013,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
     private_keys[i] = {
         {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
         {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
-    auth.add_account(MempoolTestServer::kAccountAddresses[i], auth_data);
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
   }
 
   const Transaction &tx = txs[0];
@@ -1034,6 +1023,97 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
       /*auxiliary_private_keys=*/
       {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
        {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyAuthDataChanged)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx =
+      hogd::Authentication::sign(tx, /*signature_weight=*/1, {{0, private_key}},
+                                 /*auxiliary_private_keys=*/{});
+  EXPECT_TRUE(auth.authenticate(signed_tx));
+
+  auth_data.nonce_config.required_weight = 2;
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+                               auth_data);
+  server.set_dbtip({.height = 1, .hash = {}, .id = 1});
+  auth.update_block_id(/*block_id=*/1);
+  EXPECT_FALSE(auth.authenticate(signed_tx));
+}
+
+TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  x23::Vec<Transaction> txs;
+  txs.reserve(kNumTxs);
+  {
+    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    for (const SignedTransaction &signed_tx : signed_txs) {
+      txs.push_back(signed_tx.tx);
+    }
+  }
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Authentication &auth = clients.interface->authentication();
+
+  std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
+  std::array<AccountAuthData, 3> auth_datas = {get_default_account(),
+                                               get_default_account(),
+                                               get_default_account()};
+  for (size_t i = 0; i < 3; i++) {
+    AccountAuthData &auth_data = auth_datas[i];
+    if (i == 0) {
+      auth_data.nonce_config.required_weight = 2;
+      set_nonce_key(auth_data, /*idx=*/0);
+      set_nonce_key(auth_data, /*idx=*/1);
+    }
+    add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0, 1},
+                   /*required_weight=*/2);
+    private_keys[i] = {
+        {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/i + 1)},
+        {1, create_key_pair(auth_data, /*idx=*/1, /*weight=*/i + 1)}};
+    server.set_account_auth_data(MempoolTestServer::kAccountAddresses[i],
+                                 auth_data);
+  }
+
+  const Transaction &tx = txs[0];
+  const SignedTransaction signed_tx = hogd::Authentication::sign(
+      tx, /*signature_weight=*/12, private_keys[0],
+      /*auxiliary_private_keys=*/
+      {{MempoolTestServer::kAccountAddresses[1], private_keys[1]},
+       {MempoolTestServer::kAccountAddresses[2], private_keys[2]}});
+  EXPECT_TRUE(auth.authenticate(signed_tx));
+
+  auth_datas[1].public_keys[0]->max_weight = 1;
+  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[1],
+                               auth_datas[1]);
+  server.set_dbtip({.height = 1, .hash = {}, .id = 1});
+  auth.update_block_id(/*block_id=*/1);
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 

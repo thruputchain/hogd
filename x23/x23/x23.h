@@ -6,6 +6,7 @@
 #include <compare>
 #include <concepts>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <string>
 #include <tuple>

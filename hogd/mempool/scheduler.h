@@ -130,6 +130,10 @@ public:
   // between them.
   void cycle_groups(const ContractAddress &account);
 
+  void filter_txs_for_account(
+      const ContractAddress &account,
+      const std::function<bool(const SignedTransaction &tx)> &filter);
+
   // Debug.
   void dump_runqueue() const;
 
@@ -189,6 +193,7 @@ private:
   // then all txs that expire at heights [current_height - 1] and smaller are
   // discarded.
   void discard_expired_txs(BlockHeight current_height);
+  void discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   bool on_runqueue(TxInfo &info)
   {

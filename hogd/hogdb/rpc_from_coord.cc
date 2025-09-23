@@ -14,6 +14,7 @@
 #include <utility>
 
 // generated x23 headers
+#include "account.hh"
 #include "db_coord.hh"
 #include "genesis.hh"
 
@@ -124,7 +125,13 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
     co_return DbBlockResult(DbResult::DbResultError);
-  co_return DbBlockResult(to_db_result(commit_block(id)));
+  HogDBStatus<void> ret = commit_block(id);
+  if (!ret)
+    co_return DbBlockResult(DbResult::DbResultError);
+
+  DbBlockResult result(DbResult::DbResultOK);
+  result.block_hash() = ctx_.get_tip().hash;
+  co_return result;
 }
 
 x23::Async<DbResult>
@@ -156,6 +163,8 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
   // TODO(abelay): we could potential free memory here too.
 
   DbBlockResult ret(DbResult::DbResultOK);
+  // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
+  // hash is invalid. Discuss with Geoff and David about how to resolve this.
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
@@ -238,6 +247,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
+        info("requesting nnint128 for genesis block: {} {}", item_key, value);
         auto r = itx->request_nnint128(item_key, value);
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
@@ -255,8 +265,8 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
           failure = true;
         }
       },
-      [&](ContractAddress const &addr, SHA256Hash const &hash) {
-        auto r = ctx_.get_db().write_address_wasm_hash(addr, hash);
+      [&](ContractAddress const &addr, DeployedContractHash const &hash) {
+        auto r = ctx_.get_db().write_address_metadata(addr, hash);
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;

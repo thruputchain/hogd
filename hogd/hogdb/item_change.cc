@@ -16,6 +16,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -150,6 +151,32 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
   return {};
 }
 
+inline HogDBStatus<void>
+DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                             const ItemKey &key) const
+{
+  assert(key.is_address_metadata());
+  HogDBStatus<void> ret =
+      db.write_address_metadata(key.get_address(), deployed_contract_hash_);
+  if (ret) {
+    auto buf = x23::serialize(deployed_contract_hash_);
+    CHECK(
+        MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  }
+  return ret;
+}
+
+inline HogDBStatus<void>
+NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
+                        const ItemKey &key) const
+{
+  auto buf = x23::serialize(new_contract_);
+  return db.write_wasm_code(key.get_contract_code_hash(),
+                            std::as_bytes(std::span(buf)));
+}
+
 namespace {
 
 template<typename T>
@@ -215,6 +242,19 @@ ItemChange::undo_merge(const ItemChange &change)
           arg.undo_merge(std::get<std::decay_t<decltype(arg)>>(change.type_));
       },
       type_);
+}
+
+void
+ItemChange::commit_change(const ItemChange &change)
+{
+  assert(type_.index() == change.type_.index());
+  // In the future, we will forward the change
+  // to the variant.
+  if (change.exclusive_) {
+    // Committing the change that held the exclusive lock allows
+    // us to release that lock.
+    exclusive_ = false;
+  }
 }
 
 size_t

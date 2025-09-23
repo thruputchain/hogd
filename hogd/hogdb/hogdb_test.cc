@@ -7,6 +7,7 @@
 #include <utility>
 
 // xdr types
+#include "account.hh"
 #include "db_coord.hh"
 #include "types.hh"
 
@@ -91,12 +92,15 @@ TEST_F(HogDBTest, DataAccessObject)
 
   // test wasm hash
   std::string test_code("wasm contract code is here");
+  uint32_t contract_size = test_code.size();
   SHA256Hash hash = sha256(std::as_bytes(std::span(test_code)));
-  EXPECT_TRUE(db_.write_address_wasm_hash(addr, hash));
-  HogDBStatus<SHA256Hash> rhash = db_.read_address_wasm_hash(addr);
+  EXPECT_TRUE(db_.write_address_metadata(
+      addr,
+      DeployedContractHash{.hash = hash, .contract_size = contract_size}));
+  auto rhash = db_.read_address_metadata(addr);
   EXPECT_TRUE(rhash);
   if (rhash) {
-    EXPECT_EQ(hash, *rhash);
+    EXPECT_EQ(hash, rhash->hash);
   }
 
   // test wasm code

@@ -28,7 +28,8 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
-  static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
+  constexpr static auto make_addrkey(ContractAddress contract_addr,
+                                     std::string_view key)
   {
     return make_contract_data_addrkey(contract_addr, key);
   }
@@ -153,11 +154,14 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
-// reference should be released allowing other reservations to succeed
+// reference should be released.
+// AuthData is only allowed for kStorageKeyTypeAccountAuthData.
+// We check that the reference is released by committing the block
+// and making sure the item does not exist in the next block.
 TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 {
   if (GetParam() == TestDB::kHogDB) {
@@ -167,7 +171,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_addrkey(contract_addr, "test");
+  auto key = make_account_auth_data_addrkey(contract_addr);
 
   // First, create a successful auth data reservation to occupy key ID 0
   auto tx1 = make_new_per_tx_db_proxy();
@@ -186,36 +190,16 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   ASSERT_FALSE(r2.value())
       << "auth_conflict: Second auth data delta with same key ID should fail";
 
-  // Here the reference is held; adding a bytestring here should fail
-  {
-    auto tx_intermediate = make_new_per_tx_db_proxy();
-    tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(
-                                  StorageItemRPCFlags::kStorageNone));
-    auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
-    ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value())
-        << "bytestring_conflict: Intermediate bytestring should fail";
-    ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
-  }
-
   // Here's where the reference must be released.
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
-  // The bug test: now try to reserve a different type after the failed auth
-  // reservation This should succeed if the reference was properly released on
-  // the failure above
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_bytestring_delta("value"),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
-  auto r3 = tx3.try_push_current_subtransaction();
-  ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value())
-      << "Should be able to reserve bytestring after auth conflict";
-
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  advance_block();
+
+  auto item = lookup_storage_item_from_db(key);
+  ASSERT_FALSE(item.has_value());
 }
 
 // Test ReplayCache reference leak: when try_reserve_insert() fails,
@@ -276,7 +260,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
 // Test NNInt reference leak: when try_acquire_bounds_lock() fails,
@@ -337,7 +321,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
@@ -350,7 +334,7 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_addrkey(contract_addr, "test");
+  auto key = make_account_auth_data_addrkey(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
@@ -373,9 +357,9 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReferenceLeakTest,

@@ -17,7 +17,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -150,7 +149,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
   auto contract_0_addr = make_contract_address(0);
-  write_deployment(contract_0_addr, sha256(*contract_0));
+  write_deployment(contract_0_addr, contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_0_addr, 1'000'000'000);
@@ -222,7 +221,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
-  write_deployment(ContractAddress{}, sha256(*contract_0));
+  write_deployment(ContractAddress{}, contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
@@ -356,7 +355,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
 
   // Test case 1: sequential good try invokes
   // Invoke method 2, starting with a clean contract deployment
-  write_deployment(make_contract_address(1), sha256(*contract_0));
+  write_deployment(make_contract_address(1), contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(1), 1'000'000'000);
@@ -391,7 +390,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
 
   // Test case 2: unwinding a frame that contains a try_invoke
   // Invoke method 3, starting with a clean contract deployment
-  write_deployment(make_contract_address(2), sha256(*contract_0));
+  write_deployment(make_contract_address(2), contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(2), 1'000'000'000);
@@ -421,7 +420,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
 
   // Test case 3: bad try_invoke followed by a good
   // Invoke method 4, starting with a clean contract deployment
-  write_deployment(make_contract_address(3), sha256(*contract_0));
+  write_deployment(make_contract_address(3), contract_0);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(3), 1'000'000'000);
@@ -540,7 +539,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke method 1 (which should fail)
@@ -685,7 +684,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // First transaction: invoke method 1 (should succeed and acquire exclusive
@@ -828,7 +827,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // First transaction: invoke method 1 (should succeed and acquire exclusive
@@ -992,7 +991,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // First transaction: invoke method 2 (should succeed)
@@ -1183,7 +1182,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   // Test case 1:
   // Test that try invoke can acquire an exclusive lock.
   ContractAddress tc1_addr = make_contract_address(30); // Using a new address
-  write_deployment(tc1_addr, sha256(*contract_template));
+  write_deployment(tc1_addr, contract_template);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(tc1_addr, 1'000'000'000);
@@ -1267,7 +1266,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   // Then, invoke method 1 with parameters [false, true].  This should succeed.
   // Commit the second transaction.
   ContractAddress tc2_addr = make_contract_address(31); // New address for TC2
-  write_deployment(tc2_addr, sha256(*contract_template));
+  write_deployment(tc2_addr, contract_template);
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(tc2_addr, 1'000'000'000);
@@ -1413,7 +1412,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // Deploy contract and grant exactly enough storage tokens for one write
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, one_write_cost);
 
   // Single transaction: invoke method 2 (root)
@@ -1571,7 +1570,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   // writes
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -1744,7 +1743,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // updates
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -1870,7 +1869,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 2 (root)
@@ -2021,7 +2020,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -2164,15 +2163,15 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // Deploy contracts
   auto sender_contract_xdr = make_native_contract(kSenderNativeId);
   write_contract(sender_contract_xdr);
-  write_deployment(sender_addr, sha256(*sender_contract_xdr));
+  write_deployment(sender_addr, sender_contract_xdr);
 
   auto receiver_contract_xdr = make_native_contract(kReceiverNativeId);
   write_contract(receiver_contract_xdr);
-  write_deployment(receiver_addr, sha256(*receiver_contract_xdr));
+  write_deployment(receiver_addr, receiver_contract_xdr);
 
   auto token_contract_xdr = make_native_contract(kTokenNativeId);
   write_contract(token_contract_xdr);
-  write_deployment(token_contract_addr, sha256(*token_contract_xdr));
+  write_deployment(token_contract_addr, token_contract_xdr);
 
   // Grant initial tokens to sender
   setup_grant_storage_token(sender_addr, write_cost);
@@ -2324,7 +2323,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
   write_contract(test_contract_xdr);
-  write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+  write_deployment(ContractAddress{}, test_contract_xdr);
 
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
@@ -2595,11 +2594,11 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   // Deploy contracts
   auto error_contract_xdr = make_native_contract(kErrorContractId);
   write_contract(error_contract_xdr);
-  write_deployment(error_contract_addr, sha256(*error_contract_xdr));
+  write_deployment(error_contract_addr, error_contract_xdr);
 
   auto caller_contract_xdr = make_native_contract(kCallerContractId);
   write_contract(caller_contract_xdr);
-  write_deployment(caller_contract_addr, sha256(*caller_contract_xdr));
+  write_deployment(caller_contract_addr, caller_contract_xdr);
 
   // Grant tokens to both contracts
   setup_grant_storage_token(error_contract_addr, 1'000'000'000);
@@ -2726,7 +2725,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
-  write_deployment(contract_addr, sha256(*contract));
+  write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   // Invoke method 0

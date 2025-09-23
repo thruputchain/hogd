@@ -11,7 +11,6 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -37,7 +36,7 @@ protected:
   void SetUp() override
   {
     write_contract(contract_);
-    write_deployment(contract_addr_, sha256(*contract_));
+    write_deployment(contract_addr_, contract_);
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
@@ -97,7 +96,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
   auto native_contract_addr = make_contract_address(1);
   auto native_contract_xdr = make_native_contract(0);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {
@@ -202,7 +201,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
 
   auto native_contract_xdr = make_native_contract(0);
   write_contract(native_contract_xdr);
-  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
+  write_deployment(native_contract_addr, native_contract_xdr);
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {

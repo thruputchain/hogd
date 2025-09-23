@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mockdb/in_memory_database.h"
@@ -120,7 +121,8 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 }
 
 void
-BlockState::commit_transaction(TransactionID txid)
+BlockState::commit_transaction(TransactionID txid,
+                               NewContractBatch new_contracts)
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
@@ -158,6 +160,10 @@ BlockState::commit_transaction(TransactionID txid)
     storage_view_.commit_storage_delta(cost_addrkey, cost_release_delta, *r);
   }
   tx_manager_.increment_closed();
+
+  for (auto &contract : new_contracts) {
+    storage_view_.commit_contract_create(std::move(contract));
+  }
 }
 
 void
@@ -171,21 +177,6 @@ BlockState::abort_transaction(TransactionID txid)
     storage_view_.revert_storage_lock(addr, lock.lock_);
   }
   tx_manager_.increment_closed();
-}
-
-void
-BlockState::commit_contract_create(Contract const &contract)
-{
-  assert(!is_closed());
-  storage_view_.commit_contract_create(contract);
-}
-
-void
-BlockState::commit_contract_deploy(ContractAddress const &addr,
-                                   SHA256Hash const &contract_hash)
-{
-  assert(!is_closed());
-  storage_view_.commit_contract_deploy(addr, contract_hash);
 }
 
 void

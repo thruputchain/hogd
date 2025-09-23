@@ -19,28 +19,31 @@ print_usage() {
 
 while getopts 'c:f:d:t:x:' flag; do
   case "${flag}" in
-    c) if [[ "${OPTARG}" == "gcc" ]]; then
-         CC="${GCC_CC}"
-         CXX="${GCC_CXX}"
-       elif [[ "${OPTARG}" == "clang" ]]; then
-         CC="${CLANG_CC}"
-         CXX="${CLANG_CXX}"
-       fi
-       ;;
-    f) CXX_FLAGS="${OPTARG}" ;;
-    d) BUILD_DIR="${OPTARG}" ;;
-    t) if [[ "${OPTARG}" == "Debug" || "${OPTARG}" == "Release" ]]
-       then
-         BUILD_TYPE="${OPTARG}"
-       else
-         print_usage
-         exit 1 
-       fi
-       ;;
-    x) CMAKE_FLAGS+=("${OPTARG}") ;;
-    *) print_usage
-       exit 1 ;;
-    esac
+  c)
+    if [[ "${OPTARG}" == "gcc" ]]; then
+      CC="${GCC_CC}"
+      CXX="${GCC_CXX}"
+    elif [[ "${OPTARG}" == "clang" ]]; then
+      CC="${CLANG_CC}"
+      CXX="${CLANG_CXX}"
+    fi
+    ;;
+  f) CXX_FLAGS="${OPTARG}" ;;
+  d) BUILD_DIR="${OPTARG}" ;;
+  t)
+    if [[ "${OPTARG}" == "Debug" || "${OPTARG}" == "Release" ]]; then
+      BUILD_TYPE="${OPTARG}"
+    else
+      print_usage
+      exit 1
+    fi
+    ;;
+  x) CMAKE_FLAGS+=("${OPTARG}") ;;
+  *)
+    print_usage
+    exit 1
+    ;;
+  esac
 done
 
 # Find build path

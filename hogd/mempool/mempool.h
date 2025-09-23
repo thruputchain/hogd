@@ -29,12 +29,18 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  Mempool(coord_client_t &&coord_client, db_coord_client_t &&db_coord_client,
+  // The maximum number of txs in a block.
+  static constexpr size_t kMaxBlockSize = 128;
+
+  Mempool(BlockID current_block_id, coord_client_t &&coord_client,
+          db_coord_client_t &&db_coord_client,
           db_sched_client_t &&db_sched_client, exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)),
       db_coord_client_(std::move(db_coord_client)),
       db_sched_client_(std::move(db_sched_client)),
-      exec_client_(std::move(exec_client)), scheduler_(db_sched_client_)
+      exec_client_(std::move(exec_client)), current_block_id_(current_block_id),
+      scheduler_(db_sched_client_),
+      authentication_(current_block_id_, db_sched_client_)
   {}
 
   // Disable copy and move.
@@ -66,19 +72,22 @@ public:
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> executorcoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown();
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 128;
   // To compute the block hash, we insert tx hashes into a Merkle Trie. We make
   // insertion faster with multiple threads. Using a lot of threads could cause
   // worse performance if each thread has few hashes to insert. Thus, to
   // calculate a reasonable number of threads to use, we ensure that each thread
   // has at least [kMinHashesPerThread] hashes to insert.
   static constexpr size_t kMinHashesPerThread = 16'384;
+
+  const std::function<bool(const SignedTransaction &tx)> auth_filter_ =
+      [&](const SignedTransaction &tx) {
+        return authentication_.authenticate(tx);
+      };
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
   // This will need to be reworked if/when we have multiple threads processing
@@ -95,6 +104,7 @@ private:
                                    BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
+  x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
   static SHA256Hash
@@ -111,12 +121,15 @@ private:
 
   x23::Async<bool> open_validation_block(BlockID block_id);
 
+  void mark_block_committed(BlockID block_id);
+
   coord_client_t coord_client_;
   db_coord_client_t db_coord_client_;
   db_sched_client_t db_sched_client_;
   exec_client_t exec_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
+  BlockID current_block_id_;
   Scheduler scheduler_;
   Authentication authentication_;
 

@@ -50,8 +50,12 @@ void
 InvokeTX::commit()
 {
   assert_is_valid();
-
-  // changes are already applied to BlockTX, so we merely clear them here.
+  // changes are already applied to BlockTX, but we still need to mark them all
+  // as committed
+  for (auto &[key, vec] : changes_) {
+    if (!vec.empty())
+      block_.commit_change(key, vec.back().change);
+  }
   changes_.clear();
 }
 

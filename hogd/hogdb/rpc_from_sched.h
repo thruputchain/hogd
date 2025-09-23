@@ -40,7 +40,7 @@ public:
 
   x23::Async<DbSchedResult> dbsched_write_hog_ages(const HogAgeBatch &ages);
 
-  static x23::Async<DbAccountAuthDataBatchResult>
+  x23::Async<DbAccountAuthDataBatchResult>
   dbsched_get_account_auth_data(BlockID block_id,
                                 ContractAddressBatch accounts);
 
