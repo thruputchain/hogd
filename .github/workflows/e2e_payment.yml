@@ -1,0 +1,44 @@
+name: E2E Payment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bench_server_1:
+    runs-on: client
+    steps:
+    - name: Setup build environment
+      uses: ./.github/actions/setup-build-environment
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11111
+  
+  bench_server_2:
+    runs-on: hog7
+    steps:
+    - name: Setup build environment
+      uses: ./.github/actions/setup-build-environment
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11111
+  
+  bench_server_3:
+    runs-on: hog8
+    steps:
+    - name: Setup build environment
+      uses: ./.github/actions/setup-build-environment
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11111
+
+  build:
+    runs-on: metrics
+    steps:
+    - name: Setup build environment
+      uses: ./.github/actions/setup-build-environment
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    # TODO run the coord here
