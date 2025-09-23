@@ -25,6 +25,8 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
