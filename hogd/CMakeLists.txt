@@ -20,7 +20,6 @@ add_library(
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
   hogd_interface INTERFACE
-  built_headers_interface
   crypto_interface
   protocol
 )
