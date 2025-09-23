@@ -12,8 +12,6 @@ add_subdirectory(xdr)
 add_subdirectory(genesis)
 add_subdirectory(loadgen)
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
-
 # Then combine them into the hogd library (used by all executables below)
 add_library(
   hogd
@@ -22,6 +20,7 @@ add_library(
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
   hogd_interface INTERFACE
+  built_headers_interface
   crypto_interface
   protocol
 )
