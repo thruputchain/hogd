@@ -105,9 +105,9 @@ jobs:
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
     - name: launch loadgen
-      run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start ./release/hogd/loadgen/loadgen_server -p 11222
+      run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
     - name: launch hogexec
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start ./release/hogd/hogexec/hogexec localhost:7888 50
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec localhost:7888 50
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
     - name: wait for hogexec
