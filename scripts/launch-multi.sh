@@ -5,10 +5,10 @@
 HOGD_PROJECT_DIR="/home/hog12/$(whoami)/hogd"
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
-loadgen_server="hog3"
-chuckd_server="hog3"
-hogexec_servers=("hog4" "hog5")
-hogdb_servers=("hog6")
+loadgen_server="hog4"
+chuckd_server="hog4"
+hogexec_servers=("hog4" "hog4")
+hogdb_servers=("hog4")
 
 # Set to 1 to enable x23 RPC logging.
 export X23TRACE=0
@@ -41,6 +41,9 @@ done
 # -------------------------------
 
 # The code starts below.
+
+# This removes duplicates from [all_servers].
+all_servers=($(printf "%s\n" "${all_servers[@]}" | awk '!seen[$0]++'))
 
 # Kills all of the processes on all of the servers.
 kill_everything() {
@@ -183,6 +186,7 @@ ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
   --num-txs 20000                              \
   --exec-batch 100                             \
   --exec-par 10                                \
+  --num-blocks 100                             \
   --max-msg-size 400000000                     \
   > /tmp/chuckd.log 2>&1 &"
 wait_port "$chuckd_server" 7888
