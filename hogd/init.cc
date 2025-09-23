@@ -6,6 +6,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/init.h"
+#include "hogd/version.h"
 
 namespace hogd {
 
@@ -26,6 +27,8 @@ hogd_init([[maybe_unused]] int argc, [[maybe_unused]] char *argv[])
 
   // initialize logging
   log_init(std::make_unique<ConsoleLogger>());
+
+  version::print_version();
 
   // initialize each subsystem
   for (auto [func, name] : init_tbl) {
