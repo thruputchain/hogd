@@ -165,11 +165,11 @@ TEST_F(HogDBTest, ItemChange)
 
   // try different bases (conflict)
   EXPECT_EQ(ItemChange(NNInt128(10, 1)).merge(ItemChange(NNInt128(20, 1))),
-            HogDBError(HogDBCode::kConflict));
+            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
 
   // try using nnint128 as a lock (conflict)
   EXPECT_EQ(ItemChange(NNInt128(1, -1)).merge(ItemChange(NNInt128(1, -1))),
-            HogDBError(HogDBCode::kConflict));
+            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
 
   // try positive addition (no conflict)
   EXPECT_TRUE(ItemChange(NNInt128(0, 10)).merge(ItemChange(NNInt128(0, 10))));
@@ -179,7 +179,7 @@ TEST_F(HogDBTest, ItemChange)
 
   // try subtract below zero (conflict)
   EXPECT_EQ(ItemChange(NNInt128(10, -6)).merge(ItemChange(NNInt128(10, -5))),
-            HogDBError(HogDBCode::kConflict));
+            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
 
   //
   // Test Byte changes
@@ -195,7 +195,7 @@ TEST_F(HogDBTest, ItemChange)
 
   // try different bytes (conflict)
   EXPECT_EQ(ItemChange(Bytes(as)).merge(ItemChange(Bytes(bs))),
-            HogDBError(HogDBCode::kConflict));
+            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
 }
 
 TEST_F(HogDBTest, StorageCost)

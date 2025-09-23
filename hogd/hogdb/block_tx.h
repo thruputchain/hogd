@@ -59,10 +59,10 @@ private:
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
 
   // raw locking operations.
-  static inline HogDBStatus<void>
+  static inline HogDBStatus<int128_t>
   do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
           const ItemChange &change);
-  static inline HogDBStatus<void>
+  static inline HogDBStatus<int128_t>
   do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
                  const ItemChange &old_change, const ItemChange &new_change);
   void inline do_unlock_item(const std::unique_lock<std::mutex> &ul,

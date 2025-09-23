@@ -59,14 +59,24 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // The actual amount of storage tokens that are locked
   // will be reduced by the amount locked for the current snapshot.
   { t.merge(arg) } -> std::same_as<HogDBStatus<int128_t>>;
+  // An upper bound on the amount of storage tokens needed to support the item,
+  // for the case where the change is the first one applied to the item.
+  { t.marginal_storage_cost() } -> std::same_as<int128_t>;
+
   // reverts the change and reservation in arg that was previously merged.
   { t.undo_merge(arg) } -> std::same_as<void>;
   // returns the size in bytes of storage required in ramdb.
   { t.storage_size() } -> std::same_as<size_t>;
-  // Returns the amount of storage tokens that were actually needed to support
-  // the item. This amount can be nondeterministic. This amount WILL ALWAYS be
-  // less than or equal to the amount returned by merge.
-  { t.commit_change(arg) } -> std::same_as<int128_t>;
+  // Marks a change as committed.
+  { t.commit_change(arg) } -> std::same_as<void>;
+  // Returns the amount of storage tokens that are actually needed to support
+  // the item, for all of the changes that are currently committed.
+  // The caller is responsible for releasing the difference between the amount
+  // returned by merge, and the difference in this cost before and after a call
+  // to commit_change. Returns std::nullopt if no changes have been committed
+  // (so the cost is the cost of the snapshot item, which isn't stored inside
+  // the item structs).
+  { t.committed_storage_cost() } -> std::same_as<std::optional<int128_t>>;
 };
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
@@ -91,6 +101,21 @@ public:
   static size_t storage_size() { return sizeof(int128_t); }
   int128_t value() const { return base_ + delta_; }
   int128_t base() const { return base_; }
+
+  void commit_change(const NNInt128 & /*unused*/) { change_committed_ = true; }
+
+  std::optional<int128_t> committed_storage_cost() const
+  {
+    if (change_committed_) {
+      return marginal_storage_cost();
+    }
+    return std::nullopt;
+  }
+
+  constexpr static int128_t marginal_storage_cost()
+  {
+    return storage_cost(storage_size());
+  }
 
 private:
   int128_t base_;
@@ -126,11 +151,11 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
-  HogDBStatus<void> merge(const Bytes &bytes)
+  HogDBStatus<int128_t> merge(const Bytes &bytes)
   {
     if (buf_ != bytes.buf_)
       return HogDBError(HogDBCode::kConflict);
-    return {};
+    return marginal_storage_cost();
   }
   static void undo_merge(const Bytes &bytes) {}
 
@@ -140,6 +165,21 @@ public:
     std::vector<std::byte> buf(buf_);
     auto span = std::span<const std::byte>(buf);
     return OwningSpan(span, [ref = std::move(buf)] {});
+  }
+
+  void commit_change(const Bytes & /*unused*/) { change_committed_ = true; }
+
+  std::optional<int128_t> committed_storage_cost() const
+  {
+    if (change_committed_) {
+      return marginal_storage_cost();
+    }
+    return std::nullopt;
+  }
+
+  int128_t marginal_storage_cost() const
+  {
+    return storage_cost(storage_size());
   }
 
 private:
@@ -158,11 +198,28 @@ public:
   static HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                   const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
-  static HogDBStatus<int128_t> merge(const Deletion & /*del*/) { return 0; }
+  static HogDBStatus<int128_t> merge(const Deletion & /*del*/)
+  {
+    return marginal_storage_cost();
+  }
   static void undo_merge(const Deletion &del) {}
   static size_t storage_size() { return 0; }
 
-  static int128_t commit_change(const Deletion & /*del*/) { return 0; }
+  void commit_change(const Deletion & /*del*/) { change_committed_ = true; }
+  std::optional<int128_t> committed_storage_cost() const
+  {
+    if (change_committed_) {
+      return marginal_storage_cost();
+    }
+    return std::nullopt;
+  }
+
+  constexpr static int128_t marginal_storage_cost()
+  {
+    return storage_cost(storage_size());
+  }
+
+  bool change_committed_{false};
 };
 
 static_assert(is_item<Deletion>);
@@ -181,11 +238,12 @@ public:
            deployed_contract_data.deployed_contract_hash_);
     return true;
   }
-  HogDBStatus<void> merge(const DeployedContractData &deployed_contract_data)
+  HogDBStatus<int128_t>
+  merge(const DeployedContractData &deployed_contract_data)
   {
     assert(deployed_contract_hash_ ==
            deployed_contract_data.deployed_contract_hash_);
-    return {};
+    return marginal_storage_cost();
   }
   static void undo_merge(const DeployedContractData &deployed_contract_data) {}
   size_t storage_size() const { return deployed_contract_hash_.contract_size; }
@@ -194,6 +252,25 @@ public:
   {
     return deployed_contract_hash_;
   }
+
+  void commit_change(const DeployedContractData & /*deployed_contract_data*/)
+  {
+    change_committed_ = true;
+  }
+  std::optional<int128_t> committed_storage_cost() const
+  {
+    if (change_committed_) {
+      return marginal_storage_cost();
+    }
+    return std::nullopt;
+  }
+
+  int128_t marginal_storage_cost() const
+  {
+    return storage_cost(storage_size());
+  }
+
+  bool change_committed_{false};
 
 private:
   DeployedContractHash deployed_contract_hash_;
@@ -214,10 +291,10 @@ public:
     assert(new_contract_ == new_contract_data.new_contract_);
     return true;
   }
-  HogDBStatus<void> merge(const NewContractData &new_contract_data)
+  HogDBStatus<int128_t> merge(const NewContractData &new_contract_data)
   {
     assert(new_contract_ == new_contract_data.new_contract_);
-    return {};
+    return 0;
   }
   static void undo_merge(const NewContractData &new_contract_data) {}
   static size_t storage_size()
@@ -227,7 +304,12 @@ public:
     return 0;
   }
 
+  static void commit_change(const NewContractData & /*new_contract_data*/) {};
+  static std::optional<int128_t> committed_storage_cost() { return 0; }
+
   const Contract &new_contract() const { return new_contract_; }
+
+  constexpr static int128_t marginal_storage_cost() { return 0; }
 
 private:
   Contract new_contract_;
@@ -269,12 +351,14 @@ public:
   void narrow(const ItemChange &change);
   // merge merges the reservation and value of a change into this one. It
   // returns kConflict if the change does not commute.
-  HogDBStatus<void> merge(const ItemChange &change);
+  HogDBStatus<int128_t> merge(const ItemChange &change);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
   // commit_change marks a change as committed.
   // The change MUST have been previously merged.
   void commit_change(const ItemChange &change);
+
+  int128_t marginal_storage_cost() const;
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).

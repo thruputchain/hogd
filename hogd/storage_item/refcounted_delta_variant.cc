@@ -450,6 +450,13 @@ ReplayCacheArgs::get_current_committed_cost(
     StorageCostModel const *current_model,
     StorageItemWrapper const *base_item) const
 {
+  if (!has_committed_delta_) {
+    if (base_item) {
+      return base_item->storage_cost();
+    }
+    return 0;
+  }
+
   size_t committed_size = committed_nonces_.size();
   if (base_item) {
     committed_size += base_item->replay_cache().count_remaining_after_clear(
@@ -620,15 +627,15 @@ DeployedContractArgs::get_current_committed_cost(
 {
   assert(cost_model);
   if (committed_) {
+    if (base_item) {
+      warn("Redeploying a contract; that's not supposed to happen");
+      assert(base_item->deployed_contract_hash() == deployed_contract_hash_);
+    }
     return cost_model->get_contract_size_cost(
         deployed_contract_hash_.contract_size);
   }
   if (base_item) {
     assert(base_item->type() == StorageItemType::kItemTypeDeployedContractHash);
-    if (committed_) {
-      warn("Redeploying a contract; that's not supposed to happen");
-      assert(base_item->deployed_contract_hash() == deployed_contract_hash_);
-    }
     return base_item->storage_cost();
   }
   return 0;

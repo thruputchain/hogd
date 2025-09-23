@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-ATTRIBUTE_ALWAYS_INLINE HogDBStatus<void>
+ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
                  ItemLock &lock, const ItemChange &change)
 {
@@ -26,18 +26,19 @@ BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
   if (++lock.ref == 1) {
     lock.change = change;
-    return {};
+    return change.marginal_storage_cost();
   }
 
-  if (HogDBStatus<void> ret = lock.change.merge(change); !ret) {
+  HogDBStatus<int128_t> ret = lock.change.merge(change);
+  if (!ret) {
     lock.ref--;
     return ret.error();
   }
 
-  return {};
+  return ret;
 }
 
-ATTRIBUTE_ALWAYS_INLINE HogDBStatus<void>
+ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
                         ItemLock &lock, const ItemChange &old_change,
                         const ItemChange &new_change)
@@ -47,17 +48,17 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
   if (lock.ref == 1) {
     lock.change = new_change;
-    return {};
+    return new_change.marginal_storage_cost();
   }
 
   ItemChange tmp = lock.change;
   tmp.undo_merge(old_change);
-  HogDBStatus<void> ret = tmp.merge(new_change);
+  HogDBStatus<int128_t> ret = tmp.merge(new_change);
   if (!ret)
     return ret.error();
 
   lock.change = std::move(tmp);
-  return {};
+  return ret;
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
@@ -97,7 +98,8 @@ BlockTX::lock_balance(const Address &addr, int128_t delta)
   if (!change)
     return change.error();
   auto [lock, ul] = addr_balance_locks_[addr];
-  return do_lock(ul, lock, *change);
+  return do_lock(ul, lock, *change)
+      .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
 }
 
 HogDBStatus<void>
@@ -111,7 +113,8 @@ BlockTX::modify_balance(const Address &addr, int128_t old_delta,
 
   ItemChange old_change(NNInt128(nnint->base(), old_delta));
   ItemChange new_change(NNInt128(nnint->base(), new_delta));
-  return do_modify_lock(ul, lock, old_change, new_change);
+  return do_modify_lock(ul, lock, old_change, new_change)
+      .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
 }
 
 void

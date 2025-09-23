@@ -100,7 +100,7 @@ NNInt128::merge(const NNInt128 &nnint)
   delta_ += nnint.delta_;
 
   assert_is_valid();
-  return storage_cost(storage_size());
+  return marginal_storage_cost();
 }
 
 inline void
@@ -214,7 +214,7 @@ ItemChange::narrow(const ItemChange &change)
       type_);
 }
 
-HogDBStatus<void>
+HogDBStatus<int128_t>
 ItemChange::merge(const ItemChange &change)
 {
   if (type_.index() != change.type_.index())
@@ -223,10 +223,11 @@ ItemChange::merge(const ItemChange &change)
     return HogDBError(HogDBCode::kConflict);
 
   return std::visit(
-      [&change](auto &arg) -> HogDBStatus<void> {
+      [&change](auto &arg) -> HogDBStatus<int128_t> {
         if constexpr (!is_monostate<decltype(arg)>)
           return arg.merge(std::get<std::decay_t<decltype(arg)>>(change.type_));
-        return {};
+        assert(false);
+        return HogDBError(HogDBCode::kInternal);
       },
       type_);
 }
@@ -290,6 +291,19 @@ ItemChange::storage_cost_delta(HogDBDAO &db, const ItemKey &key)
   // calculate the delta between the size of the changed item and its snapshot.
   ssize_t cost = is_deletion() ? 0 : storage_cost(storage_size());
   return cost - static_cast<ssize_t>(*snapshot_cost_);
+}
+
+int128_t
+ItemChange::marginal_storage_cost() const
+{
+  return std::visit(
+      [](auto &arg) -> int128_t {
+        if constexpr (!is_monostate<decltype(arg)>)
+          return arg.marginal_storage_cost();
+        assert(false);
+        return 0;
+      },
+      type_);
 }
 
 } // namespace hogd
