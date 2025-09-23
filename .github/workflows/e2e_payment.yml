@@ -97,7 +97,16 @@ jobs:
         path: chuckd
         ref: main
     - name: build chuckd
-      run: go build -C chuckd
+      run: go build -C chuckd/chuckd
+    - name: wait for bench servers
+      run: |
+        ./scripts/wait-port.sh client 11111
+        ./scripts/wait-port.sh hog7 11111  
+        ./scripts/wait-port.sh hog8 11111
+    - name: launch loadgen
+      run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start ./release/hogd/loadgen/loadgen_server -p 11222
+    - name: wait for loadgen
+      run: ./scripts/wait-port.sh hog7 11222
 
     - name: cleanup control servers
       if: always()
@@ -105,6 +114,9 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+
+
+
 
 
 
