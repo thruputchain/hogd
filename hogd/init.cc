@@ -18,6 +18,14 @@ const std::pair<InitFunc, std::string_view> init_tbl[] = {
     {crypto_init, "crypto"},
 };
 
+void
+print_version()
+{
+  info("hogd version: {}, hash: {}, build time: {}", version::kHogdVersion,
+       version::kHogdGitHashFull, version::kHogdBuildTime);
+  info("hogd protocol: {}", version::kHogdProtocol);
+}
+
 } // namespace
 
 int
@@ -28,7 +36,7 @@ hogd_init([[maybe_unused]] int argc, [[maybe_unused]] char *argv[])
   // initialize logging
   log_init(std::make_unique<ConsoleLogger>());
 
-  version::print_version();
+  print_version();
 
   // initialize each subsystem
   for (auto [func, name] : init_tbl) {

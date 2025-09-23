@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(hogd C CXX)
+project(hogd VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 
@@ -80,11 +80,25 @@ include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
 include(cmake/wasmopt.cmake)
 
+# Where to place generated headers
+set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd")
+file(MAKE_DIRECTORY "${BUILT_HEADERS_DIR}")
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
-  ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
+  ${BUILT_HEADERS_DIR}/config.h
   @ONLY
 )
+
+# A target that regenerates version.h on every build.
+add_custom_target(version ALL
+  COMMAND ${CMAKE_COMMAND}
+          -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+          -DOUT_FILE=${BUILT_HEADERS_DIR}/version.h
+          -DPROJECT_VERSION=${PROJECT_VERSION}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake
+  COMMENT "Generating version.h"
+  VERBATIM)
 
 include(CheckIPOSupported)
 check_ipo_supported()

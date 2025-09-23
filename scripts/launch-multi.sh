@@ -5,8 +5,8 @@
 HOGD_PROJECT_DIR="/home/hog12/$(whoami)/hogd"
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
-loadgen_server="hog4"
-chuckd_server="hog4"
+loadgen_server="hog3"
+chuckd_server="hog3"
 hogexec_servers=("hog4" "hog4")
 hogdb_servers=("hog4")
 

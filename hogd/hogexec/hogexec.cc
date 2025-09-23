@@ -41,7 +41,7 @@ hogexec_init(const std::string &coordinator_addr, int poll_threads)
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
   const std::string executor_address = get_executor_address();
-  const ExecCard card{.protocol = version::kProtocol,
+  const ExecCard card{.protocol = version::kHogdProtocol,
                       .upid = {},
                       .address = executor_address.c_str()};
   ExecCoordServer exec(card, coordinator_host, coordinator_port, poll_threads);

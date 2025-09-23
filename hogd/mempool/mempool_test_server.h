@@ -70,7 +70,7 @@ public:
 
   MempoolTestServer()
     : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
-      exec_card_{.protocol = version::kProtocol,
+      exec_card_{.protocol = version::kHogdProtocol,
                  .upid = {},
                  .address =
                      x23::HostPort(kAddress.c_str(), coordinator_port_).show()},

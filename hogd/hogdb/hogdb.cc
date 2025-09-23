@@ -162,7 +162,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       const std::string coord_address = create_address(kCoordServerPort);
       const std::string exec_address = create_address(kExecServerPort);
       const std::string sched_address = create_address(kSchedServerPort);
-      ShardCard card{.protocol = version::kProtocol,
+      ShardCard card{.protocol = version::kHogdProtocol,
                      .upid = {},
                      .block_height = 0,
                      .shard_count = 1,
