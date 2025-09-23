@@ -427,7 +427,7 @@ defined by a `version` block inside a `program` block.  The program
 and version are both specified by 32-bit unsigned numbers.  Within a
 version, functions are also each assigned a 32-bit number.  The
 [specification][RPC-assignment] suggests choosing program numbers in
-the range 0x20000000 - 0x2fffffff for programs that have not been
+the range 0x20000000 - 0x3fffffff for programs that have not been
 officially registered with IANA.  For example:
 
 ```

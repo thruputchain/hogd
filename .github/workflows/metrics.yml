@@ -25,6 +25,8 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -66,6 +68,8 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -85,4 +89,7 @@ jobs:
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: metrics
       run: ./scripts/metrics.sh release
+    - name: shut down bench server
+      if: always()
+      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
 
