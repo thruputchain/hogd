@@ -2,7 +2,7 @@
 
 # These parameters are CONFIGURABLE.
 # -------------------------------
-CHUCKD_BUILD_DIR="/home/hog12/$(whoami)/hogd/chuckd/chuckd"
+HOGD_PROJECT_DIR="/home/hog12/$(whoami)/hogd"
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
@@ -16,7 +16,8 @@ export X23TRACE=0
 
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
-CHUCKD_BINARY=${CHUCKD_BUILD_DIR}/chuckd
+CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/chuckd/chuckd
+CHUCKD_BINARY=${HOGD_PROJECT_DIR}/chuckd/chuckd/chuckd
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
