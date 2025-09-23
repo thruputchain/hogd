@@ -2,7 +2,7 @@
 
 # These parameters are CONFIGURABLE.
 # -------------------------------
-CHUCKD_BUILD_DIR="/home/hog12/$(whoami)/chuckd/chuckd"
+CHUCKD_BUILD_DIR="/home/hog12/$(whoami)/hogd/chuckd/chuckd"
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
