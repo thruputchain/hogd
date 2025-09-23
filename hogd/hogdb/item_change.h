@@ -53,11 +53,20 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   { t.narrow(arg) } -> std::same_as<bool>;
   // merges the change and reservation in arg (will fail if there is a
   // conflict).
-  { t.merge(arg) } -> std::same_as<HogDBStatus<void>>;
+  // Returns an upper bound of the TOTAL amount of storage tokens
+  // that must be locked to support the item, after the merge.
+  // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
+  // The actual amount of storage tokens that are locked
+  // will be reduced by the amount locked for the current snapshot.
+  { t.merge(arg) } -> std::same_as<HogDBStatus<int128_t>>;
   // reverts the change and reservation in arg that was previously merged.
   { t.undo_merge(arg) } -> std::same_as<void>;
   // returns the size in bytes of storage required in ramdb.
   { t.storage_size() } -> std::same_as<size_t>;
+  // Returns the amount of storage tokens that were actually needed to support
+  // the item. This amount can be nondeterministic. This amount WILL ALWAYS be
+  // less than or equal to the amount returned by merge.
+  { t.commit_change(arg) } -> std::same_as<int128_t>;
 };
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
@@ -76,7 +85,7 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const NNInt128 &nnint);
-  HogDBStatus<void> merge(const NNInt128 &nnint);
+  HogDBStatus<int128_t> merge(const NNInt128 &nnint);
   void undo_merge(const NNInt128 &nnint);
 
   static size_t storage_size() { return sizeof(int128_t); }
@@ -88,6 +97,8 @@ private:
   int128_t delta_;
   int128_t plus_{0};  // sum of all positive deltas (positive value)
   int128_t minus_{0}; // sum of all negative deltas (negative value)
+
+  bool change_committed_{false};
 
   void assert_is_valid() const
   {
@@ -133,6 +144,9 @@ public:
 
 private:
   std::vector<std::byte> buf_;
+  // If a change has been committed, then every subsequent change can
+  // release any locked storage tokens
+  bool change_committed_{false};
 };
 
 static_assert(is_item<Bytes>);
@@ -144,9 +158,11 @@ public:
   static HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                   const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
-  static HogDBStatus<void> merge(const Deletion & /*del*/) { return {}; }
+  static HogDBStatus<int128_t> merge(const Deletion & /*del*/) { return 0; }
   static void undo_merge(const Deletion &del) {}
   static size_t storage_size() { return 0; }
+
+  static int128_t commit_change(const Deletion & /*del*/) { return 0; }
 };
 
 static_assert(is_item<Deletion>);

@@ -52,10 +52,17 @@ BytestringArgs::to_item(StorageCostModel const *cost_model) const
 int128_t
 BytestringArgs::get_current_committed_cost(
     StorageCostModel const *current_model,
-    StorageItemWrapper const * /*unused*/) const
+    StorageItemWrapper const *base_item) const
 {
-  return current_model->kBaseItemCost +
-         current_model->get_bytestring_cost(bytestring_set_.size());
+  assert(current_model);
+  if (committed_) {
+    return current_model->kBaseItemCost +
+           current_model->get_bytestring_cost(bytestring_set_.size());
+  }
+  if (base_item) {
+    return base_item->storage_cost();
+  }
+  return 0;
 }
 
 int128_t
@@ -226,6 +233,15 @@ RetrocausalQueueArgs::get_current_committed_cost(
     StorageCostModel const *current_model,
     StorageItemWrapper const *base_item) const
 {
+  assert(current_model);
+  // nothing has committed yet
+  if (!insert_committed_ && !past_consume_delta_) {
+    if (base_item) {
+      return base_item->storage_cost();
+    }
+    return 0;
+  }
+
   auto stats = get_current_committed_stats(base_item);
   return current_model->kBaseItemCost +
          current_model->get_retrocausal_queue_cost(stats.active_size,
@@ -558,11 +574,19 @@ AuthDataArgs::to_item(StorageCostModel const *cost_model) const
 int128_t
 AuthDataArgs::get_current_committed_cost( // NOLINT
     StorageCostModel const *current_model,
-    StorageItemWrapper const * /*base_item*/) const
+    StorageItemWrapper const *base_item) const
 {
-  // TODO(geoff): Implement proper cost model for auth data based on number of
-  // signers
-  return current_model->kBaseItemCost;
+  assert(current_model);
+  if (has_committed_delta_) {
+    // TODO(geoff): Implement proper cost model for auth data based on number of
+    // signers
+    return current_model->kBaseItemCost;
+  }
+
+  if (base_item) {
+    return base_item->storage_cost();
+  }
+  return 0;
 }
 
 int128_t
@@ -594,6 +618,7 @@ DeployedContractArgs::get_current_committed_cost(
     StorageCostModel const *cost_model,
     StorageItemWrapper const *base_item) const
 {
+  assert(cost_model);
   if (committed_) {
     return cost_model->get_contract_size_cost(
         deployed_contract_hash_.contract_size);
@@ -604,8 +629,7 @@ DeployedContractArgs::get_current_committed_cost(
       warn("Redeploying a contract; that's not supposed to happen");
       assert(base_item->deployed_contract_hash() == deployed_contract_hash_);
     }
-    return cost_model->get_contract_size_cost(
-        base_item->deployed_contract_hash().contract_size);
+    return base_item->storage_cost();
   }
   return 0;
 }

@@ -69,7 +69,7 @@ NNInt128::narrow(const NNInt128 &nnint)
   return true;
 }
 
-inline HogDBStatus<void>
+inline HogDBStatus<int128_t>
 NNInt128::merge(const NNInt128 &nnint)
 {
   assert_is_valid();
@@ -100,7 +100,7 @@ NNInt128::merge(const NNInt128 &nnint)
   delta_ += nnint.delta_;
 
   assert_is_valid();
-  return {};
+  return storage_cost(storage_size());
 }
 
 inline void
