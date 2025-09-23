@@ -70,6 +70,7 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
@@ -86,6 +87,10 @@ jobs:
       run: cargo --version
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
-    - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc
-    # TODO run the coord here
+    - name: Checkout chuckd
+      uses: actions/checkout@v4
+      with:
+        repository: groundhogchain/chuckd
+        path: chuckd
+    - name: build chuckd
+      run: go build -C chuckd
