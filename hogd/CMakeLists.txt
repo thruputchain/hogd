@@ -28,6 +28,7 @@ target_link_libraries(
   hogd
   base
   crypto
+  built_headers_interface
   hogd_interface
 )
 
