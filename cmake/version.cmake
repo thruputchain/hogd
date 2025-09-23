@@ -3,6 +3,7 @@
 #  - OUT_FILE: path to write the generated header
 #  - PROJECT_VERSION: (optional) from project()
 
+message("hi!")
 # Get git info (works even if not in a git checkout)
 find_program(GIT_EXEC git)
 set(GIT_HOGD_HASH "unknown")
@@ -50,6 +51,8 @@ endif()
 
 # Build timestamp (UTC) so you can see when the binary was produced
 string(TIMESTAMP BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+message("${GIT_HOGD_HASH}${GIT_HOGD_DIRTY}")
 
 # Compose the header text
 set(_txt "/* Auto-generated. Do not edit. */
