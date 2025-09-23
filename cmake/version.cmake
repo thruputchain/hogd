@@ -58,10 +58,10 @@ set(_txt "/* Auto-generated. Do not edit. */
 
 namespace hogd::version {
 
-constexpr const char *kHogdVersion     = \"${PROJECT_VERSION}\";
-constexpr const char *kHogdGitHash     = \"${GIT_HOGD_HASH}\";
-constexpr const char *kHogdGitHashFull = \"${GIT_HOGD_HASH}${GIT_HOGD_DIRTY}\";
-constexpr const char *kHogdBuildTime   = \"${BUILD_TIME}\";
+constexpr const char *kHogdVersion           = \"${PROJECT_VERSION}\";
+constexpr const char *kHogdGitHash           = \"${GIT_HOGD_HASH}\";
+constexpr const char *kHogdGitHashFull       = \"${GIT_HOGD_HASH}${GIT_HOGD_DIRTY}\";
+constexpr const char *kHogdBuildTime         = \"${BUILD_TIME}\";
 
 constexpr const char *kHogdProtocolHash      = \"${GIT_PROTOCOL_HASH}\";
 constexpr const char *kHogdProtocolHashFull  = \"${GIT_PROTOCOL_HASH}${GIT_PROTOCOL_DIRTY}\";

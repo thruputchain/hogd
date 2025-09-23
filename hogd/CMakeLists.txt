@@ -1,12 +1,3 @@
-execute_process(
-  COMMAND git rev-parse --short HEAD
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE GIT_COMMIT_HASH
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-include_directories(${CMAKE_BINARY_DIR})
-
 # Build each shared module
 add_subdirectory(base)
 add_subdirectory(container)
