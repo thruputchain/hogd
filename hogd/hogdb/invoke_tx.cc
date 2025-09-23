@@ -53,8 +53,8 @@ InvokeTX::commit()
   // changes are already applied to BlockTX, but we still need to mark them all
   // as committed
   for (auto &[key, vec] : changes_) {
-    if (!vec.empty())
-      block_.commit_change(key, vec.back().change);
+    if (!vec.change_vec.empty())
+      block_.commit_change(key, vec.change_vec.back().change);
   }
   changes_.clear();
 }
@@ -77,7 +77,8 @@ InvokeTX::rollback_to_savepoint(int depth)
   assert_is_valid();
 
   tx_depth_ = depth;
-  for (auto &[key, vec] : changes_) {
+  for (auto &[key, item_vec] : changes_) {
+    auto& vec = item_vec.change_vec;
     // skip if no changes made after savepoint.
     if (vec.empty() || vec.back().tx_depth <= tx_depth_)
       continue;

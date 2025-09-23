@@ -95,9 +95,15 @@ private:
     int tx_depth;
   };
 
+  // This implementation does not released locked storage upon savepoint rollback (only when the transaction commits or aborts).
+  struct ItemVersionVec {
+    std::vector<ItemVersion> change_vec;
+    int128_t locked_storage_cost{0};
+  };
+
   int tx_depth_{0};
   BlockTX &block_;
-  std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
+  std::unordered_map<ItemKey, ItemVersionVec> changes_;
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
@@ -111,7 +117,7 @@ private:
     if constexpr (is_debug_build()) {
       for (const auto &[key, vec] : changes_) {
         [[maybe_unused]] int depth = 0;
-        for (const ItemVersion &item : vec) {
+        for (const ItemVersion &item : vec.change_vec) {
           assert(item.tx_depth >= depth);
           assert(item.tx_depth <= tx_depth_);
           depth = item.tx_depth + 1;
@@ -134,7 +140,7 @@ InvokeTX::read_change(const ItemKey &key) const
   if (it == changes_.end())
     return nullptr;
 
-  const std::vector<ItemVersion> &v = it->second;
+  const std::vector<ItemVersion> &v = it->second.change_vec;
   return &v.back().change;
 }
 

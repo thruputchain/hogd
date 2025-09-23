@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <variant>
@@ -270,29 +271,6 @@ ItemChange::storage_size() const
       type_);
 }
 
-HogDBStatus<ssize_t>
-ItemChange::storage_cost_delta(HogDBDAO &db, const ItemKey &key)
-{
-  // fetch the snapshot size of the object from the database if needed.
-  if (!snapshot_cost_) {
-    auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
-      HogDBStatus<size_t> ret = db.get_item_size(key);
-      if (!ret && ret.error() == HogDBCode::kNotFound)
-        return 0UL;
-      if (!ret)
-        return ret.error();
-      return storage_cost(*ret);
-    }();
-    if (!snapshot_cost)
-      return snapshot_cost.error();
-    snapshot_cost_ = *snapshot_cost;
-  }
-
-  // calculate the delta between the size of the changed item and its snapshot.
-  ssize_t cost = is_deletion() ? 0 : storage_cost(storage_size());
-  return cost - static_cast<ssize_t>(*snapshot_cost_);
-}
-
 int128_t
 ItemChange::marginal_storage_cost() const
 {
@@ -305,5 +283,46 @@ ItemChange::marginal_storage_cost() const
       },
       type_);
 }
+
+HogDBStatus<int128_t>
+ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key)
+{
+  auto ret =  std::visit(
+      [](auto &arg) -> std::optional<int128_t> {
+        if constexpr (!is_monostate<decltype(arg)>)
+          return arg.committed_storage_cost();
+        return std::nullopt;
+      },
+      type_);
+  if (ret) {
+    return *ret;
+  }
+
+  if (!snapshot_cost_) {
+    auto ret = load_snapshot_cost(db, key);
+    if (!ret)
+      return ret.error();
+  }
+  assert(snapshot_cost_.has_value());
+  return *snapshot_cost_;
+}
+
+HogDBStatus<void>
+ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
+{
+  auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
+    HogDBStatus<size_t> ret = db.get_item_size(key);
+    if (!ret && ret.error() == HogDBCode::kNotFound)
+      return 0UL;
+    if (!ret)
+      return ret.error();
+    return storage_cost(*ret);
+  }();
+  if (!snapshot_cost)
+    return snapshot_cost.error();
+  snapshot_cost_ = *snapshot_cost;
+  return {};
+}
+
 
 } // namespace hogd

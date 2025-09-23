@@ -59,7 +59,7 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // The actual amount of storage tokens that are locked
   // will be reduced by the amount locked for the current snapshot.
   { t.merge(arg) } -> std::same_as<HogDBStatus<int128_t>>;
-  // An upper bound on the amount of storage tokens needed to support the item,
+  // An upper bound on the amount of storage tokens needed to support the item change,
   // for the case where the change is the first one applied to the item.
   { t.marginal_storage_cost() } -> std::same_as<int128_t>;
 
@@ -340,9 +340,6 @@ public:
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
 
-  // setters
-  void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
-
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            ItemKey key) const;
@@ -359,6 +356,7 @@ public:
   void commit_change(const ItemChange &change);
 
   int128_t marginal_storage_cost() const;
+  HogDBStatus<int128_t> committed_storage_cost(HogDBDAO &db, const ItemKey &key);
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).
@@ -366,12 +364,14 @@ public:
 
 private:
   bool exclusive_{false};
-  std::optional<size_t> snapshot_cost_;
+  std::optional<int128_t> snapshot_cost_;
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData>
       type_;
 
   size_t storage_size() const;
+
+  HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key);
 };
 
 inline std::optional<int128_t>
