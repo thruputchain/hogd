@@ -76,4 +76,4 @@ constexpr const char *kHogdProtocol          = \"hogp/${GIT_PROTOCOL_HASH}${GIT_
 # Write only if changed (prevents gratuitous recompiles)
 file(WRITE "${OUT_FILE}.tmp" "${_txt}")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${OUT_FILE}.tmp" "${OUT_FILE}")
-#file(REMOVE "${OUT_FILE}.tmp")
+file(REMOVE "${OUT_FILE}.tmp")
