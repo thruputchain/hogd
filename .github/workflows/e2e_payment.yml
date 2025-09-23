@@ -88,6 +88,8 @@ jobs:
       run: cargo --version
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
     - name: Checkout chuckd
       uses: actions/checkout@v4
       with:
@@ -96,3 +98,13 @@ jobs:
         ref: main
     - name: build chuckd
       run: go build -C chuckd
+
+    - name: cleanup control servers
+      if: always()
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+
+
+

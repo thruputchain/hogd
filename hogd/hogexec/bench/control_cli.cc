@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <print>
@@ -27,7 +28,7 @@ handle_shutdown_command(std::string const &host, std::string const &port)
   try {
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto client = hogd::connect_to_control_server(cp, host, port, std::chrono::milliseconds(10000));
 
     std::println("Sending shutdown command to {}:{}", host, port);
     client.shutdown_server();
