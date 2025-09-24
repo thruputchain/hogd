@@ -97,6 +97,7 @@ BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
 HogDBStatus<void>
 BlockTX::lock_balance(const Address &addr, int128_t delta)
 {
+  info("locking balance for addr {} delta {}", addr, delta);
   HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
   if (!change)
     return change.error();
@@ -106,10 +107,12 @@ BlockTX::lock_balance(const Address &addr, int128_t delta)
       .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
 }
 
+#if 0
 HogDBStatus<void>
 BlockTX::modify_balance(const Address &addr, int128_t old_delta,
                         int128_t new_delta)
 {
+  info("modifying balance for addr {} old_delta {} new_delta {}", addr, old_delta, new_delta);
   auto [lock, ul] = addr_balance_locks_[addr];
   std::optional<NNInt128> nnint = lock.change.get_raw_nnint128();
   if (!nnint) [[unlikely]]
@@ -119,12 +122,14 @@ BlockTX::modify_balance(const Address &addr, int128_t old_delta,
   ItemChange new_change(NNInt128(nnint->base(), new_delta));
   return do_modify_lock(ul, lock, old_change, new_change)
       .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
-}
+} 
+#endif
 
 void
 BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   assert(delta > 0);
+  info("releasing balance for addr {} delta {}", addr, delta);
   if (auto r = lock_balance(addr, delta); !r) [[unlikely]]
     throw std::runtime_error("failed to release balance");
 }
@@ -139,9 +144,10 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
     return do_lock(ul, lock, change)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
-  if (auto r = change.load_snapshot_cost(db_, key); !r)
-    return r.error();
+
   auto [lock, ul] = item_locks_[key];
+  if (auto r = lock.change.load_snapshot_cost(db_, key); !r)
+    return r.error();
   return do_lock(ul, lock, change);
 }
 
@@ -187,8 +193,10 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   }
   auto [lock, ul] = item_locks_[key];
   int128_t cost_before = lock.change.committed_storage_cost();
+  info("cost_before for key {} = {}", key, cost_before);
   lock.change.commit_change(change);
   int128_t cost_after = lock.change.committed_storage_cost();
+  info("cost_after for key {} = {}", key, cost_after);
   return cost_after - cost_before;
 }
 

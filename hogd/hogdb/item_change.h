@@ -218,7 +218,7 @@ public:
 
   constexpr static int128_t marginal_storage_cost()
   {
-    return storage_cost(storage_size());
+    return 0;
   }
 
   bool change_committed_{false};
@@ -339,6 +339,7 @@ public:
   // I.e. when the cost is 0 (for balances or other reserved item key types).
   void set_snapshot_cost(int128_t snapshot_cost)
   {
+    info("setting snapshot cost = {}", snapshot_cost);
     snapshot_cost_ = snapshot_cost;
   }
 

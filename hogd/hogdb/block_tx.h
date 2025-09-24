@@ -81,8 +81,8 @@ private:
 
   // balance operations for charging for storage.
   HogDBStatus<void> lock_balance(const Address &addr, int128_t delta);
-  HogDBStatus<void> modify_balance(const Address &addr, int128_t old_delta,
-                                   int128_t new_delta);
+  //HogDBStatus<void> modify_balance(const Address &addr, int128_t old_delta,
+ //                                  int128_t new_delta);
 };
 
 } // namespace hogd
