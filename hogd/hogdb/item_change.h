@@ -400,7 +400,10 @@ private:
       assert(cost_.has_value());
       return cost_.value();
     }
-    auto &operator*(this auto &self) { return *self.cost_; }
+    auto &operator*(this auto &self) {
+      assert(self.cost_.has_value());
+      return *self.cost_;
+    }
     operator bool() const { return cost_.has_value(); }
   };
 
