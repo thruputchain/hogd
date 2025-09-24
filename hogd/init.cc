@@ -71,7 +71,7 @@ void
 print_version(const char *process)
 {
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
-       version::kHogdGitHashFull);
+       version::kHogdGitHash);
   info("hogd protocol: {}", version::kHogdProtocol);
   info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
 }

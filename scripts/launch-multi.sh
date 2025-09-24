@@ -7,7 +7,7 @@ HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
-hogexec_servers=("hog4" "hog4")
+hogexec_servers=("hog4")
 hogdb_servers=("hog4")
 
 # Set to 1 to enable x23 RPC logging.
