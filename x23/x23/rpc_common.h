@@ -292,10 +292,9 @@ struct RpcCsvLogger {
   {
     if (logfd_ < 0)
       return;
-    auto logmsg = std::format("{:.9f},{},{},{}{}",
-			      timestamp(),
-			      server ? "SERVER" : "CLIENT",
-			      msg.body.mtype(), msg.xid, srcdest_);
+    auto logmsg = std::format("{:.9f},{},{},{}{}", timestamp(),
+                              server ? "SERVER" : "CLIENT", msg.body.mtype(),
+                              msg.xid, srcdest_);
     RpcLogger::append_proc<Meta>(&logmsg, msg);
     logmsg += '\n';
     write(logfd_, logmsg.data(), logmsg.size());
@@ -311,7 +310,7 @@ struct RpcCsvLogger {
   void log_client_fail(std::uint32_t xid, std::string_view text)
   {
     auto logmsg =
-      std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
+        std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
     write(logfd_, logmsg.data(), logmsg.size());
   }
 
