@@ -10,6 +10,7 @@
 #include "ci_server.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/version.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/vec.h"
@@ -34,15 +35,15 @@ public:
       config.program_args.push_back(x23::BoundedStr{arg.c_str()});
     }
 
-    if (client_.ciserver_start(config)() !=
+    if (client_.ciserver_start(version::kHogdGitHash, config)() !=
         CIServerErrorCode::kCIServerErrorCodeOK) {
       throw std::runtime_error("Failed to start server");
     }
   }
 
-  void stop_server() { client_.ciserver_stop()(); }
+  void stop_server() { client_.ciserver_stop(version::kHogdGitHash)(); }
 
-  void shutdown_server() { client_.ciserver_shutdown()(); }
+  void shutdown_server() { client_.ciserver_shutdown(version::kHogdGitHash)(); }
 
 private:
   CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client_;
