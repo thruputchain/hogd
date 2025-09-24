@@ -1,12 +1,21 @@
+#include <cstddef>
 #include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <ios>
 #include <memory>
+#include <sstream>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -18,25 +27,57 @@ const std::pair<InitFunc, std::string_view> init_tbl[] = {
     {crypto_init, "crypto"},
 };
 
-void
-print_version()
+// Reads the binary of the currently running process.
+std::vector<std::byte>
+read_self_binary()
 {
-  info("hogd version: {}, hash: {}, build time: {}", version::kHogdVersion,
-       version::kHogdGitHashFull, version::kHogdBuildTime);
+  std::ifstream f("/proc/self/exe", std::ios::binary | std::ios::ate);
+  CHECK(f.is_open());
+
+  const std::streamsize len = f.tellg();
+  CHECK_GT(len, 0UL);
+
+  std::vector<std::byte> buf(static_cast<size_t>(len));
+  f.seekg(0, std::ios::beg);
+  CHECK(f.good());
+
+  f.read(reinterpret_cast<char *>(buf.data()), len);
+  CHECK_EQ(f.gcount(), len);
+  CHECK(f.good());
+  return buf;
+}
+
+void
+print_version(const char *process)
+{
+  info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
+       version::kHogdGitHashFull);
   info("hogd protocol: {}", version::kHogdProtocol);
+
+  // Now we generate and print the hash of the binary for this process.
+  // The number of hex digits to print of the binary hash.
+  SHA256Hash binary_hash = sha256(read_self_binary());
+  constexpr size_t kHashLength = 12;
+  static_assert(kHashLength % 2 == 0);
+  // We multiply by 2 because there are 2 hex digits per byte.
+  CHECK_LE(kHashLength, binary_hash.size() * 2);
+  std::ostringstream binary_hash_stream;
+  for (size_t i = 0; i < kHashLength / 2; i++) {
+    binary_hash_stream << std::hex << std::setw(2) << std::setfill('0')
+                       << static_cast<int>(binary_hash[i]);
+  }
+  info("hogd process: {}, binary hash: {}", process, binary_hash_stream.str());
 }
 
 } // namespace
 
 int
-hogd_init([[maybe_unused]] int argc, [[maybe_unused]] char *argv[])
+hogd_init(int argc, char *argv[])
 {
   // TODO(amb): parse arguments and set up configuration
 
   // initialize logging
   log_init(std::make_unique<ConsoleLogger>());
-
-  print_version();
 
   // initialize each subsystem
   for (auto [func, name] : init_tbl) {
@@ -47,6 +88,12 @@ hogd_init([[maybe_unused]] int argc, [[maybe_unused]] char *argv[])
       return EXIT_FAILURE;
     }
   }
+
+  CHECK_GT(argc, 0);
+  // We deliberately call [print_version] after initializing the subsystems
+  // above. [print_version()] uses [sha256()] from the crypto library, so we
+  // need to initialize the crypto subsystem first.
+  print_version(argv[0]);
 
   return EXIT_SUCCESS;
 }
