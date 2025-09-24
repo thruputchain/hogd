@@ -150,6 +150,31 @@ get_port(const sockaddr_storage &ss)
   }
 }
 
+bool
+is_loopback(const sockaddr_storage &ss)
+{
+  static const auto is_v4_loopback = [](in_addr a) {
+    return ntohl(a.s_addr) >> 24 == 127;
+  };
+
+  switch (ss.ss_family) {
+  case AF_INET:
+    return is_v4_loopback(reinterpret_cast<const sockaddr_in *>(&ss)->sin_addr);
+  case AF_INET6:
+  {
+    const auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(&ss);
+    if (IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr))
+      return true;
+    if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr))
+      return is_v4_loopback(
+          *reinterpret_cast<const in_addr *>(sin6->sin6_addr.s6_addr + 12));
+    return false;
+  }
+  default:
+    return false;
+  }
+}
+
 Str
 show_ipaddr(const sockaddr_storage &ss)
 {
