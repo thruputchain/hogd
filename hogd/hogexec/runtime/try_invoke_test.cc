@@ -1045,10 +1045,6 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
 TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb exclusive lock release";
-    return;
-  }
   // Test on try invoke responding to rejection from the database.
 
   // Native contract with the following methods:
@@ -1316,10 +1312,6 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
 TEST_P(TryInvokeTest, StorageCostAccounting)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test that checks that storage costs are accounted for correctly in try
   // invoke. A contract has enough storage tokens for one bytestring write. The
   // root frame invokes a try_invoke frame, which attempts to write two
@@ -1457,10 +1449,6 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
 
 TEST_P(TryInvokeTest, MarginalCostAccounting)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test to demonstrate necessity for memoizing locked costs.
   // Root frame invokes three try_invoke frames.  Each one writes a bytestring,
   // (on separate keys) but the contract only has enough storage tokens for two
@@ -2063,10 +2051,6 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
 TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test to make sure that if a contract transfers storage tokens to another
   // contract, the new storage tokens can be used at the receiver contract
   // within the same transaction.
@@ -2091,6 +2075,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto str_hello = make_bytestring("hello");
   uint128_t write_cost = cost_model->kBaseItemCost +
                          cost_model->get_bytestring_cost(str_hello.size());
+  ASSERT_GT(write_cost, 0);
 
   // Sender contract
   auto sender_contract = std::make_unique<NativeContract>(

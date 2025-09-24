@@ -9,6 +9,7 @@
 #include "built_contracts/itc_erc20.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -19,6 +20,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -78,6 +80,8 @@ make_native_token_contract()
       [](SystemCallHandler &handler, NativeRuntime &runtime,
          ContractAddress receiver,
          amount_t amount) -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
+        trace("native token transfer: receiver {} amount {}",
+              x23::show(receiver), x23::show(amount));
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
@@ -123,6 +127,8 @@ make_native_token_contract()
       [](SystemCallHandler &handler, NativeRuntime &runtime,
          ContractAddress owner, ContractAddress receiver,
          amount_t amount) -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
+        trace("native token transfer_from: owner {} receiver {} amount {}",
+              x23::show(owner), x23::show(receiver), x23::show(amount));
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
@@ -179,6 +185,8 @@ make_native_token_contract()
       [](SystemCallHandler &handler, NativeRuntime &runtime,
          ContractAddress spender, difference_t amount)
           -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
+        trace("native token adjust_allowance: spender {} amount {}",
+              x23::show(spender), x23::show(amount));
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
@@ -203,6 +211,8 @@ make_native_token_contract()
       [](SystemCallHandler &handler, NativeRuntime &runtime,
          ContractAddress contract_address)
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+        trace("native token get_balance_of: contract_address {}",
+              x23::show(contract_address));
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
@@ -223,6 +233,7 @@ make_native_token_contract()
   builder.add<itc_erc20::ERC20, "get_balance">(
       [](SystemCallHandler &handler, NativeRuntime &runtime)
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+        trace("native token get_balance");
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
@@ -257,6 +268,7 @@ make_native_token_contract()
   builder.add<itc_erc20::ERC20, "total_supply">(
       [](NativeRuntime &runtime)
           -> InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>> {
+        trace("native token total_supply");
         // TODO(geoff): gas costs
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};

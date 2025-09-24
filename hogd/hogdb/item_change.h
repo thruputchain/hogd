@@ -216,10 +216,7 @@ public:
     return std::nullopt;
   }
 
-  constexpr static int128_t marginal_storage_cost()
-  {
-    return 0;
-  }
+  constexpr static int128_t marginal_storage_cost() { return 0; }
 
   bool change_committed_{false};
 };

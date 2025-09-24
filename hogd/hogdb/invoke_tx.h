@@ -96,7 +96,6 @@ private:
     int128_t locked_storage_cost{0};
   };
 
-
   int tx_depth_{0};
   BlockTX &block_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
@@ -117,13 +116,10 @@ private:
     if constexpr (is_debug_build()) {
       for (const auto &[key, vec] : changes_) {
         [[maybe_unused]] int depth = 0;
-        [[maybe_unused]] int locked_storage_cost = 0;
         for (const ItemVersion &item : vec) {
           assert(item.tx_depth >= depth);
           assert(item.tx_depth <= tx_depth_);
-          assert(item.locked_storage_cost >= locked_storage_cost);
           depth = item.tx_depth + 1;
-          locked_storage_cost = item.locked_storage_cost;
         }
       }
     }

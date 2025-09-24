@@ -49,13 +49,26 @@ HogDBStatus<void>
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
   info("locking storage for addr {} cost {}", addr, cost);
-  assert(cost >= 0);
   auto key = make_address_balance_item_key(addr);
   auto it = changes_.find(key);
   if (it == changes_.end() || it->second.empty()) {
     auto bal_change = make_balance_change(block_.get_db(), addr, -cost);
     if (!bal_change)
       return bal_change.error();
+
+    auto nnint = bal_change->get_raw_nnint128();
+    assert(nnint);
+    auto [ign, of] = overflowing_add(nnint->base(), nnint->delta());
+    info("nnint base {} delta {} ign {} of {}", nnint->base(), nnint->delta(),
+         ign, of);
+    if (of) {
+      return HogDBError(HogDBCode::kOverflow);
+    }
+    if (ign < 0) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+    info("locking new balance for addr {} delta {}", addr,
+         bal_change->get_raw_nnint128().value().delta());
 
     auto status = block_.lock(key, *bal_change);
     if (!status)
@@ -71,8 +84,26 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
   auto nnint = last.change.get_raw_nnint128();
   assert(nnint);
 
-  auto new_nnint = NNInt128(nnint->base(), nnint->delta() - cost);
+  std::println("nnint base {} delta {}", nnint->base(), nnint->delta());
+
+  auto [new_delta, of] = overflowing_add(nnint->delta(), -cost);
+  if (of) {
+    return HogDBError(HogDBCode::kOverflow);
+  }
+
+  auto [ign, of2] = overflowing_add(nnint->base(), new_delta);
+  if (of2) {
+    return HogDBError(HogDBCode::kOverflow);
+  }
+  if (ign < 0) {
+    return HogDBError(HogDBCode::kConflict);
+  }
+
+  auto new_nnint = NNInt128(nnint->base(), new_delta);
   ItemChange new_change(std::move(new_nnint));
+  new_change.narrow(last.change);
+  info("locking existing balance for addr {} delta {} old delta {}", addr,
+       new_change.get_raw_nnint128().value().delta(), nnint->delta());
   auto status = block_.modify_lock(key, last.change, new_change);
   if (!status)
     return status.error();
@@ -97,12 +128,13 @@ InvokeTX::commit()
   // as committed
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      auto cost_change =
-          block_.commit_change(key, vec.back().change);
+      auto cost_change = block_.commit_change(key, vec.back().change);
       assert(cost_change <= vec.back().locked_storage_cost);
       int128_t released_cost = vec.back().locked_storage_cost - cost_change;
       assert(released_cost >= 0);
-      info("released cost for key {} = {} (cost_change = {} locked_storage_cost = {})", key, released_cost, cost_change, vec.back().locked_storage_cost);
+      info("released cost for key {} = {} (cost_change = {} "
+           "locked_storage_cost = {})",
+           key, released_cost, cost_change, vec.back().locked_storage_cost);
 
       if (released_cost > 0) {
         block_.release_balance(key.get_address(), released_cost);
@@ -129,7 +161,8 @@ InvokeTX::abort()
       }
       assert(vec.back().locked_storage_cost >= 0);
       if (vec.back().locked_storage_cost > 0) {
-        block_.release_balance(key.get_address(), vec.back().locked_storage_cost);
+        block_.release_balance(key.get_address(),
+    vec.back().locked_storage_cost);
       }
     }
     else {
@@ -182,10 +215,9 @@ InvokeTX::release_savepoint(int depth)
     ItemVersion tmp{.change = std::move(vec.back().change),
                     .tx_depth = tx_depth_};
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                                  &ItemVersion::tx_depth),
-                         vec.end());
-    if (!vec.empty() &&
-        vec.back().tx_depth == tx_depth_) {
+                                       &ItemVersion::tx_depth),
+              vec.end());
+    if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
       vec.back().change = std::move(tmp.change);
       // TODO(geoff): abelay had left this as return; that seems incorrect.
       continue;
@@ -198,6 +230,7 @@ HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
   std::vector<ItemVersion> &v = changes_[key];
+  info("requesting change for key {}", key);
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
@@ -207,15 +240,15 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
     v.emplace_back(std::move(change), tx_depth_);
 
-    int128_t marginal_storage =
-        std::max<int128_t>(0, *ret);
+    int128_t marginal_storage = std::max<int128_t>(0, *ret);
+    info("new key request change: marginal_storage = {}", marginal_storage);
 
     // now lock the storage
     if (marginal_storage > 0) {
       if (auto r = lock_storage(key.get_address(), marginal_storage); !r) {
         return r.error();
       }
-      v.back().locked_storage_cost += marginal_storage;
+      v.back().locked_storage_cost = marginal_storage;
     }
     return {};
   }

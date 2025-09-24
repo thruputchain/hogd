@@ -139,7 +139,7 @@ public:
                         StorageCostModel const *cost_model);
 
   // different storage cost models unimplemented currently
-  const StorageCostModel kDefaultCostModel = StorageCostModel(0, 0, 0, 0, 0);
+  const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
 
   const StorageCostModel *get_default_cost_model() const
   {

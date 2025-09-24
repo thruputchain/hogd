@@ -94,18 +94,35 @@ BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
   lock.change.undo_merge(change);
 }
 
+#if 0
 HogDBStatus<void>
 BlockTX::lock_balance(const Address &addr, int128_t delta)
 {
   info("locking balance for addr {} delta {}", addr, delta);
   HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
-  if (!change)
+  if (!change) {
+    info("failed to make balance change for addr {} delta {}", addr, delta);
     return change.error();
+  }
   change->set_snapshot_cost(0);
+
+  // validity check on the single nnint
+  auto nnint = change->get_raw_nnint128();
+  assert(nnint);
+  auto [ign, of] = overflowing_add(nnint->base(), nnint->delta());
+  info("nnint base {} delta {} ign {} of {}", nnint->base(), nnint->delta(), ign, of);
+  if (of) {
+    return HogDBError(HogDBCode::kOverflow);
+  }
+  if (ign < 0) {
+    return HogDBError(HogDBCode::kConflict);
+  }
+
   auto [lock, ul] = addr_balance_locks_[addr];
   return do_lock(ul, lock, *change)
       .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
 }
+#endif
 
 #if 0
 HogDBStatus<void>
@@ -122,7 +139,7 @@ BlockTX::modify_balance(const Address &addr, int128_t old_delta,
   ItemChange new_change(NNInt128(nnint->base(), new_delta));
   return do_modify_lock(ul, lock, old_change, new_change)
       .and_then([](auto /*unused*/) -> HogDBStatus<void> { return {}; });
-} 
+}
 #endif
 
 void
@@ -130,8 +147,22 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   assert(delta > 0);
   info("releasing balance for addr {} delta {}", addr, delta);
-  if (auto r = lock_balance(addr, delta); !r) [[unlikely]]
-    throw std::runtime_error("failed to release balance");
+  // if (auto r = lock_balance(addr, delta); !r) [[unlikely]]
+  //   throw std::runtime_error("failed to release balance");
+
+  info("locking balance for addr {} delta {}", addr, delta);
+  HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
+  if (!change) [[unlikely]] {
+    info("failed to make balance change for addr {} delta {}", addr, delta);
+    throw std::runtime_error("failed to make balance change");
+  }
+  change->set_snapshot_cost(0);
+
+  auto [lock, ul] = addr_balance_locks_[addr];
+  if (auto r = do_lock(ul, lock, *change); !r) [[unlikely]] {
+    info("failed to lock balance for addr {} delta {}", addr, delta);
+    throw std::runtime_error("failed to lock balance");
+  }
 }
 
 HogDBStatus<int128_t>
@@ -141,6 +172,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_[key.get_address()];
     change.set_snapshot_cost(0);
+    info("balance do_lock workflow");
     return do_lock(ul, lock, change)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
@@ -148,6 +180,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   auto [lock, ul] = item_locks_[key];
   if (auto r = lock.change.load_snapshot_cost(db_, key); !r)
     return r.error();
+  info("item do_lock workflow");
   return do_lock(ul, lock, change);
 }
 

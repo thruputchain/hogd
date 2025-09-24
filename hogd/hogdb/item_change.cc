@@ -137,6 +137,10 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
   HogDBStatus<int8_t> type_ret = db.get_item_type(key);
   if (!type_ret) {
+    // Deleting a non-existent key is a no-op.
+    if (type_ret.error() == HogDBCode::kNotFound) {
+      return {};
+    }
     return type_ret.error();
   }
 
@@ -264,7 +268,8 @@ ItemChange::commit_change(const ItemChange &change)
   std::visit(
       [&change](auto &arg) {
         if constexpr (!is_monostate<decltype(arg)>)
-          arg.commit_change(std::get<std::decay_t<decltype(arg)>>(change.type_));
+          arg.commit_change(
+              std::get<std::decay_t<decltype(arg)>>(change.type_));
       },
       type_);
 }
@@ -354,7 +359,7 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
     }
     if (!ret)
       return ret.error();
-    info("snapshot cost found for key {} = {}", key, *ret);
+    info("snapshot cost found for key {} = {}", key, storage_cost(*ret));
     return storage_cost(*ret);
   }();
   if (!snapshot_cost)
