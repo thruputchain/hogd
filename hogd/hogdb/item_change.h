@@ -336,7 +336,6 @@ public:
   // I.e. when the cost is 0 (for balances or other reserved item key types).
   void set_snapshot_cost(int128_t snapshot_cost)
   {
-    info("setting snapshot cost = {}", snapshot_cost);
     snapshot_cost_ = snapshot_cost;
   }
 

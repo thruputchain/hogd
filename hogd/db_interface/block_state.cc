@@ -47,7 +47,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
                                       StorageDelta delta,
                                       StorageItemRPCFlagSet flags)
 {
-  info("Starting try_reserve_storage_delta on delta {}", x23::show(delta));
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
 
@@ -55,13 +54,10 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   {
     auto lock = tx.get_lock(addrkey);
 
-    info("trying to reserve storage delta for addrkey {} delta {}",
-         x23::show(addrkey), x23::show(delta));
     auto res =
         storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
 
     if (!res) {
-      info("failed to reserve storage delta");
       return false;
     }
     marginal_cost = res->locked_tokens_ - tx.get_cost(addrkey);
@@ -92,7 +88,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   };
 
   if (prev_delta) {
-    info("had a previous delta: {}", x23::show(*prev_delta));
     assert(prev_delta->type() ==
                StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd ||
            prev_delta->type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
@@ -100,7 +95,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
     new_storage_delta = *prev_delta;
     get_add_value(new_storage_delta) =
         to_xdr(from_xdr(get_add_value(new_storage_delta)) - marginal_cost);
-    info("new storage delta: {}", x23::show(new_storage_delta));
   }
   else {
     assert(storage_lock.lock_type() == StorageLockType::kNone ||
@@ -110,9 +104,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
     new_storage_delta.nnint_add() = to_xdr(-marginal_cost);
   }
 
-  info("trying to reserve storage delta for cost addrkey {} delta {}",
-       x23::show(cost_addrkey), x23::show(new_storage_delta));
-  info("nnint add value {}", from_xdr(new_storage_delta.nnint_add()));
   auto new_lock = storage_view_.try_reserve_storage_delta(
       cost_addrkey, new_storage_delta, storage_lock,
       std::to_underlying(StorageItemRPCFlags::kStorageNone));

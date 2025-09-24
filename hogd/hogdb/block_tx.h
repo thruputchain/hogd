@@ -5,6 +5,7 @@
 #include <mutex>
 
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hog_types.h"

@@ -319,7 +319,6 @@ ItemChange::marginal_storage_cost() const
 int128_t
 ItemChange::committed_storage_cost() const
 {
-  info("getting committed storage cost");
   auto ret = std::visit(
       [](auto &arg) -> std::optional<int128_t> {
         if constexpr (!is_monostate<decltype(arg)>)
@@ -328,10 +327,8 @@ ItemChange::committed_storage_cost() const
       },
       type_);
   if (ret) {
-    info("committed storage cost = {}", *ret);
     return *ret;
   }
-  info("snapshot cost = {}", *snapshot_cost_);
   assert(snapshot_cost_.has_value());
   return *snapshot_cost_;
 }
@@ -352,19 +349,15 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
 {
   auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
     HogDBStatus<size_t> ret = db.get_item_size(key);
-    info("loading snapshot cost for key {}", key);
     if (!ret && ret.error() == HogDBCode::kNotFound) {
-      info("snapshot cost not found for key {}", key);
       return 0UL;
     }
     if (!ret)
       return ret.error();
-    info("snapshot cost found for key {} = {}", key, storage_cost(*ret));
     return storage_cost(*ret);
   }();
   if (!snapshot_cost)
     return snapshot_cost.error();
-  info("loading snapshot cost = {}", *snapshot_cost);
   snapshot_cost_ = *snapshot_cost;
   return {};
 }

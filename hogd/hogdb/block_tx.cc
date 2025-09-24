@@ -46,10 +46,8 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
   assert(ul.owns_lock());
   assert(lock.ref > 0);
 
-  info("modifying lock");
   if (lock.ref == 1) {
     lock.change = new_change;
-    info("successfuly modified lock single ref");
     return lock.change.marginal_storage_cost();
   }
 
@@ -60,7 +58,6 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
     return ret.error();
 
   lock.change = std::move(tmp);
-  info("successfuly modified lock");
   return ret;
 }
 
@@ -98,7 +95,6 @@ void
 BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   assert(delta > 0);
-  info("releasing balance for addr {} delta {}", addr, delta);
 
   HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
   if (!change) [[unlikely]] {
@@ -171,10 +167,8 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   }
   auto [lock, ul] = item_locks_[key];
   int128_t cost_before = lock.change.committed_storage_cost();
-  info("cost_before for key {} = {}", key, cost_before);
   lock.change.commit_change(change);
   int128_t cost_after = lock.change.committed_storage_cost();
-  info("cost_after for key {} = {}", key, cost_after);
   return cost_after - cost_before;
 }
 
