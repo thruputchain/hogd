@@ -36,10 +36,12 @@ class CIControlServer {
 public:
   using rpc_service = CIServer1;
 
-  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash, ServerConfig const &config)
+  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
+                                   ServerConfig const &config)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash, version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
@@ -181,7 +183,8 @@ public:
   void ciserver_stop(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash, version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
       return;
     }
 
@@ -207,7 +210,8 @@ public:
   void ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash, version::kHogdGitHash);
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
       return;
     }
 
@@ -219,7 +223,6 @@ public:
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
 private:
-
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
     return std::string(hogd_git_hash) == version::kHogdGitHash;
