@@ -35,7 +35,7 @@ read_self_binary()
   CHECK(f.is_open());
 
   const std::streamsize len = f.tellg();
-  CHECK_GT(len, 0UL);
+  CHECK_GT(len, 0L);
 
   std::vector<std::byte> buf(static_cast<size_t>(len));
   f.seekg(0, std::ios::beg);
