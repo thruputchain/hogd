@@ -400,7 +400,8 @@ private:
       assert(cost_.has_value());
       return cost_.value();
     }
-    auto &operator*(this auto &self) {
+    auto &operator*(this auto &self)
+    {
       assert(self.cost_.has_value());
       return *self.cost_;
     }
