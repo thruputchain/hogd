@@ -84,7 +84,7 @@ include(cmake/wasmopt.cmake)
 set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers")
 file(MAKE_DIRECTORY "${BUILT_HEADERS_DIR}")
 
-set(HOGD_BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd")
+set(HOGD_BUILT_HEADERS_DIR "${BUILT_HEADERS_DIR}/hogd")
 file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
 
 configure_file(
