@@ -28,6 +28,8 @@ private:
   void handle_account_auth_data_item_change(HogDBStatus<DBItem> const &before,
                                             HogDBStatus<DBItem> const &after);
 
+  void update_total_supply(int128_t change);
+
   std::atomic<int128_t> total_supply_change_{0};
 };
 

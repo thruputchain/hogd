@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <iterator>
 #include <span>
+#include <stdexcept>
 #include <utility>
 
 #include "account.hh"
@@ -23,7 +24,11 @@ namespace hogd {
 bool
 HogConservationInvariant::check()
 {
-  return total_supply_change_ == 0;
+  auto r = total_supply_change_.load();
+  if (r != 0) {
+    error("total_supply_change_ is not 0: {}", r);
+  }
+  return r == 0;
 }
 
 void
@@ -72,7 +77,7 @@ HogConservationInvariant::handle_balance_change(
   auto before_balance = get_balance(before);
   auto after_balance = get_balance(after);
 
-  total_supply_change_ += after_balance - before_balance;
+  update_total_supply(after_balance - before_balance);
 }
 
 void
@@ -98,7 +103,7 @@ HogConservationInvariant::handle_address_metadata_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  total_supply_change_ += after_storage_cost - before_storage_cost;
+  update_total_supply(before_storage_cost - after_storage_cost);
 }
 
 void
@@ -121,10 +126,11 @@ HogConservationInvariant::handle_contract_data_item_change(
       return 0;
     }
   };
-  auto before_balance = get_storage_cost(before);
-  auto after_balance = get_storage_cost(after);
-
-  total_supply_change_ += after_balance - before_balance;
+  auto before_cost = get_storage_cost(before);
+  auto after_cost = get_storage_cost(after);
+  // These numbers are costs; if we delete an item, then we're releasing
+  // (increasing) total supply.
+  update_total_supply(before_cost - after_cost);
 }
 
 void
@@ -135,11 +141,29 @@ HogConservationInvariant::handle_account_auth_data_item_change(
     if (!item.has_value()) {
       return 0;
     }
+    assert(item.value().type == 0);
+    AccountAuthData auth_data;
+    try {
+      x23::deserialize(&auth_data, x23::BufViewEnd(item.value().value));
+    } catch (x23::XdrException &e) {
+      warn("failed to deserialize account auth data: {}", e.what());
+      assert(false);
+      return 0;
+    }
+    throw std::runtime_error(
+        "account auth data type not yet implemented in hogdb");
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  total_supply_change_ += after_storage_cost - before_storage_cost;
+  update_total_supply(before_storage_cost - after_storage_cost);
+}
+
+void
+HogConservationInvariant::update_total_supply(int128_t change)
+{
+  [[maybe_unused]] auto r = total_supply_change_.fetch_add(change);
+  trace("total_supply_change_ (before): {} change {}", r, change);
 }
 
 } // namespace hogd

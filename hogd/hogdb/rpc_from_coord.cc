@@ -81,6 +81,14 @@ HogDBCoordServer::commit_block(BlockID id)
   if (!ret)
     return ret.error();
 
+  if (!ctx_.get_db().check_invariants()) {
+    error("invariants check failed!!!");
+    // TODO(geoff): Figure out if there's a way to rollback the block tx,
+    // in ramdb; otherwise, the state is in some kind of corrupted version
+    // where some core invariant is violated.
+    return HogDBError(HogDBCode::kInternal);
+  }
+
   // destroy the block TX.
   ctx_.close_block_tx(id);
 
@@ -121,6 +129,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
+    ctx_.get_db().enable_debug_invariants();
   }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)

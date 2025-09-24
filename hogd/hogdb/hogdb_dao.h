@@ -11,8 +11,10 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "account.hh"
@@ -21,6 +23,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_hog_conservation.h"
 #include "types.hh"
 
 #include "hogd/base/span.h"
@@ -147,6 +150,26 @@ public:
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }
 
+  void enable_debug_invariants()
+  {
+    assert(invariants_.empty());
+    info("enabling debug variants");
+    invariants_.push_back(std::make_unique<HogConservationInvariant>());
+  }
+
+  bool check_invariants()
+  {
+    bool ret = true;
+    for (auto &invariant : invariants_) {
+      if (!invariant->check()) {
+        ret = false;
+        break;
+      }
+    }
+    invariants_.clear();
+    return ret;
+  }
+
   // for_each_state_item calls fn in parallel for every item that needs to be
   // included in the merkle state root. It is typically used at initialization
   // time when the database is first loaded.
@@ -205,6 +228,27 @@ public:
   HogDBStatus<void> remove_item(const ItemKey &key);
 
 private:
+  std::optional<HogDBStatus<DBItem>>
+  get_before_item(std::span<const std::byte> key)
+  {
+    if (!invariants_.empty()) {
+      return db_.get(key);
+    }
+    return std::nullopt;
+  }
+
+  void update_invariants_post(std::span<const std::byte> key,
+                              std::optional<HogDBStatus<DBItem>> const &before)
+  {
+    if (!invariants_.empty()) {
+      assert(before.has_value());
+      auto after = db_.get(key);
+      for (auto &invariant : invariants_) {
+        invariant->log_item_change(key, *before, after);
+      }
+    }
+  }
+
   std::vector<std::unique_ptr<HogdbInvariant>> invariants_;
   RAMDB db_;
 };
