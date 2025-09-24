@@ -99,3 +99,17 @@ following:
 3. Update all the rust git repositories managed by cargo
 
     * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly update)`
+
+## Repair instructions
+
+If your rust installation gets messed up, delete the directories
+`~/.cargo` and `~/.rustup`.  Then start over by reinstalling rustup.
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup +nightly target add wasm32-unknown-unknown
+rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+cargo install --force cbindgen
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+(cd built_contracts && cargo +nightly update)
+```
