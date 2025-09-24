@@ -1,3 +1,6 @@
+#include <print>
+
+#include <netdb.h>
 
 #include "x23/rpc_common.h"
 #include "x23/sockio.h"
@@ -20,11 +23,29 @@ RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
   peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
 }
 
-RpcCsvLogger::RpcCsvLogger(int peerfd, int logfd)
-  : logfd_(logfd),
-    srcdest_(std::format(",{},{},", HostPort{remote_addr(peerfd)},
-                         HostPort{local_addr(peerfd)}))
-{}
+RpcCsvLogger::RpcCsvLogger(int peerfd, int logfd) : logfd_(logfd)
+{
+  if (logfd_ < 0)
+    return;
+  srcdest_ = ",";
+  for (auto getter : {remote_addr, local_addr}) {
+    char name[NI_MAXHOST];
+    sockaddr_storage ss = getter(peerfd);
+    int err;
+    if (is_loopback(ss)) {
+      name[sizeof(name) - 1] = '\0';
+      err = gethostname(name, sizeof(name) - 1);
+    }
+    else
+      err =
+          getnameinfo(reinterpret_cast<const sockaddr *>(&ss), sockaddr_len(ss),
+                      name, sizeof(name), nullptr, 0, NI_NOFQDN | NI_NAMEREQD);
+    if (err)
+      uformat_to(&srcdest_, "{},", HostPort{ss});
+    else
+      uformat_to(&srcdest_, "{}/{},", auto{name}, HostPort{ss});
+  }
+}
 
 std::string
 msg_show_stat(const rpc_msg &msg)
