@@ -82,6 +82,9 @@ sockaddr_storage remote_addr(BorrowedFd s);
 
 std::uint16_t get_port(const sockaddr_storage &ss);
 
+// Returns true if ss has an IPv4 or IPv6 loopback address.  Ignores port.
+bool is_loopback(const sockaddr_storage &ss);
+
 namespace detail {
 // Join a host address and port number with a colon.  If the address
 // itself contains colons (because it is IPv6), then place the address
