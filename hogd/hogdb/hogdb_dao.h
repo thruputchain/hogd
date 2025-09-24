@@ -120,8 +120,8 @@ enum class Prefix : char {
   kContractDataKey = 'K',
   kWasmCode = 'C',
   kWasmCodeRefcount = 'R',
-  // global info, like the db tip, have prefixes that begin with (and may extend)
-  // this character
+  // global info, like the db tip, have prefixes that begin with (and may
+  // extend) this character
   kGlobalMetadata = '<',
 };
 

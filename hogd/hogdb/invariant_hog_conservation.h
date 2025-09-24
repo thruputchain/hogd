@@ -13,16 +13,22 @@ namespace hogd {
 
 class HogConservationInvariant : public HogdbInvariant {
 public:
-    bool check() override;
-    void log_item_change(std::span<const std::byte> key, HogDBStatus<DBItem> const& before, HogDBStatus<DBItem> const& after) override;
+  bool check() override;
+  void log_item_change(std::span<const std::byte> key,
+                       HogDBStatus<DBItem> const &before,
+                       HogDBStatus<DBItem> const &after) override;
 
 private:
-    void handle_balance_change(HogDBStatus<DBItem> const& before, HogDBStatus<DBItem> const& after);
-    void handle_contract_data_item_change(HogDBStatus<DBItem> const& before, HogDBStatus<DBItem> const& after);
-    void handle_address_metadata_item_change(HogDBStatus<DBItem> const& before, HogDBStatus<DBItem> const& after);
-    void handle_account_auth_data_item_change(HogDBStatus<DBItem> const& before, HogDBStatus<DBItem> const& after);
-    
-    std::atomic<int128_t> total_supply_change_{0};
+  void handle_balance_change(HogDBStatus<DBItem> const &before,
+                             HogDBStatus<DBItem> const &after);
+  void handle_contract_data_item_change(HogDBStatus<DBItem> const &before,
+                                        HogDBStatus<DBItem> const &after);
+  void handle_address_metadata_item_change(HogDBStatus<DBItem> const &before,
+                                           HogDBStatus<DBItem> const &after);
+  void handle_account_auth_data_item_change(HogDBStatus<DBItem> const &before,
+                                            HogDBStatus<DBItem> const &after);
+
+  std::atomic<int128_t> total_supply_change_{0};
 };
 
-}
+} // namespace hogd

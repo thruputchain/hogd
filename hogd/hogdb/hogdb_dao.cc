@@ -31,7 +31,6 @@ namespace {
 
 constexpr std::string kGlobalTipKey = ">DBTIP";
 
-
 // Warning: you may have to update this if you make changes to Prefix.
 constexpr bool
 is_state_item(std::span<const std::byte> key)
