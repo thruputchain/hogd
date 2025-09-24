@@ -47,18 +47,15 @@ read_self_binary()
   return buf;
 }
 
-void
-print_version(const char *process)
+// Generates the hash of the binary for the currently running process.
+std::string
+get_self_binary_hash()
 {
-  info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
-       version::kHogdGitHashFull);
-  info("hogd protocol: {}", version::kHogdProtocol);
-
-  // Now we generate and print the hash of the binary for this process.
-  // The number of hex digits to print of the binary hash.
-  SHA256Hash binary_hash = sha256(read_self_binary());
   constexpr size_t kHashLength = 12;
   static_assert(kHashLength % 2 == 0);
+
+  // The number of hex digits to print of the binary hash.
+  SHA256Hash binary_hash = sha256(read_self_binary());
   // We multiply by 2 because there are 2 hex digits per byte.
   CHECK_LE(kHashLength, binary_hash.size() * 2);
   std::ostringstream binary_hash_stream;
@@ -66,7 +63,16 @@ print_version(const char *process)
     binary_hash_stream << std::hex << std::setw(2) << std::setfill('0')
                        << static_cast<int>(binary_hash[i]);
   }
-  info("hogd process: {}, binary hash: {}", process, binary_hash_stream.str());
+  return binary_hash_stream.str();
+}
+
+void
+print_version(const char *process)
+{
+  info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
+       version::kHogdGitHashFull);
+  info("hogd protocol: {}", version::kHogdProtocol);
+  info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
 }
 
 } // namespace
