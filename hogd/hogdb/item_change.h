@@ -395,7 +395,11 @@ private:
     }
 
     bool has_value() const { return cost_.has_value(); }
-    int128_t value() const { return cost_.value(); }
+    int128_t value() const
+    {
+      assert(cost_.has_value());
+      return cost_.value();
+    }
     auto &operator*(this auto &self) { return *self.cost_; }
     operator bool() const { return cost_.has_value(); }
   };
