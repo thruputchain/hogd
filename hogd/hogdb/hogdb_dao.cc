@@ -31,25 +31,6 @@ namespace {
 
 constexpr std::string kGlobalTipKey = ">DBTIP";
 
-// Prefix is a prefix appended to each key to form an overall key that
-// indicates the category of data being stored. The rest of the key is normally
-// a contract address, except for kWasmCode, which uses the hash of the wasm
-// blob as the rest of its key.
-//
-// Warning: These key prefixes are persisted on disk so they cannot be changed
-// without migrating existing data.
-//
-// Warning: So far, they are also included in the merkle trie root hash, so
-// they're very hard to change.
-enum class Prefix : char {
-  kHogAge = 'A',
-  kBalance = 'B',
-  kAccountAuthData = 'D',
-  kAddressMetadata = 'M',
-  kContractDataKey = 'K',
-  kWasmCode = 'C',
-  kWasmCodeRefcount = 'R',
-};
 
 // Warning: you may have to update this if you make changes to Prefix.
 constexpr bool

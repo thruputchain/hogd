@@ -20,6 +20,7 @@
 #include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/hogdb/invariant.h"
 #include "types.hh"
 
 #include "hogd/base/span.h"
@@ -99,6 +100,29 @@ public:
 
 private:
   std::unique_ptr<Database> db_;
+};
+
+// Prefix is a prefix appended to each key to form an overall key that
+// indicates the category of data being stored. The rest of the key is normally
+// a contract address, except for kWasmCode, which uses the hash of the wasm
+// blob as the rest of its key.
+//
+// Warning: These key prefixes are persisted on disk so they cannot be changed
+// without migrating existing data.
+//
+// Warning: So far, they are also included in the merkle trie root hash, so
+// they're very hard to change.
+enum class Prefix : char {
+  kHogAge = 'A',
+  kBalance = 'B',
+  kAccountAuthData = 'D',
+  kAddressMetadata = 'M',
+  kContractDataKey = 'K',
+  kWasmCode = 'C',
+  kWasmCodeRefcount = 'R',
+  // global info, like the db tip, have prefixes that begin with (and may extend)
+  // this character
+  kGlobalMetadata = '<',
 };
 
 // Item type identifiers; stored in the type field in ramdb.
@@ -181,6 +205,7 @@ public:
   HogDBStatus<void> remove_item(const ItemKey &key);
 
 private:
+  std::vector<std::unique_ptr<HogdbInvariant>> invariants_;
   RAMDB db_;
 };
 
