@@ -186,7 +186,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
     if constexpr (is_debug_build()) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
     }
-    info("pushing delta {}", x23::show(delta));
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
