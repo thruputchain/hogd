@@ -20,6 +20,12 @@ RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
   peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
 }
 
+RpcCsvLogger::RpcCsvLogger(int peerfd, int logfd)
+  : logfd_(logfd),
+    srcdest_(std::format(",{},{},", HostPort{remote_addr(peerfd)},
+                         HostPort{local_addr(peerfd)}))
+{}
+
 std::string
 msg_show_stat(const rpc_msg &msg)
 {

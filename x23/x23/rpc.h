@@ -467,7 +467,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     Buf rbuf = co_await a;
     BufView rv = rbuf.subspan(deserialize_from(&msg, rbuf));
     if (!rpc_is_success(msg)) {
-      logger_.log_client(msg);
+      logger_.template log_client<ProcMeta>(msg);
       throw XdrCallFailed(msg);
     }
 
@@ -481,7 +481,7 @@ struct RpcStream : public detail::RpcStreamImpl {
       throw e;
     }
 
-    logger_.log_client(msg, ret);
+    logger_.template log_client<ProcMeta>(msg, ret);
     if constexpr (std::is_void_v<typename ProcMeta::return_type>)
       co_return;
     else
@@ -523,10 +523,11 @@ rpc_stream(CoroPoll &cp, int fd, Logger logger = {})
 // and replies.  When selecting whether to log at runtime, you can
 // pass logfd = -1 to suppress logging and most of the logging
 // overhead.
-inline RpcStream<RpcLogger>::Configurator
+template<typename Logger = RpcLogger>
+inline RpcStream<Logger>::Configurator
 rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 {
-  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(fd, logfd));
+  return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
 }
 
 } // namespace x23
