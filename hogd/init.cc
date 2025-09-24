@@ -18,6 +18,11 @@
 #include "hogd/version.h"
 #include "types.hh"
 
+#ifdef __APPLE__
+#include <cstring>
+#include <mach-o/dyld.h>
+#endif
+
 namespace hogd {
 
 namespace {
@@ -32,7 +37,20 @@ const std::pair<InitFunc, std::string_view> init_tbl[] = {
 std::vector<std::byte>
 read_self_binary()
 {
+#ifdef __APPLE__
+  char path[1024];
+  memset(path, 0, sizeof(path));
+  uint32_t size = sizeof(path);
+  if (_NSGetExecutablePath(path, &size) == 0)
+    info("executable path is {}", path);
+  else
+    error("buffer too small; need size {}", size);
+
+  std::ifstream f(std::string(path), std::ios::binary | std::ios::ate);
+
+#else
   std::ifstream f("/proc/self/exe", std::ios::binary | std::ios::ate);
+#endif
   CHECK(f.is_open());
 
   const std::streamsize len = f.tellg();
