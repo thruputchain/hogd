@@ -95,7 +95,8 @@ private:
     int tx_depth;
   };
 
-  // This implementation does not released locked storage upon savepoint rollback (only when the transaction commits or aborts).
+  // This implementation does not released locked storage upon savepoint
+  // rollback (only when the transaction commits or aborts).
   struct ItemVersionVec {
     std::vector<ItemVersion> change_vec;
     int128_t locked_storage_cost{0};
@@ -111,6 +112,10 @@ private:
   // request_change tries to apply a change to the transaction.
   HogDBStatus<void> request_change(const ItemKey &key, ItemChange &&change);
 
+  // lock_storage locks the storage for the given address.
+  // cost must be nonnegative.
+  HogDBStatus<void> lock_storage(Address const &addr, int128_t cost);
+
   void assert_is_valid() const
   {
     assert(tx_depth_ >= 0);
@@ -118,6 +123,8 @@ private:
       for (const auto &[key, vec] : changes_) {
         [[maybe_unused]] int depth = 0;
         for (const ItemVersion &item : vec.change_vec) {
+          info("item.tx_depth = {} tx_depth_ = {} depth = {}", item.tx_depth,
+               tx_depth_, depth);
           assert(item.tx_depth >= depth);
           assert(item.tx_depth <= tx_depth_);
           depth = item.tx_depth + 1;
@@ -147,6 +154,7 @@ InvokeTX::read_change(const ItemKey &key) const
 inline HogDBStatus<void>
 InvokeTX::request_bytes(const ItemKey &key, std::span<const std::byte> buf)
 {
+  info("requesting bytes on key {}", key);
   return request_change(key, Bytes{buf});
 }
 

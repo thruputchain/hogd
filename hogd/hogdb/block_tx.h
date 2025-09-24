@@ -37,15 +37,22 @@ public:
   }
 
   // lock reserves the right to apply change to an item.
-  HogDBStatus<void> lock(const ItemKey &key, ItemChange &change);
+  // Lock returns the amount of storage tokens at least as large as what will
+  // be needed to support the change, if committed.
+  HogDBStatus<int128_t> lock(const ItemKey &key, ItemChange &change);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
-  HogDBStatus<void> modify_lock(const ItemKey &key, ItemChange &old_change,
-                                ItemChange &new_change);
+  // It returns an amount of storage tokens at least as large as what will
+  // be needed to support the change, if committed.
+  HogDBStatus<int128_t> modify_lock(const ItemKey &key, ItemChange &old_change,
+                                    ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.
-  void commit_change(const ItemKey &key, ItemChange const &change);
+  // returns the increase in committed storage cost.
+  int128_t commit_change(const ItemKey &key, ItemChange const &change);
+
+  void release_balance(const Address &addr, int128_t delta);
 
 private:
   struct ItemLock {
@@ -76,7 +83,6 @@ private:
   HogDBStatus<void> lock_balance(const Address &addr, int128_t delta);
   HogDBStatus<void> modify_balance(const Address &addr, int128_t old_delta,
                                    int128_t new_delta);
-  void unlock_balance(const Address &addr, int128_t delta);
 };
 
 } // namespace hogd

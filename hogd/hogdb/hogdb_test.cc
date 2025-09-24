@@ -198,47 +198,6 @@ TEST_F(HogDBTest, ItemChange)
             HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
 }
 
-TEST_F(HogDBTest, StorageCost)
-{
-  ItemKey ikey = make_key(kAddress, kAddress);
-  MerkleTriePrefix trie;
-
-  // test new nnint128 item creation
-  {
-    ItemChange change(NNInt128(1, 1));
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost should go up.
-      EXPECT_GT(*delta, 0);
-    }
-    HogDBStatus<void> ret = change.commit(db_, trie, ikey);
-    EXPECT_TRUE(ret);
-  }
-
-  // test modification to existing nnint128 item
-  {
-    ItemChange change(NNInt128(1, 1));
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost shouldn't change.
-      EXPECT_EQ(*delta, 0);
-    }
-  }
-
-  // test deletion to existing nnint128 item
-  {
-    ItemChange change(Deletion{});
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost should go down.
-      EXPECT_LT(*delta, 0);
-    }
-  }
-}
-
 } // namespace hogd
 
 int

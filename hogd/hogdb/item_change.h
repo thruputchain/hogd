@@ -59,8 +59,9 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // The actual amount of storage tokens that are locked
   // will be reduced by the amount locked for the current snapshot.
   { t.merge(arg) } -> std::same_as<HogDBStatus<int128_t>>;
-  // An upper bound on the amount of storage tokens needed to support the item change,
-  // for the case where the change is the first one applied to the item.
+  // An upper bound on the amount of storage tokens needed to support the item
+  // change, for the case where the change is the first one applied to the item.
+  // I.e. this is the amount returned by t.merge() for t = empty ItemChange.
   { t.marginal_storage_cost() } -> std::same_as<int128_t>;
 
   // reverts the change and reservation in arg that was previously merged.
@@ -101,6 +102,7 @@ public:
   static size_t storage_size() { return sizeof(int128_t); }
   int128_t value() const { return base_ + delta_; }
   int128_t base() const { return base_; }
+  int128_t delta() const { return delta_; }
 
   void commit_change(const NNInt128 & /*unused*/) { change_committed_ = true; }
 
@@ -332,10 +334,19 @@ public:
   {}
   ~ItemChange() = default;
 
+  // setters
+  // This should only be called when the snapshot cost is explicitly knowable:
+  // I.e. when the cost is 0 (for balances or other reserved item key types).
+  void set_snapshot_cost(int128_t snapshot_cost)
+  {
+    snapshot_cost_ = snapshot_cost;
+  }
+
   // getters
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
+  bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
@@ -355,23 +366,50 @@ public:
   // The change MUST have been previously merged.
   void commit_change(const ItemChange &change);
 
-  int128_t marginal_storage_cost() const;
-  HogDBStatus<int128_t> committed_storage_cost(HogDBDAO &db, const ItemKey &key);
+  HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key);
+  HogDBStatus<int128_t> marginal_storage_cost(HogDBDAO &db, const ItemKey &key);
+  HogDBStatus<int128_t> marginal_storage_cost() const;
 
-  // storage_cost_delta returns the change in storage cost (in native tokens)
-  // needed to store the item if committed (could be negative).
-  HogDBStatus<ssize_t> storage_cost_delta(HogDBDAO &db, const ItemKey &key);
+  int128_t committed_storage_cost() const;
+  HogDBStatus<int128_t> committed_storage_cost(HogDBDAO &db,
+                                               const ItemKey &key);
 
 private:
+  struct LazySnapshotCost {
+    std::optional<int128_t> cost_;
+
+    LazySnapshotCost &operator=(const LazySnapshotCost &other)
+    {
+      if (cost_ && other.cost_) {
+        assert(*cost_ == *other.cost_);
+      }
+      if (!cost_) {
+        cost_ = other.cost_;
+      }
+      return *this;
+    }
+    LazySnapshotCost &operator=(int128_t cost)
+    {
+      if (cost_) {
+        assert(*cost_ == cost);
+      }
+      cost_ = cost;
+      return *this;
+    }
+
+    bool has_value() const { return cost_.has_value(); }
+    int128_t value() const { return cost_.value(); }
+    auto &operator*(this auto &self) { return *self.cost_; }
+    operator bool() const { return cost_.has_value(); }
+  };
+
   bool exclusive_{false};
-  std::optional<int128_t> snapshot_cost_;
+  LazySnapshotCost snapshot_cost_;
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData>
       type_;
 
   size_t storage_size() const;
-
-  HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key);
 };
 
 inline std::optional<int128_t>
@@ -408,7 +446,9 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
     }
     balance = 0;
   }
-  return ItemChange(NNInt128(*balance, delta));
+  auto out = ItemChange(NNInt128(*balance, delta));
+  out.set_snapshot_cost(0);
+  return out;
 }
 
 } // namespace hogd
