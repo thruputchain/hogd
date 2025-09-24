@@ -59,7 +59,8 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
     auto nnint = bal_change->get_raw_nnint128();
     assert(nnint);
     // make sure that the proposed change is valid in itself.
-    // TODO(geoff): If we switch to retrocausal nnint, this check could be relaxed.
+    // TODO(geoff): If we switch to retrocausal nnint, this check could be
+    // relaxed.
     auto [ign, of] = overflowing_add(nnint->base(), nnint->delta());
     if (of) {
       return HogDBError(HogDBCode::kOverflow);
@@ -127,8 +128,8 @@ InvokeTX::commit()
     if (!vec.empty()) {
       auto cost_change = block_.commit_change(key, vec.back().change);
       assert(cost_change <= vec.back().locked_storage_cost);
-      // NONDETERMINISTIC:Compute the amount of storage tokens that can be released
-      // after this transaction commits.
+      // NONDETERMINISTIC:Compute the amount of storage tokens that can be
+      // released after this transaction commits.
       int128_t released_cost = vec.back().locked_storage_cost - cost_change;
       assert(released_cost >= 0);
 

@@ -163,22 +163,42 @@ TEST_F(HogDBTest, ItemChange)
   //
 
   // try different bases (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(10, 1)).merge(ItemChange(NNInt128(20, 1))),
-            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  {
+    auto x = ItemChange(NNInt128(10, 1));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(20, 1))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   // try using nnint128 as a lock (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(1, -1)).merge(ItemChange(NNInt128(1, -1))),
-            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  {
+    auto x = ItemChange(NNInt128(1, -1));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(1, -1))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   // try positive addition (no conflict)
-  EXPECT_TRUE(ItemChange(NNInt128(0, 10)).merge(ItemChange(NNInt128(0, 10))));
+  {
+    auto x = ItemChange(NNInt128(0, 10));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(0, 5))));
+  }
 
   // try subtract to zero (no conflict)
-  EXPECT_TRUE(ItemChange(NNInt128(10, -5)).merge(ItemChange(NNInt128(10, -5))));
+  {
+    auto x = ItemChange(NNInt128(10, -5));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(10, -5))));
+  }
 
   // try subtract below zero (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(10, -6)).merge(ItemChange(NNInt128(10, -5))),
-            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  {
+    auto x = ItemChange(NNInt128(10, -6));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(10, -5))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   //
   // Test Byte changes
@@ -190,11 +210,19 @@ TEST_F(HogDBTest, ItemChange)
   auto bs = std::as_bytes(std::span(b));
 
   // try same bytes (no conflict)
-  EXPECT_TRUE(ItemChange(Bytes(as)).merge(ItemChange(Bytes(as))));
+  {
+    auto x = ItemChange(Bytes(as));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(Bytes(as))));
+  }
 
   // try different bytes (conflict)
-  EXPECT_EQ(ItemChange(Bytes(as)).merge(ItemChange(Bytes(bs))),
-            HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  {
+    auto x = ItemChange(Bytes(as));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(Bytes(bs))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 }
 
 } // namespace hogd
