@@ -345,6 +345,10 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
+  bool is_create_contract() const
+  {
+    return std::holds_alternative<NewContractData>(type_);
+  }
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
 
@@ -370,6 +374,13 @@ public:
   int128_t committed_storage_cost() const;
   HogDBStatus<int128_t> committed_storage_cost(HogDBDAO &db,
                                                const ItemKey &key);
+  auto get_type() const { return type_.index(); }
+
+  bool no_storage_cost() const
+  {
+    // is_create_contract pays storage cost via the deployment entries
+    return is_deletion() || is_create_contract();
+  }
 
 private:
   struct LazySnapshotCost {

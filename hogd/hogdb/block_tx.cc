@@ -178,9 +178,12 @@ BlockTX::commit(WorkerPool &pool)
   std::mutex lock;
   HogDBStatus<void> ret;
 
+  pool.adjust_workers(1);
+
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLock &> v) {
+        info("commit_change: {}", v.first);
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
@@ -193,6 +196,7 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const Address, const ItemLock &> v) {
         int128_t val = v.second.change.to_nnint128().value();
+        info("commit_balance_change: {}", v.first);
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);

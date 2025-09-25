@@ -89,6 +89,7 @@ public:
   // Does NOT update the refcount on the contract.
   HogDBStatus<void> request_new_contract(Contract contract);
 
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -96,9 +97,24 @@ private:
     int128_t locked_storage_cost{0};
   };
 
+  struct StorageBalanceVersion {
+    // The amount of storage that was manually transferred (by explicit contract call)
+    // in or out of this address.
+    int128_t manual_transfer_amount;
+    // total locked amount at this depth,
+    // for all ops on this address.
+    int128_t total_locked_storage_amount;
+    int tx_depth;
+  };
+
   int tx_depth_{0};
   BlockTX &block_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
+  // Whenever you request a balance change (from a user action),
+  // combine it with the latest balance delta for that address.
+  // Whenever you update a balance change from a storage operation,
+  // also update the balance_deltas_ for that address.
+  std::unordered_map<Address, std::vector<StorageBalanceVersion>> balance_deltas_;
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
@@ -110,9 +126,12 @@ private:
   // cost must be nonnegative.
   HogDBStatus<void> lock_storage(Address const &addr, int128_t cost);
 
+  HogDBStatus<void> update_balance_lock(Address const &addr);
+
   void assert_is_valid() const
   {
     assert(tx_depth_ >= 0);
+    std::unordered_map<Address, int128_t> balance_deltas;
     if constexpr (is_debug_build()) {
       for (const auto &[key, vec] : changes_) {
         [[maybe_unused]] int depth = 0;
@@ -121,6 +140,10 @@ private:
           assert(item.tx_depth <= tx_depth_);
           depth = item.tx_depth + 1;
         }
+        balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+      }
+      for (const auto &[addr, vec] : balance_deltas_) {
+        assert(vec.back().total_locked_amount == balance_deltas[addr]);
       }
     }
   }

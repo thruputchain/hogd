@@ -43,6 +43,7 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/version.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -69,7 +70,7 @@ public:
 
   MempoolTestServer()
     : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
-      exec_card_{.protocol = "blah",
+      exec_card_{.protocol = version::kHogdProtocol,
                  .upid = {},
                  .address =
                      x23::HostPort(kAddress.c_str(), coordinator_port_).show()},

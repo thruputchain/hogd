@@ -11,8 +11,10 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 // xdr types
 #include "account.hh"
@@ -20,6 +22,8 @@
 #include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_hog_conservation.h"
 #include "types.hh"
 
 #include "hogd/base/span.h"
@@ -101,6 +105,29 @@ private:
   std::unique_ptr<Database> db_;
 };
 
+// Prefix is a prefix appended to each key to form an overall key that
+// indicates the category of data being stored. The rest of the key is normally
+// a contract address, except for kWasmCode, which uses the hash of the wasm
+// blob as the rest of its key.
+//
+// Warning: These key prefixes are persisted on disk so they cannot be changed
+// without migrating existing data.
+//
+// Warning: So far, they are also included in the merkle trie root hash, so
+// they're very hard to change.
+enum class Prefix : char {
+  kHogAge = 'A',
+  kBalance = 'B',
+  kAccountAuthData = 'D',
+  kAddressMetadata = 'M',
+  kContractDataKey = 'K',
+  kWasmCode = 'C',
+  kWasmCodeRefcount = 'R',
+  // global info, like the db tip, have prefixes that begin with (and may
+  // extend) this character
+  kGlobalMetadata = '<',
+};
+
 // Item type identifiers; stored in the type field in ramdb.
 //
 // These are only used in cases where multiple types can be stored at an
@@ -122,6 +149,26 @@ public:
 
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }
+
+  void enable_debug_invariants()
+  {
+    assert(invariants_.empty());
+    info("enabling debug variants");
+    invariants_.push_back(std::make_unique<HogConservationInvariant>());
+  }
+
+  bool check_invariants()
+  {
+    bool ret = true;
+    for (auto &invariant : invariants_) {
+      if (!invariant->check()) {
+        ret = false;
+        break;
+      }
+    }
+    invariants_.clear();
+    return ret;
+  }
 
   // for_each_state_item calls fn in parallel for every item that needs to be
   // included in the merkle state root. It is typically used at initialization
@@ -175,12 +222,34 @@ public:
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t> get_item_size(const ItemKey &key);
+  HogDBStatus<size_t> get_charged_storage_cost(const ItemKey &key);
   HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
   HogDBStatus<void> remove_item(const ItemKey &key);
 
 private:
+  std::optional<HogDBStatus<DBItem>>
+  get_before_item(std::span<const std::byte> key)
+  {
+    if (!invariants_.empty()) {
+      return db_.get(key);
+    }
+    return std::nullopt;
+  }
+
+  void update_invariants_post(std::span<const std::byte> key,
+                              std::optional<HogDBStatus<DBItem>> const &before)
+  {
+    if (!invariants_.empty()) {
+      assert(before.has_value());
+      auto after = db_.get(key);
+      for (auto &invariant : invariants_) {
+        invariant->log_item_change(key, *before, after);
+      }
+    }
+  }
+
+  std::vector<std::unique_ptr<HogdbInvariant>> invariants_;
   RAMDB db_;
 };
 

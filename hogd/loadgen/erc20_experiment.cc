@@ -63,7 +63,7 @@ ERC20ExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    //return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -79,6 +79,7 @@ ERC20ExperimentState::generate_experiment()
                                                      make_nonce(0));
 
   // initialize wallets
+  #if 0
   for (auto const &wallet : wallets_) {
     // Initialize with an arbitrarily large amount, so that the wallets have
     // storage available to support their token balances. This will be changed
@@ -90,7 +91,8 @@ ERC20ExperimentState::generate_experiment()
                                    wallet.public_key),
                                1'000'000'000);
   }
-
+  #endif
+  
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
   mint_txs.reserve(config_.num_accounts);

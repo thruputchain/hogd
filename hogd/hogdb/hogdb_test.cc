@@ -123,7 +123,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rnnint128) {
     EXPECT_EQ(test_nnint128, *rnnint128);
   }
-  HogDBStatus<size_t> rsize = db_.get_item_size(ikey);
+  HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(sizeof(test_nnint128), *rsize);
@@ -143,7 +143,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rbytes) {
     EXPECT_EQ(std::as_bytes(std::span(test_bytes)), *rbytes);
   }
-  rsize = db_.get_item_size(ikey);
+  rsize = db_.get_charged_storage_cost(ikey);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(test_bytes.size(), *rsize);

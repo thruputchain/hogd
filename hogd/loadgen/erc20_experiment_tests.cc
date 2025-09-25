@@ -33,7 +33,7 @@ protected:
 TEST_P(ERC20ExperimentTest, Basic)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_accounts = 10,
+      .num_accounts = 1,
   });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());

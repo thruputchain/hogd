@@ -46,9 +46,62 @@ InvokeTX::read_bytes(const ItemKey &key)
   return ret;
 }
 
+// Is only responsible for updating the lock on the balance item;
+// not for updating anything else
+HogDBStatus<void>
+InvokeTX::update_balance_lock(Address const& addr)
+{
+  int128_t storage_adjustment = 0;
+  auto bal = balance_deltas_[addr];
+  if (!bal.empty()) {
+    auto [ign, of] = overflowing_add(bal.back().total_locked_storage_amount, bal.back().manual_transfer_amount);
+    if (of) {
+      return HogDBError(HogDBCode::kOverflow);
+    }
+    storage_adjustment = ign;
+  }
+
+  auto key = make_address_balance_item_key(addr);
+  auto change = changes_[key];
+  if (change.empty()) {
+    auto base = block_.get_db().read_address_balance(addr);
+    if (!base) {
+      return base.error();
+    }
+    auto nnint = NNInt128(*base, storage_adjustment);
+    auto [ign, of] = overflowing_add(nnint.base(), nnint.delta());
+    if (of) {
+      return HogDBError(HogDBCode::kOverflow);
+    }
+    if (ign < 0) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+    auto new_item = ItemChange(std::move(nnint));
+
+    auto status = block_.lock(key, new_item);
+    if (!status) {
+      return status.error();
+    }
+    change.emplace_back(std::move(new_item), tx_depth_, 0);
+    return {};
+  }
+
+  auto last = change.back();
+  assert(last.tx_depth <= tx_depth_);
+  assert(last.change.is_nnint128());
+  auto nnint = last.change.get_raw_nnint128();
+  assert(nnint);
+
+
+
+
+
+}
+
 HogDBStatus<void>
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
+  info("lock_storage: {} {}", addr, cost);
   auto key = make_address_balance_item_key(addr);
   auto it = changes_.find(key);
   if (it == changes_.end() || it->second.empty()) {
@@ -69,6 +122,7 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
       return HogDBError(HogDBCode::kConflict);
     }
 
+    info("doing new lock storage: base {} amount {}", nnint->base(),  nnint -> delta());
     auto status = block_.lock(key, *bal_change);
     if (!status)
       return status.error();
@@ -134,6 +188,7 @@ InvokeTX::commit()
       assert(released_cost >= 0);
 
       if (released_cost > 0) {
+        info("release_balance: {} {}", key.get_address(), released_cost);
         block_.release_balance(key.get_address(), released_cost);
       }
     }
@@ -180,6 +235,12 @@ InvokeTX::rollback_to_savepoint(int depth)
     }
     block_.unlock(key, tmp);
   }
+
+  for (auto &[addr, vec] : balance_deltas_) {
+    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
+                                       &StorageBalanceVersion::tx_depth),
+              vec.end());
+  }
 }
 
 void
@@ -206,6 +267,8 @@ InvokeTX::release_savepoint(int depth)
     }
     vec.push_back(std::move(tmp));
   }
+
+  throw std::runtime_error("not implemented releasing balance versions");
 }
 
 HogDBStatus<void>
@@ -230,6 +293,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       }
       v.back().locked_storage_cost = marginal_storage;
     }
+    assert_is_valid();
     return {};
   }
 
@@ -258,6 +322,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
     v.back().locked_storage_cost += marginal_storage;
   }
+  assert_is_valid();
   return {};
 }
 

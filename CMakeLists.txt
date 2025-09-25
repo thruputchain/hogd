@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(hogd C CXX)
+project(hogd VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 
@@ -80,16 +80,40 @@ include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
 include(cmake/wasmopt.cmake)
 
+# Where to place generated headers
+set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers")
+file(MAKE_DIRECTORY "${BUILT_HEADERS_DIR}")
+
+set(HOGD_BUILT_HEADERS_DIR "${BUILT_HEADERS_DIR}/hogd")
+file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
-  ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
+  ${HOGD_BUILT_HEADERS_DIR}/config.h
   @ONLY
 )
 
+# A target that regenerates version.h on every build.
+set(VERSION_H "${HOGD_BUILT_HEADERS_DIR}/version.h")
+add_custom_target(version ALL
+  COMMAND ${CMAKE_COMMAND}
+          -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+          -DOUT_FILE=${VERSION_H}
+          -DPROJECT_VERSION=${PROJECT_VERSION}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake
+  BYPRODUCTS "${VERSION_H}"
+  COMMENT "Generating version.h"
+  VERBATIM)
+
+# === Interface target that exposes the header and enforces the dep ===
+add_library(built_headers_interface INTERFACE)
+# Only this target provides the include dir where the header lives:
+target_include_directories(built_headers_interface INTERFACE "${BUILT_HEADERS_DIR}")
+# Make anyone who links this depend on header generation:
+add_dependencies(built_headers_interface version)
+
 include(CheckIPOSupported)
 check_ipo_supported()
-
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
 # Enable GoogleTest (Google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
