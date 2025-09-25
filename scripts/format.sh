@@ -35,7 +35,7 @@ SH_DIR=${ROOT_DIR}/scripts
 set -euo pipefail
 
 # Run clang-format
-git ls-files -c "${CODE_DIR}/*.cc" "${X23_DIR}/*.cc" \
+git ls-files --recurse-submodules -c "${CODE_DIR}/*.cc" "${X23_DIR}/*.cc" \
   "${CODE_DIR}/*.h" "${X23_DIR}/*.h" |
   xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
@@ -51,6 +51,6 @@ find "${SH_DIR}" -name '*.sh' |
   xargs ${SH_FORMAT} ${SH_FLAGS}
 
 # xdr format (note: this assumes .clang-format matches that in the protocol directory)
-if OFF != "$CHECK"; then
-  git-ls-files "${ROOT_DIR}/protocol/*.x" | xargs ${X23_DIR}/misc/xdrformat
+if test OFF = "$CHECK"; then
+  ${X23_DIR}/misc/xdrformat "${ROOT_DIR}/protocol"/*.x
 fi

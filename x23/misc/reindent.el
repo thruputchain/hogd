@@ -1,16 +1,21 @@
 ;; reindent.el
 
-;; Find the directory this file lives in
-(defvar reindent-dir
-  (file-name-directory (or load-file-name buffer-file-name)))
+(defvar reindent-dir (file-name-directory (or load-file-name buffer-file-name)))
+(add-to-list 'load-path reindent-dir)
 
-;; Load xdr-mode.el from the same directory
-(load-file (expand-file-name "xdr-mode.el" reindent-dir))
+;; Prefer .eln/.elc if available, and be quiet
+(load "xdr-mode" nil 'nomessage)
 
-;; Process each file given on the command line
-(mapc (lambda (file)
-        (find-file file)
-        ;; major mode activates automatically
-        (indent-region (point-min) (point-max))
-        (save-buffer))
-      command-line-args-left)
+(defvar reindent-start-dir default-directory)
+
+(defun reindent-quietly (file)
+  (let ((abs (expand-file-name file reindent-start-dir)))
+    (let ((default-directory reindent-start-dir))
+      (find-file abs))
+    (let ((inhibit-message t) (message-log-max nil))
+      (indent-region (point-min) (point-max)))
+    (save-buffer)
+    (kill-buffer (current-buffer))))
+
+(dolist (f command-line-args-left)
+  (reindent-quietly f))
