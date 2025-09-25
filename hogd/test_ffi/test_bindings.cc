@@ -7,7 +7,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <span>
+#include <string>
 #include <utility>
 
 #include "account.hh"
@@ -39,8 +39,11 @@ lazy_init()
   static std::mutex init_mutex;
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
+  int argc = 1;
+  std::string test_prognam = "test_bindings";
+  char *argv[] = {test_prognam.data()};
   if (!initialized) {
-    hogd_init(0, nullptr);
+    hogd_init(argc, argv);
     initialized = true;
   }
 }
