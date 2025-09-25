@@ -49,21 +49,28 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   GCC_RELEASE_BUILD_PID=$!
 fi
 
-printf "${COLOR}STEP 1: Check build (gcc)\n${NC}"
+printf "${COLOR}\nSTEP 1: Check format\n${NC}"
+if ! ${SCRIPT_DIR}/format.sh -c; then
+  printf "format failed!\n"
+  exit 1
+fi
+printf "Format checking passed.\n"
+
+printf "${COLOR}STEP 2: Check build (gcc)\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}"; then
   printf "build failed!\n"
   cat "${GCC_ERRORS_LOG}"
   exit 1
 fi
 
-printf "${COLOR}\nSTEP 2: Check tests (gcc)\n${NC}"
+printf "${COLOR}\nSTEP 3: Check tests (gcc)\n${NC}"
 if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
 fi
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
+  printf "${COLOR}Waiting for Step 4 (llvm) build to finish...\n${NC}"
   wait $LLVM_BUILD_PID
   LLVM_STATUS=$?
   if [ $LLVM_STATUS -ne 0 ]; then
@@ -76,9 +83,9 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "===== end llvm errors =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
+  printf "${COLOR}Step 4 (llvm) build finished\n${NC}"
 
-  printf "${COLOR}STEP 5: Check linter\n${NC}"
+  printf "${COLOR}STEP 6: Check linter\n${NC}"
   TIDY_LOG=${BUILD_DIR}/tidy.log
   ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm >"$TIDY_LOG" 2>&1 &
   TIDY_PID=$!
@@ -93,7 +100,7 @@ else
   fi
 fi
 
-printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
+printf "${COLOR}\nSTEP 5: Check tests (llvm)\n${NC}"
 if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
@@ -109,21 +116,14 @@ if [ $BUILD_PARALLEL = "yes" ]; then
     printf "===== end tidy log =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 5 (tidy) finished\n${NC}"
+  printf "${COLOR}Step 6 (tidy) finished\n${NC}"
 else
-  printf "${COLOR}\nSTEP 5: Check linter\n${NC}"
+  printf "${COLOR}\nSTEP 6: Check linter\n${NC}"
   if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
     printf "linter failed!\n"
     exit 1
   fi
 fi
-
-printf "${COLOR}\nSTEP 6: Check format\n${NC}"
-if ! ${SCRIPT_DIR}/format.sh -c; then
-  printf "format failed!\n"
-  exit 1
-fi
-printf "Format checking passed.\n"
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   printf "${COLOR}Waiting for Step 7 (gcc_release) build to finish...\n${NC}"
