@@ -40,6 +40,11 @@ public:
     d.nnint_add() = to_xdr(add);
     return d;
   }
+
+  constexpr static auto make_delete_delta()
+  {
+    return StorageDelta(StorageDeltaType::kDeltaTypeDelete);
+  }
 };
 
 TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
@@ -576,6 +581,83 @@ TEST_P(DirectNNIntTest, NNIntCreateCost)
   ASSERT_TRUE(bal_ref.has_value());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(from_xdr(bal_main->nnint()), from_xdr(bal_ref->nnint()));
+  // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
+{
+  // This test makes sure that rolling back to a savepoint does not fail
+  // because of storage cost accounting.
+
+  // We first get the cost of a single nnint item.
+  auto query_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(query_addr, kInitialBalance);
+  auto key = make_addrkey(query_addr, "nn_key12");
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_nnint_delta(0, 100),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+  advance_block();
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(query_addr));
+  ASSERT_TRUE(bal.has_value());
+  int128_t bal_int = from_xdr(bal.value().nnint());
+  EXPECT_LE(bal_int, kInitialBalance);
+  int128_t cost = kInitialBalance - bal_int;
+
+  // Now for the test itself.
+
+  // The first tx creates a key, and then deletes it.
+  // The second creates a different key, and does
+  // try_push_current_subtransaction.  This should fail. The first tx then rolls
+  // back to its initial savepoint, and commits.
+
+  auto contract_addr = make_contract_address(1);
+  setup_grant_storage_token(contract_addr, cost);
+  auto key_contract = make_addrkey(contract_addr, "nn_key13");
+  auto key_contract_2 = make_addrkey(contract_addr, "nn_key14");
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(key_contract, make_nnint_delta(0, 100),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_TRUE(r1.value());
+
+  tx1.add_delta(key_contract, make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_TRUE(r2.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key_contract_2, make_nnint_delta(0, 200),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_FALSE(r3.value());
+
+  ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto res = lookup_storage_item_from_db(key_contract);
+  ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
+  ASSERT_EQ(from_xdr(res->nnint()), 100);
+
+  auto contract_bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(contract_bal.has_value());
+  int128_t contract_bal_int = from_xdr(contract_bal.value().nnint());
+  EXPECT_EQ(contract_bal_int, 0);
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
