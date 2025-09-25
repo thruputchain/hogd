@@ -253,7 +253,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [&](StorageKey const &key, int128_t value) {
+      [&](StorageKey const &key, int128_t value) -> int128_t {
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
@@ -263,6 +263,9 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
           error("failed to write genesis block storage: {}", r.error());
           failure = true;
         }
+
+        // invoketx handles the storage costs
+        return 0;
       },
       [&](auto const &contract) {
         auto data = x23::serialize(*contract);

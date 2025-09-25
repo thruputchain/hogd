@@ -328,7 +328,8 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key)
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
     {
-      auto db_key = make_address_key(key.get_address(), Prefix::kAddressMetadata);
+      auto db_key =
+          make_address_key(key.get_address(), Prefix::kAddressMetadata);
       auto item = db_.get(db_key);
       if (!item) {
         return HogDBError(HogDBCode::kNotFound);
@@ -336,7 +337,7 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key)
       DeployedContractHash deployed_contract_hash;
       try {
         x23::deserialize(&deployed_contract_hash,
-                        x23::BufViewEnd(item.value().value));
+                         x23::BufViewEnd(item.value().value));
       } catch (x23::XdrException &e) {
         error("failed to deserialize deployed contract hash: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
@@ -347,7 +348,8 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key)
     return db_.get_size(make_contract_data_key(key.as_bytes()));
   case ItemKeyType::kItemKeyTypeContractCode:
   case ItemKeyType::kItemKeyTypeContractRefcount:
-    // these keys are not charged: storage costs for contracts are charged on the deployment entries
+    // these keys are not charged: storage costs for contracts are charged on
+    // the deployment entries
     return HogDBError(HogDBCode::kNotFound);
   }
   error("unknown item key type: {}", std::to_underlying(key.key_type()));

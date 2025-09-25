@@ -47,7 +47,7 @@ InvokeTX::read_bytes(const ItemKey &key)
 }
 
 HogDBStatus<NNInt128>
-InvokeTX::get_storage_balance_change(Address const& addr)
+InvokeTX::get_storage_balance_change(Address const &addr)
 {
   auto snapshot_base = [&] -> HogDBStatus<int128_t> {
     auto item_change = changes_[make_address_balance_item_key(addr)];
@@ -82,7 +82,8 @@ InvokeTX::get_storage_balance_change(Address const& addr)
   int128_t delta = 0;
   if (!bal.empty()) {
     info("bal is not empty");
-    auto [ign, of] = overflowing_add(bal.back().total_locked_storage_amount, bal.back().manual_transfer_amount);
+    auto [ign, of] = overflowing_sub(bal.back().manual_transfer_amount,
+                                     bal.back().total_locked_storage_amount);
     if (of) {
       return HogDBError(HogDBCode::kOverflow);
     }
@@ -93,32 +94,46 @@ InvokeTX::get_storage_balance_change(Address const& addr)
   if (of) {
     return HogDBError(HogDBCode::kOverflow);
   }
-  info("storage balance change for {}: {} {}", addr, snapshot_base.value(), delta);
+  if (ign < 0) {
+    // invalid delta
+    // TODO(geoff): if we add in retrocausal nnint, we will need to allow this
+    // case
+    return HogDBError(HogDBCode::kConflict);
+  }
+  info("storage balance change for {}: {} {}", addr, snapshot_base.value(),
+       delta);
   return NNInt128(snapshot_base.value(), delta);
 }
 
 // Is only responsible for updating the lock on the balance item;
 // not for updating anything else
 HogDBStatus<void>
-InvokeTX::update_balance_lock(Address const& addr)
+InvokeTX::update_balance_lock(Address const &addr)
 {
   info("update_balance_lock: {}", addr);
   auto storage_change = get_storage_balance_change(addr);
   if (!storage_change) {
-    info("failed to get storage balance change for {}: {}", addr, storage_change.error());
+    info("failed to get storage balance change for {}: {}", addr,
+         storage_change.error());
     return storage_change.error();
   }
-  info("storage balance change for {}: {} {}", addr, storage_change.value().base(), storage_change.value().delta());
+  info("storage balance change for {}: {} {}", addr,
+       storage_change.value().base(), storage_change.value().delta());
   auto new_item = ItemChange(std::move(storage_change.value()));
+  info("new item after move: {} {}", new_item.get_raw_nnint128()->base(),
+       new_item.get_raw_nnint128()->delta());
 
   auto key = make_address_balance_item_key(addr);
-  auto change = changes_[key];
+  auto &change = changes_[key];
   if (change.empty()) {
 
     auto status = block_.lock(key, new_item);
     if (!status) {
+      info("failed to lock balance item for {}: {}", addr, status.error());
       return status.error();
     }
+    info("emplacing new item: {} {}", new_item.get_raw_nnint128()->base(),
+         new_item.get_raw_nnint128()->delta());
     change.emplace_back(std::move(new_item), tx_depth_, 0);
     return {};
   }
@@ -128,7 +143,8 @@ InvokeTX::update_balance_lock(Address const& addr)
   assert(last.change.is_nnint128());
   new_item.narrow(last.change);
 
-  info("new item after narrow: {} {}", new_item.get_raw_nnint128()->base(), new_item.get_raw_nnint128()->delta());
+  info("new item after narrow: {} {}", new_item.get_raw_nnint128()->base(),
+       new_item.get_raw_nnint128()->delta());
 
   auto status = block_.modify_lock(key, last.change, new_item);
   if (!status) {
@@ -149,13 +165,20 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
   info("lock_storage: {} {}", addr, cost);
 
-  auto& bal_stats = balance_deltas_[addr];
+  auto &bal_stats = balance_deltas_[addr];
   if (bal_stats.empty()) {
-    bal_stats.emplace_back(StorageBalanceVersion{.manual_transfer_amount = 0, .total_locked_storage_amount = 0, .tx_depth = tx_depth_});
-  } else if (bal_stats.back().tx_depth < tx_depth_) {
+    bal_stats.emplace_back(
+        StorageBalanceVersion{.manual_transfer_amount = 0,
+                              .total_locked_storage_amount = 0,
+                              .tx_depth = tx_depth_});
+  }
+  else if (bal_stats.back().tx_depth < tx_depth_) {
     // setup the back with a copy of the current state
     auto back = bal_stats.back();
-    bal_stats.emplace_back(StorageBalanceVersion{.manual_transfer_amount = back.manual_transfer_amount, .total_locked_storage_amount = back.total_locked_storage_amount, .tx_depth = tx_depth_});
+    bal_stats.emplace_back(StorageBalanceVersion{
+        .manual_transfer_amount = back.manual_transfer_amount,
+        .total_locked_storage_amount = back.total_locked_storage_amount,
+        .tx_depth = tx_depth_});
   }
   assert(!bal_stats.empty());
   assert(bal_stats.back().tx_depth == tx_depth_);
@@ -166,7 +189,6 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
   info("balance_deltas_[addr].size() {}", balance_deltas_.at(addr).size());
 
   return update_balance_lock(addr);
-
 }
 #if 0
 
@@ -283,8 +305,6 @@ InvokeTX::abort()
 void
 InvokeTX::rollback_to_savepoint(int depth)
 {
-  assert_is_valid();
-
   tx_depth_ = depth;
   for (auto &[key, vec] : changes_) {
     // skip if no changes made after savepoint.
@@ -312,6 +332,7 @@ InvokeTX::rollback_to_savepoint(int depth)
                                        &StorageBalanceVersion::tx_depth),
               vec.end());
   }
+  assert_is_valid();
 }
 
 void
@@ -346,9 +367,11 @@ HogDBStatus<void>
 InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 {
   info("request_balance_change: {} {}", addr, delta);
-  auto& bal = balance_deltas_[addr];
+  auto &bal = balance_deltas_[addr];
   if (bal.empty() || bal.back().tx_depth < tx_depth_) {
-    bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta, .total_locked_storage_amount = 0, .tx_depth = tx_depth_});
+    bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta,
+                                           .total_locked_storage_amount = 0,
+                                           .tx_depth = tx_depth_});
   }
   else {
     assert(bal.back().tx_depth == tx_depth_);

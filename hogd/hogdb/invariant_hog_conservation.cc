@@ -37,7 +37,8 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
                                           HogDBStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
-  info("log_item_change: {} {} {}", std::to_underlying(prefix), before.has_value(), after.has_value());
+  info("log_item_change: {} {} {}", std::to_underlying(prefix),
+       before.has_value(), after.has_value());
   switch (prefix) {
   case Prefix::kBalance:
     handle_balance_change(before, after);
@@ -104,7 +105,8 @@ HogConservationInvariant::handle_address_metadata_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  info("handle_address_metadata_item_change: {} {}", before_storage_cost, after_storage_cost);
+  info("handle_address_metadata_item_change: {} {}", before_storage_cost,
+       after_storage_cost);
   update_total_supply(after_storage_cost - before_storage_cost);
 }
 
@@ -131,8 +133,8 @@ HogConservationInvariant::handle_contract_data_item_change(
   auto before_cost = get_storage_cost(before);
   auto after_cost = get_storage_cost(after);
   // These numbers are the amount of coins stored (locked) at this location.
-  // Deleting an item (negative total supply change) is equivalent to transferring that
-  // amount to another key
+  // Deleting an item (negative total supply change) is equivalent to
+  // transferring that amount to another key
   info("handle_contract_data_item_change: {} {}", before_cost, after_cost);
   update_total_supply(after_cost - before_cost);
 }
@@ -160,7 +162,8 @@ HogConservationInvariant::handle_account_auth_data_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  info("handle_account_auth_data_item_change: {} {}", before_storage_cost, after_storage_cost);
+  info("handle_account_auth_data_item_change: {} {}", before_storage_cost,
+       after_storage_cost);
   update_total_supply(after_storage_cost - before_storage_cost);
 }
 

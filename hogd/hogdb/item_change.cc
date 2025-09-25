@@ -355,7 +355,7 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
     }
     if (!ret)
       return ret.error();
-    
+
     return storage_cost(*ret);
   }();
   if (!snapshot_cost)

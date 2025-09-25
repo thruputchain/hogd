@@ -100,7 +100,8 @@ public:
   void undo_merge(const NNInt128 &nnint);
 
   static size_t storage_size() { return sizeof(int128_t); }
-  int128_t value() const { 
+  int128_t value() const
+  {
     info("value for {} + {}", base_, delta_);
     return base_ + delta_;
   }
@@ -132,6 +133,8 @@ private:
 
   void assert_is_valid() const
   {
+    info("assert_is_valid for {} + {} (plus {} minus {})", base_, delta_, plus_,
+         minus_);
     // check for valid bounds.
     assert(minus_ <= 0);
     assert(plus_ >= 0);

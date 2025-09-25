@@ -89,7 +89,6 @@ public:
   // Does NOT update the refcount on the contract.
   HogDBStatus<void> request_new_contract(Contract contract);
 
-
 private:
   struct ItemVersion {
     ItemChange change;
@@ -98,8 +97,8 @@ private:
   };
 
   struct StorageBalanceVersion {
-    // The amount of storage that was manually transferred (by explicit contract call)
-    // in or out of this address.
+    // The amount of storage that was manually transferred (by explicit contract
+    // call) in or out of this address.
     int128_t manual_transfer_amount;
     // total locked amount at this depth,
     // for all ops on this address.
@@ -114,7 +113,8 @@ private:
   // combine it with the latest balance delta for that address.
   // Whenever you update a balance change from a storage operation,
   // also update the balance_deltas_ for that address.
-  std::unordered_map<Address, std::vector<StorageBalanceVersion>> balance_deltas_;
+  std::unordered_map<Address, std::vector<StorageBalanceVersion>>
+      balance_deltas_;
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
@@ -143,7 +143,9 @@ private:
           depth = item.tx_depth + 1;
         }
         if (!vec.empty()) {
-          info("balance_deltas[key.get_address()] for {}: {} += {}", key.get_address(), balance_deltas[key.get_address()], vec.back().locked_storage_cost);
+          info("balance_deltas[key.get_address()] for {}: {} += {}",
+               key.get_address(), balance_deltas[key.get_address()],
+               vec.back().locked_storage_cost);
           balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
         }
       }
@@ -151,9 +153,14 @@ private:
       for (const auto &[addr, vec] : balance_deltas_) {
         info("balance_deltas_[addr].size() for {}: {}", addr, vec.size());
         if (!vec.empty()) {
-          info("vec.back().total_locked_storage_amount for {} (depth {} vs tx_depth_ {}): {} vs {}", addr, vec.back().tx_depth, tx_depth_, vec.back().total_locked_storage_amount, balance_deltas[addr]);
-          assert(vec.back().total_locked_storage_amount == balance_deltas[addr]);
-        } else {
+          info("vec.back().total_locked_storage_amount for {} (depth {} vs "
+               "tx_depth_ {}): {} vs {}",
+               addr, vec.back().tx_depth, tx_depth_,
+               vec.back().total_locked_storage_amount, balance_deltas[addr]);
+          assert(vec.back().total_locked_storage_amount ==
+                 balance_deltas[addr]);
+        }
+        else {
           assert(balance_deltas[addr] == 0);
         }
       }

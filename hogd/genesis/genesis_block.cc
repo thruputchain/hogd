@@ -61,9 +61,15 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
 }
 } // namespace
 
+int128_t
+GenesisBlockLoader::initial_hog_token_supply()
+{
+  return int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+}
+
 void
 GenesisBlockLoader::load_genesis_block(
-    std::function<void(StorageKey const &, int128_t const &)> const
+    std::function<int128_t(StorageKey const &, int128_t const &)> const
         &write_storage,
     std::function<void(std::shared_ptr<const Contract> contract)> const
         &write_contract,
@@ -76,12 +82,12 @@ GenesisBlockLoader::load_genesis_block(
   write_deployment(kDeployContractAddress,
                    make_deployed_contract_hash(deploy_contract));
 
-  // write the initial token allocation
+  // Write the initial token allocation
   StorageKey allocation_key(
       StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-  constexpr static int128_t kHogTokenTotalSupply =
-      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
-  write_storage(allocation_key, kHogTokenTotalSupply);
+  write_storage(allocation_key, initial_hog_token_supply());
+
+  int128_t total_storage_costs = 0;
 
   // Process each initial configuration entry
   for (auto const &entry : genesis_block_.initial_config) {
@@ -92,8 +98,12 @@ GenesisBlockLoader::load_genesis_block(
     auto amount = from_xdr(entry.amount);
 
     // Write to storage
-    write_storage(storage_key, amount);
+    total_storage_costs += write_storage(storage_key, amount);
   }
+
+  // Overwrite the allocation with the updated amount
+  write_storage(allocation_key,
+                initial_hog_token_supply() - total_storage_costs);
 
   // write the precompiled token contract
   auto precompiled_token_contract = make_native_contract(

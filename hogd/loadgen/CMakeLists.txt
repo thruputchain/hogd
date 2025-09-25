@@ -23,6 +23,7 @@ target_include_directories(loadgen PRIVATE
 add_executable(
   loadgen_tests
   erc20_experiment_tests.cc
+  loadgen_tests.cc
 )
 gtest_discover_tests(loadgen_tests)
 
