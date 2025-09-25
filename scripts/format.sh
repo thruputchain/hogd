@@ -20,7 +20,7 @@ done
 if [ "${CHECK}" = "ON" ]; then
   FFLAGS="--dry-run --Werror"
   CF_FLAGS="--check"
-  SH_FLAGS=""
+  SH_FLAGS="-d"
 else
   FFLAGS=""
   CF_FLAGS=""
