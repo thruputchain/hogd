@@ -49,3 +49,6 @@
 
 // Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
 #cmakedefine01 HAVE_ATOMIC_SHARED_PTR
+
+// Define to 1 if you have getprogname() in stdlib.h
+#cmakedefine01 HAVE_GETPROGNAME

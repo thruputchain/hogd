@@ -172,7 +172,7 @@ public:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
 
-        return client_config.template client<DbCoord1>();
+        return client_config->template client<DbCoord1>();
       }())
   {}
 
