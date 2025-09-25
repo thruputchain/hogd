@@ -24,16 +24,16 @@ getprogname()
   if (progname.empty()) {
 #if HAVE_GETPROGNAME
     progname = ::getprogname();
-#else // !HAVE_GETPROGNAME
+#else  // !HAVE_GETPROGNAME
     std::string buf(1024UZ, '\0');
     for (;;) {
       auto n = readlink("/proc/self/exe", buf.data(), buf.size());
       if (size_t(n) == buf.size()) {
-	buf.resize(2 * buf.size());
-	continue;
+        buf.resize(2 * buf.size());
+        continue;
       }
       if (n > 0)
-	setprogname({buf.data(), size_t(n)});
+        setprogname({buf.data(), size_t(n)});
       break;
     }
 #endif // !HAVE_GETPROGNAME

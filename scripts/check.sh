@@ -12,13 +12,15 @@ print_usage() {
   printf -- "-e enable extra checks\n"
   printf -- "-p run tests in parallel\n"
   printf -- "-b do builds in parallel\n"
+  printf -- "-d <dir> specify build directory (default: $BUILD_DIR)\n"
 }
 
-while getopts 'epb' flag; do
+while getopts 'epbd:' flag; do
   case "${flag}" in
   e) EXTRA=yes ;;
   p) PARALLEL=--parallel ;;
   b) BUILD_PARALLEL=yes ;;
+  d) BUILD_DIR="$OPTARG" ;;
   *)
     print_usage
     exit 1
