@@ -10,8 +10,8 @@ chuckd_server="hog3"
 hogexec_servers=("hog4")
 hogdb_servers=("hog4")
 
-# Set to 1 to enable x23 RPC logging.
-export X23TRACE=0
+# Set to 1 to enable x23 RPC logging. Set to nothing to disable x23 RPC logging.
+export X23TRACE=
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.

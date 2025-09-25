@@ -22,10 +22,9 @@ public:
   using rpc_service = ExecutorCoord1;
 
   ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
-                       WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
     : self_executor_id_(self_executor_id), cp_(cp),
-      main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
+      executor_states_(std::move(db_proxy))
   {}
 
   uint16_t start_server(uint16_t port_number);
@@ -73,7 +72,6 @@ private:
   const uint16_t self_executor_id_;
 
   x23::CoroPoll &cp_;
-  WorkerPool &main_worker_pool_;
 
   ExecutorStateManager executor_states_;
   std::atomic<bool> shutdown_flag_ = false;

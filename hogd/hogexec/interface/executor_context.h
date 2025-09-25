@@ -15,10 +15,9 @@ namespace hogd {
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
-  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
-                  WorkerPool &main_worker_pool)
+  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
-      snapshot_cache_(id, db_proxy), main_worker_pool_(main_worker_pool)
+      snapshot_cache_(id, db_proxy)
   {}
 
   // Disable copy and move
@@ -42,7 +41,6 @@ private:
   const BlockID block_id_;
   DatabaseProxy &db_proxy_;
   StorageSnapshotCache snapshot_cache_;
-  WorkerPool &main_worker_pool_;
 };
 
 } // namespace hogd

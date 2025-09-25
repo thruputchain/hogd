@@ -127,13 +127,13 @@ ExecutorRpcInterface::executorcoord_validate_batch(
 x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_open_proposal_block(BlockID id)
 {
-  co_return executor_states_.open_proposal(id, main_worker_pool_);
+  co_return executor_states_.open_proposal(id);
 }
 
 x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_open_validation_block(BlockID id)
 {
-  co_return executor_states_.open_validation(id, main_worker_pool_);
+  co_return executor_states_.open_validation(id);
 }
 
 x23::Async<void>

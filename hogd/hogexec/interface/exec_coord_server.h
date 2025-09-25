@@ -27,8 +27,7 @@ public:
                   uint16_t coord_port, int poll_threads)
     : self_card_(std::move(self_card)),
       coord_address_(std::move(coord_address)), coord_port_(coord_port),
-      main_worker_pool_(available_parallelism()), x23_pool_(poll_threads),
-      cp_(x23_pool_)
+      x23_pool_(), cp_(x23_pool_)
   {}
 
   ~ExecCoordServer() { await_shutdown_request(); }
@@ -74,7 +73,6 @@ private:
   ExecCard self_card_;
   const std::string coord_address_;
   const uint16_t coord_port_;
-  WorkerPool main_worker_pool_;
   // We want to wait for CoroPoll to shutdown before shutting down WorkerPool,
   // as CoroPoll shutdown makes sure no pending RPCs are in flight (which might
   // have work enqueued on the WorkerPool).

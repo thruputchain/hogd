@@ -112,14 +112,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
       ValidationModeData{proposed_tx.nondeterministic_proposal_data},
       make_hogexec_context());
 
-  auto [async, cb] = x23::make_async<InvokeResult>();
-
-  main_worker_pool_.submit([&syscall_handler, &cb] -> void {
-    auto res = syscall_handler.root_invoke();
-    cb(res);
-  });
-
-  auto invoke_res = co_await async;
+  auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
     auto res = proxy.abort_transaction();
