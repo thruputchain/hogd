@@ -46,37 +46,74 @@ InvokeTX::read_bytes(const ItemKey &key)
   return ret;
 }
 
+HogDBStatus<NNInt128>
+InvokeTX::get_storage_balance_change(Address const& addr)
+{
+  auto snapshot_base = [&] -> HogDBStatus<int128_t> {
+    auto item_change = changes_[make_address_balance_item_key(addr)];
+    if (item_change.empty()) {
+      auto val = block_.get_db().read_address_balance(addr);
+      if (!val) {
+        if (val.error() == HogDBCode::kNotFound) {
+          return 0;
+        }
+        return val.error();
+      }
+      return *val;
+    }
+    assert(item_change.back().change.is_nnint128());
+    auto nnint = item_change.back().change.get_raw_nnint128();
+    assert(nnint);
+    return nnint->base();
+  }();
+  if (!snapshot_base) {
+    return snapshot_base.error();
+  }
+
+  for (auto const &[key, vec] : balance_deltas_) {
+    info("balance_deltas_ for {}: {}", key, vec.size());
+  }
+  info("balance_deltas_.size() {}", balance_deltas_.size());
+
+  info("snapshot_base for {}: {}", addr, snapshot_base.value());
+  auto bal = balance_deltas_[addr];
+  info("bal.size() for {}: {}", addr, bal.size());
+
+  int128_t delta = 0;
+  if (!bal.empty()) {
+    info("bal is not empty");
+    auto [ign, of] = overflowing_add(bal.back().total_locked_storage_amount, bal.back().manual_transfer_amount);
+    if (of) {
+      return HogDBError(HogDBCode::kOverflow);
+    }
+    delta = ign;
+  }
+
+  auto [ign, of] = overflowing_add(snapshot_base.value(), delta);
+  if (of) {
+    return HogDBError(HogDBCode::kOverflow);
+  }
+  info("storage balance change for {}: {} {}", addr, snapshot_base.value(), delta);
+  return NNInt128(snapshot_base.value(), delta);
+}
+
 // Is only responsible for updating the lock on the balance item;
 // not for updating anything else
 HogDBStatus<void>
 InvokeTX::update_balance_lock(Address const& addr)
 {
-  int128_t storage_adjustment = 0;
-  auto bal = balance_deltas_[addr];
-  if (!bal.empty()) {
-    auto [ign, of] = overflowing_add(bal.back().total_locked_storage_amount, bal.back().manual_transfer_amount);
-    if (of) {
-      return HogDBError(HogDBCode::kOverflow);
-    }
-    storage_adjustment = ign;
+  info("update_balance_lock: {}", addr);
+  auto storage_change = get_storage_balance_change(addr);
+  if (!storage_change) {
+    info("failed to get storage balance change for {}: {}", addr, storage_change.error());
+    return storage_change.error();
   }
+  info("storage balance change for {}: {} {}", addr, storage_change.value().base(), storage_change.value().delta());
+  auto new_item = ItemChange(std::move(storage_change.value()));
 
   auto key = make_address_balance_item_key(addr);
   auto change = changes_[key];
   if (change.empty()) {
-    auto base = block_.get_db().read_address_balance(addr);
-    if (!base) {
-      return base.error();
-    }
-    auto nnint = NNInt128(*base, storage_adjustment);
-    auto [ign, of] = overflowing_add(nnint.base(), nnint.delta());
-    if (of) {
-      return HogDBError(HogDBCode::kOverflow);
-    }
-    if (ign < 0) {
-      return HogDBError(HogDBCode::kConflict);
-    }
-    auto new_item = ItemChange(std::move(nnint));
 
     auto status = block_.lock(key, new_item);
     if (!status) {
@@ -89,19 +126,50 @@ InvokeTX::update_balance_lock(Address const& addr)
   auto last = change.back();
   assert(last.tx_depth <= tx_depth_);
   assert(last.change.is_nnint128());
-  auto nnint = last.change.get_raw_nnint128();
-  assert(nnint);
+  new_item.narrow(last.change);
 
+  info("new item after narrow: {} {}", new_item.get_raw_nnint128()->base(), new_item.get_raw_nnint128()->delta());
 
-
-
-
+  auto status = block_.modify_lock(key, last.change, new_item);
+  if (!status) {
+    return status.error();
+  }
+  if (last.tx_depth == tx_depth_) {
+    last.change = std::move(new_item);
+  }
+  else {
+    assert(last.tx_depth < tx_depth_);
+    change.emplace_back(std::move(new_item), tx_depth_, 0);
+  }
+  return {};
 }
 
 HogDBStatus<void>
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
   info("lock_storage: {} {}", addr, cost);
+
+  auto& bal_stats = balance_deltas_[addr];
+  if (bal_stats.empty()) {
+    bal_stats.emplace_back(StorageBalanceVersion{.manual_transfer_amount = 0, .total_locked_storage_amount = 0, .tx_depth = tx_depth_});
+  } else if (bal_stats.back().tx_depth < tx_depth_) {
+    // setup the back with a copy of the current state
+    auto back = bal_stats.back();
+    bal_stats.emplace_back(StorageBalanceVersion{.manual_transfer_amount = back.manual_transfer_amount, .total_locked_storage_amount = back.total_locked_storage_amount, .tx_depth = tx_depth_});
+  }
+  assert(!bal_stats.empty());
+  assert(bal_stats.back().tx_depth == tx_depth_);
+
+  bal_stats.back().total_locked_storage_amount += cost;
+
+  info("bal_stats.size() {}", bal_stats.size());
+  info("balance_deltas_[addr].size() {}", balance_deltas_.at(addr).size());
+
+  return update_balance_lock(addr);
+
+}
+#if 0
+
   auto key = make_address_balance_item_key(addr);
   auto it = changes_.find(key);
   if (it == changes_.end() || it->second.empty()) {
@@ -171,6 +239,7 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
   assert(changes_[key].back().locked_storage_cost == 0);
   return {};
 }
+#endif
 
 void
 InvokeTX::commit()
@@ -194,6 +263,7 @@ InvokeTX::commit()
     }
   }
   changes_.clear();
+  balance_deltas_.clear();
 }
 
 void
@@ -207,6 +277,7 @@ InvokeTX::abort()
     }
   }
   changes_.clear();
+  balance_deltas_.clear();
 }
 
 void
@@ -272,8 +343,28 @@ InvokeTX::release_savepoint(int depth)
 }
 
 HogDBStatus<void>
+InvokeTX::request_balance_change(Address const &addr, int128_t delta)
+{
+  info("request_balance_change: {} {}", addr, delta);
+  auto& bal = balance_deltas_[addr];
+  if (bal.empty() || bal.back().tx_depth < tx_depth_) {
+    bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta, .total_locked_storage_amount = 0, .tx_depth = tx_depth_});
+  }
+  else {
+    assert(bal.back().tx_depth == tx_depth_);
+    bal.back().manual_transfer_amount = delta;
+  }
+
+  assert(!bal.empty());
+  assert(bal.back().tx_depth == tx_depth_);
+
+  return update_balance_lock(addr);
+}
+
+HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
+  assert(!key.is_address_balance());
   std::vector<ItemVersion> &v = changes_[key];
 
   // this is the first change for this key; try to acquire a lock on the item.
@@ -293,6 +384,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       }
       v.back().locked_storage_cost = marginal_storage;
     }
+    info("starting assert_is_valid modifying a new change");
     assert_is_valid();
     return {};
   }
@@ -322,6 +414,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
     v.back().locked_storage_cost += marginal_storage;
   }
+  info("starting assert_is_valid modifying an existing change");
   assert_is_valid();
   return {};
 }
@@ -347,6 +440,12 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
 {
+  if (key.is_address_balance()) {
+    info("requesting balance change: {} {}", key.get_address(), delta);
+    return request_balance_change(key.get_address(), delta);
+  }
+  assert(!key.is_address_balance());
+
   HogDBStatus<int128_t> base = block_.get_db().read_nnint128(key);
   if (!base) {
     if (base.error() != HogDBCode::kNotFound)

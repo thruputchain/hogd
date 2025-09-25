@@ -100,7 +100,10 @@ public:
   void undo_merge(const NNInt128 &nnint);
 
   static size_t storage_size() { return sizeof(int128_t); }
-  int128_t value() const { return base_ + delta_; }
+  int128_t value() const { 
+    info("value for {} + {}", base_, delta_);
+    return base_ + delta_;
+  }
   int128_t base() const { return base_; }
   int128_t delta() const { return delta_; }
 

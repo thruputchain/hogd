@@ -243,6 +243,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
+  int depth = itx->create_savepoint();
   assert(itx);
 
   bool failure = false;
@@ -284,6 +285,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   if (failure) {
     error("genesis block initialization failed");
+    itx->rollback_to_savepoint(depth - 1);
     co_return DbResult::DbResultError;
   }
 
@@ -292,6 +294,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   itx->commit();
+  info("committing genesis invoketx");
   ctx_.close_invoke_tx(kGenesisBlockID, 0);
   co_return to_db_result(commit_block(kGenesisBlockID));
 }

@@ -121,12 +121,14 @@ private:
   const ItemChange *read_change(const ItemKey &key) const;
   // request_change tries to apply a change to the transaction.
   HogDBStatus<void> request_change(const ItemKey &key, ItemChange &&change);
+  HogDBStatus<void> request_balance_change(Address const &addr, int128_t delta);
 
   // lock_storage locks the storage for the given address.
   // cost must be nonnegative.
   HogDBStatus<void> lock_storage(Address const &addr, int128_t cost);
 
   HogDBStatus<void> update_balance_lock(Address const &addr);
+  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr);
 
   void assert_is_valid() const
   {
@@ -140,10 +142,20 @@ private:
           assert(item.tx_depth <= tx_depth_);
           depth = item.tx_depth + 1;
         }
-        balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+        if (!vec.empty()) {
+          info("balance_deltas[key.get_address()] for {}: {} += {}", key.get_address(), balance_deltas[key.get_address()], vec.back().locked_storage_cost);
+          balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
+        }
       }
+      info("start one iteration of balance_deltas_");
       for (const auto &[addr, vec] : balance_deltas_) {
-        assert(vec.back().total_locked_amount == balance_deltas[addr]);
+        info("balance_deltas_[addr].size() for {}: {}", addr, vec.size());
+        if (!vec.empty()) {
+          info("vec.back().total_locked_storage_amount for {} (depth {} vs tx_depth_ {}): {} vs {}", addr, vec.back().tx_depth, tx_depth_, vec.back().total_locked_storage_amount, balance_deltas[addr]);
+          assert(vec.back().total_locked_storage_amount == balance_deltas[addr]);
+        } else {
+          assert(balance_deltas[addr] == 0);
+        }
       }
     }
   }
