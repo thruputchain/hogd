@@ -22,14 +22,8 @@ base_init()
   if (cret < 0)
     return GError(GCode::kInternal);
 
-#ifdef __APPLE__
-  // Logging library is broken on mac with both clang and gcc
-  info("pid:{}, os:{}, arch:{}, cores:{}", getpid(), std::string(buf.sysname),
-       std::string(buf.machine), available_parallelism());
-#else
-  info("pid:{}, os:{}, arch:{}, cores:{}", getpid(), buf.sysname, buf.machine,
-       available_parallelism());
-#endif
+  info("pid:{}, os:{}, arch:{}, cores:{}", getpid(), auto(buf.sysname),
+       auto(buf.machine), available_parallelism());
   return {};
 }
 

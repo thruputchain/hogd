@@ -49,8 +49,8 @@ WasmiContext::make_new_runtime(Contract const &contract, SHA256Hash const &hash,
   }
 
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.wasmi_contract().data(),
-                        contract.wasmi_contract().size(), hash.data(),
+      new_wasmi_runtime(contract.wasmi_contract().wasm.data(),
+                        contract.wasmi_contract().wasm.size(), hash.data(),
                         host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};
@@ -71,8 +71,8 @@ WasmiContext::verify_contract(Contract const &contract) const
 
   return wasmi_verify_contract(wasmi_context_ptr_,
                                reinterpret_cast<const uint8_t *>(
-                                   contract.wasmi_contract().data()),
-                               contract.wasmi_contract().size());
+                                   contract.wasmi_contract().wasm.data()),
+                               contract.wasmi_contract().wasm.size());
 }
 
 bool
