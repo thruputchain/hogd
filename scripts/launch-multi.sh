@@ -10,8 +10,8 @@ chuckd_server="hog3"
 hogexec_servers=("hog4")
 hogdb_servers=("hog4")
 
-# Set to 1 to enable x23 RPC logging.
-export X23TRACE=0
+# Set to 1 to enable x23 RPC logging. Set to nothing to disable x23 RPC logging.
+export X23TRACE=
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.
@@ -199,8 +199,7 @@ echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
-    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 \
-    > /tmp/hogexec.log 2>&1 &"
+    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > /tmp/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
@@ -210,7 +209,7 @@ for s in "${hogdb_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
     rm -rf /tmp/hogdb; \
-    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 \
+    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 \
     > /tmp/hogdb.log 2>&1 &"
 done
 
