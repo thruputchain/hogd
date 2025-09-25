@@ -43,9 +43,11 @@ function(add_wasm_build target_name)
         --target wasm32-unknown-unknown
         --release
         --locked
+        --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
-        -Zbuild-std=core,alloc &&
+        -Zbuild-std=core,alloc 
+        -Zbuild-std-features="std/optimize_for_size" &&
         cp 
           ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm 
           ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
@@ -165,6 +167,20 @@ add_wasm_contract(initial_token_claim)
 add_types_xdr(itc_erc20)
 add_wasm_contract(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
 add_dependencies(itc_erc20_header itc_erc20_types_xdr)
+
+
+# If we make all of the wasms depend on the first one, then the first one builds first
+# (and builds any and all dependencies that are shared) and then the rest can build safely in parallel
+# without weird errors
+add_dependencies(fibonacci_call_wasm fibonacci_wasm)
+add_dependencies(cxs_roundtrip_wasm fibonacci_wasm)
+add_dependencies(txs_roundtrip_wasm fibonacci_wasm)
+add_dependencies(read_only_test_wasm fibonacci_wasm)
+add_dependencies(manual_revert_test_wasm fibonacci_wasm)
+add_dependencies(manual_revert_caller_wasm fibonacci_wasm)
+add_dependencies(simple_wallet_wasm fibonacci_wasm)
+add_dependencies(initial_token_claim_wasm fibonacci_wasm)
+add_dependencies(itc_erc20_wasm fibonacci_wasm)
 
 add_xdr_rs(
 	cxs_roundtrip_rs 

@@ -96,9 +96,9 @@ following:
 
     * `git sup`
 
-3. Update all the rust git repositories managed by cargo
+3. Fetch all the rust git repositories managed by cargo
 
-    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly update)`
+    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)`
 
 ## Repair instructions
 
@@ -111,5 +111,5 @@ rustup +nightly target add wasm32-unknown-unknown
 rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
 cargo install --force cbindgen
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-(cd built_contracts && cargo +nightly update)
+(cd built_contracts && cargo +nightly fetch)
 ```
