@@ -6,9 +6,7 @@
 #include <utility>
 
 #include "coord.hh"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "x23/event.h"
