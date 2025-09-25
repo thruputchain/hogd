@@ -74,8 +74,7 @@ public:
                  .upid = {},
                  .address =
                      x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
-      executor_coord_server_(exec_card_, kAddress, coordinator_port_,
-                             /*poll_threads=*/1)
+      executor_coord_server_(exec_card_, kAddress, coordinator_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.

@@ -5,7 +5,6 @@
 
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"
@@ -25,8 +24,7 @@ ExecutorStateManager::get_executor_context(
 }
 
 ExecResult
-ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
-                                 WorkerPool &main_worker_pool)
+ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
 {
   auto active_blocks = active_blocks_.take();
 
@@ -39,28 +37,23 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
   }
 
   [[maybe_unused]] auto [_, inserted] = active_blocks->emplace(
-      new_block_id,
-      ContextEntry{.refcount = 1,
-                   .context = std::make_unique<ExecutorContext>(
-                       mode, new_block_id, *db_proxy_, main_worker_pool)});
+      new_block_id, ContextEntry{.refcount = 1,
+                                 .context = std::make_unique<ExecutorContext>(
+                                     mode, new_block_id, *db_proxy_)});
   assert(inserted);
   return ExecResult::ExecResultOK;
 }
 
 ExecResult
-ExecutorStateManager::open_proposal(BlockID new_proposal_id,
-                                    WorkerPool &main_worker_pool)
+ExecutorStateManager::open_proposal(BlockID new_proposal_id)
 {
-  return open_block(new_proposal_id, ExecutionMode::kProposing,
-                    main_worker_pool);
+  return open_block(new_proposal_id, ExecutionMode::kProposing);
 }
 
 ExecResult
-ExecutorStateManager::open_validation(BlockID new_validation_id,
-                                      WorkerPool &main_worker_pool)
+ExecutorStateManager::open_validation(BlockID new_validation_id)
 {
-  return open_block(new_validation_id, ExecutionMode::kValidating,
-                    main_worker_pool);
+  return open_block(new_validation_id, ExecutionMode::kValidating);
 }
 
 void

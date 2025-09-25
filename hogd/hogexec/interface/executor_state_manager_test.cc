@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "exec_coord.hh"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/init.h"
 
@@ -11,19 +10,14 @@ TEST(ExecutorStateManagerTest, TestRefcounting)
 {
   ExecutorStateManager manager(nullptr);
 
-  ASSERT_EQ(manager.open_proposal(1, WorkerPool::get_default_pool()),
-            ExecResult::ExecResultOK);
-  ASSERT_EQ(manager.open_proposal(1, WorkerPool::get_default_pool()),
-            ExecResult::ExecResultOK);
-  ASSERT_NE(manager.open_validation(1, WorkerPool::get_default_pool()),
-            ExecResult::ExecResultOK);
+  ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);
+  ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);
+  ASSERT_NE(manager.open_validation(1), ExecResult::ExecResultOK);
 
   manager.remove_block(1);
-  ASSERT_NE(manager.open_validation(1, WorkerPool::get_default_pool()),
-            ExecResult::ExecResultOK);
+  ASSERT_NE(manager.open_validation(1), ExecResult::ExecResultOK);
   manager.remove_block(1);
-  ASSERT_EQ(manager.open_validation(1, WorkerPool::get_default_pool()),
-            ExecResult::ExecResultOK);
+  ASSERT_EQ(manager.open_validation(1), ExecResult::ExecResultOK);
 }
 
 } // namespace hogd
