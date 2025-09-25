@@ -1,13 +1,11 @@
 #pragma once
 
 #include "exec_coord.hh"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -28,11 +26,10 @@ public:
 
   ExecutionMode mode() const { return mode_; }
 
-  x23::Async<ExecProposeResult>
-  propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
-  x23::Async<ExecResult>
-  validate_transaction(ProposedTransaction const &proposed_tx,
-                       TransactionID tx_id);
+  ExecProposeResult propose_transaction(SignedTransaction const &signed_tx,
+                                        TransactionID tx_id);
+  ExecResult validate_transaction(ProposedTransaction const &proposed_tx,
+                                  TransactionID tx_id);
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);
