@@ -28,11 +28,10 @@ public:
 
   ExecutionMode mode() const { return mode_; }
 
-  x23::Async<ExecProposeResult>
-  propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
-  x23::Async<ExecResult>
-  validate_transaction(ProposedTransaction const &proposed_tx,
-                       TransactionID tx_id);
+  ExecProposeResult propose_transaction(SignedTransaction const &signed_tx,
+                                        TransactionID tx_id);
+  ExecResult validate_transaction(ProposedTransaction const &proposed_tx,
+                                  TransactionID tx_id);
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);

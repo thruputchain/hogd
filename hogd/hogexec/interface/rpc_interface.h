@@ -51,12 +51,12 @@ public:
   executorcoord_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);
 
-  x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
-  x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);
+  ExecResult executorcoord_open_proposal_block(BlockID id);
+  ExecResult executorcoord_open_validation_block(BlockID id);
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all transactions
   // on this block have been committed or aborted.
-  x23::Async<void> executorcoord_finish_block(BlockID id);
+  void executorcoord_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.
@@ -77,6 +77,6 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::Async>);
+static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::MaybeAsync>);
 
 } // namespace hogd
