@@ -221,10 +221,14 @@ private:
             msg_set_reply_stat(&rmsg, SUCCESS);
             if constexpr (returns_void) {
               co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg);
               co_return make_record(rmsg);
             }
-            else
-              co_return make_record<return_type>(rmsg, co_await awaitable);
+            else {
+              return_type res = co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
+              co_return make_record<return_type>(rmsg, res);
+            }
           } catch (const std::exception &e) {
             co_return self.error(e);
           }
