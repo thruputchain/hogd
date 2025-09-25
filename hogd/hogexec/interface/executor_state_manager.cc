@@ -5,7 +5,6 @@
 
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"

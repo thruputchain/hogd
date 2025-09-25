@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "exec_coord.hh"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/init.h"
 
