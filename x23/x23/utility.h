@@ -9,6 +9,8 @@
 #include <new>
 #include <ranges>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -355,5 +357,11 @@ pause_instruction()
 constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
 #pragma GCC diagnostic pop
+
+// Set argv0 for debug logging purposes, in case it can't be inferred
+void setprogname(std::string_view argv0);
+
+// Get short program name
+const std::string &getprogname();
 
 } // namespace x23

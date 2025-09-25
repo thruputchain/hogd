@@ -417,39 +417,6 @@ struct RpcStream : public detail::RpcStreamImpl {
     Configurator(RpcStream &s) noexcept : super(s) {}
     Configurator(const Configurator &) = delete;
     ~Configurator() { get()->go(); }
-
-    RpcStream *operator->() const noexcept { return get(); }
-
-    template<typename Server,
-             typename VersMeta = typename std::remove_cvref_t<
-                 decltype(*declval<Server>())>::rpc_service,
-             typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    [[deprecated("use Configurator like a pointer")]]
-    Configurator &server(Server srvr, VersMeta vm = {},
-                         ExtraArgs &&...extra_args)
-    {
-      get()->template server<Server, VersMeta, ExtraArgs...>(
-          std::forward<Server>(srvr), vm,
-          std::forward<ExtraArgs>(extra_args)...);
-      return *this;
-    }
-    template<typename VersMeta, typename Server, typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    [[deprecated("use Configurator like a pointer")]]
-    Configurator &server(Server srvr, ExtraArgs &&...ea)
-    {
-      get()->template server<Server, VersMeta, ExtraArgs...>(
-          std::move(srvr), {}, std::forward<ExtraArgs>(ea)...);
-      return *this;
-    }
-
-    template<typename VersMeta>
-    [[deprecated("use Configurator like a pointer")]]
-    auto client(VersMeta arg = {})
-    {
-      return get()->client(arg);
-    }
   };
 
   template<typename ProcMeta>

@@ -221,7 +221,7 @@ HogDBCoordServer::start_server(uint16_t port)
        x23::UniqueFd lfd) -> x23::Detached {
       co_await cp.pool_.bg();
       while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c).server(server);
+        x23::rpc_stream_logged(cp, *c)->server(server);
       }
     }(cp_, this, std::move(lfd));
   }

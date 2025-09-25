@@ -35,11 +35,12 @@ SH_DIR=${ROOT_DIR}/scripts
 set -euo pipefail
 
 # Run clang-format
-find "${CODE_DIR}" "${X23_DIR}" -name '*.h' -o -name '*.cc' |
+git ls-files --recurse-submodules -c "${CODE_DIR}/*.cc" "${X23_DIR}/*.cc" \
+  "${CODE_DIR}/*.h" "${X23_DIR}/*.h" |
   xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
 # Rust fmt
-CARGO_DIRS=$(find "${CODE_DIR}" "${X23_DIR}" -name 'Cargo.toml')
+CARGO_DIRS=$(git ls-files --recurse-submodules -c "${CODE_DIR}/*/Cargo.toml")
 for CARGO_DIR in $CARGO_DIRS; do
   cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human
 done
@@ -50,5 +51,6 @@ find "${SH_DIR}" -name '*.sh' |
   xargs ${SH_FORMAT} ${SH_FLAGS}
 
 # xdr format (note: this assumes .clang-format matches that in the protocol directory)
-find "${ROOT_DIR}/protocol" -name '*.x' |
-  xargs ${CLANG_FORMAT} -i ${FFLAGS}
+if test OFF = "$CHECK"; then
+  ${X23_DIR}/misc/xdrformat "${ROOT_DIR}/protocol"/*.x
+fi

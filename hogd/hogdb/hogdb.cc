@@ -153,7 +153,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     auto client_config = x23::rpc_stream_logged(cp, fd);
     while (true) {
       auto client =
-          std::make_optional(client_config.template client<Coordinator1>());
+          std::make_optional(client_config->template client<Coordinator1>());
       if (!client) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         continue;
