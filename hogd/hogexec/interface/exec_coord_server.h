@@ -24,7 +24,7 @@ namespace hogd {
 class ExecCoordServer {
 public:
   ExecCoordServer(ExecCard self_card, std::string coord_address,
-                  uint16_t coord_port, int poll_threads)
+                  uint16_t coord_port)
     : self_card_(std::move(self_card)),
       coord_address_(std::move(coord_address)), coord_port_(coord_port),
       x23_pool_(), cp_(x23_pool_)
