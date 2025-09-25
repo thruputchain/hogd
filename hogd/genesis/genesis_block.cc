@@ -53,7 +53,7 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
   case ContractType::kWasmi:
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().size())};
+                                    contract->wasmi_contract().wasm.size())};
   default:
     throw std::runtime_error(
         "make_deployed_contract_hash: unsupported contract type");

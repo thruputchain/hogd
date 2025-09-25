@@ -523,7 +523,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     case ContractType::kMockTest:
       return 0LU;
     case ContractType::kWasmi:
-      return load_contract->wasmi_contract().size();
+      return load_contract->wasmi_contract().wasm.size();
     default:
       assert(false);
       return 0LU;
