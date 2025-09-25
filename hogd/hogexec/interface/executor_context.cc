@@ -1,5 +1,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
+#include <cassert>
+
 #include "exec_coord.hh"
 #include "ffi_enums.hh"
 #include "hogd/hogexec/precompiles/context.h"
@@ -9,8 +11,6 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "x23/async.h"
-#include <cassert>
 
 namespace hogd {
 
@@ -57,7 +57,7 @@ make_exec_result(SystemErrorCode error_code)
 }
 } // namespace
 
-x23::Async<ExecProposeResult>
+ExecProposeResult
 ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
                                      TransactionID tx_id)
 {
@@ -70,7 +70,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   if (!invoke_res.is_root_success()) {
     auto st = proxy.abort_transaction();
     if (!st.has_value()) {
-      co_return ExecProposeResult(make_exec_result(st.error().code()));
+      return ExecProposeResult(make_exec_result(st.error().code()));
     }
     assert(!invoke_res.result_.has_value());
 
@@ -81,7 +81,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
         InvokeErrorCode::kInvokeDeterministic) {
       out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
     }
-    co_return out;
+    return out;
   }
 
   auto commit_res = syscall_handler.try_commit_transaction();
@@ -89,18 +89,18 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     // this error code should not be returned by the try_commit_transaction
     // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    co_return ExecProposeResult(make_exec_result(commit_res.error().code()));
+    return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
   if (commit_res.value()) {
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
-    co_return out;
+    return out;
   }
-  co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+  return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
 }
 
-x23::Async<ExecResult>
+ExecResult
 ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
                                       TransactionID tx_id)
 {
@@ -117,10 +117,10 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   if (!invoke_res.is_root_success()) {
     auto res = proxy.abort_transaction();
     if (!res.has_value()) {
-      co_return make_exec_result(res.error().code());
+      return make_exec_result(res.error().code());
     }
     assert(!invoke_res.result_.has_value());
-    co_return make_exec_result(invoke_res.result_.error().code());
+    return make_exec_result(invoke_res.result_.error().code());
   }
 
   auto commit_res = syscall_handler.try_commit_transaction();
@@ -128,13 +128,13 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
     // this error code should not be returned by the try_commit_transaction
     // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    co_return make_exec_result(commit_res.error().code());
+    return make_exec_result(commit_res.error().code());
   }
 
   if (commit_res.value()) {
-    co_return ExecResult::ExecResultOK;
+    return ExecResult::ExecResultOK;
   }
-  co_return ExecResult::ExecResultTxNonDeterministicError;
+  return ExecResult::ExecResultTxNonDeterministicError;
 }
 
 } // namespace hogd

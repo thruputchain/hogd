@@ -6,7 +6,6 @@
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
