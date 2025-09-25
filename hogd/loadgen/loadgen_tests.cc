@@ -22,6 +22,8 @@ public:
   {}
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST_P(LoadgenTests, EmptyGenesisBlock)
 {
   run_genesis_initialization(GenesisBlock{});
@@ -51,6 +53,8 @@ TEST_P(LoadgenTests, OneInitialConfig)
             GenesisBlockLoader::initial_hog_token_supply());
   // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(LoadgenTests, LoadgenTests,
                          ::testing::Values(TestDB::kMockInMemory,

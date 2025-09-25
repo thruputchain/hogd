@@ -33,6 +33,7 @@ protected:
 
   void check_initial_balance()
   {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     auto bal =
         lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
             GenesisBlockLoader::kDeployContractAddress));
@@ -40,6 +41,7 @@ protected:
     EXPECT_LT(from_xdr(bal.value().nnint()),
               GenesisBlockLoader::initial_hog_token_supply());
     // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
 };
 
