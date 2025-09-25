@@ -18,7 +18,7 @@ done
 
 # If there are any .x files, run Emacs in batch mode with reindent.el.
 if (( ${#x_files[@]} > 0 )); then
-    emacs --batch -l "$DIR/reindent" -- "${x_files[@]}"
+    emacs -Q --batch -l "$DIR/reindent" -- "${x_files[@]}"
 fi
 
 # If there are any non-.x files, run clang-format in-place on them.
