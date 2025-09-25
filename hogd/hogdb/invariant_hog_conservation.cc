@@ -24,7 +24,7 @@ namespace hogd {
 bool
 HogConservationInvariant::check()
 {
-  auto r = total_supply_change_.load();
+  auto r = total_supply_change_.with([](auto &t) { return t; });
   if (r != 0) {
     error("total_supply_change_ is not 0: {}", r);
   }
@@ -162,8 +162,9 @@ HogConservationInvariant::handle_account_auth_data_item_change(
 void
 HogConservationInvariant::update_total_supply(int128_t change)
 {
-  [[maybe_unused]] auto r = total_supply_change_.fetch_add(change);
-  trace("total_supply_change_ (before): {} change {}", r, change);
+  [[maybe_unused]] auto r =
+      total_supply_change_.with([change](auto &t) { return t += change; });
+  trace("total_supply_change_ (after update): {} change {}", r, change);
 }
 
 } // namespace hogd

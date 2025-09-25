@@ -8,6 +8,7 @@
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -30,7 +31,7 @@ private:
 
   void update_total_supply(int128_t change);
 
-  std::atomic<int128_t> total_supply_change_{0};
+  x23::MVar<int128_t> total_supply_change_{0};
 };
 
 } // namespace hogd
