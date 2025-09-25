@@ -605,9 +605,11 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
   auto bal = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(query_addr));
   ASSERT_TRUE(bal.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   int128_t bal_int = from_xdr(bal.value().nnint());
   EXPECT_LE(bal_int, kInitialBalance);
   int128_t cost = kInitialBalance - bal_int;
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   // Now for the test itself.
 
