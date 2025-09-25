@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -30,26 +31,6 @@ namespace hogd {
 namespace {
 
 constexpr std::string kGlobalTipKey = ">DBTIP";
-
-// Prefix is a prefix appended to each key to form an overall key that
-// indicates the category of data being stored. The rest of the key is normally
-// a contract address, except for kWasmCode, which uses the hash of the wasm
-// blob as the rest of its key.
-//
-// Warning: These key prefixes are persisted on disk so they cannot be changed
-// without migrating existing data.
-//
-// Warning: So far, they are also included in the merkle trie root hash, so
-// they're very hard to change.
-enum class Prefix : char {
-  kHogAge = 'A',
-  kBalance = 'B',
-  kAccountAuthData = 'D',
-  kAddressMetadata = 'M',
-  kContractDataKey = 'K',
-  kWasmCode = 'C',
-  kWasmCodeRefcount = 'R',
-};
 
 // Warning: you may have to update this if you make changes to Prefix.
 constexpr bool
@@ -247,8 +228,21 @@ HogDBStatus<void>
 HogDBDAO::write_address_balance(const Address &addr, int128_t val)
 {
   auto key = make_address_key(addr, Prefix::kBalance);
-  return db_.put(std::as_bytes(std::span(key)), kNNInt128,
-                 byte_view(cpu_to_le(val)));
+  std::optional<HogDBStatus<DBItem>> before_item;
+  if (!invariants_.empty()) {
+    before_item = db_.get(std::as_bytes(std::span(key)));
+  }
+
+  auto ret = db_.put(std::as_bytes(std::span(key)), kNNInt128,
+                     byte_view(cpu_to_le(val)));
+
+  if (!invariants_.empty()) {
+    auto after_item = db_.get(std::as_bytes(std::span(key)));
+    for (auto &invariant : invariants_) {
+      invariant->log_item_change(key, *before_item, after_item);
+    }
+  }
+  return ret;
 }
 
 HogDBStatus<void>
@@ -277,8 +271,13 @@ HogDBDAO::write_address_metadata(Address const &addr,
 {
   auto key = make_address_key(addr, Prefix::kAddressMetadata);
   auto buf = x23::serialize(hash);
-  return db_.put(std::as_bytes(std::span(key)), 0,
-                 std::as_bytes(std::span(buf)));
+  auto key_span = std::as_bytes(std::span(key));
+
+  auto before_item = get_before_item(key_span);
+  auto ret = db_.put(key_span, 0, std::as_bytes(std::span(buf)));
+
+  update_invariants_post(key_span, before_item);
+  return ret;
 }
 
 HogDBStatus<void>
@@ -296,14 +295,21 @@ HogDBDAO::write_nnint128(const ItemKey &key, int128_t val)
     return write_address_balance(key.get_address(), val);
   assert(key.is_contract_data());
 
-  return db_.put(make_contract_data_key(key.as_bytes()), kNNInt128,
-                 byte_view(cpu_to_le(val)));
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto before_item = get_before_item(db_key);
+  auto ret = db_.put(db_key, kNNInt128, byte_view(cpu_to_le(val)));
+  update_invariants_post(db_key, before_item);
+  return ret;
 }
 
 HogDBStatus<void>
 HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
 {
-  return db_.put(make_contract_data_key(key.as_bytes()), kBytes, buf);
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto before_item = get_before_item(db_key);
+  auto ret = db_.put(db_key, kBytes, buf);
+  update_invariants_post(db_key, before_item);
+  return ret;
 }
 
 HogDBStatus<size_t>
@@ -361,7 +367,11 @@ HogDBDAO::remove_item(const ItemKey &key)
     error("item key is not contract data: {}", key.key_type());
     return HogDBError(HogDBCode::kInternal);
   }
-  return db_.remove(make_contract_data_key(key.as_bytes()));
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto before_item = get_before_item(db_key);
+  auto ret = db_.remove(db_key);
+  update_invariants_post(db_key, before_item);
+  return ret;
 }
 
 } // namespace hogd

@@ -239,6 +239,10 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_exclusive() const { return exclusive_; }
+  bool is_create_contract() const
+  {
+    return std::holds_alternative<NewContractData>(type_);
+  }
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
 
@@ -259,6 +263,14 @@ public:
   // commit_change marks a change as committed.
   // The change MUST have been previously merged.
   void commit_change(const ItemChange &change);
+
+  auto get_type() const { return type_.index(); }
+
+  bool no_storage_cost() const
+  {
+    // is_create_contract pays storage cost via the deployment entries
+    return is_deletion() || is_create_contract();
+  }
 
   // storage_cost_delta returns the change in storage cost (in native tokens)
   // needed to store the item if committed (could be negative).
