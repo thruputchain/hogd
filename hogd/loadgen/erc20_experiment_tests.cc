@@ -4,6 +4,8 @@
 #include <memory>
 #include <optional>
 
+#include "hogd/base/xdr_util.h"
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -28,6 +30,17 @@ protected:
   void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
+
+  void check_initial_balance()
+  {
+    auto bal =
+        lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
+            GenesisBlockLoader::kDeployContractAddress));
+    ASSERT_TRUE(bal.has_value());
+    EXPECT_LT(from_xdr(bal.value().nnint()),
+              GenesisBlockLoader::initial_hog_token_supply());
+    // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
+  }
 };
 
 TEST_P(ERC20ExperimentTest, Basic)
@@ -39,6 +52,7 @@ TEST_P(ERC20ExperimentTest, Basic)
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_block);
+  check_initial_balance();
 
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
@@ -82,6 +96,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
   ASSERT_TRUE(result.has_value());
 
   run_genesis_initialization(result.value().genesis_block);
+  check_initial_balance();
 
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {

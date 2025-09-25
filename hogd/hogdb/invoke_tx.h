@@ -143,20 +143,11 @@ private:
           depth = item.tx_depth + 1;
         }
         if (!vec.empty()) {
-          info("balance_deltas[key.get_address()] for {}: {} += {}",
-               key.get_address(), balance_deltas[key.get_address()],
-               vec.back().locked_storage_cost);
           balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
         }
       }
-      info("start one iteration of balance_deltas_");
       for (const auto &[addr, vec] : balance_deltas_) {
-        info("balance_deltas_[addr].size() for {}: {}", addr, vec.size());
         if (!vec.empty()) {
-          info("vec.back().total_locked_storage_amount for {} (depth {} vs "
-               "tx_depth_ {}): {} vs {}",
-               addr, vec.back().tx_depth, tx_depth_,
-               vec.back().total_locked_storage_amount, balance_deltas[addr]);
           assert(vec.back().total_locked_storage_amount ==
                  balance_deltas[addr]);
         }

@@ -4,10 +4,12 @@
 #include <cassert>
 #include <cstddef>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -70,18 +72,10 @@ InvokeTX::get_storage_balance_change(Address const &addr)
     return snapshot_base.error();
   }
 
-  for (auto const &[key, vec] : balance_deltas_) {
-    info("balance_deltas_ for {}: {}", key, vec.size());
-  }
-  info("balance_deltas_.size() {}", balance_deltas_.size());
-
-  info("snapshot_base for {}: {}", addr, snapshot_base.value());
-  auto bal = balance_deltas_[addr];
-  info("bal.size() for {}: {}", addr, bal.size());
+  auto const &bal = balance_deltas_[addr];
 
   int128_t delta = 0;
   if (!bal.empty()) {
-    info("bal is not empty");
     auto [ign, of] = overflowing_sub(bal.back().manual_transfer_amount,
                                      bal.back().total_locked_storage_amount);
     if (of) {
@@ -100,8 +94,8 @@ InvokeTX::get_storage_balance_change(Address const &addr)
     // case
     return HogDBError(HogDBCode::kConflict);
   }
-  info("storage balance change for {}: {} {}", addr, snapshot_base.value(),
-       delta);
+  trace("Storage balance change for {} is {} + {}", addr, snapshot_base.value(),
+        delta);
   return NNInt128(snapshot_base.value(), delta);
 }
 
@@ -110,18 +104,14 @@ InvokeTX::get_storage_balance_change(Address const &addr)
 HogDBStatus<void>
 InvokeTX::update_balance_lock(Address const &addr)
 {
-  info("update_balance_lock: {}", addr);
+  // Combines the manual balance transfers with the up-to-now storage cost
+  // to create/apply/update one balance nnint delta.
   auto storage_change = get_storage_balance_change(addr);
   if (!storage_change) {
-    info("failed to get storage balance change for {}: {}", addr,
-         storage_change.error());
     return storage_change.error();
   }
-  info("storage balance change for {}: {} {}", addr,
-       storage_change.value().base(), storage_change.value().delta());
+
   auto new_item = ItemChange(std::move(storage_change.value()));
-  info("new item after move: {} {}", new_item.get_raw_nnint128()->base(),
-       new_item.get_raw_nnint128()->delta());
 
   auto key = make_address_balance_item_key(addr);
   auto &change = changes_[key];
@@ -129,11 +119,9 @@ InvokeTX::update_balance_lock(Address const &addr)
 
     auto status = block_.lock(key, new_item);
     if (!status) {
-      info("failed to lock balance item for {}: {}", addr, status.error());
       return status.error();
     }
-    info("emplacing new item: {} {}", new_item.get_raw_nnint128()->base(),
-         new_item.get_raw_nnint128()->delta());
+
     change.emplace_back(std::move(new_item), tx_depth_, 0);
     return {};
   }
@@ -142,9 +130,6 @@ InvokeTX::update_balance_lock(Address const &addr)
   assert(last.tx_depth <= tx_depth_);
   assert(last.change.is_nnint128());
   new_item.narrow(last.change);
-
-  info("new item after narrow: {} {}", new_item.get_raw_nnint128()->base(),
-       new_item.get_raw_nnint128()->delta());
 
   auto status = block_.modify_lock(key, last.change, new_item);
   if (!status) {
@@ -163,8 +148,7 @@ InvokeTX::update_balance_lock(Address const &addr)
 HogDBStatus<void>
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
-  info("lock_storage: {} {}", addr, cost);
-
+  trace("Locking storage for {}: amount {}", addr, cost);
   auto &bal_stats = balance_deltas_[addr];
   if (bal_stats.empty()) {
     bal_stats.emplace_back(
@@ -185,83 +169,8 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
 
   bal_stats.back().total_locked_storage_amount += cost;
 
-  info("bal_stats.size() {}", bal_stats.size());
-  info("balance_deltas_[addr].size() {}", balance_deltas_.at(addr).size());
-
   return update_balance_lock(addr);
 }
-#if 0
-
-  auto key = make_address_balance_item_key(addr);
-  auto it = changes_.find(key);
-  if (it == changes_.end() || it->second.empty()) {
-    auto bal_change = make_balance_change(block_.get_db(), addr, -cost);
-    if (!bal_change)
-      return bal_change.error();
-
-    auto nnint = bal_change->get_raw_nnint128();
-    assert(nnint);
-    // make sure that the proposed change is valid in itself.
-    // TODO(geoff): If we switch to retrocausal nnint, this check could be
-    // relaxed.
-    auto [ign, of] = overflowing_add(nnint->base(), nnint->delta());
-    if (of) {
-      return HogDBError(HogDBCode::kOverflow);
-    }
-    if (ign < 0) {
-      return HogDBError(HogDBCode::kConflict);
-    }
-
-    info("doing new lock storage: base {} amount {}", nnint->base(),  nnint -> delta());
-    auto status = block_.lock(key, *bal_change);
-    if (!status)
-      return status.error();
-
-    changes_[key].emplace_back(std::move(*bal_change), tx_depth_, 0);
-    assert(changes_[key].back().locked_storage_cost == 0);
-    return {};
-  }
-
-  auto last = it->second.back();
-  assert(last.change.is_nnint128());
-  auto nnint = last.change.get_raw_nnint128();
-  assert(nnint);
-
-  auto [new_delta, of] = overflowing_add(nnint->delta(), -cost);
-  if (of) {
-    return HogDBError(HogDBCode::kOverflow);
-  }
-
-  // TODO(geoff): If we switch to retrocausal nnint, this check could be relaxed
-  // That would require relaxing the nnint assert_is_valid check below
-  auto [ign, of2] = overflowing_add(nnint->base(), new_delta);
-  if (of2) {
-    return HogDBError(HogDBCode::kOverflow);
-  }
-  if (ign < 0) {
-    return HogDBError(HogDBCode::kConflict);
-  }
-
-  auto new_nnint = NNInt128(nnint->base(), new_delta);
-  ItemChange new_change(std::move(new_nnint));
-  new_change.narrow(last.change);
-  auto status = block_.modify_lock(key, last.change, new_change);
-  if (!status)
-    return status.error();
-
-  if (last.tx_depth == tx_depth_) {
-    last.change = std::move(new_change);
-  }
-  else {
-    assert(last.tx_depth < tx_depth_);
-    it->second.emplace_back(std::move(new_change), tx_depth_, 0);
-  }
-
-  // balance items don't lock storage
-  assert(changes_[key].back().locked_storage_cost == 0);
-  return {};
-}
-#endif
 
 void
 InvokeTX::commit()
@@ -279,7 +188,6 @@ InvokeTX::commit()
       assert(released_cost >= 0);
 
       if (released_cost > 0) {
-        info("release_balance: {} {}", key.get_address(), released_cost);
         block_.release_balance(key.get_address(), released_cost);
       }
     }
@@ -366,7 +274,6 @@ InvokeTX::release_savepoint(int depth)
 HogDBStatus<void>
 InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 {
-  info("request_balance_change: {} {}", addr, delta);
   auto &bal = balance_deltas_[addr];
   if (bal.empty() || bal.back().tx_depth < tx_depth_) {
     bal.emplace_back(StorageBalanceVersion{.manual_transfer_amount = delta,
@@ -407,7 +314,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       }
       v.back().locked_storage_cost = marginal_storage;
     }
-    info("starting assert_is_valid modifying a new change");
+
     assert_is_valid();
     return {};
   }
@@ -437,7 +344,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
     v.back().locked_storage_cost += marginal_storage;
   }
-  info("starting assert_is_valid modifying an existing change");
+
   assert_is_valid();
   return {};
 }
@@ -464,7 +371,6 @@ HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
 {
   if (key.is_address_balance()) {
-    info("requesting balance change: {} {}", key.get_address(), delta);
     return request_balance_change(key.get_address(), delta);
   }
   assert(!key.is_address_balance());

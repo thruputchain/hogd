@@ -153,7 +153,6 @@ public:
   void enable_debug_invariants()
   {
     assert(invariants_.empty());
-    info("enabling debug variants");
     invariants_.push_back(std::make_unique<HogConservationInvariant>());
   }
 

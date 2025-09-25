@@ -37,8 +37,6 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
                                           HogDBStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
-  info("log_item_change: {} {} {}", std::to_underlying(prefix),
-       before.has_value(), after.has_value());
   switch (prefix) {
   case Prefix::kBalance:
     handle_balance_change(before, after);
@@ -78,7 +76,6 @@ HogConservationInvariant::handle_balance_change(
   };
   auto before_balance = get_balance(before);
   auto after_balance = get_balance(after);
-  info("handle_balance_change: {} {}", before_balance, after_balance);
   update_total_supply(after_balance - before_balance);
 }
 
@@ -105,8 +102,6 @@ HogConservationInvariant::handle_address_metadata_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  info("handle_address_metadata_item_change: {} {}", before_storage_cost,
-       after_storage_cost);
   update_total_supply(after_storage_cost - before_storage_cost);
 }
 
@@ -135,7 +130,6 @@ HogConservationInvariant::handle_contract_data_item_change(
   // These numbers are the amount of coins stored (locked) at this location.
   // Deleting an item (negative total supply change) is equivalent to
   // transferring that amount to another key
-  info("handle_contract_data_item_change: {} {}", before_cost, after_cost);
   update_total_supply(after_cost - before_cost);
 }
 
@@ -162,8 +156,6 @@ HogConservationInvariant::handle_account_auth_data_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  info("handle_account_auth_data_item_change: {} {}", before_storage_cost,
-       after_storage_cost);
   update_total_supply(after_storage_cost - before_storage_cost);
 }
 
@@ -172,7 +164,6 @@ HogConservationInvariant::update_total_supply(int128_t change)
 {
   [[maybe_unused]] auto r =
       total_supply_change_.with([change](auto &t) { return t += change; });
-  info("total_supply_change_ (after update): {} change {}", r, change);
 }
 
 } // namespace hogd

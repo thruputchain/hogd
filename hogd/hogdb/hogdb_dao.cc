@@ -227,7 +227,6 @@ HogDBDAO::read_bytes(const ItemKey &key)
 HogDBStatus<void>
 HogDBDAO::write_address_balance(const Address &addr, int128_t val)
 {
-  info("writing address balance for {}: {}", addr, val);
   auto key = make_address_key(addr, Prefix::kBalance);
   std::optional<HogDBStatus<DBItem>> before_item;
   if (!invariants_.empty()) {

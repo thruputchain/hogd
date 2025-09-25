@@ -839,6 +839,8 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
   // now storage is available
+  // This is where hogdb doesn't allow a write, when a retrocausal nnint would
+  // allow it.
   tx3.add_delta(make_addrkey(contract_addr, "test_new"),
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
