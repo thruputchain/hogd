@@ -23,25 +23,9 @@ namespace hogd {
 uint16_t
 ExecutorRpcInterface::start_server(uint16_t port_number)
 {
-  x23::UniqueFd lfd = x23::tcplisten(port_number);
-  if (!lfd) {
-    perror("listen");
-    exit(EXIT_FAILURE);
-  }
-  // If the [port_number] parameter is 0, then the kernel chooses the port
-  // number for us. Thus, in that case, [port_number] will be assigned a nonzero
-  // value below.
-  port_number = x23::get_port(x23::local_addr(lfd.get()));
-
-  [](x23::CoroPoll &cp, ExecutorRpcInterface *server,
-     x23::UniqueFd lfd) -> x23::Detached {
-    co_await cp.pool_.bg();
-    while (auto c = co_await cp.accept(lfd)) {
-      x23::rpc_stream_logged(cp, *c)->server(server);
-    }
-  }(cp_, this, std::move(lfd));
-
-  return port_number;
+  return tcp_rpc_server(cp_, port_number, [this](auto c) {
+    c->server(this);
+  });
 }
 
 x23::Async<ExecProposeResult>

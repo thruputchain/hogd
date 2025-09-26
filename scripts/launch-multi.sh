@@ -18,9 +18,13 @@ elif test -r "$HOGD_PROJECT_DIR/hog.conf"; then
   . "$HOGD_PROJECT_DIR/hog.conf"
 fi
 
-# Run with env X23TRACE=1 to enable tracing
-: ${X23TRACE=}
-export X23TRACE
+X23ENV=$(env | grep '^X23')
+if test -n "$X23ENV"; then
+    X23ENV="export $X23ENV"
+else
+    X23ENV=":"
+fi
+
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.
@@ -37,7 +41,7 @@ binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
   "${hogdb_servers[@]}")
 
-COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5)
+COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 results_only=false
 
@@ -190,14 +194,14 @@ wait_port() {
 
 echo "Start loadgen..."
 ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-  "export X23TRACE=$X23TRACE; \
+  "$X23ENV; \
   nohup \"$LOADGEN_BINARY\" -p 11222 >$logdir/loadgen.log 2>&1 &"
 wait_port "$loadgen_server" 11222
 
 echo "Start chuckd..."
 # Start chuckd.
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  "export X23TRACE=$X23TRACE;                  \
+  "$X23ENV;                  \
   nohup \"$CHUCKD_BINARY\"                     \
   bench loadgen                                \
   --stack                                      \
@@ -217,7 +221,7 @@ wait_port "$chuckd_server" 7888
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "export X23TRACE=$X23TRACE; \
+    "$X23ENV; \
     nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > $logdir/hogexec.log 2>&1 &"
 done
 
@@ -226,7 +230,7 @@ echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "export X23TRACE=$X23TRACE; \
+    "$X23ENV; \
     rm -rf $logdir/hogdb; \
     nohup \"$HOGDB_BINARY\" $logdir/hogdb 10000000000 \"$chuckd_server\":7888 \
     > $logdir/hogdb.log 2>&1 &"
