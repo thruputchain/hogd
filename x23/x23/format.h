@@ -7,7 +7,37 @@
 
 namespace x23 {
 
-// Convert an XDR type to a human-readable string representation.
+// Converts any XDR type to a human-readable string or string-like
+// type.  The resulting string will be multiple lines of text for
+// structures, unions, arrays, and vectors, one line for each element
+// of the container.
+//
+// You can customize how a particular XDR type X is printed by making
+// std::formattable<X, char> true.  A minimal example of how to do
+// that is as follows (but only from the root namespace, so be sure to
+// close any surrounding namespaces):
+//
+// template<> struct std::formatter<X> {
+//   constexpr auto parse(auto &ctx) { return ctx.begin(); }
+//   auto format(const X &x, auto &ctx) const {
+//     std::format_to(ctx.out(), "X");
+//     return ctx.out();
+//   }
+// };
+// static_assert(std::formattable<X, char>);
+//
+// Just a reminder of some C++ requirements that generate non-obvious
+// outcomes if you fail to meet them:
+//
+//    - parse must be constexpr
+//    - format must be const
+//    - the arguments should be auto and not std::format_context<X, char>
+//      (even if the latter works with some compilers, it won't with others)
+//
+// If you want to format to something other than std::string, just
+// pass an empty one to the second argument, as in:
+//
+//     Str text = show(x, Str{});
 template<is_xdr_type X0, is_bytevec Out = std::string>
 Out
 show(const X0 &x, size_t indent = 0, Out ret = {})
@@ -43,6 +73,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     }
     else if constexpr (category<X> & FlagSet{kOpaqueVec, kOpaqueArray}) {
       constexpr char hexbytes[] = "0123456789abcdef";
+      out->reserve(out->size() + 2 * x.size());
       for (auto c : x) {
         out->push_back(hexbytes[c >> 4 & 0xf]);
         out->push_back(hexbytes[c & 0xf]);
