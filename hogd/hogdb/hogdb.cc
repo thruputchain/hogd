@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,7 +26,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
@@ -83,17 +81,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // create the RPC context.
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   MerkleTriePrefix trie;
+  db.load_trie(trie);
   RPCContext ctx(db, trie);
-
-  // insert each item in the database into the merkle trie.
-  ctx.get_db().for_each_state_item([&trie](std::span<const std::byte> key,
-                                           uint8_t type,
-                                           std::span<const std::byte> value) {
-    std::span<const std::byte> k =
-        MerkleTrieHelpers::add_type_to_merkle_key(key, type);
-    CHECK(trie.insert(k, value));
-  });
-  trie.generate_top_level_hashes();
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
@@ -106,6 +95,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     ctx.get_tip() = *tip;
   }
   else {
+    CHECK_EQ(trie.size(), 0UL);
     ctx.get_tip().height = 0;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }

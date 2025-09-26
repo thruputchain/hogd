@@ -6,14 +6,18 @@
 #include <stdexcept>
 #include <utility>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
@@ -198,6 +202,17 @@ BlockTX::commit(WorkerPool &pool)
           std::scoped_lock guard(lock);
           ret = tmp;
         }
+
+        // write the address balance to the trie
+        // TODO(geoff,jhumphri): should the value type here be byte_view(little
+        // endian)? Right now, the type is kNNInt128 and the value is
+        // byte_view(little endian) because that is what is written to the db in
+        // write_address_balance. We should factor this out into one method,
+        // instead of requiring duplication of this logic.
+        CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(
+                  get_trie(), make_address_balance_item_key(v.first), kNNInt128,
+                  byte_view(cpu_to_le(val)))
+                  .has_value());
       });
 
   return ret;

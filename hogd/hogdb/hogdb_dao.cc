@@ -14,6 +14,7 @@
 #include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/ramdb/db_status.h"
 #include "types.hh"
 
@@ -21,6 +22,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "x23/serialize.h"
@@ -92,6 +94,18 @@ make_contract_data_key(std::span<const std::byte> key)
 }
 
 } // namespace
+
+void
+HogDBDAO::load_trie(MerkleTriePrefix &trie)
+{
+  for_each_state_item([&trie](std::span<const std::byte> key, uint8_t type,
+                              std::span<const std::byte> value) {
+    std::span<const std::byte> k =
+        MerkleTrieHelpers::add_type_to_merkle_key(key.subspan(1), type);
+    CHECK(trie.insert(k, value));
+  });
+  trie.generate_top_level_hashes();
+}
 
 void
 HogDBDAO::for_each_state_item(GetEachCallback fn)
