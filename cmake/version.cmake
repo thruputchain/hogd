@@ -31,14 +31,11 @@ endif()
 # Compose the header text
 set(_txt "/* Auto-generated. Do not edit. */
 
-#pragma once
-
 namespace hogd::version {
 
-constexpr const char *kHogdVersion           = \"${PROJECT_VERSION}\";
-constexpr const char *kHogdGitHash           = \"${GIT_HOGD_HASH}\";
-
-constexpr const char *kHogdProtocol          = \"hogp/${GIT_PROTOCOL_HASH}\";
+const char *kHogdVersion           = \"${PROJECT_VERSION}\";
+const char *kHogdGitHash           = \"${GIT_HOGD_HASH}\";
+const char *kHogdProtocol          = \"hogp/${GIT_PROTOCOL_HASH}\";
 
 } // namespace hogd::version 
 ")
