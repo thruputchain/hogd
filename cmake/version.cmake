@@ -33,9 +33,9 @@ set(_txt "/* Auto-generated. Do not edit. */
 
 namespace hogd::version {
 
-const char *kHogdVersion           = \"${PROJECT_VERSION}\";
-const char *kHogdGitHash           = \"${GIT_HOGD_HASH}\";
-const char *kHogdProtocol          = \"hogp/${GIT_PROTOCOL_HASH}\";
+const char *const kHogdVersion           = \"${PROJECT_VERSION}\";
+const char *const kHogdGitHash           = \"${GIT_HOGD_HASH}\";
+const char *const kHogdProtocol          = \"hogp/${GIT_PROTOCOL_HASH}\";
 
 } // namespace hogd::version 
 ")
