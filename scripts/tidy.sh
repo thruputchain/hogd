@@ -1,6 +1,8 @@
 #!/bin/bash
 
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+set -x
+
+SCRIPT_DIR=$(dirname "$(readlink -f \"$0\")")
 source ${SCRIPT_DIR}/env.sh
 CODE_DIR=hogd
 BUILD_DIR=build
