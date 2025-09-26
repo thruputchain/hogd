@@ -54,7 +54,7 @@ void enable_abortive_close(BorrowedFd fd);
 UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
 
 inline UniqueFd
-tcplisten(std::uint16_t port, int backlog = 5)
+tcplisten(uint16_t port, int backlog = 5)
 {
   auto fd = stcplisten(port, backlog);
   set_nonblock(fd);
