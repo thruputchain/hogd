@@ -215,6 +215,9 @@ public:
       return;
     }
 
+    info("stopping any running process");
+    ciserver_stop(hogd_git_hash);
+
     info("shutting down control server");
     waiting_for_shutdown_ = true;
     waiting_for_shutdown_.notify_all();
@@ -229,10 +232,15 @@ public:
     }
 
     std::lock_guard<std::mutex> lock(running_pid_mutex_);
-    if (running_pid_) {
-      CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
-      status.exit_code() = *most_recent_exit_code_;
-      return status;
+    if (!running_pid_) {
+
+      if (most_recent_exit_code_.has_value()) {
+        CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
+        status.exit_code() = *most_recent_exit_code_;
+        return status;
+      }
+      error("queried proc status before starting a process");
+      return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
     }
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }

@@ -45,15 +45,19 @@ public:
 
   void shutdown_server() { client_.ciserver_shutdown(version::kHogdGitHash)(); }
 
-  CIProcStatus query_proc_status() { return client_.ciserver_query_proc_status(version::kHogdGitHash)(); }
+  CIProcStatus query_proc_status()
+  {
+    return client_.ciserver_query_proc_status(version::kHogdGitHash)();
+  }
 
 private:
   CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client_;
 };
 
 inline auto
-connect_to_control_server(x23::CoroPoll &cp, std::string const &host,
-                          std::string const &port, std::chrono::milliseconds timeout = std::chrono::milliseconds(0))
+connect_to_control_server(
+    x23::CoroPoll &cp, std::string const &host, std::string const &port,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(0))
 {
   auto start_time = std::chrono::steady_clock::now();
   while (true) {

@@ -32,11 +32,13 @@ handle_expect_running_command(std::string const &host, std::string const &port)
     x23::CoroPoll cp(pool);
     auto client = hogd::connect_to_control_server(cp, host, port);
     auto status = client.query_proc_status();
-    if (status.error_code() == hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
+    if (status.error_code() ==
+        hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
       std::println("Process is running");
       return 0;
     }
-    else if (status.error_code() == hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+    else if (status.error_code() ==
+             hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       std::println("Process is not running: exit code {}", status.exit_code());
       return 1;
     }
@@ -44,8 +46,7 @@ handle_expect_running_command(std::string const &host, std::string const &port)
       std::println("Error: {}", status.error_code());
       return 1;
     }
-  }
-  catch (std::exception const &e) {
+  } catch (std::exception const &e) {
     std::println(stderr, "Error: {}", e.what());
     return 1;
   }
@@ -57,7 +58,9 @@ handle_shutdown_command(std::string const &host, std::string const &port)
   try {
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port, std::chrono::milliseconds(10000));
+    auto client =
+        hogd::connect_to_control_server(cp, host, port,
+                                        std::chrono::milliseconds(10000));
 
     std::println("Sending shutdown command to {}:{}", host, port);
     client.shutdown_server();
