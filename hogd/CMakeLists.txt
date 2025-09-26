@@ -12,10 +12,15 @@ add_subdirectory(xdr)
 add_subdirectory(genesis)
 add_subdirectory(loadgen)
 
+set_source_files_properties(
+  ${VERSION_CC}
+  PROPERTIES GENERATED TRUE)
+
 # Then combine them into the hogd library (used by all executables below)
 add_library(
   hogd
   init.cc
+  ${VERSION_CC}
 )
 add_library(hogd_interface INTERFACE)
 target_link_libraries(

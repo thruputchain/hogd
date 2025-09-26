@@ -93,16 +93,16 @@ configure_file(
   @ONLY
 )
 
-# A target that regenerates version.h on every build.
-set(VERSION_H "${HOGD_BUILT_HEADERS_DIR}/version.h")
+# A target that regenerates version.cc on every build.
+set(VERSION_CC "${HOGD_BUILT_HEADERS_DIR}/version.cc")
 add_custom_target(version ALL
   COMMAND ${CMAKE_COMMAND}
           -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-          -DOUT_FILE=${VERSION_H}
+          -DOUT_FILE=${VERSION_CC}
           -DPROJECT_VERSION=${PROJECT_VERSION}
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake
-  BYPRODUCTS "${VERSION_H}"
-  COMMENT "Generating version.h"
+  BYPRODUCTS "${VERSION_CC}"
+  COMMENT "Generating version.cc"
   VERBATIM)
 
 # === Interface target that exposes the header and enforces the dep ===
