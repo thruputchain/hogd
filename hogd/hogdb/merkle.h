@@ -3,17 +3,15 @@
 #pragma once
 
 #include <cassert>
-#include <concepts>
 #include <cstddef>
-#include <optional>
 #include <span>
-#include <utility>
-#include <variant>
 #include <vector>
 
-#include "hogd/base/status.h"
+#include "hogd/base/perthread.h"
+#include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/status.h"
 
 namespace hogd {
 
@@ -28,7 +26,7 @@ public:
   // have different types. Two tries that each contain the same KV pair, but
   // with different value types, should have different root hashes.
   static std::span<const std::byte>
-  add_type_to_merkle_key(std::span<const std::byte> &key, uint8_t type)
+  add_type_to_merkle_key(std::span<const std::byte> const &key, uint8_t type)
   {
     static PerThread<std::vector<std::byte>> backing_store;
 

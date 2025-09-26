@@ -22,6 +22,7 @@
 #include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "types.hh"
@@ -113,8 +114,9 @@ private:
 // Warning: These key prefixes are persisted on disk so they cannot be changed
 // without migrating existing data.
 //
-// Warning: So far, they are also included in the merkle trie root hash, so
-// they're very hard to change.
+// Warning: These prefixes are NOT included in the merkle trie root hash.
+//
+// Not every prefix type is included in the merkle trie.
 enum class Prefix : char {
   kHogAge = 'A',
   kBalance = 'B',
@@ -173,6 +175,10 @@ public:
   // included in the merkle state root. It is typically used at initialization
   // time when the database is first loaded.
   void for_each_state_item(GetEachCallback fn);
+
+  // loads the trie from the database.
+  // Recomputes the top-level hashes.
+  void load_trie(MerkleTriePrefix &trie);
 
   //
   // Global Operations

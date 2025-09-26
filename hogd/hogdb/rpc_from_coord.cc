@@ -93,11 +93,7 @@ HogDBCoordServer::commit_block(BlockID id)
   ctx_.close_block_tx(id);
 
   // update the DbTip.
-  ctx_.get_trie().generate_top_level_hashes();
-  ctx_.get_tip().hash = ctx_.get_trie().get_root_hash();
-  ctx_.get_tip().height = ctx_.get_tip().height + 1;
-  ctx_.get_tip().id = id;
-  ret = ctx_.get_db().write_dbtip(ctx_.get_tip());
+  ret = ctx_.update_dbtip(id);
   if (!ret)
     return ret.error();
 

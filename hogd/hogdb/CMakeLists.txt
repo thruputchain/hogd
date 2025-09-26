@@ -56,6 +56,7 @@ target_link_libraries(
 add_executable(
   hogdb_test
   hogdb_test.cc
+  recovery_tests.cc
 )
 target_link_libraries(
   hogdb_test
