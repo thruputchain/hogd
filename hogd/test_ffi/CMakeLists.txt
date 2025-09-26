@@ -30,6 +30,7 @@ target_link_libraries(
 add_executable(
   test_ffi_test
   mock_syscall_test.cc
+  test_bindings_test.cc
 )
 
 target_include_directories(

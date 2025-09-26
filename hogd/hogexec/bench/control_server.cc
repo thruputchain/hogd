@@ -24,6 +24,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
+#include "hogd/version.h"
 #include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/sockio.h"
@@ -35,8 +36,15 @@ class CIControlServer {
 public:
   using rpc_service = CIServer1;
 
-  CIServerErrorCode ciserver_start(ServerConfig const &config)
+  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
+                                   ServerConfig const &config)
   {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
+    }
+
     if (running_pid_) {
       error("already running process: {}", *running_pid_);
       return CIServerErrorCode::kCIServerErrorCodeAlreadyRunning;
@@ -172,8 +180,14 @@ public:
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
-  void ciserver_stop()
+  void ciserver_stop(HogdGitHash const &hogd_git_hash)
   {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return;
+    }
+
     auto pid = [&]() {
       std::lock_guard<std::mutex> lock(running_pid_mutex_);
       return running_pid_;
@@ -193,8 +207,14 @@ public:
     }
   }
 
-  void ciserver_shutdown()
+  void ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return;
+    }
+
     info("shutting down control server");
     waiting_for_shutdown_ = true;
     waiting_for_shutdown_.notify_all();
@@ -203,6 +223,11 @@ public:
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
 private:
+  static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
+  {
+    return std::string(hogd_git_hash) == version::kHogdGitHash;
+  }
+
   // Helper function to wait for child process and log exit status
   // NOLINTBEGIN(misc-include-cleaner)
   void wait_for_child(pid_t child_pid)

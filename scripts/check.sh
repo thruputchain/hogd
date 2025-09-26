@@ -12,13 +12,15 @@ print_usage() {
   printf -- "-e enable extra checks\n"
   printf -- "-p run tests in parallel\n"
   printf -- "-b do builds in parallel\n"
+  printf -- "-d <dir> specify build directory (default: $BUILD_DIR)\n"
 }
 
-while getopts 'epb' flag; do
+while getopts 'epbd:' flag; do
   case "${flag}" in
   e) EXTRA=yes ;;
   p) PARALLEL=--parallel ;;
   b) BUILD_PARALLEL=yes ;;
+  d) BUILD_DIR="$OPTARG" ;;
   *)
     print_usage
     exit 1
@@ -47,21 +49,50 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   GCC_RELEASE_BUILD_PID=$!
 fi
 
-printf "${COLOR}STEP 1: Check build (gcc)\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}"; then
-  printf "build failed!\n"
-  cat "${GCC_ERRORS_LOG}"
-  exit 1
+GCC_DEBUG_LOG=${BUILD_DIR}/gcc_debug_build.log
+if [ "$BUILD_PARALLEL" = "yes" ]; then
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}" >"$GCC_DEBUG_LOG" 2>&1 &
+  GCC_DEBUG_BUILD_PID=$!
 fi
 
-printf "${COLOR}\nSTEP 2: Check tests (gcc)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
+printf "${COLOR}\nSTEP 1: Check format\n${NC}"
+if ! ${SCRIPT_DIR}/format.sh -c; then
+  printf "format failed!\n"
+  exit 1
+fi
+printf "Format checking passed.\n"
+
+if [ "$BUILD_PARALLEL" = "yes" ]; then
+  printf "${COLOR}Waiting for Step 2 (gcc debug) build to finish...\n${NC}"
+  wait $GCC_DEBUG_BUILD_PID
+  GCC_DEBUG_STATUS=$?
+  if [ $GCC_DEBUG_STATUS -ne 0 ]; then
+    printf "gcc debug build failed!\n"
+    printf "\n===== gcc debug build log =====\n"
+    cat "$GCC_DEBUG_LOG"
+    printf "===== end gcc debug build log =====\n\n"
+    printf "\n===== gcc debug errors =====\n"
+    cat "${GCC_ERRORS_LOG}"
+    printf "===== end gcc debug errors =====\n\n"
+    exit 1
+  fi
+else
+  printf "${COLOR}STEP 2: Check build (gcc)\n${NC}"
+  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}"; then
+    printf "build failed!\n"
+    cat "${GCC_ERRORS_LOG}"
+    exit 1
+  fi
+fi
+
+printf "${COLOR}\nSTEP 3: Check tests (gcc)\n${NC}"
+if ! ctest --test-dir ${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
 fi
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
+  printf "${COLOR}Waiting for Step 4 (llvm) build to finish...\n${NC}"
   wait $LLVM_BUILD_PID
   LLVM_STATUS=$?
   if [ $LLVM_STATUS -ne 0 ]; then
@@ -74,9 +105,9 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "===== end llvm errors =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
+  printf "${COLOR}Step 4 (llvm) build finished\n${NC}"
 
-  printf "${COLOR}STEP 5: Check linter\n${NC}"
+  printf "${COLOR}STEP 6: Check linter\n${NC}"
   TIDY_LOG=${BUILD_DIR}/tidy.log
   ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm >"$TIDY_LOG" 2>&1 &
   TIDY_PID=$!
@@ -91,8 +122,8 @@ else
   fi
 fi
 
-printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
+printf "${COLOR}\nSTEP 5: Check tests (llvm)\n${NC}"
+if ! ctest --test-dir ${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
   printf "tests failed!\n"
   exit 1
 fi
@@ -107,21 +138,14 @@ if [ $BUILD_PARALLEL = "yes" ]; then
     printf "===== end tidy log =====\n\n"
     exit 1
   fi
-  printf "${COLOR}Step 5 (tidy) finished\n${NC}"
+  printf "${COLOR}Step 6 (tidy) finished\n${NC}"
 else
-  printf "${COLOR}\nSTEP 5: Check linter\n${NC}"
+  printf "${COLOR}\nSTEP 6: Check linter\n${NC}"
   if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
     printf "linter failed!\n"
     exit 1
   fi
 fi
-
-printf "${COLOR}\nSTEP 6: Check format\n${NC}"
-if ! ${SCRIPT_DIR}/format.sh -c; then
-  printf "format failed!\n"
-  exit 1
-fi
-printf "Format checking passed.\n"
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   printf "${COLOR}Waiting for Step 7 (gcc_release) build to finish...\n${NC}"

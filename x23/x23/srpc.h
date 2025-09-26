@@ -350,10 +350,11 @@ srpc_stream(int fd, Logger logger = {})
   return new SRpcStream(UniqueFd{fd}, std::move(logger));
 }
 
-inline SRpcStream<RpcLogger>::Configurator
+template<typename Logger = RpcLogger>
+inline SRpcStream<Logger>::Configurator
 srpc_stream_logged(int fd, int logfd = RpcLogger::default_logfd)
 {
-  return new SRpcStream<RpcLogger>(UniqueFd{fd}, RpcLogger(fd, logfd));
+  return new SRpcStream<Logger>(UniqueFd{fd}, Logger(fd, logfd));
 }
 
 template<typename Logger>

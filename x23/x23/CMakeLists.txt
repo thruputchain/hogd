@@ -35,6 +35,7 @@ add_library(x23
   threadpool.h
   typename.h
   uiobuf.h
+  utility.cc
   utility.h
   vec.h
   x23.h

@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+# Resolve the directory this script lives in (handles symlinks).
+SCRIPT_PATH="$(readlink -f -- "$0")"
+DIR="$(dirname -- "$SCRIPT_PATH")"
+
+# Split args into two arrays: .x files and non-.x files.
+x_files=()
+other_files=()
+
+for arg in "$@"; do
+    case "$arg" in
+        *.x)   x_files+=("$arg") ;;
+        *)     other_files+=("$arg") ;;
+    esac
+done
+
+# If there are any .x files, run Emacs in batch mode with reindent.el.
+if (( ${#x_files[@]} > 0 )); then
+    emacs -Q --batch -l "$DIR/reindent" -- "${x_files[@]}"
+fi
+
+# If there are any non-.x files, run clang-format in-place on them.
+if (( ${#other_files[@]} > 0 )); then
+    clang-format -i -- "${other_files[@]}"
+fi

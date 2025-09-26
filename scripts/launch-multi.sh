@@ -2,21 +2,23 @@
 
 # These parameters are CONFIGURABLE.
 # -------------------------------
-CHUCKD_BUILD_DIR="/home/hog12/$(whoami)/chuckd/chuckd"
+HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
-hogexec_servers=("hog4" "hog5")
-hogdb_servers=("hog6")
+hogexec_servers=("hog4")
+hogdb_servers=("hog4")
 
-# Set to 1 to enable x23 RPC logging.
-export X23TRACE=0
+# Run with env X23TRACE=1 to enable tracing
+: ${X23TRACE=}
+export X23TRACE
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
-CHUCKD_BINARY=${CHUCKD_BUILD_DIR}/chuckd
+CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd
+CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
@@ -41,13 +43,17 @@ done
 
 # The code starts below.
 
+# This removes duplicates from [all_servers].
+all_servers=($(printf "%s\n" "${all_servers[@]}" | awk '!seen[$0]++'))
+
 # Kills all of the processes on all of the servers.
 kill_everything() {
   local do_wait=$1
+  local all_procs=("${procs[@]}" "make" "go")
 
   for s in "${all_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "killall -9 ${procs[@]} > /dev/null 2>&1 || true" &
+      "killall -9 ${all_procs[@]} > /dev/null 2>&1 || true" &
   done
   if [[ $do_wait == true ]]; then
     wait
@@ -67,8 +73,9 @@ cleanup() {
   # Prevent re-entry into the trap handler.
   trap - EXIT INT TERM
 
-  # Kill the ssh sessions that print the log statements from the servers.
-  kill -9 "${ssh_pids[@]}"
+  # Kill the ssh sessions that print the [make] output and log statements from
+  # the servers.
+  kill -9 "${ssh_pids[@]}" 2>/dev/null
 
   # Now kill the chuckd and hogd processes on the servers. [kill_everything()]
   # issues the ssh commands as background processes, so these ssh commands will
@@ -89,6 +96,7 @@ build_all() {
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
       "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
   done
+  ssh_pids=($(jobs -pr))
   wait
 }
 build_all
@@ -182,6 +190,7 @@ ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
   --num-txs 20000                              \
   --exec-batch 100                             \
   --exec-par 10                                \
+  --num-blocks 100                             \
   --max-msg-size 400000000                     \
   > /tmp/chuckd.log 2>&1 &"
 wait_port "$chuckd_server" 7888
@@ -191,8 +200,7 @@ echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
-    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 50 \
-    > /tmp/hogexec.log 2>&1 &"
+    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > /tmp/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
@@ -202,7 +210,7 @@ for s in "${hogdb_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "export X23TRACE=$X23TRACE; \
     rm -rf /tmp/hogdb; \
-    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 50 \
+    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 \
     > /tmp/hogdb.log 2>&1 &"
 done
 

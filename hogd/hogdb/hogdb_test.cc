@@ -15,7 +15,6 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -124,7 +123,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rnnint128) {
     EXPECT_EQ(test_nnint128, *rnnint128);
   }
-  HogDBStatus<size_t> rsize = db_.get_item_size(ikey);
+  HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(sizeof(test_nnint128), *rsize);
@@ -144,7 +143,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rbytes) {
     EXPECT_EQ(std::as_bytes(std::span(test_bytes)), *rbytes);
   }
-  rsize = db_.get_item_size(ikey);
+  rsize = db_.get_charged_storage_cost(ikey);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(test_bytes.size(), *rsize);
@@ -164,22 +163,42 @@ TEST_F(HogDBTest, ItemChange)
   //
 
   // try different bases (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(10, 1)).merge(ItemChange(NNInt128(20, 1))),
-            HogDBError(HogDBCode::kConflict));
+  {
+    auto x = ItemChange(NNInt128(10, 1));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(20, 1))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   // try using nnint128 as a lock (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(1, -1)).merge(ItemChange(NNInt128(1, -1))),
-            HogDBError(HogDBCode::kConflict));
+  {
+    auto x = ItemChange(NNInt128(1, -1));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(1, -1))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   // try positive addition (no conflict)
-  EXPECT_TRUE(ItemChange(NNInt128(0, 10)).merge(ItemChange(NNInt128(0, 10))));
+  {
+    auto x = ItemChange(NNInt128(0, 10));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(0, 5))));
+  }
 
   // try subtract to zero (no conflict)
-  EXPECT_TRUE(ItemChange(NNInt128(10, -5)).merge(ItemChange(NNInt128(10, -5))));
+  {
+    auto x = ItemChange(NNInt128(10, -5));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(10, -5))));
+  }
 
   // try subtract below zero (conflict)
-  EXPECT_EQ(ItemChange(NNInt128(10, -6)).merge(ItemChange(NNInt128(10, -5))),
-            HogDBError(HogDBCode::kConflict));
+  {
+    auto x = ItemChange(NNInt128(10, -6));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(10, -5))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
+  }
 
   //
   // Test Byte changes
@@ -191,51 +210,18 @@ TEST_F(HogDBTest, ItemChange)
   auto bs = std::as_bytes(std::span(b));
 
   // try same bytes (no conflict)
-  EXPECT_TRUE(ItemChange(Bytes(as)).merge(ItemChange(Bytes(as))));
+  {
+    auto x = ItemChange(Bytes(as));
+    x.set_snapshot_cost(0);
+    EXPECT_TRUE(x.merge(ItemChange(Bytes(as))));
+  }
 
   // try different bytes (conflict)
-  EXPECT_EQ(ItemChange(Bytes(as)).merge(ItemChange(Bytes(bs))),
-            HogDBError(HogDBCode::kConflict));
-}
-
-TEST_F(HogDBTest, StorageCost)
-{
-  ItemKey ikey = make_key(kAddress, kAddress);
-  MerkleTriePrefix trie;
-
-  // test new nnint128 item creation
   {
-    ItemChange change(NNInt128(1, 1));
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost should go up.
-      EXPECT_GT(*delta, 0);
-    }
-    HogDBStatus<void> ret = change.commit(db_, trie, ikey);
-    EXPECT_TRUE(ret);
-  }
-
-  // test modification to existing nnint128 item
-  {
-    ItemChange change(NNInt128(1, 1));
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost shouldn't change.
-      EXPECT_EQ(*delta, 0);
-    }
-  }
-
-  // test deletion to existing nnint128 item
-  {
-    ItemChange change(Deletion{});
-    HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, ikey);
-    EXPECT_TRUE(delta);
-    if (delta) {
-      // cost should go down.
-      EXPECT_LT(*delta, 0);
-    }
+    auto x = ItemChange(Bytes(as));
+    x.set_snapshot_cost(0);
+    EXPECT_EQ(x.merge(ItemChange(Bytes(bs))),
+              HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
 }
 
@@ -244,7 +230,7 @@ TEST_F(HogDBTest, StorageCost)
 int
 main(int argc, char *argv[])
 {
-  int ret = hogd::hogd_init(argc, argv);
+  int ret = hogd::hogd_init(argc, argv, false);
   if (ret)
     return ret;
   testing::InitGoogleTest(&argc, argv);

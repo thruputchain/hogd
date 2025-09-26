@@ -2,8 +2,6 @@
 
 #define X23_NAME "@PROJECT_NAME@"
 #define X23_VERSION "@PROJECT_VERSION@"
-// Git commit hash as a string
-#define GIT_COMMIT_HASH "@GIT_COMMIT_HASH@"
 
 #define X23_PACKAGE_STRING X23_NAME " " X23_VERSION
 
@@ -49,3 +47,6 @@
 
 // Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
 #cmakedefine01 HAVE_ATOMIC_SHARED_PTR
+
+// Define to 1 if you have getprogname() in stdlib.h
+#cmakedefine01 HAVE_GETPROGNAME

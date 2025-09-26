@@ -81,6 +81,14 @@ HogDBCoordServer::commit_block(BlockID id)
   if (!ret)
     return ret.error();
 
+  if (!ctx_.get_db().check_invariants()) {
+    error("invariants check failed!!!");
+    // TODO(geoff): Figure out if there's a way to rollback the block tx,
+    // in ramdb; otherwise, the state is in some kind of corrupted version
+    // where some core invariant is violated.
+    return HogDBError(HogDBCode::kInternal);
+  }
+
   // destroy the block TX.
   ctx_.close_block_tx(id);
 
@@ -121,6 +129,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
+    ctx_.get_db().enable_debug_invariants();
   }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
@@ -212,7 +221,7 @@ HogDBCoordServer::start_server(uint16_t port)
        x23::UniqueFd lfd) -> x23::Detached {
       co_await cp.pool_.bg();
       while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c).server(server);
+        x23::rpc_stream_logged(cp, *c)->server(server);
       }
     }(cp_, this, std::move(lfd));
   }
@@ -234,6 +243,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
+  int depth = itx->create_savepoint();
   assert(itx);
 
   bool failure = false;
@@ -243,16 +253,18 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [&](StorageKey const &key, int128_t value) {
+      [&](StorageKey const &key, int128_t value) -> int128_t {
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
-        info("requesting nnint128 for genesis block: {} {}", item_key, value);
         auto r = itx->request_nnint128(item_key, value);
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
           failure = true;
         }
+
+        // invoketx handles the storage costs
+        return 0;
       },
       [&](auto const &contract) {
         auto data = x23::serialize(*contract);
@@ -275,6 +287,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   if (failure) {
     error("genesis block initialization failed");
+    itx->rollback_to_savepoint(depth - 1);
     co_return DbResult::DbResultError;
   }
 

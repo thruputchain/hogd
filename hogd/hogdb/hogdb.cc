@@ -36,6 +36,7 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/version.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
@@ -152,7 +153,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     auto client_config = x23::rpc_stream_logged(cp, fd);
     while (true) {
       auto client =
-          std::make_optional(client_config.template client<Coordinator1>());
+          std::make_optional(client_config->template client<Coordinator1>());
       if (!client) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         continue;
@@ -161,7 +162,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       const std::string coord_address = create_address(kCoordServerPort);
       const std::string exec_address = create_address(kExecServerPort);
       const std::string sched_address = create_address(kSchedServerPort);
-      ShardCard card{.protocol = "blah",
+      ShardCard card{.protocol = version::kHogdProtocol,
                      .upid = {},
                      .block_height = 0,
                      .shard_count = 1,
@@ -195,7 +196,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting hogdb!");
 
-  if (argc < 3) {
+  if (argc < 3 || argc >= 5) {
     std::println("usage: db_path ram_bytes [coordinator_ip:port]");
     return EXIT_FAILURE;
   }

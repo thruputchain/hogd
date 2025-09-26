@@ -63,6 +63,7 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kIO:
     return RPCError::kRPCUnrecoverable;
   default:
+    error("Received unhandled error type from RPC: {}", ret.error().raw_code());
     return RPCError::kRPCTransactionFailed;
     break;
   }
@@ -131,6 +132,7 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_deploy_contract(addrkey.address,
                                    delta.deployed_contract_hash()));
   default:
+    error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
   }
 }

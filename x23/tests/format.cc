@@ -8,6 +8,16 @@
 
 using namespace x23;
 
+template<> struct std::formatter<fix_4> {
+  constexpr auto parse(auto &ctx) { return ctx.begin(); }
+  auto format(const fix_4 &f4, auto &ctx) const
+  {
+    std::format_to(ctx.out(), "fix_4(i={})", f4.i);
+    return ctx.out();
+  }
+};
+static_assert(std::formattable<fix_4, char>);
+
 int
 main()
 {

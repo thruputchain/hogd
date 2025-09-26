@@ -10,6 +10,7 @@ add_library(
 )
 target_link_libraries(
   base_objects
+  built_headers_interface
   protocol
 )
 add_library(base STATIC $<TARGET_OBJECTS:base_objects>)

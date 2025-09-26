@@ -96,6 +96,25 @@ following:
 
     * `git sup`
 
-3. Update all the rust git repositories managed by cargo
+3. Fetch all the rust git repositories managed by cargo
 
-    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly update)`
+    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)`
+    * `(cd hogd/hogexec/wasmi CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch)`
+
+## Repair instructions
+
+If your rust installation gets messed up, delete the directories
+`~/.cargo` and `~/.rustup`.  Then start over by reinstalling rustup.
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup +nightly target add wasm32-unknown-unknown
+rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+cargo install --force cbindgen
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+(cd built_contracts && cargo +nightly fetch)
+```
+
+You might have to also fetch some crates that the rust stdlib (core, alloc, std) depend on.
+The easiest way to get those crates is just to do one build in non-offline mode;
+chatgpt suggests you can also do `cd built_contracts && cargo +nightly fetch && cargo +nightly build -Zbuild-std=core,alloc --target wasm32-unknown-unknown --release --frozen || true`.

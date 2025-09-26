@@ -6,7 +6,6 @@
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc_types.hh"
@@ -22,10 +21,9 @@ public:
   using rpc_service = ExecutorCoord1;
 
   ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
-                       WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
     : self_executor_id_(self_executor_id), cp_(cp),
-      main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
+      executor_states_(std::move(db_proxy))
   {}
 
   uint16_t start_server(uint16_t port_number);
@@ -52,12 +50,12 @@ public:
   executorcoord_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);
 
-  x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
-  x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);
+  ExecResult executorcoord_open_proposal_block(BlockID id);
+  ExecResult executorcoord_open_validation_block(BlockID id);
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all transactions
   // on this block have been committed or aborted.
-  x23::Async<void> executorcoord_finish_block(BlockID id);
+  void executorcoord_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.
@@ -73,12 +71,11 @@ private:
   const uint16_t self_executor_id_;
 
   x23::CoroPoll &cp_;
-  WorkerPool &main_worker_pool_;
 
   ExecutorStateManager executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::Async>);
+static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::MaybeAsync>);
 
 } // namespace hogd

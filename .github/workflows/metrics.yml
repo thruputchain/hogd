@@ -25,6 +25,10 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -38,6 +42,10 @@ jobs:
       run: echo $PATH
     - name: cargo version check
       run: cargo --version
+    - name: cargo fetch
+      run: |
+        (cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)
+        (cd hogd/hogexec/wasmi && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch)
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
@@ -66,6 +74,10 @@ jobs:
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
           ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -79,10 +91,17 @@ jobs:
       run: echo $PATH
     - name: cargo version check
       run: cargo --version
+    - name: cargo fetch
+      run: |
+        (cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)
+        (cd hogd/hogexec/wasmi && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch)
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: metrics
       run: ./scripts/metrics.sh release
+    - name: shut down bench server
+      if: always()
+      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
 

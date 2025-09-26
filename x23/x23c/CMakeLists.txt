@@ -34,10 +34,17 @@ add_custom_target(generate_parser_and_lexer DEPENDS
   ${CMAKE_CURRENT_BINARY_DIR}/lex.cc
 )
 
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/config.cc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/config.cc
+  @ONLY
+)
+
 add_executable(x23c
   defs.h
   ${CMAKE_CURRENT_BINARY_DIR}/parse.cc
   ${CMAKE_CURRENT_BINARY_DIR}/lex.cc
+  ${CMAKE_CURRENT_BINARY_DIR}/config.cc
   gen_hh.cc
   gen_rs.cc
   x23c.cc

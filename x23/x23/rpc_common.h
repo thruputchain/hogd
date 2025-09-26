@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cassert>
+#include <chrono>
 #include <compare>
 #include <cstdint>
 #include <format>
@@ -188,6 +189,26 @@ struct RpcLogger {
   RpcLogger(int peerfd, int logfd = default_logfd) noexcept;
   bool active() const { return logfd_ >= 0; }
 
+  template<typename Meta>
+  static void append_proc(is_bytevec auto *out, const rpc_msg &msg)
+  {
+    if constexpr (requires {
+                    { Meta::proc_name } -> decays_to<const char *>;
+                  })
+      uformat_to(out, "{}::{}", Meta::version_meta::version_name,
+                 Meta::proc_name);
+    else if (msg.body.mtype() != msg_type::CALL)
+      uformat_to(out, "");
+    else if constexpr (requires {
+                         { Meta::version_name } -> decays_to<const char *>;
+                       })
+      uformat_to(out, "{}::<proc#{}>", Meta::version_name,
+                 msg.body.cbody().proc);
+    else
+      uformat_to(out, "<prog#{},vers#{}>::<proc#{}>", msg.body.cbody().prog,
+                 msg.body.cbody().vers, msg.body.cbody().proc);
+  }
+
   template<typename Meta = void>
   static std::string
   make_log_message(bool am_server, const std::string &peername,
@@ -200,19 +221,8 @@ struct RpcLogger {
                     am_server == (msg.body.mtype() == CALL) ? "==>" : "<==",
                     msg.xid, msg.body.mtype());
     if (msg.body.mtype() == CALL) {
-      if constexpr (requires {
-                      { Meta::proc_name } -> decays_to<const char *>;
-                    })
-        uformat_to(&ret, " {}::{}", Meta::version_meta::version_name,
-                   Meta::proc_name);
-      else if constexpr (requires {
-                           { Meta::version_name } -> decays_to<const char *>;
-                         })
-        uformat_to(&ret, " {}::<proc#{}>", Meta::version_name,
-                   msg.body.cbody().proc);
-      else
-        uformat_to(&ret, " <prog#{},vers#{}>::<proc#{}>", msg.body.cbody().prog,
-                   msg.body.cbody().vers, msg.body.cbody().proc);
+      ret += ' ';
+      append_proc<Meta>(&ret, msg);
     }
     else if (!rpc_is_success(msg))
       uformat_to(&ret, " FAIL {}", msg_show_stat(msg));
@@ -260,6 +270,57 @@ struct RpcLogger {
                               show_addr(remote_addr(fd)), fd.get());
     write(logfd_, logmsg.data(), logmsg.size());
   }
+};
+
+struct RpcCsvLogger {
+  int logfd_{-1};
+  std::string srcdest_;
+
+  RpcCsvLogger() noexcept = default;
+  RpcCsvLogger(int peerfd, int = RpcLogger::default_logfd);
+  bool active() const { return logfd_ >= 0; }
+
+  static double timestamp()
+  {
+    using namespace std::chrono;
+    return duration<double>(system_clock::now().time_since_epoch()).count();
+  }
+
+  template<typename Meta>
+  void do_log(bool server, const rpc_msg &msg, const is_xdr_type auto &...pl)
+      requires (sizeof...(pl) <= 1)
+  {
+    if (logfd_ < 0)
+      return;
+    auto logmsg = std::format("{:.9f},{},{},{}{}", timestamp(),
+                              server ? "SERVER" : "CLIENT", msg.body.mtype(),
+                              msg.xid, srcdest_);
+    RpcLogger::append_proc<Meta>(&logmsg, msg);
+    logmsg += '\n';
+    write(logfd_, logmsg.data(), logmsg.size());
+  }
+
+  template<typename Meta = void>
+  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
+      requires (sizeof...(pl) <= 1)
+  {
+    do_log<Meta>(false, msg, pl...);
+  }
+
+  void log_client_fail(std::uint32_t xid, std::string_view text)
+  {
+    auto logmsg =
+        std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
+    write(logfd_, logmsg.data(), logmsg.size());
+  }
+
+  template<typename Meta = void>
+  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
+      requires (sizeof...(pl) <= 1)
+  {
+    do_log<Meta>(true, msg, pl...);
+  }
+  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
 };
 
 struct RpcNoLogger {

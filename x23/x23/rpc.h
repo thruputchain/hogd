@@ -221,10 +221,14 @@ private:
             msg_set_reply_stat(&rmsg, SUCCESS);
             if constexpr (returns_void) {
               co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg);
               co_return make_record(rmsg);
             }
-            else
-              co_return make_record<return_type>(rmsg, co_await awaitable);
+            else {
+              return_type res = co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
+              co_return make_record<return_type>(rmsg, res);
+            }
           } catch (const std::exception &e) {
             co_return self.error(e);
           }
@@ -413,39 +417,6 @@ struct RpcStream : public detail::RpcStreamImpl {
     Configurator(RpcStream &s) noexcept : super(s) {}
     Configurator(const Configurator &) = delete;
     ~Configurator() { get()->go(); }
-
-    RpcStream *operator->() const noexcept { return get(); }
-
-    template<typename Server,
-             typename VersMeta = typename std::remove_cvref_t<
-                 decltype(*declval<Server>())>::rpc_service,
-             typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    [[deprecated("use Configurator like a pointer")]]
-    Configurator &server(Server srvr, VersMeta vm = {},
-                         ExtraArgs &&...extra_args)
-    {
-      get()->template server<Server, VersMeta, ExtraArgs...>(
-          std::forward<Server>(srvr), vm,
-          std::forward<ExtraArgs>(extra_args)...);
-      return *this;
-    }
-    template<typename VersMeta, typename Server, typename... ExtraArgs>
-    requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    [[deprecated("use Configurator like a pointer")]]
-    Configurator &server(Server srvr, ExtraArgs &&...ea)
-    {
-      get()->template server<Server, VersMeta, ExtraArgs...>(
-          std::move(srvr), {}, std::forward<ExtraArgs>(ea)...);
-      return *this;
-    }
-
-    template<typename VersMeta>
-    [[deprecated("use Configurator like a pointer")]]
-    auto client(VersMeta arg = {})
-    {
-      return get()->client(arg);
-    }
   };
 
   template<typename ProcMeta>
@@ -467,7 +438,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     Buf rbuf = co_await a;
     BufView rv = rbuf.subspan(deserialize_from(&msg, rbuf));
     if (!rpc_is_success(msg)) {
-      logger_.log_client(msg);
+      logger_.template log_client<ProcMeta>(msg);
       throw XdrCallFailed(msg);
     }
 
@@ -481,7 +452,7 @@ struct RpcStream : public detail::RpcStreamImpl {
       throw e;
     }
 
-    logger_.log_client(msg, ret);
+    logger_.template log_client<ProcMeta>(msg, ret);
     if constexpr (std::is_void_v<typename ProcMeta::return_type>)
       co_return;
     else
@@ -523,10 +494,11 @@ rpc_stream(CoroPoll &cp, int fd, Logger logger = {})
 // and replies.  When selecting whether to log at runtime, you can
 // pass logfd = -1 to suppress logging and most of the logging
 // overhead.
-inline RpcStream<RpcLogger>::Configurator
+template<typename Logger = RpcLogger>
+inline RpcStream<Logger>::Configurator
 rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 {
-  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(fd, logfd));
+  return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
 }
 
 } // namespace x23

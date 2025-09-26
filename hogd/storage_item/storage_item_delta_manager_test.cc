@@ -11,6 +11,7 @@
 #include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/retrocausal_queue.h"
@@ -1204,6 +1205,7 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
                   if (!lk) {
                     co_return;
                   }
+
                   net_storage_cost += lk->locked_tokens_;
                   co_await set.bg();
                   auto res = item.commit(delta, *lk);
@@ -1263,7 +1265,6 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
                 bytestring.size() != 8) {
               return false;
             }
-
             return net_storage_cost ==
                    cost_model.kBaseItemCost +
                        cost_model.get_bytestring_cost(bytestring.size()) -
@@ -1626,3 +1627,13 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 } // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  auto ret = hogd::hogd_init(argc, argv);
+  if (ret != 0)
+    return ret;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

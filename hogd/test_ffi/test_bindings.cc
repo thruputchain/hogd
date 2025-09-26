@@ -7,7 +7,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <span>
+#include <string>
 #include <utility>
 
 #include "account.hh"
@@ -40,7 +40,7 @@ lazy_init()
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
   if (!initialized) {
-    hogd_init(0, nullptr);
+    hogd_init(0, nullptr, false);
     initialized = true;
   }
 }

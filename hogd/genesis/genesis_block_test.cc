@@ -39,6 +39,17 @@ protected:
     deployment_map_[contract_address] = contract_hash;
   }
 
+  int128_t get_initial_balance()
+  {
+    auto key =
+        StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    auto it = storage_map_.find(key);
+    if (it == storage_map_.end()) {
+      return 0;
+    }
+    return it->second;
+  }
+
   // Helper to create a test genesis block
   static GenesisBlock create_test_genesis_block()
   {
@@ -95,8 +106,9 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, int128_t value) {
+      [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
+        return 100;
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
@@ -107,6 +119,8 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   EXPECT_EQ(storage_map_.size(), 3);
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
+  EXPECT_EQ(get_initial_balance(),
+            GenesisBlockLoader::initial_hog_token_supply() - 200);
 }
 
 TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
@@ -147,8 +161,9 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, int128_t value) {
+      [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
+        return 100;
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
@@ -159,6 +174,8 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
   EXPECT_EQ(storage_map_.size(), 1);
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
+  EXPECT_EQ(get_initial_balance(),
+            GenesisBlockLoader::initial_hog_token_supply());
 }
 
 TEST_F(GenesisBlockTest, MultipleEntries)
@@ -169,8 +186,9 @@ TEST_F(GenesisBlockTest, MultipleEntries)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, int128_t value) {
+      [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
+        return 100;
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
@@ -189,6 +207,8 @@ TEST_F(GenesisBlockTest, MultipleEntries)
   }
 
   EXPECT_NE(keys[0], keys[1]);
+  EXPECT_EQ(get_initial_balance(),
+            GenesisBlockLoader::initial_hog_token_supply() - 200);
 }
 
 } // namespace hogd
@@ -196,7 +216,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv);
+  auto ret = hogd::hogd_init(argc, argv, false);
   if (ret != 0)
     return ret;
   testing::InitGoogleTest(&argc, argv);

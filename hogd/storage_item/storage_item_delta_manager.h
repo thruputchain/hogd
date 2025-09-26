@@ -137,7 +137,7 @@ private:
   std::shared_ptr<const StorageItemWrapper> next_round_item_ = nullptr;
 
   int128_t committed_item_cost_; // committed_item_->get_locked_cost()
-  int128_t unreleased_storage_cost_ = 0;
+  // int128_t unreleased_storage_cost_ = 0;
 
   RefcountedDeltaVariant variant_;
   InvalidStateFlag *invalid_state_flag_;

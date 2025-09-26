@@ -139,7 +139,7 @@ public:
                         StorageCostModel const *cost_model);
 
   // different storage cost models unimplemented currently
-  const StorageCostModel kDefaultCostModel = StorageCostModel(0, 0, 0, 0, 0);
+  const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
 
   const StorageCostModel *get_default_cost_model() const
   {
@@ -172,7 +172,7 @@ public:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
 
-        return client_config.template client<DbCoord1>();
+        return client_config->template client<DbCoord1>();
       }())
   {}
 
@@ -382,7 +382,8 @@ public:
       contract_size = 0;
       break;
     case ContractType::kWasmi:
-      contract_size = static_cast<uint32_t>(contract->wasmi_contract().size());
+      contract_size =
+          static_cast<uint32_t>(contract->wasmi_contract().wasm.size());
       break;
     default:
       assert(false);

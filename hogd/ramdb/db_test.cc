@@ -709,7 +709,7 @@ TEST_F(DatabaseTest, DiskCleanup)
 int
 main(int argc, char *argv[])
 {
-  int ret = hogd::hogd_init(argc, argv);
+  int ret = hogd::hogd_init(argc, argv, false);
   if (ret)
     return ret;
   testing::InitGoogleTest(&argc, argv);
