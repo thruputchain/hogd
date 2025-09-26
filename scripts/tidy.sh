@@ -28,10 +28,12 @@ cd ${ROOT_DIR}/hogd/hogexec/wasmi
 cargo +nightly clippy --no-deps -- -D warnings &
 CLIPPY_PID=$!
 
+BUILD_DIR=$(readlink -f "$BUILD_DIR")
+
 # Run clang-tidy
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
-  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
+  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${BUILD_DIR} \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
