@@ -125,7 +125,7 @@ INSTANTIATE_TEST_SUITE_P(ERC20ExperimentTest, ERC20ExperimentTest,
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv);
+  auto ret = hogd::hogd_init(argc, argv, false);
   if (ret != 0)
     return ret;
   testing::InitGoogleTest(&argc, argv);
