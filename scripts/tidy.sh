@@ -1,8 +1,5 @@
 #!/bin/bash
 
-echo "+ tidy.sh $*" >&2
-set -x
-
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/env.sh
 CODE_DIR=hogd
@@ -26,12 +23,12 @@ while getopts 'd:f' flag; do
   esac
 done
 
+BUILD_DIR=$(readlink -f "$BUILD_DIR")
+
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
 cargo +nightly clippy --no-deps -- -D warnings &
 CLIPPY_PID=$!
-
-BUILD_DIR=$(readlink -f "${BUILD_DIR:-.}")
 
 # Run clang-tidy
 cd ${ROOT_DIR}
