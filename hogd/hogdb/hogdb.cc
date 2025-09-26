@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 #include <print>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,7 +26,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
