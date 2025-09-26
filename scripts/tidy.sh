@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/env.sh
 CODE_DIR=hogd
 BUILD_DIR=build
@@ -23,6 +23,8 @@ while getopts 'd:f' flag; do
   esac
 done
 
+BUILD_DIR=$(readlink -f "$BUILD_DIR")
+
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
 cargo +nightly clippy --no-deps -- -D warnings &
@@ -31,7 +33,7 @@ CLIPPY_PID=$!
 # Run clang-tidy
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
-  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
+  xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then

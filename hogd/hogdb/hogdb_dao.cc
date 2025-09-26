@@ -313,28 +313,43 @@ HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
 }
 
 HogDBStatus<size_t>
-HogDBDAO::get_item_size(const ItemKey &key)
+HogDBDAO::get_charged_storage_cost(const ItemKey &key)
 {
   switch (key.key_type()) {
   case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
     assert(key.is_address_balance());
-    return db_.get_size(make_address_key(key.get_address(), Prefix::kBalance));
+    // this is not charged
+    return HogDBError(HogDBCode::kNotFound);
   case ItemKeyType::kItemKeyTypeAccountAuthData:
     assert(key.is_account_auth_data());
     return db_.get_size(
         make_address_key(key.get_address(), Prefix::kAccountAuthData));
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
-    return db_.get_size(
-        make_address_key(key.get_address(), Prefix::kAddressMetadata));
+    {
+      auto db_key =
+          make_address_key(key.get_address(), Prefix::kAddressMetadata);
+      auto item = db_.get(db_key);
+      if (!item) {
+        return HogDBError(HogDBCode::kNotFound);
+      }
+      DeployedContractHash deployed_contract_hash;
+      try {
+        x23::deserialize(&deployed_contract_hash,
+                         x23::BufViewEnd(item.value().value));
+      } catch (x23::XdrException &e) {
+        error("failed to deserialize deployed contract hash: {}", e.what());
+        return HogDBError(HogDBCode::kInternal);
+      }
+      return deployed_contract_hash.contract_size;
+    }
   case ItemKeyType::kItemKeyTypeContractData:
     return db_.get_size(make_contract_data_key(key.as_bytes()));
   case ItemKeyType::kItemKeyTypeContractCode:
-    return db_.get_size(
-        make_address_key(key.get_contract_code_hash(), Prefix::kWasmCode));
   case ItemKeyType::kItemKeyTypeContractRefcount:
-    return db_.get_size(make_address_key(key.get_contract_code_hash(),
-                                         Prefix::kWasmCodeRefcount));
+    // these keys are not charged: storage costs for contracts are charged on
+    // the deployment entries
+    return HogDBError(HogDBCode::kNotFound);
   }
   error("unknown item key type: {}", std::to_underlying(key.key_type()));
   return HogDBError(HogDBCode::kInternal);

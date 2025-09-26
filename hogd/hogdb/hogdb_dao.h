@@ -153,7 +153,6 @@ public:
   void enable_debug_invariants()
   {
     assert(invariants_.empty());
-    info("enabling debug variants");
     invariants_.push_back(std::make_unique<HogConservationInvariant>());
   }
 
@@ -222,7 +221,7 @@ public:
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t> get_item_size(const ItemKey &key);
+  HogDBStatus<size_t> get_charged_storage_cost(const ItemKey &key);
   HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
   HogDBStatus<void> remove_item(const ItemKey &key);

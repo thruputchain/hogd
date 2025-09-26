@@ -61,7 +61,8 @@ public:
   // Load genesis block data into storage
   // This calculates storage keys and stores allocation amounts as int128s
   void load_genesis_block(
-      std::function<void(StorageKey const &, int128_t const &)> const
+      // Returned amount is the amount of storage used by the item
+      std::function<int128_t(StorageKey const &, int128_t const &)> const
           &write_storage,
       std::function<void(std::shared_ptr<const Contract>)> const
           &write_contract,
@@ -88,6 +89,8 @@ public:
   static ContractAddress
   calculate_deployed_address(SHA256Hash const &contract_hash,
                              SHA256Hash const &nonce);
+
+  static int128_t initial_hog_token_supply();
 
 private:
   GenesisBlock genesis_block_;

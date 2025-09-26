@@ -2,7 +2,7 @@
 
 # These parameters are CONFIGURABLE.
 # -------------------------------
-HOGD_PROJECT_DIR="/home/hog12/$(whoami)/hogd"
+HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
@@ -10,14 +10,15 @@ chuckd_server="hog3"
 hogexec_servers=("hog4")
 hogdb_servers=("hog4")
 
-# Set to 1 to enable x23 RPC logging. Set to nothing to disable x23 RPC logging.
-export X23TRACE=
+# Run with env X23TRACE=1 to enable tracing
+: ${X23TRACE=}
+export X23TRACE
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
-CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/chuckd/chuckd
-CHUCKD_BINARY=${HOGD_PROJECT_DIR}/chuckd/chuckd/chuckd
+CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd
+CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb

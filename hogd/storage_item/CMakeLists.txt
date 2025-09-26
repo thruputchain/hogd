@@ -43,6 +43,6 @@ target_link_libraries(
   storage_item_test
   storage_item
   model_checker
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(storage_item_test)

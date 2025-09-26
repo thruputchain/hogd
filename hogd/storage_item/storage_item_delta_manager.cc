@@ -213,6 +213,7 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
     }
   } break;
   case StorageDeltaType::kDeltaTypeDelete:
+    variant_.get_variant_arm_unchecked<DeleteArgs>().committed_ = true;
     break;
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
@@ -741,6 +742,9 @@ int128_t
 StorageItemDeltaManager::commit(StorageDelta const &delta,
                                 MeteredStorageLock const &lock)
 {
+  int128_t previous_committed_cost =
+      variant_.get_current_committed_cost(cost_model_, committed_item_.get());
+
   assert(!round_committed_);
   assert(lock.lock_.lock_type() != StorageLockType::kNone);
 
@@ -768,16 +772,13 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
       variant_.get_current_committed_cost(cost_model_, committed_item_.get());
   assert(required_storage >= 0);
 
-  // want: required_storage = base_storage + unreleased_storage_cost_.
   int128_t locked_storage = lock.locked_tokens_;
-  assert(committed_item_cost_ + unreleased_storage_cost_ + locked_storage >=
-         required_storage);
+  assert(previous_committed_cost + locked_storage >= required_storage);
 
-  int128_t storage_excess = committed_item_cost_ + unreleased_storage_cost_ +
-                            locked_storage - required_storage;
+  int128_t storage_excess =
+      previous_committed_cost + locked_storage - required_storage;
   assert(storage_excess >= 0);
 
-  unreleased_storage_cost_ = required_storage - committed_item_cost_;
   return storage_excess;
 }
 

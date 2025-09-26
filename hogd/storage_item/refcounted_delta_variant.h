@@ -62,7 +62,7 @@ struct BytestringArgs {
 
   int128_t
   get_current_committed_cost(StorageCostModel const *current_model,
-                             StorageItemWrapper const * /*unused*/) const;
+                             StorageItemWrapper const *base_item) const;
 
   int128_t
   get_marginal_cost_upper_bound(StorageDelta const &delta,
@@ -92,11 +92,16 @@ public:
     return candidate_set_value == set_value_;
   }
 
-  constexpr static int128_t
-  get_current_committed_cost(StorageCostModel const *current_model,
-                             StorageItemWrapper const * /*unused*/)
+  int128_t get_current_committed_cost(StorageCostModel const *current_model,
+                                      StorageItemWrapper const *base_item) const
   {
-    return current_model->kBaseItemCost;
+    if (committed_) {
+      return current_model->kBaseItemCost;
+    }
+    if (base_item) {
+      return base_item->storage_cost();
+    }
+    return 0;
   }
 
   int128_t
@@ -141,11 +146,21 @@ private:
 // Deleted state
 struct DeleteArgs {
   static bool typeclass_match() { return true; }
-  static std::shared_ptr<const StorageItemWrapper> to_item() { return nullptr; }
-  constexpr static int128_t
-  get_current_committed_cost(StorageCostModel const * /*unused*/,
-                             StorageItemWrapper const * /*unused*/)
+  std::shared_ptr<const StorageItemWrapper> to_item() const
   {
+    assert(committed_);
+    return nullptr;
+  }
+
+  int128_t get_current_committed_cost(StorageCostModel const * /*unused*/,
+                                      StorageItemWrapper const *base_item) const
+  {
+    if (committed_) {
+      return 0;
+    }
+    if (base_item) {
+      return base_item->storage_cost();
+    }
     return 0;
   }
   constexpr static int128_t
@@ -155,6 +170,8 @@ struct DeleteArgs {
   {
     return 0;
   }
+
+  bool committed_ = false;
 };
 
 // Retrocausal queue state
@@ -354,7 +371,11 @@ struct ExclusiveLockedState {
   get_current_committed_cost(StorageCostModel const *cost_model,
                              StorageItemWrapper const *base_item)
   {
-    return base_item->storage_cost(cost_model);
+    assert(cost_model);
+    if (base_item) {
+      return base_item->storage_cost();
+    }
+    return 0;
   }
 
   static int128_t
@@ -378,7 +399,10 @@ struct UnmodifiedState {
                              StorageItemWrapper const *base_item)
   {
     // base item stores the cost model under which it was added to the snapshot
-    return base_item->storage_cost();
+    if (base_item) {
+      return base_item->storage_cost();
+    }
+    return 0;
   }
 
   static int128_t

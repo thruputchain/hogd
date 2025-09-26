@@ -3,7 +3,6 @@
 #include <cassert>
 #include <optional>
 
-#include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/storage_view.h"

@@ -76,7 +76,6 @@ HogConservationInvariant::handle_balance_change(
   };
   auto before_balance = get_balance(before);
   auto after_balance = get_balance(after);
-
   update_total_supply(after_balance - before_balance);
 }
 
@@ -103,7 +102,7 @@ HogConservationInvariant::handle_address_metadata_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  update_total_supply(before_storage_cost - after_storage_cost);
+  update_total_supply(after_storage_cost - before_storage_cost);
 }
 
 void
@@ -128,9 +127,10 @@ HogConservationInvariant::handle_contract_data_item_change(
   };
   auto before_cost = get_storage_cost(before);
   auto after_cost = get_storage_cost(after);
-  // These numbers are costs; if we delete an item, then we're releasing
-  // (increasing) total supply.
-  update_total_supply(before_cost - after_cost);
+  // These numbers are the amount of coins stored (locked) at this location.
+  // Deleting an item (negative total supply change) is equivalent to
+  // transferring that amount to another key
+  update_total_supply(after_cost - before_cost);
 }
 
 void
@@ -156,7 +156,7 @@ HogConservationInvariant::handle_account_auth_data_item_change(
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
 
-  update_total_supply(before_storage_cost - after_storage_cost);
+  update_total_supply(after_storage_cost - before_storage_cost);
 }
 
 void
@@ -164,7 +164,6 @@ HogConservationInvariant::update_total_supply(int128_t change)
 {
   [[maybe_unused]] auto r =
       total_supply_change_.with([change](auto &t) { return t += change; });
-  trace("total_supply_change_ (after update): {} change {}", r, change);
 }
 
 } // namespace hogd

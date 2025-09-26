@@ -28,12 +28,10 @@ function(add_wasm_build target_name)
 
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
-  # just comment out the --locked flag, and the Cargo.lock will be regenerated.
-  # The --locked flag forces the CI to build with the correct version of the sdk
-  # (not just whatever the latest version it has cached is).
-  # Remember to put the --locked flag back in when you're done.
-  # 
-  # The better alternative is to run cargo +nightly update to update the lockfile manually.
+  # run cargo +nightly update to update the lockfile manually.
+  #
+  # This will not fetch crates during the build process; you need to run cargo +nightly fetch
+  # if your set of downloaded crates is incomplete.
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -43,6 +41,7 @@ function(add_wasm_build target_name)
         --target wasm32-unknown-unknown
         --release
         --locked
+        --frozen
         --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
