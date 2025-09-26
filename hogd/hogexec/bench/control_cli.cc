@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <print>
@@ -16,9 +17,39 @@ usage(char *argv[])
 {
   std::println("Usage: {} <host> <port> <command> <args...>", argv[0]);
   std::println("Commands:");
-  std::println("  shutdown  - Shutdown the control server");
-  std::println("  start     - Start a server");
+  std::println("  shutdown        - Shutdown the control server");
+  std::println("  start           - Start a process");
+  std::println("  stop            - Stop a process");
+  std::println("  expect_running  - Check if a process is running");
   exit(EXIT_FAILURE);
+}
+
+int
+handle_expect_running_command(std::string const &host, std::string const &port)
+{
+  try {
+    x23::ThreadPool pool;
+    x23::CoroPoll cp(pool);
+    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto status = client.query_proc_status();
+    if (status.error_code() ==
+        hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
+      std::println("Process is running");
+      return 0;
+    }
+    else if (status.error_code() ==
+             hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      std::println("Process is not running: exit code {}", status.exit_code());
+      return 1;
+    }
+    else {
+      std::println("Error: {}", status.error_code());
+      return 1;
+    }
+  } catch (std::exception const &e) {
+    std::println(stderr, "Error: {}", e.what());
+    return 1;
+  }
 }
 
 int
@@ -27,7 +58,9 @@ handle_shutdown_command(std::string const &host, std::string const &port)
   try {
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto client =
+        hogd::connect_to_control_server(cp, host, port,
+                                        std::chrono::milliseconds(10000));
 
     std::println("Sending shutdown command to {}:{}", host, port);
     client.shutdown_server();
@@ -106,6 +139,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
   if (command == "stop") {
     return handle_stop_command(host, port);
+  }
+  if (command == "expect_running") {
+    return handle_expect_running_command(host, port);
   }
 
   std::println(stderr, "Unknown command: {}", command);
