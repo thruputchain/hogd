@@ -137,7 +137,10 @@ jobs:
           --num-blocks 10 \
           --exec-batch 100 \
           --exec-par 10 \
-          --max-msg-size 400000000
+          --max-msg-size 400000000 \
+          > coordinator_output.txt 2>&1
+    - name: log integration metrics
+      run: ./scripts/log_integration_metrics.sh coordinator_output.txt
 
     - name: cleanup control servers
       if: always()
