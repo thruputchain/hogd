@@ -983,6 +983,19 @@ hexdump(const is_range_of<uint8_t> auto &r)
   return out;
 }
 
+Str
+hexdump(const is_range_of<std::byte> auto &r)
+{
+  Str out;
+  constexpr char hexbytes[] = "0123456789abcdef";
+  for (auto c : r) {
+    auto val = static_cast<uint8_t>(c);
+    out.push_back(hexbytes[val >> 4 & 0xf]);
+    out.push_back(hexbytes[val & 0xf]);
+  }
+  return out;
+}
+
 } // namespace x23
 
 // Rely on implicit conversion to string view for formatting
