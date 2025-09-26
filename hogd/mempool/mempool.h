@@ -6,7 +6,7 @@
 #include "coord_sched.hh"
 #include "db_coord.hh"
 #include "discovery.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"

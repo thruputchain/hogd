@@ -4,7 +4,7 @@
 #include <memory>
 #include <utility>
 
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -18,7 +18,7 @@ namespace hogd {
 // Calls from coordinator into executor
 class ExecutorRpcInterface {
 public:
-  using rpc_service = ExecutorCoord1;
+  using rpc_service = ExecutorSched1;
 
   ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
                        std::unique_ptr<DatabaseProxy> db_proxy)
@@ -76,6 +76,6 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::MaybeAsync>);
+static_assert(is_ExecutorSched1<ExecutorRpcInterface *, x23::MaybeAsync>);
 
 } // namespace hogd

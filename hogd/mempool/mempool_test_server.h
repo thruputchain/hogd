@@ -19,7 +19,7 @@
 #include "coord_sched.hh"
 #include "db_coord.hh"
 #include "db_sched.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -332,7 +332,7 @@ create_clients(const MempoolTestServer &server)
                            .to_addr());
   exec_client_t exec_client =
       x23::rpc_stream_logged(*exec_cp, exec_fd.release())
-          ->client(ExecutorCoord1{});
+          ->client(ExecutorSched1{});
 
   auto interface =
       std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
