@@ -342,4 +342,52 @@ struct RpcNoLogger {
 
 extern size_t default_max_message_size;
 
+struct RpcTraceMode {
+  enum Mode {
+    kNone = 0,
+    kTrace = 1,
+    kCsv = 2,
+  };
+
+  Mode mode{kNone};
+  int fd{-1};
+
+  decltype(auto) with_logger(BorrowedFd peerfd, auto fn)
+      requires std::invocable<decltype(fn), RpcNoLogger>
+  {
+    switch (mode) {
+    case kTrace:
+      return std::invoke(std::move(fn), RpcLogger{peerfd.get(), fd});
+    case kCsv:
+      return std::invoke(std::move(fn), RpcCsvLogger{peerfd.get(), fd});
+    default:
+      return std::invoke(std::move(fn), RpcNoLogger{peerfd.get(), fd});
+    }
+  }
+
+  // Parses environment variables to set the RPC connection tracing
+  // mode.  If env_var is "ENV_VAR" and the name of the program is
+  // "progname", then First checks ENV_VAR_progname, and if that
+  // doesn't exists, then checks ENV_VAR.  The contents of the
+  // environment variable is as follows:
+  //
+  //   * The first character of the enrivonment variable is a ','
+  //     character, then the more abbreviated CSV mode is selected,
+  //     and the remaining characters are parsed as usual.
+  //
+  //   * If the environment variable is a decimal number, this is
+  //     taken as a file descriptor number and logged output is
+  //     written to this file descriptor.
+  //
+  //   * If the environment variable starts with a '.' or '/'
+  //     character, this is interpreted as a filename into which to
+  //     write the log data.  If the name contains "%f", it is
+  //     replaced by the name of the executable.  If the name contains
+  //     "%p" it is replaced by the process ID.  If the name contains
+  //     "%%" it is replaced by a single '%' character.
+  static RpcTraceMode getenv(const char *env_var);
+};
+
+RpcTraceMode &server_trace();
+
 } // namespace x23
