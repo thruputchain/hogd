@@ -31,6 +31,8 @@ jobs:
           ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -74,6 +76,7 @@ jobs:
           ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -91,14 +94,8 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: Checkout chuckd
-      uses: actions/checkout@v4
-      with:
-        repository: groundhogchain/chuckd
-        path: chuckd
-        ref: main
     - name: build chuckd
-      run: go build -C chuckd/chuckd
+      run: go build -C groundhog-go/chuckd/chuckd
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  
@@ -121,13 +118,14 @@ jobs:
         ./scripts/wait-port.sh hog11 8082
     - name: run coordinator
       run: |
-        chuckd/chuckd/chuckd bench loadgen \
+        groundhog-go/chuckd/chuckd/chuckd bench loadgen \
           --stack \
           --level info \
           --in-addr :7888 \
           --loadgen-addr hog7:11222 \
           --num-accts 10000 \
           --num-txs 20000 \
+          --num-blocks 10 \
           --exec-batch 100 \
           --exec-par 10 \
           --max-msg-size 400000000
