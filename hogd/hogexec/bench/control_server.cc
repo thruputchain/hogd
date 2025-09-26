@@ -220,6 +220,23 @@ public:
     waiting_for_shutdown_.notify_all();
   }
 
+  CIProcStatus ciserver_query_proc_status(HogdGitHash const &hogd_git_hash)
+  {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
+    }
+
+    std::lock_guard<std::mutex> lock(running_pid_mutex_);
+    if (running_pid_) {
+      CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
+      status.exit_code() = *most_recent_exit_code_;
+      return status;
+    }
+    return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
+  }
+
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
 private:
@@ -240,8 +257,10 @@ private:
       return;
     }
 
+    int exit_code = 0;
+
     if (WIFEXITED(status)) {
-      int exit_code = WEXITSTATUS(status);
+      exit_code = WEXITSTATUS(status);
       if (exit_code == 0) {
         info("Child process {} exited successfully with code {}", child_pid,
              exit_code);
@@ -255,14 +274,18 @@ private:
       int signal_num = WTERMSIG(status);
       error("Child process {} terminated by signal {} ({})", child_pid,
             signal_num, strsignal(signal_num));
+      // chatgpt says this matches the behavior of most shells
+      exit_code = 128 + signal_num;
     }
     else {
       error("Child process {} terminated with unknown status {}", child_pid,
             status);
+      exit_code = -1;
     }
 
     std::lock_guard<std::mutex> lock(running_pid_mutex_);
     running_pid_.reset();
+    most_recent_exit_code_ = exit_code;
   }
   // NOLINTEND(misc-include-cleaner)
 public:
@@ -319,6 +342,7 @@ private:
 
   std::mutex running_pid_mutex_;
   std::optional<uint32_t> running_pid_;
+  std::optional<int> most_recent_exit_code_ = std::nullopt;
 
   // For output logging
   std::string stdout_temp_path_;

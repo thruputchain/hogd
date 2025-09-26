@@ -45,6 +45,8 @@ public:
 
   void shutdown_server() { client_.ciserver_shutdown(version::kHogdGitHash)(); }
 
+  CIProcStatus query_proc_status() { return client_.ciserver_query_proc_status(version::kHogdGitHash)(); }
+
 private:
   CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client_;
 };
