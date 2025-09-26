@@ -2,8 +2,8 @@ name: E2E Payment
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ "main" ]  
+  schedule:
+    - cron: '0 11 * * *'  # 4am Pacific Time (UTC-7)
 
 jobs:
   bench_servers:
