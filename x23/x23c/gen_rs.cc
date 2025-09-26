@@ -17,7 +17,7 @@
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
 
-#include "x23/config.h"
+#include "x23c/config.h"
 
 using std::optional;
 using std::string_view;
@@ -1069,7 +1069,7 @@ gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types)
 // Generated Code: DO NOT CHECK IN
 
 // Generated from xdrc commit: )" +
-                         std::string(GIT_COMMIT_HASH) + R"(
+                         x23::git_commit_hash() + R"(
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]

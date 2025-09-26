@@ -1,0 +1,11 @@
+#include "x23c/config.h"
+
+namespace x23 {
+
+#define GIT_COMMIT_HASH "@GIT_COMMIT_HASH@"
+
+std::string git_commit_hash() {
+    return GIT_COMMIT_HASH;
+}
+
+} // namespace x23
