@@ -243,6 +243,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   }
 
   auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
+  int depth = itx->create_savepoint();
   assert(itx);
 
   bool failure = false;
@@ -252,16 +253,18 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [&](StorageKey const &key, int128_t value) {
+      [&](StorageKey const &key, int128_t value) -> int128_t {
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
-        info("requesting nnint128 for genesis block: {} {}", item_key, value);
         auto r = itx->request_nnint128(item_key, value);
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
           failure = true;
         }
+
+        // invoketx handles the storage costs
+        return 0;
       },
       [&](auto const &contract) {
         auto data = x23::serialize(*contract);
@@ -284,6 +287,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   if (failure) {
     error("genesis block initialization failed");
+    itx->rollback_to_savepoint(depth - 1);
     co_return DbResult::DbResultError;
   }
 

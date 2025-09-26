@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-ATTRIBUTE_ALWAYS_INLINE HogDBStatus<void>
+ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
                  ItemLock &lock, const ItemChange &change)
 {
@@ -26,18 +26,19 @@ BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
   if (++lock.ref == 1) {
     lock.change = change;
-    return {};
+    return lock.change.marginal_storage_cost();
   }
 
-  if (HogDBStatus<void> ret = lock.change.merge(change); !ret) {
+  HogDBStatus<int128_t> ret = lock.change.merge(change);
+  if (!ret) {
     lock.ref--;
     return ret.error();
   }
 
-  return {};
+  return ret;
 }
 
-ATTRIBUTE_ALWAYS_INLINE HogDBStatus<void>
+ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
                         ItemLock &lock, const ItemChange &old_change,
                         const ItemChange &new_change)
@@ -47,17 +48,17 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
   if (lock.ref == 1) {
     lock.change = new_change;
-    return {};
+    return lock.change.marginal_storage_cost();
   }
 
   ItemChange tmp = lock.change;
   tmp.undo_merge(old_change);
-  HogDBStatus<void> ret = tmp.merge(new_change);
+  HogDBStatus<int128_t> ret = tmp.merge(new_change);
   if (!ret)
     return ret.error();
 
   lock.change = std::move(tmp);
-  return {};
+  return ret;
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
@@ -90,112 +91,53 @@ BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
   lock.change.undo_merge(change);
 }
 
-HogDBStatus<void>
-BlockTX::lock_balance(const Address &addr, int128_t delta)
-{
-  HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
-  if (!change)
-    return change.error();
-  auto [lock, ul] = addr_balance_locks_[addr];
-  return do_lock(ul, lock, *change);
-}
-
-HogDBStatus<void>
-BlockTX::modify_balance(const Address &addr, int128_t old_delta,
-                        int128_t new_delta)
-{
-  auto [lock, ul] = addr_balance_locks_[addr];
-  std::optional<NNInt128> nnint = lock.change.get_raw_nnint128();
-  if (!nnint) [[unlikely]]
-    throw std::runtime_error("locked balance not a nnint128");
-
-  ItemChange old_change(NNInt128(nnint->base(), old_delta));
-  ItemChange new_change(NNInt128(nnint->base(), new_delta));
-  return do_modify_lock(ul, lock, old_change, new_change);
-}
-
 void
-BlockTX::unlock_balance(const Address &addr, int128_t delta)
+BlockTX::release_balance(const Address &addr, int128_t delta)
 {
-  auto [lock, ul] = addr_balance_locks_[addr];
-  std::optional<NNInt128> nnint = lock.change.get_raw_nnint128();
-  if (!nnint) [[unlikely]]
-    throw std::runtime_error("locked balance not a nnint128");
+  assert(delta > 0);
 
-  ItemChange change(NNInt128(nnint->base(), delta));
-  do_unlock_addr_balance(ul, addr, lock, change);
+  HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
+  if (!change) [[unlikely]] {
+    throw std::runtime_error("failed to make balance change");
+  }
+  change->set_snapshot_cost(0);
+
+  auto [lock, ul] = addr_balance_locks_[addr];
+  if (auto r = do_lock(ul, lock, *change); !r) [[unlikely]] {
+    throw std::runtime_error("failed to lock balance");
+  }
 }
 
-HogDBStatus<void>
+HogDBStatus<int128_t>
 BlockTX::lock(const ItemKey &key, ItemChange &change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    return do_lock(ul, lock, change);
+    change.set_snapshot_cost(0);
+    return do_lock(ul, lock, change)
+        .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  // calculate storage cost.
-  HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, key);
-  if (!delta) [[unlikely]]
-    return delta.error();
-
-  // take the lock and charge storage cost.
   auto [lock, ul] = item_locks_[key];
-  if (lock.ref == 0 && *delta != 0) {
-    HogDBStatus<void> ret = lock_balance(key.get_address(), *delta);
-    if (!ret)
-      return ret.error();
-  }
+  if (auto r = lock.change.load_snapshot_cost(db_, key); !r)
+    return r.error();
   return do_lock(ul, lock, change);
 }
 
-HogDBStatus<void>
+HogDBStatus<int128_t>
 BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
                      ItemChange &new_change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    return do_modify_lock(ul, lock, old_change, new_change);
+    return do_modify_lock(ul, lock, old_change, new_change)
+        .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  // calculate difference in storage cost.
-  HogDBStatus<ssize_t> old_delta = old_change.storage_cost_delta(db_, key);
-  if (!old_delta) [[unlikely]]
-    return old_delta.error();
-  HogDBStatus<ssize_t> new_delta = new_change.storage_cost_delta(db_, key);
-  if (!new_delta) [[unlikely]]
-    return new_delta.error();
-
-  // modify the lock and the storage cost.
-  // TODO(geoff): The limitation here is that this design assumes storage costs
-  // can only change if we are the only tx modifying the item.
-  // This is true for bytestrings and nnints; but not necessarily for all data
-  // types.
-  // TODO(geoff): As it is now, there is no workflow with bytestrings or nnints
-  // in which we could successfully modify the balance but then do_modify_lock
-  // fails. That may be added later -- if so, then we need to rework this
-  // workflow.
   auto [lock, ul] = item_locks_[key];
-  if (lock.ref == 1 && *old_delta != *new_delta) {
-    HogDBStatus<void> ret =
-        modify_balance(key.get_address(), *old_delta, *new_delta);
-    if (!ret)
-      return ret.error();
-  }
-
-  // @abelay left the assertion as
-  // assert(lock.ref == 1 || *old_delta == *new_delta);
-  // For the bytestring type, this assertion could be triggered
-  // if multiple txs set a bytestring value and then one of those
-  // tries to set a different value (while the other txs still hold the
-  // reference). The behavior is still correct in that case, as do_modify_lock
-  // will fail.
-
-  auto res = do_modify_lock(ul, lock, old_change, new_change);
-  assert(lock.ref == 1 || *old_delta == *new_delta || !res.has_value());
-  return res;
+  return do_modify_lock(ul, lock, old_change, new_change);
 }
 
 void
@@ -208,19 +150,11 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
     return;
   }
 
-  // calculate storage cost.
-  HogDBStatus<ssize_t> delta = change.storage_cost_delta(db_, key);
-  if (!delta) [[unlikely]]
-    throw std::runtime_error("storage delta cannot fail once locked.");
-
-  // release the lock and refund storage cost.
   auto [lock, ul] = item_locks_[key];
-  if (lock.ref == 1 && *delta != 0)
-    unlock_balance(key.get_address(), *delta);
   do_unlock_item(ul, key, lock, change);
 }
 
-void
+int128_t
 BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
@@ -229,10 +163,13 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_[key.get_address()];
     lock.change.commit_change(change);
-    return;
+    return 0;
   }
   auto [lock, ul] = item_locks_[key];
+  int128_t cost_before = lock.change.committed_storage_cost();
   lock.change.commit_change(change);
+  int128_t cost_after = lock.change.committed_storage_cost();
+  return cost_after - cost_before;
 }
 
 HogDBStatus<void>
