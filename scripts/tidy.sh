@@ -1,8 +1,9 @@
 #!/bin/bash
 
+echo "+ tidy.sh $*" >& 2
 set -x
 
-SCRIPT_DIR=$(dirname "$(readlink -f \"$0\")")
+SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/env.sh
 CODE_DIR=hogd
 BUILD_DIR=build
