@@ -29,7 +29,6 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"

@@ -8,7 +8,6 @@ add_xdr(
 	../../protocol/contract_error.x
 	../../protocol/coord.x
 	../../protocol/coord_sched.x
-	../../protocol/db_coord.x
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
 	../../protocol/exec_sched.x

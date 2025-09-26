@@ -140,17 +140,17 @@ private:
 inline void
 CommonBenchState::advance_block()
 {
-  auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
+  auto r = coord_client_->dbsched_close_snapshot(block_number_)();
   if (r.result() != DbResult::DbResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
 
-  auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
+  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_)();
   if (r2.result() != DbResult::DbResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
 
-  auto r3 = coord_client_->dbcoord_create_snapshot(
+  auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal)();
   if (r3 != DbResult::DbResultOK) {
@@ -181,14 +181,14 @@ CommonBenchState::run_genesis_block(
 
   assert(block_number_ == 0);
   {
-    auto r = coord_client_->dbcoord_load_genesis_block(genesis_block)();
+    auto r = coord_client_->dbsched_load_genesis_block(genesis_block)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("Failed to write genesis block");
     }
   }
 
   {
-    auto r = coord_client_->dbcoord_create_snapshot(
+    auto r = coord_client_->dbsched_create_snapshot(
         0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("Failed to create snapshot");

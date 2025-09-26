@@ -29,7 +29,6 @@
 #include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -404,10 +403,10 @@ private:
   {
     block_number_++;
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
     if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
+      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
@@ -434,10 +433,10 @@ private:
 
     {
       auto r =
-          coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{})();
+          coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{})();
       if (r != DbResult::DbResultOK) {
         throw std::runtime_error(
-            "initialize: dbcoord_load_genesis_block failed");
+            "initialize: dbsched_load_genesis_block failed");
       }
     }
 

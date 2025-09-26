@@ -3,7 +3,7 @@
 #include <cassert>
 #include <optional>
 
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
@@ -17,12 +17,12 @@
 
 namespace hogd {
 
-// Async server implementing the DbCoord interface
-class DbCoordServer {
+// Async server implementing the DbSched interface
+class DbSchedServer {
 public:
-  using rpc_service = DbCoord1;
+  using rpc_service = DbSched1;
 
-  explicit DbCoordServer(BlockManager *block_manager)
+  explicit DbSchedServer(BlockManager *block_manager)
     : block_manager_(block_manager)
   {
     assert(block_manager_);
@@ -32,36 +32,48 @@ public:
   // Returns the port number that the server is listening on
   uint16_t start_server(uint16_t port_number);
 
-  static x23::Async<void> dbcoord_null() { co_return; }
-
   // RPC methods
-  x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id,
+  static x23::Async<void> dbsched_null() { co_return; }
+
+  static x23::Async<HogAgeResult>
+  HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+  {
+    co_return HogAgeResult(DbSchedResult::DbSchedResultError);
+  }
+
+  static x23::Async<DbSchedResult>
+  HogDBSchedServer::dbsched_write_hog_ages(const HogAgeBatch &ages)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  x23::Async<DbResult> dbsched_create_snapshot(BlockID parent_id,
                                                BlockID new_id,
                                                BlockExecutionMode mode);
-  static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id)
+  static x23::Async<DbResult> dbsched_open_snapshot(BlockID id)
   {
     co_return DbResult::DbResultError; // TODO(geoff): unimplemented
   }
-  x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
-  x23::Async<DbBlockResult> dbcoord_close_snapshot(BlockID id);
-  static x23::Async<DbResult> dbcoord_abandon_snapshot(BlockID id);
+  x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id);
+  x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
+  static x23::Async<DbResult> dbsched_abandon_snapshot(BlockID id);
 
-  static x23::Async<DbCatchupResult> dbcoord_catchup(BlockHeight height)
+  static x23::Async<DbCatchupResult> dbsched_catchup(BlockHeight height)
   {
     co_return DbCatchupResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
-  static x23::Async<DbTipResult> dbcoord_get_tip()
+  static x23::Async<DbTipResult> dbsched_get_tip()
   {
     co_return DbTipResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
   x23::Async<DbResult>
-  dbcoord_load_genesis_block(GenesisBlock const &genesis_block);
+  dbsched_load_genesis_block(GenesisBlock const &genesis_block);
 
-  static x23::Async<DbShardResult> dbcoord_shard_restore(BlockHeight height)
+  static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height)
   {
     co_return DbShardResult::ShardOK;
   }
@@ -72,6 +84,6 @@ private:
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 };
 
-static_assert(is_DbCoord1<DbCoordServer *, x23::Async>);
+static_assert(is_DbSched1<DbSchedServer *, x23::Async>);
 
 } // namespace hogd

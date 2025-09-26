@@ -14,7 +14,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
