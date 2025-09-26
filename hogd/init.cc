@@ -97,7 +97,7 @@ print_version(const char *process)
 } // namespace
 
 int
-hogd_init(int argc, char *argv[])
+hogd_init(int argc, char *argv[], bool do_print_version)
 {
   // TODO(amb): parse arguments and set up configuration
 
@@ -114,11 +114,13 @@ hogd_init(int argc, char *argv[])
     }
   }
 
-  CHECK_GT(argc, 0);
   // We deliberately call [print_version] after initializing the subsystems
   // above. [print_version()] uses [sha256()] from the crypto library, so we
   // need to initialize the crypto subsystem first.
-  print_version(argv[0]);
+  if (do_print_version) {
+    CHECK_GT(argc, 0);
+    print_version(argv[0]);
+  }
 
   return EXIT_SUCCESS;
 }

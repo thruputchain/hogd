@@ -18,6 +18,6 @@ extern GStatus<void> crypto_init();
 // Call this in your main() function.
 //
 // Returns 0 if successful, otherwise failure.
-extern int hogd_init(int argc, char *argv[]);
+extern int hogd_init(int argc, char *argv[], bool do_print_version = true);
 
 } // namespace hogd

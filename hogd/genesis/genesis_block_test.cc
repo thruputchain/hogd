@@ -196,7 +196,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
 int
 main(int argc, char *argv[])
 {
-  auto ret = hogd::hogd_init(argc, argv);
+  auto ret = hogd::hogd_init(argc, argv, false);
   if (ret != 0)
     return ret;
   testing::InitGoogleTest(&argc, argv);

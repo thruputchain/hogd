@@ -50,7 +50,7 @@ SH_FLAGS+=" -i 2"
 find "${SH_DIR}" -name '*.sh' |
   xargs ${SH_FORMAT} ${SH_FLAGS}
 
-# xdr format (note: this assumes .clang-format matches that in the protocol directory)
+# xdr format
 if test OFF = "$CHECK"; then
   ${X23_DIR}/misc/xdrformat "${ROOT_DIR}/protocol"/*.x
 fi
