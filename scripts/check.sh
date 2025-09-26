@@ -43,15 +43,15 @@ LLVM_ERRORS_LOG=${SCRIPT_DIR}/llvm_errors.log
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   LLVM_LOG=${BUILD_DIR}/llvm_build.log
   GCC_RELEASE_LOG=${BUILD_DIR}/gcc_release_build.log
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$LLVM_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$GCC_RELEASE_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$GCC_RELEASE_LOG" 2>&1 &
   GCC_RELEASE_BUILD_PID=$!
 fi
 
 GCC_DEBUG_LOG=${BUILD_DIR}/gcc_debug_build.log
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$GCC_DEBUG_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" >"$GCC_DEBUG_LOG" 2>&1 &
   GCC_DEBUG_BUILD_PID=$!
 fi
 
@@ -78,7 +78,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   fi
 else
   printf "${COLOR}STEP 2: Check build (gcc)\n${NC}"
-  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
+  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${GCC_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
     printf "build failed!\n"
     cat "${GCC_ERRORS_LOG}"
     exit 1
@@ -113,7 +113,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   TIDY_PID=$!
 else
   printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
-  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}"; then
+  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
     printf "build failed!\n"
     printf "\n===== llvm errors =====\n"
     cat "${BUILD_DIR}/llvm_errors.log"
@@ -164,7 +164,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
 else
   printf "${COLOR}\nSTEP 7: Check release build (gcc)\n${NC}"
-  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
+  if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -x "-DENABLE_CI_FAIL_LOG=${GCC_RELEASE_ERRORS_LOG}" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
     printf "build failed!\n"
     printf "\n===== gcc_release errors =====\n"
     cat "${GCC_RELEASE_ERRORS_LOG}"
@@ -179,7 +179,7 @@ if [ -z ${EXTRA+x} ]; then
 fi
 
 printf "${COLOR}\nSTEP 8: Check tsan\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Werror -fsanitize=thread -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
+if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Werror -fsanitize=thread" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
   printf "tsan build failed!\n"
   exit 1
 fi
@@ -189,7 +189,7 @@ if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure; th
 fi
 
 printf "${COLOR}\nSTEP 9: Check asan\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_asan -t Debug -c clang -f "-Werror -fsanitize=address -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
+if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_asan -t Debug -c clang -f "-Werror -fsanitize=address" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
   printf "asan build failed!\n"
   exit 1
 fi
@@ -200,7 +200,7 @@ if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_
 fi
 
 printf "${COLOR}\nSTEP 10: Check ubsan\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-Werror -fsanitize=undefined -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
+if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-Werror -fsanitize=undefined" -x "-DCMAKE_C_COMPILER_LAUNCHER=ccache" -x "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"; then
   printf "ubsan build failed!\n"
   exit 1
 fi
