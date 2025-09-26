@@ -105,12 +105,12 @@ jobs:
       run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
     - name: launch hogexec
       # coordinator runs on this machine
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:7888 50
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:7888
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
       # can't wait for hogexec: that's waiting on the coordinator
     - name: launch hogdb
-      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb /tmp/hogdb 10000000000 hog10:7888 50
+      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb /tmp/hogdb 10000000000 hog10:7888
     - name: wait for hogdb
       run: |
         ./scripts/wait-port.sh hog11 8080
