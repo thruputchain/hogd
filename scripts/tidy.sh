@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "+ tidy.sh $*" >& 2
+echo "+ tidy.sh $*" >&2
 set -x
 
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
