@@ -2,9 +2,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdio>
 #include <cstdlib>
-#include <utility>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
@@ -12,10 +10,8 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
-#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
