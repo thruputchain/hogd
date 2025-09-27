@@ -12,6 +12,7 @@
 #include "types.hh"
 
 #include "hogd/base/types.h"
+#include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"

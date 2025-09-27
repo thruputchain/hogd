@@ -15,6 +15,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "x23/threadpool.h"

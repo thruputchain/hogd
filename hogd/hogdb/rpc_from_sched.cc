@@ -24,6 +24,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
@@ -231,54 +232,6 @@ HogDBSchedServer::dbsched_close_snapshot(BlockID id) // NOLINT
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
   co_return ret;
-}
-
-namespace {
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-inline ErrnoStatus<void>
-sys_getsockname(int sockfd, T &val)
-{
-  socklen_t len = sizeof(val); // NOLINT(misc-include-cleaner)
-  return make_errno_status<void>(
-      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
-}
-
-uint16_t
-get_port(int fd)
-{
-  sockaddr_in saddr;
-  // retrieve the port number if it was assigned automatically.
-  ErrnoStatus<void> ret = sys_getsockname(fd, saddr);
-  if (!ret)
-    throw std::runtime_error("Failed to get socket name");
-  return ntohs(saddr.sin_port);
-}
-
-} // namespace
-
-void
-HogDBSchedServer::start_server(uint16_t port)
-{
-  {
-    auto lfd = x23::tcplisten(port);
-    if (!lfd) {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
-
-    std::lock_guard lock(mtx_);
-    port_ = get_port(lfd.get());
-    cv_.notify_all();
-
-    [](x23::CoroPoll &cp, HogDBSchedServer *server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await cp.pool_.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c)->server(server);
-      }
-    }(cp_, this, std::move(lfd));
-  }
 }
 
 x23::Async<DbSchedResult>
