@@ -90,12 +90,11 @@ main(int argc, char **argv)
       return 0;
     }
     else if (argv[1] == "-s"s) {
-      [argv] -> Async<void> {
-        auto lfd = x23::tcplisten(std::stoi(argv[2]));
-        while (auto c = co_await cp.accept(lfd)) {
-          rpc_stream_logged(cp, *c)->server<myvers>(&impl, context);
-        }
-      }()();
+      x23::DestroyInhibit di;
+      tcp_rpc_server(cp, std::stoi(argv[2]), [di = x23::RefPtr{di}](auto c) {
+        c->template server<myvers>(&impl, context);
+      });
+      di.destroy_wait();
     }
     else {
       std::println(stderr, "usage: {} [{{-c | -s}} port]", argv[0]);

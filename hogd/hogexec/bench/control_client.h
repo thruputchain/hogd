@@ -45,19 +45,30 @@ public:
 
   void shutdown_server() { client_.ciserver_shutdown(version::kHogdGitHash)(); }
 
+  CIProcStatus query_proc_status()
+  {
+    return client_.ciserver_query_proc_status(version::kHogdGitHash)();
+  }
+
 private:
   CIServer1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client_;
 };
 
 inline auto
-connect_to_control_server(x23::CoroPoll &cp, std::string const &host,
-                          std::string const &port)
+connect_to_control_server(
+    x23::CoroPoll &cp, std::string const &host, std::string const &port,
+    std::chrono::milliseconds timeout = std::chrono::milliseconds(0))
 {
+  auto start_time = std::chrono::steady_clock::now();
   while (true) {
     info("connecting to control server on {}:{}", host, port);
     auto fd = cp.tcpconnect(host, port)();
     if (!fd) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      auto elapsed = std::chrono::steady_clock::now() - start_time;
+      if (timeout != std::chrono::milliseconds(0) && elapsed > timeout) {
+        throw std::runtime_error("timeout connecting to control server");
+      }
       continue;
     }
     auto client_config = x23::rpc_stream_logged(cp, *fd);

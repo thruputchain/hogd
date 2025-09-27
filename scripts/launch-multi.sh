@@ -9,10 +9,22 @@ loadgen_server="hog3"
 chuckd_server="hog3"
 hogexec_servers=("hog4")
 hogdb_servers=("hog4")
+logdir=/tmp/$(whoami)
 
-# Run with env X23TRACE=1 to enable tracing
-: ${X23TRACE=}
-export X23TRACE
+# override above in build or source directory hog.conf file
+if test -r "$HOGD_BUILD_DIR/hog.conf"; then
+  . "$HOGD_BUILD_DIR/hog.conf"
+elif test -r "$HOGD_PROJECT_DIR/hog.conf"; then
+  . "$HOGD_PROJECT_DIR/hog.conf"
+fi
+
+X23ENV=$(env | grep '^X23')
+if test -n "$X23ENV"; then
+  X23ENV="export $X23ENV"
+else
+  X23ENV=":"
+fi
+
 # -------------------------------
 
 # The parameters below here are NOT CONFIGURABLE.
@@ -29,7 +41,7 @@ binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
   "${hogdb_servers[@]}")
 
-COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5)
+COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 results_only=false
 
@@ -46,6 +58,12 @@ done
 # This removes duplicates from [all_servers].
 all_servers=($(printf "%s\n" "${all_servers[@]}" | awk '!seen[$0]++'))
 
+make_logdir() {
+  for s in "${all_servers[@]}"; do
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" mkdir -p "$logdir"
+  done
+}
+
 # Kills all of the processes on all of the servers.
 kill_everything() {
   local do_wait=$1
@@ -59,6 +77,9 @@ kill_everything() {
     wait
   fi
 }
+
+echo "Making log directories..."
+make_logdir
 
 echo "Killing stale processes..."
 kill_everything true #do_wait=true
@@ -103,6 +124,7 @@ build_all
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
+  declare -a lines
   mapfile -t lines < <(
     for b in "${binaries[@]}"; do
       for s in "${all_servers[@]}"; do
@@ -172,14 +194,14 @@ wait_port() {
 
 echo "Start loadgen..."
 ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-  "export X23TRACE=$X23TRACE; \
-  nohup \"$LOADGEN_BINARY\" -p 11222 >/tmp/loadgen.log 2>&1 &"
+  "$X23ENV; \
+  nohup \"$LOADGEN_BINARY\" -p 11222 >$logdir/loadgen.log 2>&1 &"
 wait_port "$loadgen_server" 11222
 
 echo "Start chuckd..."
 # Start chuckd.
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  "export X23TRACE=$X23TRACE;                  \
+  "$X23ENV;                  \
   nohup \"$CHUCKD_BINARY\"                     \
   bench loadgen                                \
   --stack                                      \
@@ -192,15 +214,15 @@ ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
   --exec-par 10                                \
   --num-blocks 100                             \
   --max-msg-size 400000000                     \
-  > /tmp/chuckd.log 2>&1 &"
+  > $logdir/chuckd.log 2>&1 &"
 wait_port "$chuckd_server" 7888
 
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "export X23TRACE=$X23TRACE; \
-    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > /tmp/hogexec.log 2>&1 &"
+    "$X23ENV; \
+    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > $logdir/hogexec.log 2>&1 &"
 done
 
 # Start hogdb.
@@ -208,10 +230,10 @@ echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "export X23TRACE=$X23TRACE; \
-    rm -rf /tmp/hogdb; \
-    nohup \"$HOGDB_BINARY\" /tmp/hogdb 10000000000 \"$chuckd_server\":7888 \
-    > /tmp/hogdb.log 2>&1 &"
+    "$X23ENV; \
+    rm -rf $logdir/hogdb; \
+    nohup \"$HOGDB_BINARY\" $logdir/hogdb 10000000000 \"$chuckd_server\":7888 \
+    > $logdir/hogdb.log 2>&1 &"
 done
 
 # TODO(jhumphri): Launch the mempool.
@@ -233,23 +255,23 @@ echo "Done with launch."
 if $results_only; then
   # Stream only the results.
   ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -f /tmp/chuckd.log | grep --line-buffered obtain_delay_msec" |
+    "tail -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
     sed "s/^/[${chuckd_server}\/chuckd] /" &
 else
   # Stream the logs from each server.
   ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-    "tail -f /tmp/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
+    "tail -f $logdir/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
   ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -f /tmp/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+    "tail -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
 
   for s in "${hogexec_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "tail -f /tmp/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
+      "tail -f $logdir/hogexec.log" | sed "s/^/[${s}\/hogexec] /" &
   done
 
   for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "tail -f /tmp/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
+      "tail -f $logdir/hogdb.log" | sed "s/^/[${s}\/hogdb] /" &
   done
 fi
 

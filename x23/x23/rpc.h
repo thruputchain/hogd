@@ -415,8 +415,13 @@ struct RpcStream : public detail::RpcStreamImpl {
     using super::get;
 
     Configurator(RpcStream &s) noexcept : super(s) {}
+    Configurator(Configurator &&) noexcept = default;
     Configurator(const Configurator &) = delete;
-    ~Configurator() { get()->go(); }
+    ~Configurator()
+    {
+      if (RpcStream *s = get())
+        s->go();
+    }
   };
 
   template<typename ProcMeta>
@@ -499,6 +504,32 @@ inline RpcStream<Logger>::Configurator
 rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 {
   return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
+}
+
+// Listen on a TCP port, and for each incoming connection invoke a
+// callback with a new configurator.  Sets logging based on the
+// X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
+// See RpcTraceMode::getenv for a description of this environment
+// variable.
+int
+tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = 5 + nproc())
+    requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
+{
+  auto lfd = tcplisten(port, backlog);
+  if (port == 0)
+    port = get_port(local_addr(lfd));
+
+  [&cp, lfd = std::move(lfd),
+   cb = std::move(cb)](this auto /*copy*/) -> Detached {
+    while (auto c = co_await (cp.accept(lfd))) {
+      server_trace().with_logger(*c, [&](auto logger) {
+        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
+                                                          std::move(logger)));
+      });
+    }
+  }();
+
+  return port;
 }
 
 } // namespace x23

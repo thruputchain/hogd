@@ -1,0 +1,156 @@
+name: E2E Payment
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 11 * * *'  # 4am Pacific Time (UTC-7)
+
+jobs:
+  bench_servers:
+    strategy:
+      matrix:
+        runner: [client, hog7, hog8]
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+          ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+          ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+          ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: gcc version check
+      run: gcc --version
+    - name: clang version check
+      run: clang --version
+    - name: Add Cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: path check
+      run: echo $PATH
+    - name: cargo version check
+      run: cargo --version
+    - name: set gcc-14 in check
+      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: clear hogdb file directory
+      run: |
+        rm -r ./hogdb_data/ || true
+        mkdir -p hogdb_data/
+    - name: run bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11111
+
+  build:
+    runs-on: metrics
+    steps:
+    - name: Clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+          ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+          ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+          ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: gcc version check
+      run: gcc --version
+    - name: clang version check
+      run: clang --version
+    - name: Add Cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: path check
+      run: echo $PATH
+    - name: cargo version check
+      run: cargo --version
+    - name: set gcc-14 in check
+      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: build chuckd
+      run: go build -C groundhog-go/chuckd/chuckd
+    - name: wait for bench servers
+      run: |
+        ./scripts/wait-port.sh hog7 11111  
+        ./scripts/wait-port.sh hog8 11111
+        ./scripts/wait-port.sh hog11 11111
+    - name: launch loadgen
+      run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
+    - name: launch hogexec
+      # coordinator runs on this machine
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:7888
+    - name: wait for loadgen
+      run: ./scripts/wait-port.sh hog7 11222
+      # can't wait for hogexec: that's waiting on the coordinator
+    - name: launch hogdb
+      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb hogdb_data/ 10000000000 hog10:7888
+    - name: wait for hogdb
+      run: |
+        ./scripts/wait-port.sh hog11 8080
+        ./scripts/wait-port.sh hog11 8081
+        ./scripts/wait-port.sh hog11 8082
+    - name: make sure procs are running
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog7 11111 expect_running
+        ./release/hogd/hogexec/bench/control_cli hog8 11111 expect_running
+        ./release/hogd/hogexec/bench/control_cli hog11 11111 expect_running
+    - name: run coordinator
+      run: |
+        groundhog-go/chuckd/chuckd/chuckd bench loadgen \
+          --stack \
+          --level info \
+          --in-addr :7888 \
+          --loadgen-addr hog7:11222 \
+          --num-accts 10000 \
+          --num-txs 20000 \
+          --num-blocks 10 \
+          --exec-batch 100 \
+          --exec-par 10 \
+          --max-msg-size 400000000 \
+          > coordinator_output.txt 2>&1
+    - name: log integration metrics
+      run: ./scripts/log_integration_metrics.sh coordinator_output.txt
+
+    - name: cleanup control servers
+      if: always()
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+
+
+
+
+
+

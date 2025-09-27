@@ -52,6 +52,8 @@ public:
   // removes an invoke transaction.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid);
 
+  HogDBStatus<void> update_dbtip(BlockTXID bid);
+
 private:
   struct BlockCache {
     std::mutex lock;
