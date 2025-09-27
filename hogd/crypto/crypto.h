@@ -119,10 +119,9 @@ static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  return 0;
-  //return siphash24_hash(reinterpret_cast<const uint8_t (*)[16]>(key_.data()),
-  //                      reinterpret_cast<const uint8_t *>(buf.data()),
-  //                      buf.size());
+  return siphash24_hash(reinterpret_cast<const uint8_t (*)[16]>(key_.data()),
+                        reinterpret_cast<const uint8_t *>(buf.data()),
+                        buf.size());
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
