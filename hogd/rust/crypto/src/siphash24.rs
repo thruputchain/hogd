@@ -1,6 +1,5 @@
-use siphasher::sip::SipHasher24;
 use core::hash::Hasher;
-
+use siphasher::sip::SipHasher24;
 
 /// Compute SipHash24 with the given key and data
 ///
@@ -41,14 +40,7 @@ mod tests {
     fn test_siphash24_basic() {
         let data = b"hello world";
 
-        let output = unsafe {
-            siphash24_hash(
-                1,
-                1,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
+        let output = unsafe { siphash24_hash(1, 1, data.as_ptr(), data.len()) };
 
         assert_ne!(output, 0); // Should produce some hash value
     }
@@ -60,21 +52,11 @@ mod tests {
         let data = b"test data";
 
         let result1 = unsafe {
-            siphash24_hash(
-                key1.0,
-                key1.1,
-                data.as_ptr(),
-                data.len(),
-            )
+            siphash24_hash(key1.0, key1.1, data.as_ptr(), data.len())
         };
 
         let result2 = unsafe {
-            siphash24_hash(
-                key2.0,
-                key2.1,
-                data.as_ptr(),
-                data.len(),
-            )
+            siphash24_hash(key2.0, key2.1, data.as_ptr(), data.len())
         };
 
         assert_ne!(result1, result2); // Different keys should produce different hashes
@@ -85,23 +67,11 @@ mod tests {
         let key = (42, 42);
         let data = b"consistent data";
 
-        let result1 = unsafe {
-            siphash24_hash(
-                key.0,
-                key.1,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
+        let result1 =
+            unsafe { siphash24_hash(key.0, key.1, data.as_ptr(), data.len()) };
 
-        let result2 = unsafe {
-            siphash24_hash(
-                key.0,
-                key.1,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
+        let result2 =
+            unsafe { siphash24_hash(key.0, key.1, data.as_ptr(), data.len()) };
 
         assert_eq!(result1, result2); // Same input should produce same output
     }

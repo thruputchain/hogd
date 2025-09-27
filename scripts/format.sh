@@ -39,10 +39,11 @@ git ls-files --recurse-submodules -c "${CODE_DIR}/*.cc" "${X23_DIR}/*.cc" \
   "${CODE_DIR}/*.h" "${X23_DIR}/*.h" |
   xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
+set -ex
 # Rust fmt
 CARGO_DIRS=$(git ls-files --recurse-submodules -c "${CODE_DIR}/*/Cargo.toml")
 for CARGO_DIR in $CARGO_DIRS; do
-  cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human
+  cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human --all
 done
 
 # Shell fmt.
