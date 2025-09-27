@@ -20,9 +20,9 @@ fi
 
 X23ENV=$(env | grep '^X23')
 if test -n "$X23ENV"; then
-    X23ENV="export $X23ENV"
+  X23ENV="export $X23ENV"
 else
-    X23ENV=":"
+  X23ENV=":"
 fi
 
 # -------------------------------

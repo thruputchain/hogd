@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "ci_server.hh"
 #include "control_client.h"
 #include "hogd/init.h"
 #include "x23/event.h"
@@ -37,15 +38,12 @@ handle_expect_running_command(std::string const &host, std::string const &port)
       std::println("Process is running");
       return 0;
     }
-    else if (status.error_code() ==
-             hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+    if (status.error_code() == hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       std::println("Process is not running: exit code {}", status.exit_code());
       return 1;
     }
-    else {
-      std::println("Error: {}", status.error_code());
-      return 1;
-    }
+    std::println("Error: {}", status.error_code());
+    return 1;
   } catch (std::exception const &e) {
     std::println(stderr, "Error: {}", e.what());
     return 1;

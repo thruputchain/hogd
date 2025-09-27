@@ -23,9 +23,7 @@ namespace hogd {
 uint16_t
 ExecutorRpcInterface::start_server(uint16_t port_number)
 {
-  return tcp_rpc_server(cp_, port_number, [this](auto c) {
-    c->server(this);
-  });
+  return tcp_rpc_server(cp_, port_number, [this](auto c) { c->server(this); });
 }
 
 x23::Async<ExecProposeResult>
@@ -65,6 +63,7 @@ ExecutorRpcInterface::executorcoord_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
+  co_await cp_.pool_.bg();
   auto ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
     co_return ExecProposeBatchResult(signed_txs.size(),
