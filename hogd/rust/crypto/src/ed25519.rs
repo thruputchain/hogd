@@ -80,8 +80,6 @@ impl MessageSpan {
     }
 }
 
-
-
 /// Verify a batch of ed25519 signatures
 ///
 /// # Parameters
