@@ -211,14 +211,9 @@ inline Ed25519Signature
 ed25519_sign_rust(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
-  [[maybe_unused]]
-  auto ret =
-      ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[32]>(sk.data()),
-                         reinterpret_cast<const uint8_t *>(msg.data()),
-                         msg.size(),
-                         reinterpret_cast<uint8_t (*)[64]>(sig.data()));
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == Ed25519Result::Success);
+  ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[32]>(sk.data()),
+                     reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
+                     reinterpret_cast<uint8_t (*)[64]>(sig.data()));
   return sig;
 }
 
