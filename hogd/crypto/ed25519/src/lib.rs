@@ -12,16 +12,16 @@ pub enum Ed25519Result {
 }
 
 /// Verify an ed25519 signature
-/// 
+///
 /// # Parameters
 /// - `public_key`: 32-byte public key array
 /// - `signature`: 64-byte signature array
 /// - `message_ptr`: Pointer to message bytes
 /// - `message_len`: Length of message in bytes
-/// 
+///
 /// # Returns
 /// Ed25519Result indicating success or failure reason
-/// 
+///
 /// # Safety
 /// Caller must ensure:
 /// - message_ptr points to valid message_len bytes
@@ -40,7 +40,8 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 
     let public_key_bytes = unsafe { &*public_key };
     let signature_bytes = unsafe { &*signature };
-    let message_bytes = unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
+    let message_bytes =
+        unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
 
     // Parse public key
     let verifying_key = match VerifyingKey::from_bytes(public_key_bytes) {
@@ -62,16 +63,16 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 }
 
 /// Sign a message with ed25519
-/// 
+///
 /// # Parameters
 /// - `secret_key`: 32-byte secret key array
 /// - `message_ptr`: Pointer to message bytes
 /// - `message_len`: Length of message in bytes
 /// - `signature_out`: Pointer to 64-byte output buffer for signature
-/// 
+///
 /// # Returns
 /// Ed25519Result indicating success or failure reason
-/// 
+///
 /// # Safety
 /// Caller must ensure:
 /// - secret_key points to valid 32 bytes
@@ -86,12 +87,14 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
     signature_out: *mut [u8; 64],
 ) -> Ed25519Result {
     // Validate input pointers
-    if secret_key.is_null() || message_ptr.is_null() || signature_out.is_null() {
+    if secret_key.is_null() || message_ptr.is_null() || signature_out.is_null()
+    {
         return Ed25519Result::InvalidInputLength;
     }
 
     let secret_key_bytes = unsafe { &*secret_key };
-    let message_bytes = unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
+    let message_bytes =
+        unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
     let signature_out_bytes = unsafe { &mut *signature_out };
 
     // Create signing key from secret key bytes
@@ -107,21 +110,25 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
 }
 
 /// Get a human-readable description of an Ed25519Result
-/// 
+///
 /// # Parameters
 /// - `result`: The Ed25519Result to describe
-/// 
+///
 /// # Returns
 /// Pointer to a null-terminated C string describing the result.
 /// The returned pointer is valid for the lifetime of the program.
 #[no_mangle]
-pub extern "C" fn ed25519_result_description(result: Ed25519Result) -> *const i8 {
+pub extern "C" fn ed25519_result_description(
+    result: Ed25519Result,
+) -> *const i8 {
     let description = match result {
         Ed25519Result::Success => "Success\0",
         Ed25519Result::InvalidPublicKey => "Invalid public key\0",
-        Ed25519Result::InvalidSignature => "Invalid signature\0", 
+        Ed25519Result::InvalidSignature => "Invalid signature\0",
         Ed25519Result::VerificationFailed => "Signature verification failed\0",
-        Ed25519Result::InvalidInputLength => "Invalid input length or null pointer\0",
+        Ed25519Result::InvalidInputLength => {
+            "Invalid input length or null pointer\0"
+        }
     };
     description.as_ptr() as *const i8
 }
@@ -140,11 +147,11 @@ mod tests {
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
         let verifying_key = signing_key.verifying_key();
-        
+
         // Sign a test message
         let message = b"test message";
         let signature = signing_key.sign(message);
-        
+
         // Test verification
         let result = unsafe {
             ed25519_dalek_verify(
@@ -154,7 +161,7 @@ mod tests {
                 message.len(),
             )
         };
-        
+
         assert_eq!(result, Ed25519Result::Success);
     }
 
@@ -166,11 +173,11 @@ mod tests {
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
         let verifying_key = signing_key.verifying_key();
-        
+
         // Create an invalid signature (all zeros)
         let invalid_signature = [0u8; 64];
         let message = b"test message";
-        
+
         // Test verification with invalid signature
         let result = unsafe {
             ed25519_dalek_verify(
@@ -180,7 +187,7 @@ mod tests {
                 message.len(),
             )
         };
-        
+
         assert_eq!(result, Ed25519Result::VerificationFailed);
     }
 
@@ -195,7 +202,7 @@ mod tests {
                 0,
             )
         };
-        
+
         assert_eq!(result, Ed25519Result::InvalidInputLength);
     }
 
@@ -207,10 +214,10 @@ mod tests {
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
         let verifying_key = signing_key.verifying_key();
-        
+
         let message = b"test message for signing";
         let mut signature_out = [0u8; 64];
-        
+
         // Test signing
         let sign_result = unsafe {
             ed25519_dalek_sign(
@@ -220,9 +227,9 @@ mod tests {
                 &mut signature_out as *mut [u8; 64],
             )
         };
-        
+
         assert_eq!(sign_result, Ed25519Result::Success);
-        
+
         // Test that the signature verifies
         let verify_result = unsafe {
             ed25519_dalek_verify(
@@ -232,23 +239,27 @@ mod tests {
                 message.len(),
             )
         };
-        
+
         assert_eq!(verify_result, Ed25519Result::Success);
     }
 
     #[test]
     fn test_result_descriptions() {
         let desc = unsafe {
-            std::ffi::CStr::from_ptr(ed25519_result_description(Ed25519Result::Success))
-                .to_str()
-                .unwrap()
+            std::ffi::CStr::from_ptr(ed25519_result_description(
+                Ed25519Result::Success,
+            ))
+            .to_str()
+            .unwrap()
         };
         assert_eq!(desc, "Success");
-        
+
         let desc = unsafe {
-            std::ffi::CStr::from_ptr(ed25519_result_description(Ed25519Result::InvalidPublicKey))
-                .to_str()
-                .unwrap()
+            std::ffi::CStr::from_ptr(ed25519_result_description(
+                Ed25519Result::InvalidPublicKey,
+            ))
+            .to_str()
+            .unwrap()
         };
         assert_eq!(desc, "Invalid public key");
     }
