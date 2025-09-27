@@ -1,5 +1,5 @@
 use siphasher::sip::SipHasher24;
-use core::hash::{Hash, Hasher};
+use core::hash::Hasher;
 
 
 /// Compute SipHash24 with the given key and data
@@ -29,7 +29,7 @@ pub unsafe extern "C" fn siphash24_hash(
 
     // Create SipHasher24 with the key
     let mut hasher = SipHasher24::new_with_keys(key1, key2);
-    data_bytes.hash(&mut hasher);
+    hasher.write(data_bytes);
     hasher.finish()
 }
 
