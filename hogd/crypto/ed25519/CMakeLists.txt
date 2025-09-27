@@ -2,6 +2,7 @@
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
 corrosion_set_env_vars(ed25519_lib CARGO_NET_OFFLINE=true)
+corrosion_add_target_rustflags(ed25519_lib "-C target-cpu=native")
 
 add_custom_command(
     OUTPUT
