@@ -8,7 +8,7 @@
 
 // xdr types
 #include "account.hh"
-#include "sched_coord.hh"
+#include "db_sched.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"

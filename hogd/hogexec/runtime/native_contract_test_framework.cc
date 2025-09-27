@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -18,7 +19,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "sched_coord.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc_common.h"

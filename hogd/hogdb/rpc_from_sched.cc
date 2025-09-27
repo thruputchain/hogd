@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <netinet/in.h>
+#include <span>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <utility>
@@ -16,7 +17,11 @@
 // generated x23 headers
 #include "account.hh"
 #include "db_sched.hh"
-#include "sched_coord.hh"
+#include "genesis.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/block_tx.h"
 
 #include "rpc_types.hh"
 #include "types.hh"

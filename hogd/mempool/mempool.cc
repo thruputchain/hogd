@@ -9,6 +9,7 @@
 #include <tuple>
 #include <vector>
 
+#include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"

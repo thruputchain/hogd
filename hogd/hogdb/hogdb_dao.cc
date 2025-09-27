@@ -14,7 +14,6 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/ramdb/db_status.h"
-#include "sched_coord.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"

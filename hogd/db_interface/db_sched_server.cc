@@ -4,10 +4,10 @@
 #include <cstdlib>
 #include <utility>
 
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
-#include "sched_coord.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"

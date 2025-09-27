@@ -18,7 +18,7 @@
 
 // XDR headers
 #include "coord.hh"
-#include "sched_coord.hh"
+#include "db_sched.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
