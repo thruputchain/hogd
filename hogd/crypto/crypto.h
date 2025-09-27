@@ -23,7 +23,7 @@ extern "C" {
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/rust/bindings.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "types.hh"
 
 namespace hogd {
