@@ -58,7 +58,7 @@ Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
   DbSchedResult res =
-      co_await db_coord_client_.dbsched_create_snapshot(prev_block_id, block_id,
+      co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
                                                         mode);
   co_return res == DbSchedResult::DbSchedResultOK;
 }
@@ -67,7 +67,7 @@ x23::Async<void>
 Mempool::abandon_snapshot(BlockID block_id)
 {
   DbSchedResult res =
-      co_await db_coord_client_.dbsched_abandon_snapshot(block_id);
+      co_await db_sched_client_.dbsched_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbSchedResultOK], but this
   // could change in the future. In the case of a failure, we need to clean up
   // db state.
@@ -79,7 +79,7 @@ x23::Async<void>
 Mempool::close_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_coord_client_.dbsched_close_snapshot(block_id);
+      co_await db_sched_client_.dbsched_close_snapshot(block_id);
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -90,7 +90,7 @@ x23::Async<void>
 Mempool::commit_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_coord_client_.dbsched_commit_snapshot(block_id);
+      co_await db_sched_client_.dbsched_commit_snapshot(block_id);
   // [dbsched_commit_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);

@@ -98,10 +98,6 @@ public:
       db_executor_server_->start_server(/*port=*/0);
       executor_db_port_ = db_executor_server_->port();
 
-      db_coordinator_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-      db_coordinator_server_->start_server(/*port=*/0);
-      db_coordinator_port_ = db_coordinator_server_->port();
-
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
       db_scheduler_port_ = db_scheduler_server_->port();
@@ -183,7 +179,6 @@ public:
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
   uint16_t coordinator_port() const { return coordinator_port_; }
-  uint16_t db_coordinator_port() const { return db_coordinator_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
   uint16_t executor_port() const { return executor_port_; }
 
@@ -230,10 +225,6 @@ private:
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
   uint16_t executor_db_port_;
 
-  // The database server that the coordinator accesses.
-  std::unique_ptr<HogDBSchedServer> db_coordinator_server_;
-  uint16_t db_coordinator_port_;
-
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
   uint16_t db_scheduler_port_;
@@ -274,9 +265,6 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> coord_pool;
   std::unique_ptr<x23::CoroPoll> coord_cp;
 
-  std::unique_ptr<x23::ThreadPool> db_coord_pool;
-  std::unique_ptr<x23::CoroPoll> db_coord_cp;
-
   std::unique_ptr<x23::ThreadPool> db_sched_pool;
   std::unique_ptr<x23::CoroPoll> db_sched_cp;
 
@@ -299,17 +287,6 @@ create_clients(const MempoolTestServer &server)
   coord_client_t coord_client =
       x23::rpc_stream_logged(*coord_cp, coord_fd.release())
           ->client(CoordScheduler1{});
-
-  // Coordinator-DB RPC client.
-  auto db_coord_pool = std::make_unique<x23::ThreadPool>(1);
-  auto db_coord_cp = std::make_unique<x23::CoroPoll>(*db_coord_pool);
-  x23::UniqueFd db_coord_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.db_coordinator_port()}
-                           .to_addr());
-  db_coord_client_t db_coord_client =
-      x23::rpc_stream_logged(*db_coord_cp, db_coord_fd.release())
-          ->client(DbSched1{});
 
   // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>(1);
@@ -335,13 +312,10 @@ create_clients(const MempoolTestServer &server)
 
   auto interface =
       std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
-                                std::move(db_coord_client),
                                 std::move(db_sched_client),
                                 std::move(exec_client));
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
-          .db_coord_pool = std::move(db_coord_pool),
-          .db_coord_cp = std::move(db_coord_cp),
           .db_sched_pool = std::move(db_sched_pool),
           .db_sched_cp = std::move(db_sched_cp),
           .exec_pool = std::move(exec_pool),

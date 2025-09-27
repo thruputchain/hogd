@@ -4,7 +4,6 @@
 #include <span>
 #include <utility>
 
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"

@@ -25,8 +25,6 @@ namespace hogd {
 using coord_client_t =
     CoordScheduler1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-using db_coord_client_t =
-    DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 using db_sched_client_t =
     DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
