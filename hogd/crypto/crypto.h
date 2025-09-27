@@ -6,8 +6,8 @@ extern "C" {
 #include "blake3.h"
 }
 
-#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
-#include <sodium.h>
+#include <openssl/rand.h> // NOLINT(misc-include-cleaner)
+#include <openssl/sha.h>  // NOLINT(misc-include-cleaner)
 
 #include <array>
 #include <cassert>
@@ -25,6 +25,7 @@ extern "C" {
 #include "hogd/base/types.h"
 #include "hogd/rust/crypto/bindings.h"
 #include "types.hh"
+#include <sodium.h>
 
 namespace hogd {
 
@@ -33,7 +34,9 @@ namespace hogd {
 inline void
 read_random(x23::is_bytespan auto buf)
 {
-  randombytes_buf(reinterpret_cast<uint8_t *>(buf.data()), buf.size());
+  if (RAND_bytes(reinterpret_cast<uint8_t *>(buf.data()), buf.size()) != 1) {
+    throw std::runtime_error("Failed to read random bytes");
+  }
 }
 
 // sha256 returns the SHA256 hash of buf.
@@ -113,8 +116,8 @@ private:
 };
 
 // confirm our types are the same as libsodium.
-static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
-static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
+// static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
+// static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
@@ -130,11 +133,15 @@ ed25519_keygen()
 {
   Ed25519PublicKey pk;
   Ed25519SecretKey sk;
-  static_assert(sizeof(Ed25519PublicKey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-  static_assert(sizeof(Ed25519SecretKey) == crypto_sign_ed25519_SECRETKEYBYTES);
-  [[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(), sk.data());
+  static_assert(sizeof(Ed25519PublicKey) == ED25519_PUBLIC_KEY_SIZE);
+  static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
+  std::array<uint8_t, 32> random_bytes;
+  read_random(random_bytes);
+  ed25519_dalek_keygen(random_bytes.data(), pk.data(), sk.data());
+  //[[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(),
+  // sk.data());
   // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
+  // assert(ret == 0);
   return {pk, sk};
 }
 
@@ -167,9 +174,12 @@ inline Ed25519Signature
 ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
-  ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[32]>(sk.data()),
-                     reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
-                     reinterpret_cast<uint8_t (*)[64]>(sig.data()));
+  [[maybe_unused]] uint8_t ret =
+      ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[64]>(sk.data()),
+                         reinterpret_cast<const uint8_t *>(msg.data()),
+                         msg.size(),
+                         reinterpret_cast<uint8_t (*)[64]>(sig.data()));
+  assert(ret == 0);
   return sig;
 }
 

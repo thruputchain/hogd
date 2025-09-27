@@ -121,7 +121,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 /// Sign a message with ed25519
 ///
 /// # Parameters
-/// - `secret_key`: 32-byte secret key array
+/// - `secret_keypair`: 64-byte secret key array
 /// - `message_ptr`: Pointer to message bytes
 /// - `message_len`: Length of message in bytes
 /// - `signature_out`: Pointer to 64-byte output buffer for signature
@@ -131,34 +131,83 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 ///
 /// # Safety
 /// Caller must ensure:
-/// - secret_key points to valid 32 bytes
+/// - secret_keypair points to valid 64 bytes
 /// - message_ptr points to valid message_len bytes
 /// - signature_out points to valid 64-byte buffer
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_sign(
-    secret_key: *const [u8; 32],
+    secret_keypair: *const [u8; 64],
     message_ptr: *const u8,
     message_len: usize,
     signature_out: *mut [u8; 64],
-) {
-    debug_assert!(!secret_key.is_null());
+) -> u8 {
+    debug_assert!(!secret_keypair.is_null());
     debug_assert!(!message_ptr.is_null());
     debug_assert!(!signature_out.is_null());
 
-    let secret_key_bytes = unsafe { &*secret_key };
+    let secret_keypair_bytes = unsafe { &*secret_keypair };
     let message_bytes =
         unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
     let signature_out_bytes = unsafe { &mut *signature_out };
 
-    // Create signing key from secret key bytes
-    let signing_key = SigningKey::from_bytes(secret_key_bytes);
+    // Create signing key from secret keypair bytes
+    let signing_key = match SigningKey::from_keypair_bytes(secret_keypair_bytes)
+    {
+        Ok(key) => key,
+        Err(_) => {
+            return 1;
+        }
+    };
 
     // Sign the message
     let signature = signing_key.sign(message_bytes);
 
     // Copy signature to output buffer
     signature_out_bytes.copy_from_slice(&signature.to_bytes());
+    0
 }
+
+/// Generate a new ed25519 keypair given a random seed
+///
+/// # Parameters
+/// - `random_bytes`: Pointer to 32-byte random bytes
+/// - `public_key_out`: Pointer to 32-byte output buffer for public key
+/// - `secret_keypair_out`: Pointer to 64-byte output buffer for secret key
+///
+/// # Safety
+/// Caller must ensure:
+/// - random_bytes points to valid 32 bytes
+/// - public_key_out points to valid 32 bytes
+/// - secret_keypair_out points to valid 64 bytes
+#[no_mangle]
+pub unsafe extern "C" fn ed25519_dalek_keygen(
+    random_bytes: *const u8,
+    public_key_out: *mut u8,
+    secret_keypair_out: *mut u8,
+) {
+    debug_assert!(!random_bytes.is_null());
+    debug_assert!(!public_key_out.is_null());
+    debug_assert!(!secret_keypair_out.is_null());
+
+    debug_assert_eq!(ED25519_SECRET_KEYPAIR_SIZE, 64);
+    debug_assert_eq!(ED25519_PUBLIC_KEY_SIZE, 32);
+
+    let random_bytes_bytes =
+        unsafe { core::slice::from_raw_parts(random_bytes, 32) };
+    let public_key_out_bytes =
+        unsafe { core::slice::from_raw_parts_mut(public_key_out, 32) };
+    let secret_keypair_out_bytes =
+        unsafe { core::slice::from_raw_parts_mut(secret_keypair_out, 64) };
+
+    let signing_key =
+        SigningKey::from_bytes(random_bytes_bytes.try_into().unwrap());
+    let public_key = signing_key.verifying_key().to_bytes();
+    public_key_out_bytes.copy_from_slice(&public_key);
+    secret_keypair_out_bytes.copy_from_slice(&signing_key.to_keypair_bytes());
+}
+
+pub const ED25519_SECRET_KEYPAIR_SIZE: usize = 64;
+pub const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 
 #[cfg(test)]
 mod tests {

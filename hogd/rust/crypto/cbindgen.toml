@@ -60,7 +60,7 @@ usize_is_size_t = true
 
 
 [export]
-include = []
+include = ["ED25519_SECRET_KEYPAIR_SIZE", "ED25519_PUBLIC_KEY_SIZE"]
 exclude = []
 # prefix = "CAPI_"
 item_types = []
