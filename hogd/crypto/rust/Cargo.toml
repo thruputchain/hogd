@@ -1,5 +1,5 @@
 [package]
-name = "ed25519_lib"
+name = "rust_crypto"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.81"
@@ -8,6 +8,7 @@ rust-version = "1.81"
 
 [dependencies]
 ed25519-dalek = { version = "2.2.0", features = ["batch"] }
+siphasher = "1.0.1"
 
 [dev-dependencies]
 rand = "0.8.5"

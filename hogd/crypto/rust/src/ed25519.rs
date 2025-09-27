@@ -1,3 +1,5 @@
+#![no_std]
+
 use ed25519_dalek::{
     verify_batch, Signature, Signer, SigningKey, Verifier, VerifyingKey,
 };

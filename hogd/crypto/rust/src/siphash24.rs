@@ -1,5 +1,5 @@
 use siphasher::sip::SipHasher24;
-use std::hash::{Hash, Hasher};
+use core::hash::{Hash, Hasher};
 
 
 /// Compute SipHash24 with the given key and data

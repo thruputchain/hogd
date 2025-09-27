@@ -27,7 +27,11 @@ BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
-cargo +nightly clippy --no-deps -- -D warnings &
+{
+  cd ${ROOT_DIR}/hogd/hogexec/wasmi && cargo +nightly clippy --no-deps -- -D warnings
+  cd ${ROOT_DIR}/hogd/crypto/siphash24 && cargo clippy --no-deps -- -D warnings  
+  cd ${ROOT_DIR}/hogd/crypto/ed25519 && cargo clippy --no-deps -- -D warnings
+} &
 CLIPPY_PID=$!
 
 # Run clang-tidy
