@@ -108,7 +108,7 @@ add_executable(
 
 target_link_libraries(
   runtime
-  wasmi_lib
+  unified_lib
   runtime_trampoline
   protocol
   metrics

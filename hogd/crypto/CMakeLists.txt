@@ -1,5 +1,5 @@
 # create crypto module library
-add_subdirectory(rust)
+# Note: rust crypto is now built via the main rust workspace
 
 add_library(crypto_interface INTERFACE)
 add_dependencies(crypto_interface libsodium_build-configure)
@@ -20,7 +20,7 @@ target_include_directories(crypto_interface
 
 add_dependencies(
   crypto_interface 
-  generate_rust_crypto_ffi_h
+  generate_crypto_ffi_h
 )
 
 add_library(crypto_objects OBJECT crypto.cc)
@@ -46,7 +46,7 @@ target_link_libraries(
   OpenSSL::SSL
   OpenSSL::Crypto
   blake3
-  rust_crypto
+  unified_lib
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)
