@@ -1,5 +1,5 @@
 # Import targets defined in a package or workspace manifest `Cargo.toml` file
-corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib LOCKED FROZEN)
+corrosion_import_crate(MANIFEST_PATH ./Cargo.toml NO_STD CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
 corrosion_set_env_vars(rust_crypto CARGO_NET_OFFLINE=true)
 corrosion_add_target_rustflags(rust_crypto "-C target-cpu=native")
