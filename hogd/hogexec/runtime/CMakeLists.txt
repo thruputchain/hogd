@@ -109,7 +109,6 @@ add_executable(
 target_link_libraries(
   runtime
   unified_lib
-  runtime_trampoline
   protocol
   metrics
   hogd
