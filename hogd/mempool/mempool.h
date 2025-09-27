@@ -4,7 +4,6 @@
 #include <chrono>
 
 #include "coord_sched.hh"
-#include "db_coord.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/types.h"

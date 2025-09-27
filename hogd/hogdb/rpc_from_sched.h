@@ -52,23 +52,24 @@ public:
                                 ContractAddressBatch accounts);
 
   // RPC methods
-  x23::Async<DbResult> dbsched_create_snapshot(BlockID parent_id,
-                                               BlockID new_id,
-                                               BlockExecutionMode mode);
+  x23::Async<DbSchedResult> dbsched_create_snapshot(BlockID parent_id,
+                                                    BlockID new_id,
+                                                    BlockExecutionMode mode);
 
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id);
-  x23::Async<DbResult> dbsched_abandon_snapshot(BlockID id);
+  x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
 
   static x23::Async<DbCatchupResult> dbsched_catchup(BlockHeight height)
   {
     co_return DbCatchupResult{
-        DbResult::DbResultError}; // TODO(geoff): unimplemented
+        DbSchedResult::DbSchedResultError}; // TODO(geoff): unimplemented
   }
 
   x23::Async<DbTipResult> dbsched_get_tip();
 
-  x23::Async<DbResult> dbsched_load_genesis_block(GenesisBlock genesis_block);
+  x23::Async<DbSchedResult>
+  dbsched_load_genesis_block(GenesisBlock genesis_block);
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 

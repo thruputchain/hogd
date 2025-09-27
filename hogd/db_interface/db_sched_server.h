@@ -36,41 +36,47 @@ public:
   static x23::Async<void> dbsched_null() { co_return; }
 
   static x23::Async<HogAgeResult>
-  HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+  dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   {
     co_return HogAgeResult(DbSchedResult::DbSchedResultError);
   }
 
   static x23::Async<DbSchedResult>
-  HogDBSchedServer::dbsched_write_hog_ages(const HogAgeBatch &ages)
+  dbsched_write_hog_ages(const HogAgeBatch &ages)
   {
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  x23::Async<DbResult> dbsched_create_snapshot(BlockID parent_id,
-                                               BlockID new_id,
-                                               BlockExecutionMode mode);
-  static x23::Async<DbResult> dbsched_open_snapshot(BlockID id)
+  static x23::Async<DbAccountAuthDataBatchResult>
+  dbsched_get_account_auth_data(BlockID block_id, ContractAddressBatch accounts)
   {
-    co_return DbResult::DbResultError; // TODO(geoff): unimplemented
+    co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+  }
+
+  x23::Async<DbSchedResult> dbsched_create_snapshot(BlockID parent_id,
+                                                    BlockID new_id,
+                                                    BlockExecutionMode mode);
+  static x23::Async<DbSchedResult> dbsched_open_snapshot(BlockID id)
+  {
+    co_return DbSchedResult::DbSchedResultError; // TODO(geoff): unimplemented
   }
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
-  static x23::Async<DbResult> dbsched_abandon_snapshot(BlockID id);
+  static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
 
   static x23::Async<DbCatchupResult> dbsched_catchup(BlockHeight height)
   {
     co_return DbCatchupResult{
-        DbResult::DbResultError}; // TODO(geoff): unimplemented
+        DbSchedResult::DbSchedResultError}; // TODO(geoff): unimplemented
   }
 
   static x23::Async<DbTipResult> dbsched_get_tip()
   {
     co_return DbTipResult{
-        DbResult::DbResultError}; // TODO(geoff): unimplemented
+        DbSchedResult::DbSchedResultError}; // TODO(geoff): unimplemented
   }
 
-  x23::Async<DbResult>
+  x23::Async<DbSchedResult>
   dbsched_load_genesis_block(GenesisBlock const &genesis_block);
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height)

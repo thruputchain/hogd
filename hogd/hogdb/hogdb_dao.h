@@ -18,12 +18,12 @@
 
 // xdr types
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
+#include "sched_coord.hh"
 #include "types.hh"
 
 #include "hogd/base/span.h"

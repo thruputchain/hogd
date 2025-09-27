@@ -15,8 +15,8 @@
 
 // generated x23 headers
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
+#include "sched_coord.hh"
 
 #include "rpc_types.hh"
 #include "types.hh"
@@ -39,16 +39,16 @@ namespace hogd {
 namespace {
 
 template<typename T>
-DbResult
+DbSchedResult
 to_db_result(HogDBStatus<T> ret)
 {
   // TODO(abelay): the RPC error codes ought to be the same as or similar to
   // HogDBStatus; the current ones don't capture the range of possible errors.
   if (!ret) {
     error("to_db_result error: {}", ret.error());
-    return DbResult::DbResultError;
+    return DbSchedResult::DbSchedResultError;
   }
-  return DbResult::DbResultOK;
+  return DbSchedResult::DbSchedResultOK;
 }
 
 } // namespace
@@ -113,15 +113,15 @@ HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
 }
 
 x23::Async<DbTipResult>
-HogDBCoordServer::dbsched_get_tip()
+HogDBSchedServer::dbsched_get_tip()
 {
-  DbTipResult ret(DbResult::DbResultOK);
+  DbTipResult ret(DbSchedResult::DbSchedResultOK);
   ret.db_tip() = ctx_.get_tip();
   co_return ret;
 }
 
 HogDBStatus<void>
-HogDBCoordServer::commit_block(BlockID id)
+HogDBSchedServer::commit_block(BlockID id)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -166,8 +166,8 @@ HogDBCoordServer::commit_block(BlockID id)
   return {};
 }
 
-x23::Async<DbResult>
-HogDBCoordServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
+x23::Async<DbSchedResult>
+HogDBSchedServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
                                           BlockExecutionMode mode)
 {
   if constexpr (is_debug_build()) {
@@ -179,7 +179,7 @@ HogDBCoordServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-HogDBCoordServer::dbsched_commit_snapshot(BlockID id)
+HogDBSchedServer::dbsched_commit_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
@@ -187,34 +187,34 @@ HogDBCoordServer::dbsched_commit_snapshot(BlockID id)
   }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
-    co_return DbBlockResult(DbResult::DbResultError);
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   HogDBStatus<void> ret = commit_block(id);
   if (!ret)
-    co_return DbBlockResult(DbResult::DbResultError);
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
-  DbBlockResult result(DbResult::DbResultOK);
+  DbBlockResult result(DbSchedResult::DbSchedResultOK);
   result.block_hash() = ctx_.get_tip().hash;
   co_return result;
 }
 
-x23::Async<DbResult>
-HogDBCoordServer::dbsched_abandon_snapshot(BlockID id)
+x23::Async<DbSchedResult>
+HogDBSchedServer::dbsched_abandon_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_abandon(id);
   }
   BlockTX *ret = ctx_.get_block_tx(id);
   if (!ret)
-    co_return DbResult::DbResultError;
+    co_return DbSchedResult::DbSchedResultError;
 
   BlockTX &btx = *ret;
   btx.abort();
   ctx_.close_block_tx(id);
-  co_return DbResult::DbResultOK;
+  co_return DbSchedResult::DbSchedResultOK;
 }
 
 x23::Async<DbBlockResult>
-HogDBCoordServer::dbsched_close_snapshot(BlockID id) // NOLINT
+HogDBSchedServer::dbsched_close_snapshot(BlockID id) // NOLINT
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_close(id);
@@ -225,7 +225,7 @@ HogDBCoordServer::dbsched_close_snapshot(BlockID id) // NOLINT
 
   // TODO(abelay): we could potential free memory here too.
 
-  DbBlockResult ret(DbResult::DbResultOK);
+  DbBlockResult ret(DbSchedResult::DbSchedResultOK);
   // TODO(jhumphri): We have not committed the [ItemChange]s yet, so this root
   // hash is invalid. Discuss with Geoff and David about how to resolve this.
   ctx_.get_trie().generate_top_level_hashes();
@@ -258,7 +258,7 @@ get_port(int fd)
 } // namespace
 
 void
-HogDBCoordServer::start_server(uint16_t port)
+HogDBSchedServer::start_server(uint16_t port)
 {
   {
     auto lfd = x23::tcplisten(port);
@@ -271,7 +271,7 @@ HogDBCoordServer::start_server(uint16_t port)
     port_ = get_port(lfd.get());
     cv_.notify_all();
 
-    [](x23::CoroPoll &cp, HogDBCoordServer *server,
+    [](x23::CoroPoll &cp, HogDBSchedServer *server,
        x23::UniqueFd lfd) -> x23::Detached {
       co_await cp.pool_.bg();
       while (auto c = co_await cp.accept(lfd)) {
@@ -281,19 +281,19 @@ HogDBCoordServer::start_server(uint16_t port)
   }
 }
 
-x23::Async<DbResult>
-HogDBCoordServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
+x23::Async<DbSchedResult>
+HogDBSchedServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
 {
   constexpr static BlockID kGenesisBlockID = 0;
   if (ctx_.get_tip().height != 0) {
     error("Genesis block can only be loaded if the database has no blocks");
-    co_return DbResult::DbResultError;
+    co_return DbSchedResult::DbSchedResultError;
   }
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
     error("failed to open block tx: {}", r.error());
-    co_return DbResult::DbResultError;
+    co_return DbSchedResult::DbSchedResultError;
   }
 
   auto *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
@@ -342,7 +342,7 @@ HogDBCoordServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
   if (failure) {
     error("genesis block initialization failed");
     itx->rollback_to_savepoint(depth - 1);
-    co_return DbResult::DbResultError;
+    co_return DbSchedResult::DbSchedResultError;
   }
 
   if constexpr (is_debug_build()) {
@@ -355,7 +355,7 @@ HogDBCoordServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
 }
 
 x23::Async<DbShardResult>
-HogDBCoordServer::dbsched_shard_restore(BlockHeight height)
+HogDBSchedServer::dbsched_shard_restore(BlockHeight height)
 {
   co_return DbShardResult::ShardOK;
 }

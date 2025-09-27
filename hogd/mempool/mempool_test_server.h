@@ -17,7 +17,6 @@
 #include "contract_loader.h"
 #include "coord.hh"
 #include "coord_sched.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
@@ -43,6 +42,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -98,7 +98,7 @@ public:
       db_executor_server_->start_server(/*port=*/0);
       executor_db_port_ = db_executor_server_->port();
 
-      db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
+      db_coordinator_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_coordinator_server_->start_server(/*port=*/0);
       db_coordinator_port_ = db_coordinator_server_->port();
 
@@ -231,7 +231,7 @@ private:
   uint16_t executor_db_port_;
 
   // The database server that the coordinator accesses.
-  std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
+  std::unique_ptr<HogDBSchedServer> db_coordinator_server_;
   uint16_t db_coordinator_port_;
 
   // The database server that the scheduler accesses.
@@ -309,7 +309,7 @@ create_clients(const MempoolTestServer &server)
                            .to_addr());
   db_coord_client_t db_coord_client =
       x23::rpc_stream_logged(*db_coord_cp, db_coord_fd.release())
-          ->client(DbCoord1{});
+          ->client(DbSched1{});
 
   // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>(1);

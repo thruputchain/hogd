@@ -44,8 +44,8 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   // Start the coordinator server
   std::println("Starting coordinator server on port {}", coord_port);
-  HogDBCoordServer db_coord_server(ctx);
-  db_coord_server.start_server(coord_port);
+  HogDBSchedServer db_sched_server(ctx);
+  db_sched_server.start_server(coord_port);
 
   // Start the executor server
   std::println("Starting executor server on port {}", exec_port);

@@ -18,7 +18,7 @@
 
 // XDR headers
 #include "coord.hh"
-#include "db_coord.hh"
+#include "sched_coord.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -111,7 +111,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // start the coordinator server.
   info("starting coordinator server.");
-  HogDBCoordServer coord_server(ctx);
+  HogDBSchedServer coord_server(ctx);
   coord_server.start_server(kCoordServerPort);
 
   // start the executor server.

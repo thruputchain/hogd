@@ -3,7 +3,6 @@
 #include <memory>
 
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
