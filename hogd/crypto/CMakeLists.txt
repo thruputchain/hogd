@@ -1,5 +1,6 @@
 # create crypto module library
 add_subdirectory(ed25519)
+add_subdirectory(siphash24)
 
 add_library(crypto_interface INTERFACE)
 add_dependencies(crypto_interface libsodium_build-configure)
@@ -21,6 +22,7 @@ target_include_directories(crypto_interface
 add_dependencies(
   crypto_interface 
   generate_ed25519_ffi_h
+  generate_siphash24_ffi_h
 )
 
 add_library(crypto_objects OBJECT crypto.cc)
@@ -47,6 +49,7 @@ target_link_libraries(
   OpenSSL::Crypto
   blake3
   ed25519_lib
+  siphash24_lib
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)

@@ -1,4 +1,6 @@
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{
+    verify_batch, Signature, Signer, SigningKey, Verifier, VerifyingKey,
+};
 
 /// Result codes for ed25519 operations
 #[repr(C)]
@@ -58,6 +60,55 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 
     // Verify signature
     match verifying_key.verify(message_bytes, &signature) {
+        Ok(_) => Ed25519Result::Success,
+        Err(_) => Ed25519Result::VerificationFailed,
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageSpan {
+    pub message_ptr: *const u8,
+    pub message_len: usize,
+}
+
+impl MessageSpan {
+    pub fn to_slice(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(self.message_ptr, self.message_len)
+        }
+    }
+}
+
+pub unsafe extern "C" fn ed25519_dalek_verify_batch(
+    public_keys: *const [u8; 32],
+    signatures: *const [u8; 64],
+    messages: *const MessageSpan,
+    num_messages: usize,
+) -> Ed25519Result {
+    debug_assert!(!public_keys.is_null());
+    debug_assert!(!signatures.is_null());
+    debug_assert!(!messages.is_null());
+    let mut pks = Vec::with_capacity(num_messages);
+    let mut sigs = Vec::with_capacity(num_messages);
+    let mut msgs = Vec::with_capacity(num_messages);
+
+    for i in 0..num_messages {
+        let public_key = unsafe { &*public_keys.add(i) };
+        let signature = unsafe { &*signatures.add(i) };
+        let message = unsafe { &*messages.add(i) };
+        pks.push(match VerifyingKey::from_bytes(public_key) {
+            Ok(key) => key,
+            Err(_) => return Ed25519Result::InvalidPublicKey,
+        });
+        sigs.push(match Signature::try_from(signature) {
+            Ok(sig) => sig,
+            Err(_) => return Ed25519Result::InvalidSignature,
+        });
+        msgs.push(message.to_slice());
+    }
+
+    match verify_batch(&msgs, &sigs, &pks) {
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
     }

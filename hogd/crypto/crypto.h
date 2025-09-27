@@ -24,6 +24,7 @@ extern "C" {
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/ed25519/bindings.h"
+#include "hogd/crypto/siphash24/bindings.h"
 #include "types.hh"
 
 namespace hogd {
@@ -119,15 +120,9 @@ static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  uint64_t out;
-  [[maybe_unused]]
-  int ret =
-      crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
-                                 reinterpret_cast<const uint8_t *>(buf.data()),
-                                 buf.size(), key_.data());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
-  return out;
+  return siphash24_hash(reinterpret_cast<const uint8_t (*)[16]>(key_.data()),
+                        reinterpret_cast<const uint8_t *>(buf.data()),
+                        buf.size());
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
