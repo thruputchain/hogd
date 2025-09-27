@@ -83,6 +83,7 @@ impl MessageSpan {
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify_batch(
     public_keys: *const [u8; 32],
     signatures: *const [u8; 64],
