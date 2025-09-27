@@ -149,18 +149,6 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
                x23::is_bytespan auto msg)
 {
-  return crypto_sign_ed25519_verify_detached(
-             reinterpret_cast<const uint8_t *>(signature.data()),
-             reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
-             reinterpret_cast<const uint8_t *>(public_key.data())) == 0;
-}
-
-inline bool
-ed25519_verify_rust(
-    std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
-    std::span<const std::byte, sizeof(Ed25519Signature)> signature,
-    x23::is_bytespan auto msg)
-{
   return ed25519_dalek_verify(
              reinterpret_cast<const uint8_t (*)[32]>(public_key.data()),
              reinterpret_cast<const uint8_t (*)[64]>(signature.data()),
@@ -171,8 +159,8 @@ ed25519_verify_rust(
 // ed25519_verify_rust verifies sig for a msg and publickey using Rust
 // implementation.
 inline bool
-ed25519_verify_rust(const Ed25519PublicKey &publickey,
-                    const Ed25519Signature &sig, x23::is_bytespan auto msg)
+ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
+               x23::is_bytespan auto msg)
 {
   return ed25519_dalek_verify(
              reinterpret_cast<const uint8_t (*)[32]>(publickey.data()),
@@ -181,34 +169,8 @@ ed25519_verify_rust(const Ed25519PublicKey &publickey,
              msg.size()) == Ed25519Result::Success;
 }
 
-// ed25519_verify verifies sig for a msg and publickey.
-inline bool
-ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
-               x23::is_bytespan auto msg)
-{
-  return crypto_sign_ed25519_verify_detached(sig.data(),
-                                             reinterpret_cast<const uint8_t *>(
-                                                 msg.data()),
-                                             msg.size(), publickey.data()) == 0;
-}
-
-// ed25519_sign signs a message with a secret key.
 inline Ed25519Signature
 ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
-{
-  Ed25519Signature sig;
-  [[maybe_unused]]
-  int ret = crypto_sign_ed25519_detached(sig.data(), nullptr,
-                                         reinterpret_cast<const uint8_t *>(
-                                             msg.data()),
-                                         msg.size(), sk.data());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
-  return sig;
-}
-
-inline Ed25519Signature
-ed25519_sign_rust(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
   ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[32]>(sk.data()),

@@ -68,18 +68,6 @@ bm_ed25519_sign(benchmark::State &state)
 BENCHMARK(bm_ed25519_sign)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
-bm_ed25519_sign_rust(benchmark::State &state)
-{
-  auto [pk, sk] = ed25519_keygen();
-  bench_func(state, [sk](std::span<std::byte> buf) {
-    return ed25519_sign_rust(sk, buf);
-  });
-}
-BENCHMARK(bm_ed25519_sign_rust)
-    ->RangeMultiplier(2)
-    ->Range(kMin, kMax); // NOLINT
-
-void
 bm_ed25519_sign_and_verify(benchmark::State &state)
 {
   auto [pk, sk] = ed25519_keygen();
@@ -89,19 +77,6 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
   });
 }
 BENCHMARK(bm_ed25519_sign_and_verify)
-    ->RangeMultiplier(2)
-    ->Range(kMin, kMax); // NOLINT
-
-void
-bm_ed25519_sign_and_verify_rust(benchmark::State &state)
-{
-  auto [pk, sk] = ed25519_keygen();
-  bench_func(state, [pk, sk](std::span<std::byte> buf) {
-    auto sig = ed25519_sign_rust(sk, buf);
-    return ed25519_verify_rust(pk, sig, buf);
-  });
-}
-BENCHMARK(bm_ed25519_sign_and_verify_rust)
     ->RangeMultiplier(2)
     ->Range(kMin, kMax); // NOLINT
 
