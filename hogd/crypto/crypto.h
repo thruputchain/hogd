@@ -25,7 +25,6 @@ extern "C" {
 #include "hogd/base/types.h"
 #include "hogd/rust/crypto/bindings.h"
 #include "types.hh"
-#include <sodium.h>
 
 namespace hogd {
 
@@ -35,7 +34,8 @@ inline void
 read_random(x23::is_bytespan auto buf)
 {
   if (RAND_bytes(reinterpret_cast<uint8_t *>(buf.data()), buf.size()) != 1) {
-    throw std::runtime_error("Failed to read random bytes");
+    perror("Failed to read random bytes");
+    exit(EXIT_FAILURE);
   }
 }
 
