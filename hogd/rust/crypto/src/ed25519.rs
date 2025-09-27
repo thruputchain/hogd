@@ -56,10 +56,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     };
 
     // Parse signature
-    let signature = match Signature::try_from(signature_bytes) {
-        Ok(sig) => sig,
-        Err(_) => return Ed25519Result::InvalidSignature,
-    };
+    let signature = Signature::from(signature_bytes);
 
     // Verify signature
     match verifying_key.verify(message_bytes, &signature) {
@@ -83,6 +80,24 @@ impl MessageSpan {
     }
 }
 
+
+
+/// Verify a batch of ed25519 signatures
+///
+/// # Parameters
+/// - `public_keys`: Pointer to array of 32-byte public keys
+/// - `signatures`: Pointer to array of 64-byte signatures
+/// - `messages`: Pointer to array of MessageSpan
+/// - `num_messages`: Number of messages in the batch
+///
+/// # Returns
+/// Ed25519Result indicating success or failure reason
+///
+/// # Safety
+/// Caller must ensure:
+/// - public_keys points to valid array of num_messages keys, each 32 bytes
+/// - signatures points to valid array of num_messages signatures, each 64 bytes
+/// - messages points to valid array of num_messages MessageSpan
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify_batch(
     public_keys: *const [u8; 32],
@@ -105,10 +120,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
             Ok(key) => key,
             Err(_) => return Ed25519Result::InvalidPublicKey,
         });
-        sigs.push(match Signature::try_from(signature) {
-            Ok(sig) => sig,
-            Err(_) => return Ed25519Result::InvalidSignature,
-        });
+        sigs.push(Signature::from(signature));
         msgs.push(message.to_slice());
     }
 
