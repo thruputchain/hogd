@@ -26,6 +26,8 @@ pub enum Ed25519Result {
 /// Caller must ensure:
 /// - message_ptr points to valid message_len bytes
 /// - message_ptr is valid for the duration of the call
+/// - public_key points to valid 32 bytes
+/// - signature points to valid 64 bytes
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify(
     public_key: *const [u8; 32],
@@ -33,10 +35,9 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     message_ptr: *const u8,
     message_len: usize,
 ) -> Ed25519Result {
-    // Validate input pointers
-    if public_key.is_null() || signature.is_null() || message_ptr.is_null() {
-        return Ed25519Result::InvalidInputLength;
-    }
+    debug_assert!(!public_key.is_null());
+    debug_assert!(!signature.is_null());
+    debug_assert!(!message_ptr.is_null());
 
     let public_key_bytes = unsafe { &*public_key };
     let signature_bytes = unsafe { &*signature };
@@ -78,19 +79,16 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 /// - secret_key points to valid 32 bytes
 /// - message_ptr points to valid message_len bytes
 /// - signature_out points to valid 64-byte buffer
-/// - All pointers are valid for the duration of the call
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_sign(
     secret_key: *const [u8; 32],
     message_ptr: *const u8,
     message_len: usize,
     signature_out: *mut [u8; 64],
-) -> Ed25519Result {
-    // Validate input pointers
-    if secret_key.is_null() || message_ptr.is_null() || signature_out.is_null()
-    {
-        return Ed25519Result::InvalidInputLength;
-    }
+) {
+    debug_assert!(!secret_key.is_null());
+    debug_assert!(!message_ptr.is_null());
+    debug_assert!(!signature_out.is_null());
 
     let secret_key_bytes = unsafe { &*secret_key };
     let message_bytes =
@@ -105,8 +103,6 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
 
     // Copy signature to output buffer
     signature_out_bytes.copy_from_slice(&signature.to_bytes());
-
-    Ed25519Result::Success
 }
 
 /// Get a human-readable description of an Ed25519Result
@@ -192,21 +188,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ed25519_verify_null_pointers() {
-        // Test with null pointers
-        let result = unsafe {
-            ed25519_dalek_verify(
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                0,
-            )
-        };
-
-        assert_eq!(result, Ed25519Result::InvalidInputLength);
-    }
-
-    #[test]
     fn test_ed25519_sign_and_verify() {
         // Generate a test key pair
         let mut csprng = OsRng;
@@ -219,7 +200,7 @@ mod tests {
         let mut signature_out = [0u8; 64];
 
         // Test signing
-        let sign_result = unsafe {
+        unsafe {
             ed25519_dalek_sign(
                 &secret_key_bytes as *const [u8; 32],
                 message.as_ptr(),
@@ -227,8 +208,6 @@ mod tests {
                 &mut signature_out as *mut [u8; 64],
             )
         };
-
-        assert_eq!(sign_result, Ed25519Result::Success);
 
         // Test that the signature verifies
         let verify_result = unsafe {
