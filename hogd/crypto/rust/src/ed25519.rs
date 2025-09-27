@@ -1,8 +1,9 @@
-#![no_std]
-
 use ed25519_dalek::{
     verify_batch, Signature, Signer, SigningKey, Verifier, VerifyingKey,
 };
+
+extern crate alloc;
+use alloc::vec::Vec;
 
 /// Result codes for ed25519 operations
 #[repr(C)]
