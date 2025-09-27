@@ -8,7 +8,7 @@ rust-version = "1.81"
 
 [dependencies]
 ed25519-dalek = { version = "2.2.0", features = ["batch"] }
-siphasher = { version = "1.0.1", default-features = false }
+#siphasher = { version = "1.0.1", default-features = false }
 
 [dev-dependencies]
 rand = "0.8.5"
