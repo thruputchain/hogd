@@ -81,7 +81,7 @@ blake3(const T &value)
 }
 
 // SipHash24Key is the secret key used by SipHash24.
-using SipHash24Key = std::array<uint8_t, 16>;
+using SipHash24Key = std::array<uint64_t, 2>;
 
 // SipHash24 is a non-cryptographic hash function that is designed to prevent
 // denial of service attacks by making it more difficult for an adversary to
@@ -119,7 +119,7 @@ static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  return siphash24_hash(reinterpret_cast<const uint8_t (*)[16]>(key_.data()),
+  return siphash24_hash(key_[0], key_[1],
                         reinterpret_cast<const uint8_t *>(buf.data()),
                         buf.size());
 }

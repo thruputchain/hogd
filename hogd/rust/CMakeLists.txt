@@ -10,6 +10,9 @@ corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
 corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
 
+corrosion_add_target_rustflags(unified_lib "-C target-cpu=native")
+
+
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   corrosion_set_features(unified_lib

@@ -160,30 +160,6 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
     signature_out_bytes.copy_from_slice(&signature.to_bytes());
 }
 
-/// Get a human-readable description of an Ed25519Result
-///
-/// # Parameters
-/// - `result`: The Ed25519Result to describe
-///
-/// # Returns
-/// Pointer to a null-terminated C string describing the result.
-/// The returned pointer is valid for the lifetime of the program.
-#[no_mangle]
-pub extern "C" fn ed25519_result_description(
-    result: Ed25519Result,
-) -> *const i8 {
-    let description = match result {
-        Ed25519Result::Success => "Success\0",
-        Ed25519Result::InvalidPublicKey => "Invalid public key\0",
-        Ed25519Result::InvalidSignature => "Invalid signature\0",
-        Ed25519Result::VerificationFailed => "Signature verification failed\0",
-        Ed25519Result::InvalidInputLength => {
-            "Invalid input length or null pointer\0"
-        }
-    };
-    description.as_ptr() as *const i8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,26 +251,5 @@ mod tests {
         };
 
         assert_eq!(verify_result, Ed25519Result::Success);
-    }
-
-    #[test]
-    fn test_result_descriptions() {
-        let desc = unsafe {
-            std::ffi::CStr::from_ptr(ed25519_result_description(
-                Ed25519Result::Success,
-            ))
-            .to_str()
-            .unwrap()
-        };
-        assert_eq!(desc, "Success");
-
-        let desc = unsafe {
-            std::ffi::CStr::from_ptr(ed25519_result_description(
-                Ed25519Result::InvalidPublicKey,
-            ))
-            .to_str()
-            .unwrap()
-        };
-        assert_eq!(desc, "Invalid public key");
     }
 }
