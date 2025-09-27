@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 
 /// Result codes for ed25519 operations
 #[repr(C)]
@@ -59,6 +59,51 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
     }
+}
+
+/// Sign a message with ed25519
+/// 
+/// # Parameters
+/// - `secret_key`: 32-byte secret key array
+/// - `message_ptr`: Pointer to message bytes
+/// - `message_len`: Length of message in bytes
+/// - `signature_out`: Pointer to 64-byte output buffer for signature
+/// 
+/// # Returns
+/// Ed25519Result indicating success or failure reason
+/// 
+/// # Safety
+/// Caller must ensure:
+/// - secret_key points to valid 32 bytes
+/// - message_ptr points to valid message_len bytes
+/// - signature_out points to valid 64-byte buffer
+/// - All pointers are valid for the duration of the call
+#[no_mangle]
+pub unsafe extern "C" fn ed25519_dalek_sign(
+    secret_key: *const [u8; 32],
+    message_ptr: *const u8,
+    message_len: usize,
+    signature_out: *mut [u8; 64],
+) -> Ed25519Result {
+    // Validate input pointers
+    if secret_key.is_null() || message_ptr.is_null() || signature_out.is_null() {
+        return Ed25519Result::InvalidInputLength;
+    }
+
+    let secret_key_bytes = unsafe { &*secret_key };
+    let message_bytes = unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
+    let signature_out_bytes = unsafe { &mut *signature_out };
+
+    // Create signing key from secret key bytes
+    let signing_key = SigningKey::from_bytes(secret_key_bytes);
+
+    // Sign the message
+    let signature = signing_key.sign(message_bytes);
+
+    // Copy signature to output buffer
+    signature_out_bytes.copy_from_slice(&signature.to_bytes());
+
+    Ed25519Result::Success
 }
 
 /// Get a human-readable description of an Ed25519Result
@@ -152,6 +197,43 @@ mod tests {
         };
         
         assert_eq!(result, Ed25519Result::InvalidInputLength);
+    }
+
+    #[test]
+    fn test_ed25519_sign_and_verify() {
+        // Generate a test key pair
+        let mut csprng = OsRng;
+        let mut secret_key_bytes = [0u8; 32];
+        csprng.fill_bytes(&mut secret_key_bytes);
+        let signing_key = SigningKey::from_bytes(&secret_key_bytes);
+        let verifying_key = signing_key.verifying_key();
+        
+        let message = b"test message for signing";
+        let mut signature_out = [0u8; 64];
+        
+        // Test signing
+        let sign_result = unsafe {
+            ed25519_dalek_sign(
+                &secret_key_bytes as *const [u8; 32],
+                message.as_ptr(),
+                message.len(),
+                &mut signature_out as *mut [u8; 64],
+            )
+        };
+        
+        assert_eq!(sign_result, Ed25519Result::Success);
+        
+        // Test that the signature verifies
+        let verify_result = unsafe {
+            ed25519_dalek_verify(
+                verifying_key.as_bytes() as *const [u8; 32],
+                &signature_out as *const [u8; 64],
+                message.as_ptr(),
+                message.len(),
+            )
+        };
+        
+        assert_eq!(verify_result, Ed25519Result::Success);
     }
 
     #[test]

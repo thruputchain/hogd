@@ -85,7 +85,7 @@ bm_ed25519_sign_and_verify_rust(benchmark::State &state)
 {
   auto [pk, sk] = ed25519_keygen();
   bench_func(state, [pk, sk](std::span<std::byte> buf) {
-    auto sig = ed25519_sign(sk, buf);
+    auto sig = ed25519_sign_rust(sk, buf);
     return ed25519_verify_rust(pk, sig, buf);
   });
 }
