@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "crypto",
+    "wasmi",
+    "unified"
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Common dependencies that crates can inherit
+ed25519-dalek = { version = "2.2.0", features = ["batch"] }
+lru = "0.14.0"
+wasmi = "0.36.0"
+rand = "0.8.5"
+bindgen = "0.71"
+
+# Shared optimization profiles
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = true
