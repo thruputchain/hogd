@@ -22,7 +22,7 @@ extern "C" {
 #include <utility>
 
 #include "hogd/base/compiler.h"
-
+#include "hogd/crypto/ed25519/bindings.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 
@@ -153,6 +153,28 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
              reinterpret_cast<const uint8_t *>(signature.data()),
              reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
              reinterpret_cast<const uint8_t *>(public_key.data())) == 0;
+}
+
+inline bool
+ed25519_verify_rust(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
+               std::span<const std::byte, sizeof(Ed25519Signature)> signature,
+               x23::is_bytespan auto msg)
+{
+  return ed25519_dalek_verify(
+             reinterpret_cast<const uint8_t(*)[32]>(public_key.data()),
+             reinterpret_cast<const uint8_t(*)[64]>(signature.data()),
+             reinterpret_cast<const uint8_t *>(msg.data()), msg.size()) == Ed25519Result::Success;
+}
+
+// ed25519_verify_rust verifies sig for a msg and publickey using Rust implementation.
+inline bool
+ed25519_verify_rust(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
+               x23::is_bytespan auto msg)
+{
+  return ed25519_dalek_verify(
+             reinterpret_cast<const uint8_t(*)[32]>(publickey.data()),
+             reinterpret_cast<const uint8_t(*)[64]>(sig.data()),
+             reinterpret_cast<const uint8_t *>(msg.data()), msg.size()) == Ed25519Result::Success;
 }
 
 // ed25519_verify verifies sig for a msg and publickey.

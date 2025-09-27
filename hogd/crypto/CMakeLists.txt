@@ -1,4 +1,5 @@
 # create crypto module library
+add_subdirectory(ed25519)
 
 add_library(crypto_interface INTERFACE)
 add_dependencies(crypto_interface libsodium_build-configure)
@@ -12,12 +13,27 @@ target_link_libraries(crypto_interface
   OpenSSL::Crypto
 )
 
+target_include_directories(crypto_interface
+  INTERFACE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(
+  crypto_interface 
+  generate_ed25519_ffi_h
+)
+
 add_library(crypto_objects OBJECT crypto.cc)
 target_link_libraries(crypto_objects crypto_interface)
 
 add_library(
   crypto
   $<TARGET_OBJECTS:crypto_objects>
+)
+
+target_include_directories(crypto
+  INTERFACE
+  ${CMAKE_BINARY_DIR}
 )
 
 find_package(OpenSSL REQUIRED)
@@ -30,6 +46,7 @@ target_link_libraries(
   OpenSSL::SSL
   OpenSSL::Crypto
   blake3
+  ed25519_lib
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)
