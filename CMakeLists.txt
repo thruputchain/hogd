@@ -238,11 +238,6 @@ add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
 
-# Enable bcs-cpp
-add_subdirectory(external/bcs-cpp)
-set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
-include_directories(${BCS_CPP_SOURCE_DIR})
-
 # Enable model-checker
 add_subdirectory(external/model-checker)
 set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
