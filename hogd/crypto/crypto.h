@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstdio>
 extern "C" {
 #include "blake3.h"
 }
@@ -83,6 +84,39 @@ blake3(const T &value)
   return blake3(x23::serialize(value));
 }
 
+namespace detail {
+
+template<size_t N>
+auto
+span_to_pointer(std::span<const std::byte, N> span)
+{
+  return reinterpret_cast<const uint8_t (*)[N]>(span.data());
+}
+
+template<size_t N>
+auto
+span_to_pointer(std::array<uint8_t, N> const &data)
+{
+  return span_to_pointer(std::as_bytes(std::span(data)));
+}
+
+template<size_t N>
+auto
+span_to_writable_pointer(std::array<uint8_t, N> &data)
+{
+  return reinterpret_cast<uint8_t (*)[N]>(data.data());
+}
+
+inline MessageSpan
+span_to_message_span(x23::is_bytespan auto msg)
+{
+  return MessageSpan{.message_ptr =
+                         reinterpret_cast<const uint8_t *>(msg.data()),
+                     .message_len = msg.size()};
+}
+
+} // namespace detail
+
 // SipHash24Key is the secret key used by SipHash24.
 using SipHash24Key = std::array<uint64_t, 2>;
 
@@ -115,16 +149,10 @@ private:
   SipHash24Key key_;
 };
 
-// confirm our types are the same as libsodium.
-// static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
-// static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
-
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  return siphash24_hash(key_[0], key_[1],
-                        reinterpret_cast<const uint8_t *>(buf.data()),
-                        buf.size());
+  return siphash24_hash(key_[0], key_[1], detail::span_to_message_span(buf));
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
@@ -137,11 +165,9 @@ ed25519_keygen()
   static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
   std::array<uint8_t, 32> random_bytes;
   read_random(random_bytes);
-  ed25519_dalek_keygen(random_bytes.data(), pk.data(), sk.data());
-  //[[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(),
-  // sk.data());
-  // this libsodium call cannot fail (V1.20).
-  // assert(ret == 0);
+  ed25519_dalek_keygen(detail::span_to_pointer(random_bytes),
+                       detail::span_to_writable_pointer(pk),
+                       detail::span_to_writable_pointer(sk));
   return {pk, sk};
 }
 
@@ -150,11 +176,10 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
                x23::is_bytespan auto msg)
 {
-  return ed25519_dalek_verify(
-             reinterpret_cast<const uint8_t (*)[32]>(public_key.data()),
-             reinterpret_cast<const uint8_t (*)[64]>(signature.data()),
-             reinterpret_cast<const uint8_t *>(msg.data()),
-             msg.size()) == Ed25519Result::Success;
+  return ed25519_dalek_verify(detail::span_to_pointer(public_key),
+                              detail::span_to_pointer(signature),
+                              detail::span_to_message_span(msg)) ==
+         Ed25519Result::Success;
 }
 
 // ed25519_verify_rust verifies sig for a msg and publickey using Rust
@@ -163,11 +188,10 @@ inline bool
 ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                x23::is_bytespan auto msg)
 {
-  return ed25519_dalek_verify(
-             reinterpret_cast<const uint8_t (*)[32]>(publickey.data()),
-             reinterpret_cast<const uint8_t (*)[64]>(sig.data()),
-             reinterpret_cast<const uint8_t *>(msg.data()),
-             msg.size()) == Ed25519Result::Success;
+  return ed25519_dalek_verify(detail::span_to_pointer(publickey),
+                              detail::span_to_pointer(sig),
+                              detail::span_to_message_span(msg)) ==
+         Ed25519Result::Success;
 }
 
 inline Ed25519Signature
@@ -175,10 +199,9 @@ ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
   [[maybe_unused]] uint8_t ret =
-      ed25519_dalek_sign(reinterpret_cast<const uint8_t (*)[64]>(sk.data()),
-                         reinterpret_cast<const uint8_t *>(msg.data()),
-                         msg.size(),
-                         reinterpret_cast<uint8_t (*)[64]>(sig.data()));
+      ed25519_dalek_sign(detail::span_to_pointer(sk),
+                         detail::span_to_message_span(msg),
+                         detail::span_to_writable_pointer(sig));
   assert(ret == 0);
   return sig;
 }

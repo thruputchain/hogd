@@ -5,6 +5,8 @@ use ed25519_dalek::{
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::MessageSpan;
+
 /// Result codes for ed25519 operations
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,17 +39,15 @@ pub enum Ed25519Result {
 pub unsafe extern "C" fn ed25519_dalek_verify(
     public_key: *const [u8; 32],
     signature: *const [u8; 64],
-    message_ptr: *const u8,
-    message_len: usize,
+    message: MessageSpan,
 ) -> Ed25519Result {
     debug_assert!(!public_key.is_null());
     debug_assert!(!signature.is_null());
-    debug_assert!(!message_ptr.is_null());
+    debug_assert!(!message.message_ptr.is_null());
 
     let public_key_bytes = unsafe { &*public_key };
     let signature_bytes = unsafe { &*signature };
-    let message_bytes =
-        unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
+    let message_bytes = message.to_slice();
 
     // Parse public key
     let verifying_key = match VerifyingKey::from_bytes(public_key_bytes) {
@@ -62,21 +62,6 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     match verifying_key.verify(message_bytes, &signature) {
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MessageSpan {
-    pub message_ptr: *const u8,
-    pub message_len: usize,
-}
-
-impl MessageSpan {
-    pub fn to_slice(&self) -> &[u8] {
-        unsafe {
-            core::slice::from_raw_parts(self.message_ptr, self.message_len)
-        }
     }
 }
 
@@ -132,8 +117,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 ///
 /// # Parameters
 /// - `secret_keypair`: 64-byte secret key array
-/// - `message_ptr`: Pointer to message bytes
-/// - `message_len`: Length of message in bytes
+/// - `message`: MessageSpan
 /// - `signature_out`: Pointer to 64-byte output buffer for signature
 ///
 /// # Returns
@@ -142,22 +126,20 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
 /// # Safety
 /// Caller must ensure:
 /// - secret_keypair points to valid 64 bytes
-/// - message_ptr points to valid message_len bytes
+/// - message.message_ptr points to valid message.message_len bytes
 /// - signature_out points to valid 64-byte buffer
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_sign(
     secret_keypair: *const [u8; 64],
-    message_ptr: *const u8,
-    message_len: usize,
+    message: MessageSpan,
     signature_out: *mut [u8; 64],
 ) -> u8 {
     debug_assert!(!secret_keypair.is_null());
-    debug_assert!(!message_ptr.is_null());
+    debug_assert!(!message.message_ptr.is_null());
     debug_assert!(!signature_out.is_null());
 
     let secret_keypair_bytes = unsafe { &*secret_keypair };
-    let message_bytes =
-        unsafe { core::slice::from_raw_parts(message_ptr, message_len) };
+    let message_bytes = message.to_slice();
     let signature_out_bytes = unsafe { &mut *signature_out };
 
     // Create signing key from secret keypair bytes
@@ -191,9 +173,9 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
 /// - secret_keypair_out points to valid 64 bytes
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_keygen(
-    random_bytes: *const u8,
-    public_key_out: *mut u8,
-    secret_keypair_out: *mut u8,
+    random_bytes: *const [u8; 32],
+    public_key_out: *mut [u8; 32],
+    secret_keypair_out: *mut [u8; 64],
 ) {
     debug_assert!(!random_bytes.is_null());
     debug_assert!(!public_key_out.is_null());
@@ -202,12 +184,9 @@ pub unsafe extern "C" fn ed25519_dalek_keygen(
     debug_assert_eq!(ED25519_SECRET_KEYPAIR_SIZE, 64);
     debug_assert_eq!(ED25519_PUBLIC_KEY_SIZE, 32);
 
-    let random_bytes_bytes =
-        unsafe { core::slice::from_raw_parts(random_bytes, 32) };
-    let public_key_out_bytes =
-        unsafe { core::slice::from_raw_parts_mut(public_key_out, 32) };
-    let secret_keypair_out_bytes =
-        unsafe { core::slice::from_raw_parts_mut(secret_keypair_out, 64) };
+    let random_bytes_bytes = unsafe { &*random_bytes };
+    let public_key_out_bytes = unsafe { &mut *public_key_out };
+    let secret_keypair_out_bytes = unsafe { &mut *secret_keypair_out };
 
     let signing_key =
         SigningKey::from_bytes(random_bytes_bytes.try_into().unwrap());
@@ -243,8 +222,10 @@ mod tests {
             ed25519_dalek_verify(
                 verifying_key.as_bytes() as *const [u8; 32],
                 &signature.to_bytes() as *const [u8; 64],
-                message.as_ptr(),
-                message.len(),
+                MessageSpan {
+                    message_ptr: message.as_ptr(),
+                    message_len: message.len(),
+                },
             )
         };
 
@@ -269,8 +250,10 @@ mod tests {
             ed25519_dalek_verify(
                 verifying_key.as_bytes() as *const [u8; 32],
                 &invalid_signature as *const [u8; 64],
-                message.as_ptr(),
-                message.len(),
+                MessageSpan {
+                    message_ptr: message.as_ptr(),
+                    message_len: message.len(),
+                },
             )
         };
 
@@ -286,15 +269,19 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
         let verifying_key = signing_key.verifying_key();
 
+        let signing_key_bytes = signing_key.to_keypair_bytes();
+
         let message = b"test message for signing";
         let mut signature_out = [0u8; 64];
 
         // Test signing
         unsafe {
             ed25519_dalek_sign(
-                &secret_key_bytes as *const [u8; 32],
-                message.as_ptr(),
-                message.len(),
+                &signing_key_bytes as *const [u8; 64],
+                MessageSpan {
+                    message_ptr: message.as_ptr(),
+                    message_len: message.len(),
+                },
                 &mut signature_out as *mut [u8; 64],
             )
         };
@@ -304,8 +291,10 @@ mod tests {
             ed25519_dalek_verify(
                 verifying_key.as_bytes() as *const [u8; 32],
                 &signature_out as *const [u8; 64],
-                message.as_ptr(),
-                message.len(),
+                MessageSpan {
+                    message_ptr: message.as_ptr(),
+                    message_len: message.len(),
+                },
             )
         };
 
