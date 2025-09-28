@@ -2,7 +2,9 @@ name: Metrics
 
 on:
   push:
-    branches: [ "main" ]  
+    branches: [ "main" ]
+  workflow_dispatch:
+
 
 jobs:
   bench_server:

@@ -188,8 +188,7 @@ pub unsafe extern "C" fn ed25519_dalek_keygen(
     let public_key_out_bytes = unsafe { &mut *public_key_out };
     let secret_keypair_out_bytes = unsafe { &mut *secret_keypair_out };
 
-    let signing_key =
-        SigningKey::from_bytes(random_bytes_bytes.try_into().unwrap());
+    let signing_key = SigningKey::from_bytes(random_bytes_bytes);
     let public_key = signing_key.verifying_key().to_bytes();
     public_key_out_bytes.copy_from_slice(&public_key);
     secret_keypair_out_bytes.copy_from_slice(&signing_key.to_keypair_bytes());

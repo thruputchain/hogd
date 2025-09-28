@@ -36,3 +36,15 @@ target_link_libraries(
   INTERFACE
   runtime_trampoline
 )
+
+# Add cargo tests to ctest
+add_test(
+  NAME rust_workspace_tests
+  COMMAND cargo test --workspace --locked --frozen --offline
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Set environment variables for the test
+set_tests_properties(rust_workspace_tests PROPERTIES
+  ENVIRONMENT "CARGO_NET_OFFLINE=true"
+)
