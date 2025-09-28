@@ -152,7 +152,8 @@ private:
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  return siphash24_hash(key_[0], key_[1], detail::span_to_message_span(std::move(buf)));
+  return siphash24_hash(key_[0], key_[1],
+                        detail::span_to_message_span(std::move(buf)));
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
