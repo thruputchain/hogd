@@ -189,7 +189,7 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                x23::is_bytespan auto msg)
 {
   return ed25519_dalek_verify(detail::span_to_pointer(publickey),
-                              detail::span_to_pointer(sig),
+                              detail::span_to_pointer(std::move(sig)),
                               detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
@@ -200,7 +200,7 @@ ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
   Ed25519Signature sig;
   [[maybe_unused]] uint8_t ret =
       ed25519_dalek_sign(detail::span_to_pointer(sk),
-                         detail::span_to_message_span(msg),
+                         detail::span_to_message_span(std::move(msg)),
                          detail::span_to_writable_pointer(sig));
   assert(ret == 0);
   return sig;
