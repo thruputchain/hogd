@@ -67,6 +67,12 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
+  // These are just stubs that pass through the calls from the coordinator to
+  // hogdb.
+  x23::Async<DbTipResult> schedcoord_get_tip();
+  x23::Async<DbSchedResult>
+  schedcoord_load_genesis_block(GenesisBlock genesis_block);
+
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
   x23::Async<void> schedulercoord_shutdown();

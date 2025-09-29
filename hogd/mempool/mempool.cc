@@ -377,6 +377,18 @@ Mempool::mark_block_committed(BlockID block_id)
   }
 }
 
+x23::Async<DbTipResult>
+Mempool::schedcoord_get_tip()
+{
+  return db_sched_client_.dbsched_get_tip();
+}
+
+x23::Async<DbSchedResult>
+Mempool::schedcoord_load_genesis_block(GenesisBlock genesis_block)
+{
+  return db_sched_client_.dbsched_load_genesis_block(genesis_block);
+}
+
 x23::Async<void>
 Mempool::schedulercoord_shutdown()
 {

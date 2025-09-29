@@ -308,12 +308,6 @@ HogDBSchedServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
   co_return to_db_result(commit_block(kGenesisBlockID));
 }
 
-x23::Async<DbShardResult>
-HogDBSchedServer::dbsched_shard_restore(BlockHeight height)
-{
-  co_return DbShardResult::ShardOK;
-}
-
 namespace {
 
 template<typename T> requires std::is_trivially_copyable_v<T>
