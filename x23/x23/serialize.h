@@ -143,9 +143,9 @@ xdr_size_bounds()
     using ops = union_ops<X>;
     return []<size_t... I>(std::index_sequence<I...>) {
       SizeBounds ret{ops::meta::has_void ? 0 : kNoBound, 0};
-      for (auto b :
-           {xdr_size_bounds<typename ops::template union_element_t<I + 1>,
-                            Blacklist..., X>()...}) {
+      for (auto b : std::initializer_list<SizeBounds>{
+               xdr_size_bounds<typename ops::template union_element_t<I + 1>,
+                               Blacklist..., X>()...}) {
         ret.min_ = std::min(ret.min_, b.min_);
         ret.max_ = std::max(ret.max_, b.max_);
       }
