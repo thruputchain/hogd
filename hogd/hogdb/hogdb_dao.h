@@ -24,6 +24,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_contract_refcount.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "types.hh"
 
@@ -156,6 +157,7 @@ public:
   {
     assert(invariants_.empty());
     invariants_.push_back(std::make_unique<HogConservationInvariant>());
+    invariants_.push_back(std::make_unique<HogContractRefcountInvariant>());
   }
 
   bool check_invariants()
@@ -204,6 +206,8 @@ public:
                                   const AccountAuthData &auth);
   HogDBStatus<void> write_address_metadata(Address const &addr,
                                            const DeployedContractHash &hash);
+  HogDBStatus<void> update_contract_refcount(SHA256Hash const &hash,
+                                             int32_t delta);
 
   //
   // WASM Operations

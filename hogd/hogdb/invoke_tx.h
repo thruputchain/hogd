@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -192,6 +193,16 @@ inline HogDBStatus<void>
 InvokeTX::request_deploy_contract(Address const &addr,
                                   const DeployedContractHash &hash)
 {
+  // The executor should block redeployments of contracts that are already
+  // deployed.
+  if (auto r = block_.get_db().read_address_metadata(addr)) {
+    if (r.has_value()) {
+      error("attempted to redeploy contract that is already deployed on "
+            "address {}",
+            addr);
+      return HogDBError(HogDBCode::kInternal);
+    }
+  }
   return request_change(make_address_metadata_item_key(addr),
                         DeployedContractData(hash));
 }

@@ -295,6 +295,27 @@ HogDBDAO::write_address_metadata(Address const &addr,
 }
 
 HogDBStatus<void>
+HogDBDAO::update_contract_refcount(SHA256Hash const &hash, int32_t delta)
+{
+  auto key = make_address_key(hash, Prefix::kWasmCodeRefcount);
+  int32_t before_refcount = 0;
+  auto val = db_.get(key);
+  if (!val) {
+    assert(val.error() == HogDBCode::kNotFound);
+  }
+  else {
+    assert(val->type == kNNInt128);
+    std::ranges::copy(val->value, std::begin(std::as_writable_bytes(
+                                      std::span(&before_refcount, 1))));
+  }
+  int32_t after_refcount = before_refcount + delta;
+  auto ret = db_.put(std::as_bytes(std::span(key)), kNNInt128,
+                     byte_view(cpu_to_le(after_refcount)));
+  update_invariants_post(key, std::move(val));
+  return ret;
+}
+
+HogDBStatus<void>
 HogDBDAO::write_wasm_code(const SHA256Hash &hash,
                           std::span<const std::byte> buf)
 {

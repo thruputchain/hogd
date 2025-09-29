@@ -170,6 +170,10 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                                   std::as_bytes(std::span(buf)))
             .has_value());
   }
+  ret = db.update_contract_refcount(deployed_contract_hash_.hash, 1);
+  if (!ret) {
+    return ret.error();
+  }
   return ret;
 }
 

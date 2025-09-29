@@ -4,6 +4,7 @@ add_library(hogdb_objects OBJECT
   block_tx.cc
   block_id_manager.cc
   invariant_hog_conservation.cc
+  invariant_contract_refcount.cc
   invoke_tx.cc
   item_change.cc
   hogdb_dao.cc
