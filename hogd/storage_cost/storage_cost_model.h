@@ -17,18 +17,20 @@ struct StorageCostModel {
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
       kBaseContractDeploymentCost(kBaseItemCost),
-      kContractDeploymentCostPerByte(1),
-      kRCQCostPerEntry(rcq_cost_per_entry),
+      kContractDeploymentCostPerByte(1), kRCQCostPerEntry(rcq_cost_per_entry),
       kRCQCostPerBlock(rcq_cost_per_block),
       kReplayCacheCostPerEntry(replay_cache_cost_per_entry)
   {}
 
-  // Wrapper class that implements the storage cost model, given a particular config.
+  // Wrapper class that implements the storage cost model, given a particular
+  // config.
   StorageCostModel(StorageCostModelXdr const &model)
     : kBaseItemCost(from_xdr(model.base_data_item_cost)),
       kBytestringCostPerByte(model.bytestring_cost_per_byte),
-      kBaseContractDeploymentCost(from_xdr(model.base_contract_deployment_cost)),
-      kContractDeploymentCostPerByte(from_xdr(model.contract_deployment_cost_per_byte))
+      kBaseContractDeploymentCost(
+          from_xdr(model.base_contract_deployment_cost)),
+      kContractDeploymentCostPerByte(
+          from_xdr(model.contract_deployment_cost_per_byte))
   {}
 
   int128_t get_bytestring_cost(size_t bytestring_len) const;
