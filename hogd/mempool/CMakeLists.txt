@@ -1,10 +1,12 @@
 add_library(
-  mempool
+  libmempool
   rpc_from_coord.cc
+  rpc_from_db.cc
+  rpc_from_exec.cc
   scheduler.cc
 )
 target_link_libraries(
-  mempool
+  libmempool
   base
   crypto
   exec_interface
@@ -14,7 +16,25 @@ target_link_libraries(
   protocol
   runtime
 )
-set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+set_property(TARGET libmempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  mempool 
+  mempool.cc
+)
+target_link_libraries(
+  mempool
+  base
+  crypto
+  exec_interface
+  hogd
+  libmempool
+  merkle
+  protocol
+  runtime
+  contract_loader
+  GTest::gtest_main
+)
 
 add_executable(
   auth_test
@@ -26,7 +46,7 @@ target_link_libraries(
   crypto
   exec_interface
   hogd
-  mempool
+  libmempool
   merkle
   protocol
   runtime
@@ -53,7 +73,7 @@ target_link_libraries(
   crypto
   exec_interface
   hogd
-  mempool
+  libmempool
   merkle
   protocol
   runtime
@@ -80,7 +100,7 @@ target_link_libraries(
   crypto
   exec_interface
   hogd
-  mempool
+  libmempool
   merkle
   protocol
   runtime
