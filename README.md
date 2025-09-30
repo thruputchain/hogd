@@ -33,6 +33,10 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     ~~~~ .sh
     rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     ~~~~
+1. Fetch rust crate dependencies.
+    ~~~~ .sh
+    ./scripts/fetch.sh
+    ~~~~
 
 1. Install cbindgen.
 
