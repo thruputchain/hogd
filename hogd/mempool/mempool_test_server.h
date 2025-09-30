@@ -271,7 +271,7 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
-  std::unique_ptr<MempoolCoordinatorServer> interface;
+  std::unique_ptr<MempoolCoordinatorRpc> interface;
 };
 
 inline Clients
@@ -311,10 +311,10 @@ create_clients(const MempoolTestServer &server)
           ->client(ExecutorSched1{});
 
   auto interface =
-      std::make_unique<MempoolCoordinatorServer>(/*current_block_id=*/0,
-                                                 std::move(coord_client),
-                                                 std::move(db_sched_client),
-                                                 std::move(exec_client));
+      std::make_unique<MempoolCoordinatorRpc>(/*current_block_id=*/0,
+                                              std::move(coord_client),
+                                              std::move(db_sched_client),
+                                              std::move(exec_client));
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_sched_pool = std::move(db_sched_pool),

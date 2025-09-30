@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/rpc_server.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -24,17 +25,16 @@ namespace hogd {
 
 // The mempool accepts transactions from the coordinator along with block
 // nomination and validation requests.
-class MempoolCoordinatorServer {
+class MempoolCoordinatorRpc {
 public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
 
-  MempoolCoordinatorServer(BlockID current_block_id,
-                           coord_client_t &&coord_client,
-                           db_sched_client_t &&db_sched_client,
-                           exec_client_t &&exec_client)
+  MempoolCoordinatorRpc(BlockID current_block_id, coord_client_t &&coord_client,
+                        db_sched_client_t &&db_sched_client,
+                        exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)),
       db_sched_client_(std::move(db_sched_client)),
       exec_client_(std::move(exec_client)), current_block_id_(current_block_id),
@@ -43,11 +43,10 @@ public:
   {}
 
   // Disable copy and move.
-  MempoolCoordinatorServer(const MempoolCoordinatorServer &) = delete;
-  MempoolCoordinatorServer &
-  operator=(const MempoolCoordinatorServer &) = delete;
-  MempoolCoordinatorServer(MempoolCoordinatorServer &&) = delete;
-  MempoolCoordinatorServer &operator=(MempoolCoordinatorServer &&) = delete;
+  MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
+  MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
+  MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
+  MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   Scheduler &scheduler() { return scheduler_; }
   Authentication &authentication() { return authentication_; }
@@ -140,7 +139,8 @@ private:
 
   std::atomic<bool> shutdown_flag_ = false;
 };
+static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
-static_assert(is_SchedulerCoord1<MempoolCoordinatorServer *, x23::Async>);
+class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
 
 } // namespace hogd

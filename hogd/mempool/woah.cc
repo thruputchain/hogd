@@ -8,8 +8,8 @@
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
-#include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_db.h"
+//#include "hogd/mempool/rpc_from_coord.h"
+//#include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/version.h"
 #include "x23/sockio.h"
@@ -44,10 +44,16 @@ mempool_init(const std::string &coordinator_addr)
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
   MempoolExecutorServer exec;
-  // exec.start_server() ...
+  exec.start_server(kExecutorServerPort);
+  CHECK_EQ(exec.port(), kExecutorServerPort);
 
   MempoolDbServer db;
-  // db.start_server() ...
+  db.start_server(kDbServerPort);
+  CHECK_EQ(db.port(), kDbServerPort);
+
+  // TODO(jhumphri): Need to wait for both the executor(s) and db(s) to connect.
+  // Then we can create the [MempoolCoordinatorRpc] and have it register itself
+  // with the coordinator.
 
   return 0;
 }

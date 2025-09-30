@@ -1,21 +1,23 @@
 #pragma once
 
 #include <cassert>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
 #include <sys/socket.h>
 #include <thread>
-#include <type_traits>
 
 #include "hogd/base/status.h"
-#include "hogd/base/types.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "x23/cleanup.h"
 
 namespace hogd {
 
 template<typename RpcImplementation> class RpcServer {
 public:
+  template<typename... Args>
+  explicit RpcServer(Args &&...args) : rpc_(std::forward<Args>(args)...)
+  {}
+
   // Starts the server on the specified port.
   void start_server(uint16_t port)
   {
@@ -29,17 +31,17 @@ public:
     port_ = get_port(lfd.get());
     cv_.notify_all();
 
-    [](x23::CoroPoll &cp, RpcImplementation *server,
+    [](x23::CoroPoll &cp, RpcImplementation &server,
        x23::UniqueFd lfd) -> x23::Detached {
       co_await cp.pool_.bg();
       while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c)->server(server);
+        x23::rpc_stream_logged(cp, *c)->server(&server);
       }
-    }(cp_, this, std::move(lfd));
+    }(cp_, rpc_, std::move(lfd));
   }
 
   // Returns the port that the server is listening on.
-  uint16_t port() const
+  uint16_t port()
   {
     std::unique_lock lk(mtx_);
     cv_.wait(lk, [this] { return port_.has_value(); });
@@ -65,6 +67,8 @@ private:
       throw std::runtime_error("Failed to get socket name");
     return ntohs(saddr.sin_port);
   }
+
+  RpcImplementation rpc_;
 
   x23::ThreadPool pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
