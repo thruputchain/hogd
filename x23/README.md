@@ -261,6 +261,12 @@ also create your `RpcStreams` with `rpc_stream_logger` (see below).
 x23::RpcLogger::default_logfd = 2;
 ```
 
+The default value of the file descriptor is given by the environment
+variable `X23TRACE`.  However, logging of simplified servers is
+triggered a different way described [below][server-logging].
+
+[server-logging]: #simplified-tcp-server-logging
+
 ## Coroutines and `Async<T>`
 
 X23 supports asynchronous remote procedure calls using coroutines.
