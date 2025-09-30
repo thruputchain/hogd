@@ -4,6 +4,7 @@
 #include <netdb.h>
 
 #include "x23/rpc_common.h"
+#include "x23/progname.h"
 #include "x23/sockio.h"
 
 namespace x23 {
