@@ -108,8 +108,7 @@ add_executable(
 
 target_link_libraries(
   runtime
-  wasmi_lib
-  runtime_trampoline
+  unified_lib
   protocol
   metrics
   hogd

@@ -13,7 +13,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/wasmi/bindings.h"
+#include "hogd/rust/wasmi/bindings.h"
 #include "types.hh"
 #include "x23/format.h"
 
