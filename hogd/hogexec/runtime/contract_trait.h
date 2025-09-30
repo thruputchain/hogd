@@ -52,11 +52,10 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using return_t = std::conditional_t<std::is_same_v<R, void>, std::tuple<>, R>;
 };
 
-constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 3>
+constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 2>
     kSerializationFormatLookup = {
         std::pair{"txs", SerializationFormat::kTxs},
         std::pair{"cxs", SerializationFormat::kCxs},
-        std::pair{"bcs", SerializationFormat::kBcs},
 };
 
 } // namespace detail

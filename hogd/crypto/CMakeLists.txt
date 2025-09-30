@@ -2,8 +2,6 @@
 # Note: rust crypto is now built via the main rust workspace
 
 add_library(crypto_interface INTERFACE)
-add_dependencies(crypto_interface libsodium_build-configure)
-#header files for libsodium are added to global include path in toplevel CMakeLists.txt
 target_link_libraries(crypto_interface
   INTERFACE
   protocol
@@ -37,11 +35,9 @@ target_include_directories(crypto
 )
 
 find_package(OpenSSL REQUIRED)
-add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
-  libsodium
   crc32c
   OpenSSL::SSL
   OpenSSL::Crypto

@@ -6,8 +6,6 @@
 #include <tuple>
 #include <type_traits>
 
-#include "bcs/decode.h"
-#include "bcs/encode.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "transaction.hh"
@@ -19,7 +17,7 @@ namespace hogd {
 
 // Group methods for de/serializing calldata into once location, with a common
 // interface.
-enum class SerializationFormat { kBcs, kTxs, kCxs };
+enum class SerializationFormat { kTxs, kCxs };
 
 namespace detail {
 template<typename... Args>
@@ -30,43 +28,6 @@ using deserialize_return_t = std::optional<std::conditional_t<
 } // namespace detail
 
 template<SerializationFormat Format> struct Serializer;
-
-template<> struct Serializer<SerializationFormat::kBcs> {
-
-  template<typename... Args>
-  static std::optional<Calldata> serialize(Args const &...args)
-  {
-    auto r = bcs::encode_to<Calldata>(args...);
-    if (!r.has_value()) {
-      return std::nullopt;
-    }
-    return r.value();
-  }
-
-  template<typename... Args>
-  static auto deserialize(std::span<const std::byte> data)
-      -> detail::deserialize_return_t<Args...>
-  {
-    if constexpr (sizeof...(Args) == 1) {
-      auto r = bcs::decode_from<Args...>(data);
-      if (!r.has_value()) {
-        return std::nullopt;
-      }
-      return std::get<0>(r.value());
-    }
-    else {
-      auto r = bcs::decode_from<std::tuple<std::remove_cvref_t<Args>...>>(data);
-      if (!r.has_value()) {
-        return std::nullopt;
-      }
-      // the bcs library is a bit weird, and returns a tuple of tuples
-      // TODO(geoff): fix, eventually, if we use bcs
-      // There might be a way to avoid this using the parameter packs,
-      // but the error handling gets messy and this works
-      return std::get<0>(std::get<0>(r.value()));
-    }
-  }
-};
 
 template<> struct Serializer<SerializationFormat::kTxs> {
   template<typename... Args>

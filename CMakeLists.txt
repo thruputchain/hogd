@@ -168,66 +168,12 @@ endif()
 # Related to how dependencies are tracked in ExternalProject_Add_StepTargets
 cmake_policy(SET CMP0114 NEW)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
-  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function")
-  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function")
-else()
-  # Turn on minimal optimization for libsodium, so that FORTIFY_SOURCE is active for both debug and release builds
-  # On the presumption that during debugging, we do want the FORTIFY_SOURCE checks to be active
-  # on the libsodium code.
-  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function -O1")
-  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function -O1")
-endif()
-
 if (HAS_CI_FAIL_LOG)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
   set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
 endif()
 
-set(LIBSODIUM_CC "ccache ${CMAKE_C_COMPILER}")
-set(LIBSODIUM_CXX "ccache ${CMAKE_CXX_COMPILER}")
 
-# Enable libsodium
-# --enable-opt sets -march=native and other compiler flags
-# that the libsodium authors deem important
-include(ExternalProject)
-ExternalProject_Add(libsodium_build
-    SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
-    BINARY_DIR ${CMAKE_BINARY_DIR}/libsodium_build
-    CONFIGURE_COMMAND
-    env
-      CC=${LIBSODIUM_CC}
-      CXX=${LIBSODIUM_CXX}
-      CFLAGS=${LIBSODIUM_C_FLAGS}
-      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
-    ${CMAKE_SOURCE_DIR}/external/libsodium/configure 
-      --prefix=<BINARY_DIR>
-      --enable-opt
-      --disable-pie
-      #CC="ccache ${CMAKE_C_COMPILER}" CXX="ccache ${CMAKE_CXX_COMPILER}"
-      CFLAGS=${LIBSODIUM_C_FLAGS}
-      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
-    BUILD_COMMAND make -j${N}
-    INSTALL_COMMAND "" # Skip installation step
-)
-ExternalProject_Add_StepTargets(libsodium_build configure)
-
-ExternalProject_Get_Property(libsodium_build binary_dir)
-set(LIBSODIUM_PCFILEDIR "${binary_dir}")
-set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
-set(LIBSODIUM_INCLUDE_DIRS
-    "${LIBSODIUM_PCFILEDIR}/src/libsodium/include"
-    "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include"
-    "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
-)
-include_directories(${LIBSODIUM_INCLUDE_DIRS})
-
-set(LIBSODIUM_LIBRARY
-"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_STATIC_LIBRARY_SUFFIX}")
-
-add_library(libsodium STATIC IMPORTED)
-set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARY}")
-add_dependencies(libsodium libsodium-build)
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
@@ -237,11 +183,6 @@ include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
-
-# Enable bcs-cpp
-add_subdirectory(external/bcs-cpp)
-set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
-include_directories(${BCS_CPP_SOURCE_DIR})
 
 # Enable model-checker
 add_subdirectory(external/model-checker)
