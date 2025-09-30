@@ -146,8 +146,7 @@ void
 do_client(int port, const char *server)
 {
   auto server_addr =
-      *HostPort{server ? server : "localhost", uformat("{}", port)}.to_addr(
-          true);
+    *HostPort{server ? server : "localhost", uint16_t(port)}.to_addr(true);
   std::stop_source ss;
 
   std::vector<std::jthread> threads;
