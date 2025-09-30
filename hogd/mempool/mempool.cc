@@ -7,10 +7,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
+#include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/init.h"
 #include "hogd/version.h"
 #include "x23/sockio.h"
 

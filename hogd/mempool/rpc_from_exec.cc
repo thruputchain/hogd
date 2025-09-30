@@ -29,7 +29,7 @@
 namespace hogd {
 
 x23::Async<void>
-MempoolExecutorServer::schedexec_intro_exec(ExecCard card)
+MempoolExecutorRpc::schedexec_intro_exec(ExecCard card)
 {
   co_return;
 }

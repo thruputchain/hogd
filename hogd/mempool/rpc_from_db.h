@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/rpc_server.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -21,17 +22,17 @@
 
 namespace hogd {
 
-class MempoolDbServer {
+class MempoolDbRpc {
 public:
   using rpc_service = SchedDb1;
 
-  MempoolDbServer() {}
+  MempoolDbRpc() {}
 
   // Disable copy and move.
-  MempoolDbServer(const MempoolDbServer &) = delete;
-  MempoolDbServer &operator=(const MempoolDbServer &) = delete;
-  MempoolDbServer(MempoolDbServer &&) = delete;
-  MempoolDbServer &operator=(MempoolDbServer &&) = delete;
+  MempoolDbRpc(const MempoolDbRpc &) = delete;
+  MempoolDbRpc &operator=(const MempoolDbRpc &) = delete;
+  MempoolDbRpc(MempoolDbRpc &&) = delete;
+  MempoolDbRpc &operator=(MempoolDbRpc &&) = delete;
 
   x23::Async<void> scheddb_intro_shard(ShardCard card);
 
@@ -40,7 +41,8 @@ public:
 private:
   std::atomic<bool> shutdown_flag_ = false;
 };
+static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 
-static_assert(is_SchedDb1<MempoolDbServer *, x23::Async>);
+class MempoolDbServer : public RpcServer<MempoolDbRpc> {};
 
 } // namespace hogd
