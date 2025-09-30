@@ -433,8 +433,16 @@ private:
     }
 
     {
-      auto r =
-          coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{})();
+      StorageCostModelXdr cost_model_xdr = {
+          .ext = ExtensionPoint(0),
+          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .bytestring_cost_per_byte = 10,
+          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      };
+      auto r = coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{
+          .storage_cost_model = cost_model_xdr,
+      })();
       if (r != DbResult::DbResultOK) {
         throw std::runtime_error(
             "initialize: dbcoord_load_genesis_block failed");
