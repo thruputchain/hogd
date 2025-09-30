@@ -78,7 +78,6 @@ TEST(Ed25519, BasicUsage)
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }
 
-
 } // namespace hogd
 
 int

@@ -1,5 +1,5 @@
 use ed25519_zebra::{
-    SigningKey, Signature, VerificationKey, VerificationKeyBytes
+    Signature, SigningKey, VerificationKey, VerificationKeyBytes,
 };
 
 extern crate alloc;
@@ -47,10 +47,10 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     let signature_bytes = unsafe { &*signature };
     let message_bytes = message.to_slice();
 
-    let vk_bytes : VerificationKeyBytes = (*public_key_bytes).into();
+    let vk_bytes: VerificationKeyBytes = (*public_key_bytes).into();
 
     // Parse public key
-    let verifying_key : VerificationKey = match vk_bytes.try_into() {
+    let verifying_key: VerificationKey = match vk_bytes.try_into() {
         Ok(key) => key,
         Err(_) => return Ed25519Result::InvalidPublicKey,
     };
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
     debug_assert!(!public_keys.is_null());
     debug_assert!(!signatures.is_null());
     debug_assert!(!messages.is_null());
-    let mut pks : Vec<VerificationKey> = Vec::with_capacity(num_messages);
+    let mut pks: Vec<VerificationKey> = Vec::with_capacity(num_messages);
     let mut sigs = Vec::with_capacity(num_messages);
     let mut msgs = Vec::with_capacity(num_messages);
 
@@ -99,7 +99,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
         let public_key = unsafe { &*public_keys.add(i) };
         let signature = unsafe { &*signatures.add(i) };
         let message = unsafe { &*messages.add(i) };
-        let vk_bytes : VerificationKeyBytes = (*public_key).into();
+        let vk_bytes: VerificationKeyBytes = (*public_key).into();
         pks.push(match vk_bytes.try_into() {
             Ok(key) => key,
             Err(_) => return Ed25519Result::InvalidPublicKey,
@@ -146,10 +146,12 @@ pub unsafe extern "C" fn ed25519_dalek_sign(
     let signature_out_bytes = unsafe { &mut *signature_out };
 
     // Create signing key from secret keypair bytes
-    let signing_key = SigningKey::from_bytes(&secret_keypair_bytes[32..].try_into().unwrap());
+    let signing_key =
+        SigningKey::from_bytes(&secret_keypair_bytes[32..].try_into().unwrap());
 
-    let vk_bytes : VerificationKeyBytes = signing_key.verification_key().into();
-    let vk_bytes_expected: &[u8; 32] = &secret_keypair_bytes[..32].try_into().unwrap();
+    let vk_bytes: VerificationKeyBytes = signing_key.verification_key().into();
+    let vk_bytes_expected: &[u8; 32] =
+        &secret_keypair_bytes[..32].try_into().unwrap();
 
     if vk_bytes != (*vk_bytes_expected).into() {
         return 1;
@@ -193,7 +195,7 @@ pub unsafe extern "C" fn ed25519_dalek_keygen(
     let secret_keypair_out_bytes = unsafe { &mut *secret_keypair_out };
 
     let signing_key = SigningKey::from_bytes(random_bytes_bytes);
-    let public_key : [u8; 32] = signing_key.verification_key().into();
+    let public_key: [u8; 32] = signing_key.verification_key().into();
     public_key_out_bytes.copy_from_slice(&public_key);
     secret_keypair_out_bytes[..32].copy_from_slice(&public_key);
     secret_keypair_out_bytes[32..].copy_from_slice(&signing_key.to_bytes());
@@ -205,7 +207,7 @@ pub const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_zebra::{SigningKey};
+    use ed25519_zebra::SigningKey;
     use rand::{rngs::OsRng, RngCore};
 
     #[test]
@@ -215,7 +217,7 @@ mod tests {
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
-        let verifying_key : [u8; 32] = signing_key.verification_key().into();
+        let verifying_key: [u8; 32] = signing_key.verification_key().into();
 
         // Sign a test message
         let message = b"test message";
@@ -243,7 +245,7 @@ mod tests {
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
-        let verifying_key : [u8; 32] = signing_key.verification_key().into();
+        let verifying_key: [u8; 32] = signing_key.verification_key().into();
 
         // Create an invalid signature (all zeros)
         let invalid_signature = [0u8; 64];
@@ -282,9 +284,9 @@ mod tests {
             )
         };
 
-
-        let signing_key = SigningKey::from_bytes(&keypair_bytes[32..].try_into().unwrap());
-        let verifying_key : [u8; 32] = signing_key.verification_key().into();
+        let signing_key =
+            SigningKey::from_bytes(&keypair_bytes[32..].try_into().unwrap());
+        let verifying_key: [u8; 32] = signing_key.verification_key().into();
 
         assert_eq!(verifying_key, pk_bytes);
 

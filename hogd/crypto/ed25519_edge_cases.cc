@@ -127,7 +127,8 @@ const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
     },
     // Case 8: Non-canonical R, should fail under strict.
     // Not obvious to me why this is not allowed in ZIP215.
-    // However, as per https://github.com/novifinancial/ed25519-speccheck/tree/main,
+    // However, as per
+    // https://github.com/novifinancial/ed25519-speccheck/tree/main,
     // none of the implementations tested for ed25519 allow this case.
     // And failing here is the expected behavior for zebra.
     Iacr20201244TestVector{
@@ -1168,15 +1169,15 @@ ZcashTestVector const ZCASH_TEST_VECTORS[196] = {
 TEST(Ed25519Test, ZcashTestVectors)
 {
   // These test vectors are super weird: they're encodings of low-order points,
-  // which essentially makes them verify always for any message (under the batch equation,
-  // the multiplciation by 8 zeroes them out).
+  // which essentially makes them verify always for any message (under the batch
+  // equation, the multiplciation by 8 zeroes them out).
   for (auto const &tv : ZCASH_TEST_VECTORS) {
     EXPECT_EQ(ed25519_verify(tv.public_key_, tv.signature_,
                              std::as_bytes(std::span("Zcash", 5))),
               true);
     EXPECT_EQ(ed25519_verify(tv.public_key_, tv.signature_,
-                std::as_bytes(std::span("Abc", 3))),
- true);
+                             std::as_bytes(std::span("Abc", 3))),
+              true);
   }
 }
 
