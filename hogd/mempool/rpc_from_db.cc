@@ -28,7 +28,7 @@
 namespace hogd {
 
 x23::Async<void>
-MempoolDbServer::scheddb_intro_shard(ShardCard card)
+MempoolDbRpc::scheddb_intro_shard(ShardCard card)
 {
   co_return;
 }
