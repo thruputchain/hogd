@@ -236,6 +236,13 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   ctx_.initialize_cost_model(
       StorageCostModel(genesis_block.storage_cost_model));
+  {
+    auto r = ctx_.get_db().write_cost_model(ctx_.get_cost_model());
+    if (!r.has_value()) {
+      error("failed to write genesis block cost model: {}", r.error());
+      co_return DbResult::DbResultError;
+    }
+  }
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {

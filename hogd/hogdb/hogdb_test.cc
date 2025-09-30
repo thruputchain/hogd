@@ -9,6 +9,7 @@
 // xdr types
 #include "account.hh"
 #include "db_coord.hh"
+#include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
 #include "types.hh"
@@ -136,7 +137,7 @@ TEST_F(HogDBTest, DataAccessObject)
   HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
-    EXPECT_EQ(sizeof(test_nnint128), *rsize);
+    EXPECT_EQ(cost_model_.get_nnint_cost(), *rsize);
   }
   HogDBStatus<uint8_t> rtype = db_.get_item_type(ikey);
   EXPECT_TRUE(rtype);
@@ -156,7 +157,7 @@ TEST_F(HogDBTest, DataAccessObject)
   rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
-    EXPECT_EQ(test_bytes.size(), *rsize);
+    EXPECT_EQ(cost_model_.get_bytestring_cost(test_bytes.size()), *rsize);
   }
   rtype = db_.get_item_type(ikey);
   EXPECT_TRUE(rtype);

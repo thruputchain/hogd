@@ -47,7 +47,7 @@ struct StorageCostModel {
   }
 
   const int128_t kBaseItemCost;
-  const int128_t kBytestringCostPerByte;
+  const int32_t kBytestringCostPerByte;
   const int128_t kBaseContractDeploymentCost;
   const int128_t kContractDeploymentCostPerByte;
 
@@ -56,6 +56,8 @@ struct StorageCostModel {
   const int128_t kRCQCostPerEntry = 0;
   const int128_t kRCQCostPerBlock = 0;
   const int128_t kReplayCacheCostPerEntry = 0;
+
+  StorageCostModelXdr to_xdr() const;
 };
 
 } // namespace hogd

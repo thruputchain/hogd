@@ -145,6 +145,18 @@ HogDBDAO::write_dbtip(const DbTip &tip)
                  std::as_bytes(std::span(buf)));
 }
 
+HogDBStatus<void>
+HogDBDAO::write_cost_model(const StorageCostModel &cost_model)
+{
+  auto buf = x23::serialize(cost_model.to_xdr());
+  auto key = std::as_bytes(std::span(kGlobalCostModelKey));
+  if (db_.get(key)) {
+    error("Multiple versions or changing cost models not supported yet");
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return db_.put(key, 0, std::as_bytes(std::span(buf)));
+}
+
 HogDBStatus<StorageCostModel>
 HogDBDAO::read_cost_model()
 {

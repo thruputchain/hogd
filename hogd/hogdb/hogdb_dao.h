@@ -190,6 +190,7 @@ public:
   HogDBStatus<void> write_dbtip(const DbTip &tip);
 
   HogDBStatus<StorageCostModel> read_cost_model();
+  HogDBStatus<void> write_cost_model(const StorageCostModel &cost_model);
 
   //
   // Address Operations
