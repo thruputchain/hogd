@@ -65,6 +65,20 @@ TEST(Siphash24, BasicUsage)
   EXPECT_NE(hasher(b), hasher2(b));
 }
 
+TEST(Ed25519, BasicUsage)
+{
+  auto [pk, sk] = ed25519_keygen();
+  EXPECT_EQ(pk.size(), 32);
+  EXPECT_EQ(sk.size(), 64);
+
+  std::string_view msg = "test message";
+  std::string_view msg_wrong = "wrong message";
+  auto sig = ed25519_sign(sk, msg);
+  EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
+  EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
+}
+
+
 } // namespace hogd
 
 int

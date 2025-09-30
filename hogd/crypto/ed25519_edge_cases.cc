@@ -1,7 +1,13 @@
 #include "hogd/base/string.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
+#include <cassert>
+#include <cstddef>
+#include <cstring>
 #include <gtest/gtest.h>
+#include <span>
+#include <string_view>
+#include <vector>
 
 // These edge cases are drawn from the test vectors of
 // https://eprint.iacr.org/2020/1244.pdf and the Zcash project's ZIP215 work as
@@ -41,33 +47,34 @@ struct Iacr20201244TestVector {
   bool should_fail_;
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
     // Case 0: Small-order A and R components (should be rejected) but verifies
-    // under either equality check.
+    // under either equality check, allowed in ZIP215
     Iacr20201244TestVector{
         "8c93255d71dcab10e8f379c26200f3c7bd5f09d9bc3068d3ef4edeb4853022b6",
         "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
         "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a00"
         "00000000000000000000000000000000000000000000000000000000000000",
-        true,
+        false,
     },
     // Case 1: Small-order A component (should be rejected) but verifies under
-    // either equality check.
+    // either equality check, allowed in ZIP215
     Iacr20201244TestVector{
         "9bd9f44f4dcc75bd531b56b2cd280b0bb38fc1cd6d1230e14861d861de092e79",
         "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
         "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43a5"
         "bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
-        true,
+        false,
     },
     // Case 2: Small-order R component (should be rejected) but verifies under
-    // either equality check.
+    // either equality check, allowed in ZIP215
     Iacr20201244TestVector{
         "aebf3f2601a0c8c5d39cc7d8911642f740b78168218da8471772b35f9d35b9ab",
         "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
         "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa8c"
         "4bd45aecaca5b24fb97bc10ac27ac8751a7dfe1baff8b953ec9f5833ca260e",
-        true,
+        false,
     },
     // Case 3: Mixed-order A and R, verifies under either equality check, should
     // be accepted.
@@ -79,22 +86,22 @@ const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
         false,
     },
     // Case 4: Mixed-order A and R, only verifies under cofactor equality check,
-    // should be rejected.
+    // should be rejected, allowed in ZIP215
     Iacr20201244TestVector{
         "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
         "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
         "160a1cb0dc9c0258cd0a7d23e94d8fa878bcb1925f2c64246b2dee1796bed5125e"
         "c6bc982a269b723e0668e540911a9a6a58921d6925e434ab10aa7940551a09",
-        true,
+        false,
     },
     // Case 5: Mixed-order A, order-L R, only verifies under cofactor equality
-    // check, should be rejected.
+    // check, should be rejected under strict, allowed in ZIP215
     Iacr20201244TestVector{
         "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
         "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
         "21122a84e0b5fca4052f5b1235c80a537878b38f3142356b2c2384ebad4668b7e4"
         "0bc836dac0f71076f9abe3a53f9c03c1ceeeddb658d0030494ace586687405",
-        true,
+        false,
     },
     // Case 6: Order-L A and R, non-canonical S (> L), should be rejected.
     Iacr20201244TestVector{
@@ -118,7 +125,11 @@ const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
         "71f98a473474f2f13f06f97c20d58cc3f54b8bd0d272f42b695dd7e89a8c22",
         true,
     },
-    // Case 8: Non-canonical R, should fail.
+    // Case 8: Non-canonical R, should fail under strict.
+    // Not obvious to me why this is not allowed in ZIP215.
+    // However, as per https://github.com/novifinancial/ed25519-speccheck/tree/main,
+    // none of the implementations tested for ed25519 allow this case.
+    // And failing here is the expected behavior for zebra.
     Iacr20201244TestVector{
         "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
         "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
@@ -126,33 +137,31 @@ const Iacr20201244TestVector IACR_2020_1244_TEST_VECTORS[12] = {
         "be9678ac102edcd92b0210bb34d7428d12ffc5df5f37e359941266a4e35f0f",
         true},
     // Case 9: Non-canonical R noticed at a different phase of checking in some
-    // implementations, should also fail.
+    // implementations, should also fail, allowed in ZIP215
     Iacr20201244TestVector{
         "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
         "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
         "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffca"
         "8c5b64cd208982aa38d4936621a4775aa233aa0505711d8fdcfdaa943d4908",
-        true},
-    // Case 10: Non-canonical A
+        false},
+    // Case 10: Non-canonical A, allowed in ZIP215
     Iacr20201244TestVector{
         "e96b7021eb39c1a163b6da4e3093dcd3f21387da4cc4572be588fafae23c155b",
         "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5"
         "bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
-        true},
+        false},
     // Case 11: Non-canonical A noticed at a different phase of checking in some
-    // implementations, should also fail.
+    // implementations, should also fail, allowed in ZIP215
     Iacr20201244TestVector{
         "39a591f5321bbe07fd5a23dc2f39d025d74526615746727ceefd6e82ae65c06f",
         "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5"
         "bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
-        true}};
+        false}};
 
 TEST(Ed25519Test, IACR20201244)
 {
-  // Four of these test vectors require ed25519_dalek_verify_strict, instead of
-  // verify.
   for (auto const &tv : IACR_2020_1244_TEST_VECTORS) {
     EXPECT_EQ(!tv.should_fail_,
               ed25519_verify(tv.public_key_, tv.signature_, tv.message_));
@@ -173,6 +182,7 @@ struct ZcashTestVector {
   Ed25519Signature signature_;
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 ZcashTestVector const ZCASH_TEST_VECTORS[196] = {
     ZcashTestVector{
         "0100000000000000000000000000000000000000000000000000000000000000",
@@ -1157,10 +1167,16 @@ ZcashTestVector const ZCASH_TEST_VECTORS[196] = {
 
 TEST(Ed25519Test, ZcashTestVectors)
 {
+  // These test vectors are super weird: they're encodings of low-order points,
+  // which essentially makes them verify always for any message (under the batch equation,
+  // the multiplciation by 8 zeroes them out).
   for (auto const &tv : ZCASH_TEST_VECTORS) {
     EXPECT_EQ(ed25519_verify(tv.public_key_, tv.signature_,
-                             std::as_bytes(std::span("Zcash"))),
-              false);
+                             std::as_bytes(std::span("Zcash", 5))),
+              true);
+    EXPECT_EQ(ed25519_verify(tv.public_key_, tv.signature_,
+                std::as_bytes(std::span("Abc", 3))),
+ true);
   }
 }
 
