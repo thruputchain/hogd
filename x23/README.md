@@ -481,8 +481,8 @@ multiple RPC programs and versions.
 Note that for short RPC functions that always run to completion, you
 do not need to return an `Async<T>`, but rather can return the
 underlying type `T` to save the overhead of allocating a coroutine
-frame.  For example, if `null()` never needs to suspend, fast, it's
-valid to say:
+frame.  For example, if `null()` never needs to suspend, it's valid to
+say:
 
 ``` cpp
 using x23::Async;
@@ -620,7 +620,7 @@ main()
   std::mutex m;
 
   tcp_rpc_server(cp, 5665, [lk=std::unique_lock{m}](auto c) {
-    c->server(&impl, MyVers{});
+    c->server(&impl, myvers{});
   });
 
   // Wait until moved lambda is destroyed (will happen if accept
@@ -713,8 +713,8 @@ multiple TCP connections between the same client and server.
 `SRpcMulticlient` creates one TCP connection per last-level cache
 (LLC) on the machine.  The synchronous RPC stream implementation uses
 two helper threads, one for reading and one for writing.  These will
-be pinned to the each LLC\@.  RPC calls will then be routed to the
-appropriate stream for the invoking thread's LLC\@.  An example:
+be pinned to the each LLC.  RPC calls will then be routed to the
+appropriate stream for the invoking thread's LLC.  An example:
 
 ``` cpp
   char *server = "server.lan";
@@ -727,7 +727,7 @@ appropriate stream for the invoking thread's LLC\@.  An example:
     ea->error().raise("getnameinfo({})", server);
 
   auto client =
-    SRpcMulticlient<RpcLogger>::make(server_addr)->client(MyVers{});
+    SRpcMulticlient<RpcLogger>::make(server_addr)->client(myvers{});
   client.add(5, 5);
 ```
 
