@@ -221,6 +221,14 @@ GenesisBlockBuilder::build() const
         .amount = to_xdr(entry.amount),
     });
   }
+
+  block.storage_cost_model = {
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+  };
   return block;
 }
 } // namespace hogd

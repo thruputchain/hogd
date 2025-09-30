@@ -234,13 +234,8 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
     co_return DbResult::DbResultError;
   }
 
-  ctx_.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
-      .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{12000}),
-      .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-  }));
+  ctx_.initialize_cost_model(
+      StorageCostModel(genesis_block.storage_cost_model));
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);
   if (!r.has_value()) {
