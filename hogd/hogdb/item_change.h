@@ -35,6 +35,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 
 namespace hogd {
@@ -43,42 +44,46 @@ namespace hogd {
 // tracks a change to a DB item. Each class that implements this concept is an
 // item type.
 template<typename T>
-concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
-                           const ItemKey &key, const T &arg) {
-  // applies the change to the ramdb.
-  { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
-  // makes the change's reservation at least as restrictive as arg. However,
-  // does not merge the value change in arg. Returns true if narrowing was
-  // successful.
-  { t.narrow(arg) } -> std::same_as<bool>;
-  // merges the change and reservation in arg (will fail if there is a
-  // conflict).
-  // Returns an upper bound of the TOTAL amount of storage tokens
-  // that must be locked to support the item, after the merge.
-  // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
-  // The actual amount of storage tokens that are locked
-  // will be reduced by the amount locked for the current snapshot.
-  { t.merge(arg) } -> std::same_as<HogDBStatus<int128_t>>;
-  // An upper bound on the amount of storage tokens needed to support the item
-  // change, for the case where the change is the first one applied to the item.
-  // I.e. this is the amount returned by t.merge() for t = empty ItemChange.
-  { t.marginal_storage_cost() } -> std::same_as<int128_t>;
+concept is_item =
+    requires(T t, HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key,
+             const T &arg, const StorageCostModel *cost_model) {
+      // applies the change to the ramdb.
+      { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
+      // makes the change's reservation at least as restrictive as arg. However,
+      // does not merge the value change in arg. Returns true if narrowing was
+      // successful.
+      { t.narrow(arg) } -> std::same_as<bool>;
+      // merges the change and reservation in arg (will fail if there is a
+      // conflict).
+      // Returns an upper bound of the TOTAL amount of storage tokens
+      // that must be locked to support the item, after the merge.
+      // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
+      // The actual amount of storage tokens that are locked
+      // will be reduced by the amount locked for the current snapshot.
+      { t.merge(arg, cost_model) } -> std::same_as<HogDBStatus<int128_t>>;
+      // An upper bound on the amount of storage tokens needed to support the
+      // item change, for the case where the change is the first one applied to
+      // the item. I.e. this is the amount returned by t.merge() for t = empty
+      // ItemChange.
+      { t.marginal_storage_cost(cost_model) } -> std::same_as<int128_t>;
 
-  // reverts the change and reservation in arg that was previously merged.
-  { t.undo_merge(arg) } -> std::same_as<void>;
-  // returns the size in bytes of storage required in ramdb.
-  { t.storage_size() } -> std::same_as<size_t>;
-  // Marks a change as committed.
-  { t.commit_change(arg) } -> std::same_as<void>;
-  // Returns the amount of storage tokens that are actually needed to support
-  // the item, for all of the changes that are currently committed.
-  // The caller is responsible for releasing the difference between the amount
-  // returned by merge, and the difference in this cost before and after a call
-  // to commit_change. Returns std::nullopt if no changes have been committed
-  // (so the cost is the cost of the snapshot item, which isn't stored inside
-  // the item structs).
-  { t.committed_storage_cost() } -> std::same_as<std::optional<int128_t>>;
-};
+      // reverts the change and reservation in arg that was previously merged.
+      { t.undo_merge(arg) } -> std::same_as<void>;
+      // returns the size in bytes of storage required in ramdb.
+      { t.storage_size() } -> std::same_as<size_t>;
+      // Marks a change as committed.
+      { t.commit_change(arg) } -> std::same_as<void>;
+      // Returns the amount of storage tokens that are actually needed to
+      // support the item, for all of the changes that are currently committed.
+      // The caller is responsible for releasing the difference between the
+      // amount returned by merge, and the difference in this cost before and
+      // after a call to commit_change. Returns std::nullopt if no changes have
+      // been committed (so the cost is the cost of the snapshot item, which
+      // isn't stored inside the item structs).
+      {
+        t.committed_storage_cost(cost_model)
+      } -> std::same_as<std::optional<int128_t>>;
+    };
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
 // plus does not overflow. The item's value at commit time is base + delta.
@@ -96,7 +101,8 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const NNInt128 &nnint);
-  HogDBStatus<int128_t> merge(const NNInt128 &nnint);
+  HogDBStatus<int128_t> merge(const NNInt128 &nnint,
+                              const StorageCostModel *cost_model);
   void undo_merge(const NNInt128 &nnint);
 
   static size_t storage_size() { return sizeof(int128_t); }
@@ -106,17 +112,19 @@ public:
 
   void commit_change(const NNInt128 & /*unused*/) { change_committed_ = true; }
 
-  std::optional<int128_t> committed_storage_cost() const
+  std::optional<int128_t>
+  committed_storage_cost(const StorageCostModel *cost_model) const
   {
     if (change_committed_) {
-      return marginal_storage_cost();
+      return marginal_storage_cost(cost_model);
     }
     return std::nullopt;
   }
 
-  constexpr static int128_t marginal_storage_cost()
+  constexpr static int128_t
+  marginal_storage_cost(const StorageCostModel *cost_model)
   {
-    return storage_cost(storage_size());
+    return cost_model->get_nnint_cost();
   }
 
 private:
@@ -153,11 +161,12 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
   bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
-  HogDBStatus<int128_t> merge(const Bytes &bytes)
+  HogDBStatus<int128_t> merge(const Bytes &bytes,
+                              const StorageCostModel *cost_model)
   {
     if (buf_ != bytes.buf_)
       return HogDBError(HogDBCode::kConflict);
-    return marginal_storage_cost();
+    return marginal_storage_cost(cost_model);
   }
   static void undo_merge(const Bytes &bytes) {}
 
@@ -171,17 +180,18 @@ public:
 
   void commit_change(const Bytes & /*unused*/) { change_committed_ = true; }
 
-  std::optional<int128_t> committed_storage_cost() const
+  std::optional<int128_t>
+  committed_storage_cost(const StorageCostModel *cost_model) const
   {
     if (change_committed_) {
-      return marginal_storage_cost();
+      return marginal_storage_cost(cost_model);
     }
     return std::nullopt;
   }
 
-  int128_t marginal_storage_cost() const
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const
   {
-    return storage_cost(storage_size());
+    return cost_model->get_bytestring_cost(buf_.size());
   }
 
 private:
@@ -200,23 +210,29 @@ public:
   static HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                   const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
-  static HogDBStatus<int128_t> merge(const Deletion & /*del*/)
+  static HogDBStatus<int128_t> merge(const Deletion & /*del*/,
+                                     const StorageCostModel *cost_model)
   {
-    return marginal_storage_cost();
+    return marginal_storage_cost(cost_model);
   }
   static void undo_merge(const Deletion &del) {}
   static size_t storage_size() { return 0; }
 
   void commit_change(const Deletion & /*del*/) { change_committed_ = true; }
-  std::optional<int128_t> committed_storage_cost() const
+  std::optional<int128_t>
+  committed_storage_cost(const StorageCostModel *cost_model) const
   {
     if (change_committed_) {
-      return marginal_storage_cost();
+      return marginal_storage_cost(cost_model);
     }
     return std::nullopt;
   }
 
-  constexpr static int128_t marginal_storage_cost() { return 0; }
+  constexpr static int128_t
+  marginal_storage_cost(const StorageCostModel * /*unused*/)
+  {
+    return 0;
+  }
 
   bool change_committed_{false};
 };
@@ -238,11 +254,12 @@ public:
     return true;
   }
   HogDBStatus<int128_t>
-  merge(const DeployedContractData &deployed_contract_data)
+  merge(const DeployedContractData &deployed_contract_data,
+        const StorageCostModel *cost_model)
   {
     assert(deployed_contract_hash_ ==
            deployed_contract_data.deployed_contract_hash_);
-    return marginal_storage_cost();
+    return marginal_storage_cost(cost_model);
   }
   static void undo_merge(const DeployedContractData &deployed_contract_data) {}
   size_t storage_size() const { return deployed_contract_hash_.contract_size; }
@@ -256,17 +273,19 @@ public:
   {
     change_committed_ = true;
   }
-  std::optional<int128_t> committed_storage_cost() const
+  std::optional<int128_t>
+  committed_storage_cost(const StorageCostModel *cost_model) const
   {
     if (change_committed_) {
-      return marginal_storage_cost();
+      return marginal_storage_cost(cost_model);
     }
     return std::nullopt;
   }
 
-  int128_t marginal_storage_cost() const
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const
   {
-    return storage_cost(storage_size());
+    return cost_model->get_contract_size_cost(
+        deployed_contract_hash_.contract_size);
   }
 
   bool change_committed_{false};
@@ -290,7 +309,8 @@ public:
     assert(new_contract_ == new_contract_data.new_contract_);
     return true;
   }
-  HogDBStatus<int128_t> merge(const NewContractData &new_contract_data)
+  HogDBStatus<int128_t> merge(const NewContractData &new_contract_data,
+                              const StorageCostModel * /*unused*/)
   {
     assert(new_contract_ == new_contract_data.new_contract_);
     return 0;
@@ -304,11 +324,19 @@ public:
   }
 
   static void commit_change(const NewContractData & /*new_contract_data*/) {};
-  static std::optional<int128_t> committed_storage_cost() { return 0; }
+  static std::optional<int128_t>
+  committed_storage_cost(const StorageCostModel * /*unused*/)
+  {
+    return 0;
+  }
 
   const Contract &new_contract() const { return new_contract_; }
 
-  constexpr static int128_t marginal_storage_cost() { return 0; }
+  constexpr static int128_t
+  marginal_storage_cost(const StorageCostModel * /*unused*/)
+  {
+    return 0;
+  }
 
 private:
   Contract new_contract_;
@@ -360,20 +388,26 @@ public:
   void narrow(const ItemChange &change);
   // merge merges the reservation and value of a change into this one. It
   // returns kConflict if the change does not commute.
-  HogDBStatus<int128_t> merge(const ItemChange &change);
+  HogDBStatus<int128_t> merge(const ItemChange &change,
+                              const StorageCostModel *cost_model);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
   // commit_change marks a change as committed.
   // The change MUST have been previously merged.
   void commit_change(const ItemChange &change);
 
-  HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key);
-  HogDBStatus<int128_t> marginal_storage_cost(HogDBDAO &db, const ItemKey &key);
-  HogDBStatus<int128_t> marginal_storage_cost() const;
+  HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
+                                       const StorageCostModel *cost_model);
+  HogDBStatus<int128_t>
+  marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
+                        const StorageCostModel *cost_model);
+  HogDBStatus<int128_t>
+  marginal_storage_cost(const StorageCostModel *cost_model) const;
 
-  int128_t committed_storage_cost() const;
-  HogDBStatus<int128_t> committed_storage_cost(HogDBDAO &db,
-                                               const ItemKey &key);
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
+  HogDBStatus<int128_t>
+  committed_storage_cost(HogDBDAO &db, const ItemKey &key,
+                         const StorageCostModel *cost_model);
   auto get_type() const { return type_.index(); }
 
   bool no_storage_cost() const

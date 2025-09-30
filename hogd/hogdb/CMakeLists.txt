@@ -29,6 +29,7 @@ target_link_libraries(
   hogd
   merkle
   genesis
+  storage_cost
 )
 
 # Build the backend database (hogdb) executable

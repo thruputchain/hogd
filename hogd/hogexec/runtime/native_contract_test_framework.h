@@ -141,9 +141,9 @@ public:
   // different storage cost models unimplemented currently
   const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
 
-  const StorageCostModel *get_default_cost_model() const
+  const StorageCostModel *get_default_cost_model()
   {
-    return &kDefaultCostModel;
+    return &ctx_.get_cost_model();
   }
 
 private:
@@ -349,7 +349,7 @@ public:
   void write_deployment(ContractAddress const &addr,
                         std::shared_ptr<const Contract> const &contract);
 
-  const StorageCostModel *get_default_cost_model() const
+  const StorageCostModel *get_default_cost_model()
   {
     return std::visit(
         [&](auto &db_wrapper) { return db_wrapper.get_default_cost_model(); },

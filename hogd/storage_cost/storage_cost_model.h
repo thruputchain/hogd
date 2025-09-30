@@ -34,6 +34,9 @@ struct StorageCostModel {
   {}
 
   int128_t get_bytestring_cost(size_t bytestring_len) const;
+
+  constexpr int128_t get_nnint_cost() const { return kBaseItemCost; }
+
   int128_t get_retrocausal_queue_cost(int64_t active_queue_size,
                                       uint64_t active_block_count) const;
   int128_t get_replay_cache_cost(size_t replay_cache_size) const;
@@ -42,11 +45,6 @@ struct StorageCostModel {
   {
     return contract_size * kContractDeploymentCostPerByte;
   }
-
-  StorageCostModel(const StorageCostModel &) = delete;
-  StorageCostModel &operator=(const StorageCostModel &) = delete;
-  StorageCostModel(StorageCostModel &&) = delete;
-  StorageCostModel &operator=(StorageCostModel &&) = delete;
 
   const int128_t kBaseItemCost;
   const int128_t kBytestringCostPerByte;

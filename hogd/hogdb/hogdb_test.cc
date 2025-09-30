@@ -9,6 +9,8 @@
 // xdr types
 #include "account.hh"
 #include "db_coord.hh"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
@@ -45,6 +47,14 @@ protected:
   }
 
   HogDBDAO db_;
+
+  StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+  });
 };
 
 namespace {
@@ -123,7 +133,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rnnint128) {
     EXPECT_EQ(test_nnint128, *rnnint128);
   }
-  HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey);
+  HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(sizeof(test_nnint128), *rsize);
@@ -143,7 +153,7 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rbytes) {
     EXPECT_EQ(std::as_bytes(std::span(test_bytes)), *rbytes);
   }
-  rsize = db_.get_charged_storage_cost(ikey);
+  rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
     EXPECT_EQ(test_bytes.size(), *rsize);
@@ -166,7 +176,7 @@ TEST_F(HogDBTest, ItemChange)
   {
     auto x = ItemChange(NNInt128(10, 1));
     x.set_snapshot_cost(0);
-    EXPECT_EQ(x.merge(ItemChange(NNInt128(20, 1))),
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(20, 1)), &cost_model_),
               HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
 
@@ -174,7 +184,7 @@ TEST_F(HogDBTest, ItemChange)
   {
     auto x = ItemChange(NNInt128(1, -1));
     x.set_snapshot_cost(0);
-    EXPECT_EQ(x.merge(ItemChange(NNInt128(1, -1))),
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(1, -1)), &cost_model_),
               HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
 
@@ -182,21 +192,21 @@ TEST_F(HogDBTest, ItemChange)
   {
     auto x = ItemChange(NNInt128(0, 10));
     x.set_snapshot_cost(0);
-    EXPECT_TRUE(x.merge(ItemChange(NNInt128(0, 5))));
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(0, 5)), &cost_model_));
   }
 
   // try subtract to zero (no conflict)
   {
     auto x = ItemChange(NNInt128(10, -5));
     x.set_snapshot_cost(0);
-    EXPECT_TRUE(x.merge(ItemChange(NNInt128(10, -5))));
+    EXPECT_TRUE(x.merge(ItemChange(NNInt128(10, -5)), &cost_model_));
   }
 
   // try subtract below zero (conflict)
   {
     auto x = ItemChange(NNInt128(10, -6));
     x.set_snapshot_cost(0);
-    EXPECT_EQ(x.merge(ItemChange(NNInt128(10, -5))),
+    EXPECT_EQ(x.merge(ItemChange(NNInt128(10, -5)), &cost_model_),
               HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
 
@@ -213,14 +223,14 @@ TEST_F(HogDBTest, ItemChange)
   {
     auto x = ItemChange(Bytes(as));
     x.set_snapshot_cost(0);
-    EXPECT_TRUE(x.merge(ItemChange(Bytes(as))));
+    EXPECT_TRUE(x.merge(ItemChange(Bytes(as)), &cost_model_));
   }
 
   // try different bytes (conflict)
   {
     auto x = ItemChange(Bytes(as));
     x.set_snapshot_cost(0);
-    EXPECT_EQ(x.merge(ItemChange(Bytes(bs))),
+    EXPECT_EQ(x.merge(ItemChange(Bytes(bs)), &cost_model_),
               HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
 }
