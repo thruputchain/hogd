@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
@@ -22,6 +23,9 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
+#include "types.hh"
 
 namespace hogd {
 
