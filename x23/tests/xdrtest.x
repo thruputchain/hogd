@@ -177,4 +177,15 @@ struct MultilineCommentPost {
   unsigned hyper value;
 };
 
+union ExtensionPoint switch (int v)
+{
+case 0:
+  void;
+};
+
+struct ParseFailure {
+  ExtensionPoint ext;
+  int value;
+};
+
 

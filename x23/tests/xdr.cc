@@ -144,3 +144,16 @@ TEST(CommentParsing, MultilineComments)
   [[maybe_unused]]
   StellarValueEnum sv_enum = StellarValueEnum::kStellarValue;
 }
+
+TEST(ExtensionPoint, CompileCheck)
+{
+  ParseFailure pf;
+
+  x23::Buf buf = x23::serialize(pf);
+
+  try {
+    deserialize(&pf, x23::BufViewEnd(buf));
+  } catch (const x23::XdrException &e) {
+    GTEST_FAIL() << "parse failure";
+  }
+}

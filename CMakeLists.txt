@@ -184,6 +184,9 @@ if (HAS_CI_FAIL_LOG)
   set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "${CMAKE_SOURCE_DIR}/cmake/fail_wrapper.sh ${ENABLE_CI_FAIL_LOG}")
 endif()
 
+set(LIBSODIUM_CC "ccache ${CMAKE_C_COMPILER}")
+set(LIBSODIUM_CXX "ccache ${CMAKE_CXX_COMPILER}")
+
 # Enable libsodium
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
@@ -192,11 +195,16 @@ ExternalProject_Add(libsodium_build
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     BINARY_DIR ${CMAKE_BINARY_DIR}/libsodium_build
     CONFIGURE_COMMAND
-      ${CMAKE_SOURCE_DIR}/external/libsodium/configure 
+    env
+      CC=${LIBSODIUM_CC}
+      CXX=${LIBSODIUM_CXX}
+      CFLAGS=${LIBSODIUM_C_FLAGS}
+      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
+    ${CMAKE_SOURCE_DIR}/external/libsodium/configure 
       --prefix=<BINARY_DIR>
       --enable-opt
       --disable-pie
-      CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
+      #CC="ccache ${CMAKE_C_COMPILER}" CXX="ccache ${CMAKE_CXX_COMPILER}"
       CFLAGS=${LIBSODIUM_C_FLAGS}
       CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
@@ -229,11 +237,6 @@ include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
-
-# Enable bcs-cpp
-add_subdirectory(external/bcs-cpp)
-set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
-include_directories(${BCS_CPP_SOURCE_DIR})
 
 # Enable model-checker
 add_subdirectory(external/model-checker)
