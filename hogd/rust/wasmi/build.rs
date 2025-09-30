@@ -6,7 +6,7 @@ fn main() {
 
     // Generate Rust bindings from the C header file
     let bindings = bindgen::Builder::default()
-        .header("../runtime_trampoline/ffi_trampolines.h")
+        .header("../../hogexec/runtime_trampoline/ffi_trampolines.h")
         .generate()
         .expect("Unable to generate bindings");
 

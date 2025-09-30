@@ -46,9 +46,7 @@ jobs:
     - name: cargo version check
       run: cargo --version
     - name: cargo fetch
-      run: |
-        (cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)
-        (cd hogd/hogexec/wasmi && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch)
+      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
