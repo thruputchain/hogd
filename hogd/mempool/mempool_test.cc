@@ -8,8 +8,8 @@
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/mempool/authentication.h"
-#include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -235,13 +235,14 @@ TEST(Mempool, AuthChanged)
   // TODO(jhumphri): [generate_txs] should returned properly signed txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, Mempool::kMaxBlockSize + 1);
+      generate_txs(fib_client, MempoolCoordinatorServer::kMaxBlockSize + 1);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * Mempool::kMaxBlockSize * 2);
+                  /*num_hogs=*/5'000'000'000 *
+                      MempoolCoordinatorServer::kMaxBlockSize * 2);
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -273,7 +274,7 @@ TEST(Mempool, AuthChanged)
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
-            Mempool::kMaxBlockSize);
+            MempoolCoordinatorServer::kMaxBlockSize);
 
   // Now check that the last tx is still nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
@@ -290,13 +291,14 @@ TEST(Mempool, AuthInvalidated)
   // TODO(jhumphri): [generate_txs] should returned properly signed txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, Mempool::kMaxBlockSize + 1);
+      generate_txs(fib_client, MempoolCoordinatorServer::kMaxBlockSize + 1);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * Mempool::kMaxBlockSize * 2);
+                  /*num_hogs=*/5'000'000'000 *
+                      MempoolCoordinatorServer::kMaxBlockSize * 2);
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -328,7 +330,7 @@ TEST(Mempool, AuthInvalidated)
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
-            Mempool::kMaxBlockSize);
+            MempoolCoordinatorServer::kMaxBlockSize);
 
   // Now check that the last tx is not nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,

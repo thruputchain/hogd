@@ -1,6 +1,6 @@
 add_library(
   mempool
-  mempool.cc
+  rpc_from_coord.cc
   scheduler.cc
 )
 target_link_libraries(

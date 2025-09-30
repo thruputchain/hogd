@@ -6,7 +6,6 @@ add_xdr(
 	../../protocol/ci_server.x
 	../../protocol/contract.x
 	../../protocol/contract_error.x
-	../../protocol/coord.x
 	../../protocol/coord_sched.x
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
@@ -19,6 +18,8 @@ add_xdr(
 	../../protocol/precompiles.x
 	../../protocol/rpc_types.x
 	../../protocol/sched_coord.x
+	../../protocol/sched_db.x
+	../../protocol/sched_exec.x
 	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x
 	../../protocol/storage_lock.x

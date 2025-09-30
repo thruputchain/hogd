@@ -1,4 +1,4 @@
-#include "hogd/mempool/mempool.h"
+#include "hogd/mempool/rpc_from_coord.h"
 
 #include <algorithm>
 #include <atomic>
@@ -31,7 +31,8 @@ namespace hogd {
 // TODO(jhumphri): When should we remove txs from [vetted_txs_]?
 
 x23::Async<void>
-Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
+MempoolExecutorServer::schedulercoord_submit_unvetted(
+    SignedTransactionBatch batch)
 {
   // TODO(jhumphri): Is any other vetting logic needed?
   SignedTransactionBatch authenticated;
@@ -46,16 +47,16 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
 }
 
 x23::Async<void>
-Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
-                                      SignedTransactionBatch batch)
+MempoolExecutorServer::schedulercoord_submit_vetted(
+    ValidatorID validator_id, SignedTransactionBatch batch)
 {
   scheduler_.add_txs(batch);
   co_return;
 }
 
 x23::Async<bool>
-Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
-                         BlockExecutionMode mode)
+MempoolExecutorServer::create_snapshot(BlockID prev_block_id, BlockID block_id,
+                                       BlockExecutionMode mode)
 {
   DbSchedResult res =
       co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
@@ -64,7 +65,7 @@ Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
 }
 
 x23::Async<void>
-Mempool::abandon_snapshot(BlockID block_id)
+MempoolExecutorServer::abandon_snapshot(BlockID block_id)
 {
   DbSchedResult res =
       co_await db_sched_client_.dbsched_abandon_snapshot(block_id);
@@ -76,7 +77,7 @@ Mempool::abandon_snapshot(BlockID block_id)
 }
 
 x23::Async<void>
-Mempool::close_snapshot(BlockID block_id)
+MempoolExecutorServer::close_snapshot(BlockID block_id)
 {
   DbBlockResult res =
       co_await db_sched_client_.dbsched_close_snapshot(block_id);
@@ -87,7 +88,7 @@ Mempool::close_snapshot(BlockID block_id)
 }
 
 x23::Async<void>
-Mempool::commit_snapshot(BlockID block_id)
+MempoolExecutorServer::commit_snapshot(BlockID block_id)
 {
   DbBlockResult res =
       co_await db_sched_client_.dbsched_commit_snapshot(block_id);
@@ -98,7 +99,7 @@ Mempool::commit_snapshot(BlockID block_id)
 }
 
 x23::Async<void>
-Mempool::finish_block(BlockID block_id)
+MempoolExecutorServer::finish_block(BlockID block_id)
 {
   return exec_client_.executorcoord_finish_block(block_id);
 }
@@ -107,7 +108,8 @@ Mempool::finish_block(BlockID block_id)
 // essence, we are using the Merkle trie as a set. We then compute the root hash
 // of the trie and return it.
 SHA256Hash
-Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
+MempoolExecutorServer::get_block_hash(
+    const x23::Vec<SignedTransactionHash> &hashes)
 {
   CHECK(!hashes.empty());
 
@@ -153,7 +155,7 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
 }
 
 x23::Async<x23::Vec<bool>>
-Mempool::propose_batch(
+MempoolExecutorServer::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
@@ -183,7 +185,7 @@ Mempool::propose_batch(
 }
 
 x23::Async<bool>
-Mempool::open_proposal_block(BlockID block_id)
+MempoolExecutorServer::open_proposal_block(BlockID block_id)
 {
   ExecResult res =
       co_await exec_client_.executorcoord_open_proposal_block(block_id);
@@ -191,7 +193,7 @@ Mempool::open_proposal_block(BlockID block_id)
 }
 
 x23::Async<SchedulerNominationResult>
-Mempool::schedulercoord_nominate(DbTip db_tip)
+MempoolExecutorServer::schedulercoord_nominate(DbTip db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
@@ -253,8 +255,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
 }
 
 x23::Async<bool>
-Mempool::validate_batch(BlockID block_id,
-                        const x23::Vec<ProposedTransaction> &txs)
+MempoolExecutorServer::validate_batch(BlockID block_id,
+                                      const x23::Vec<ProposedTransaction> &txs)
 {
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
@@ -269,7 +271,7 @@ Mempool::validate_batch(BlockID block_id,
 }
 
 x23::Async<bool>
-Mempool::open_validation_block(BlockID block_id)
+MempoolExecutorServer::open_validation_block(BlockID block_id)
 {
   ExecResult res =
       co_await exec_client_.executorcoord_open_validation_block(block_id);
@@ -277,7 +279,8 @@ Mempool::open_validation_block(BlockID block_id)
 }
 
 x23::Async<SchedulerValidationResult>
-Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
+MempoolExecutorServer::schedulercoord_validate(DbTip db_tip,
+                                               Nomination nomination)
 {
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
@@ -367,7 +370,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
 }
 
 void
-Mempool::mark_block_committed(BlockID block_id)
+MempoolExecutorServer::mark_block_committed(BlockID block_id)
 {
   current_block_id_ = block_id;
   x23::Vec<ContractAddress> changed_accounts =
@@ -378,19 +381,19 @@ Mempool::mark_block_committed(BlockID block_id)
 }
 
 x23::Async<DbTipResult>
-Mempool::schedcoord_get_tip()
+MempoolExecutorServer::schedcoord_get_tip()
 {
   return db_sched_client_.dbsched_get_tip();
 }
 
 x23::Async<DbSchedResult>
-Mempool::schedcoord_load_genesis_block(GenesisBlock genesis_block)
+MempoolExecutorServer::schedcoord_load_genesis_block(GenesisBlock genesis_block)
 {
   return db_sched_client_.dbsched_load_genesis_block(genesis_block);
 }
 
 x23::Async<void>
-Mempool::schedulercoord_shutdown()
+MempoolExecutorServer::schedulercoord_shutdown()
 {
   shutdown_flag_.store(true, std::memory_order_release);
   co_return;

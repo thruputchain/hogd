@@ -24,7 +24,7 @@ namespace hogd {
 
 // The mempool accepts transactions from the coordinator along with block
 // nomination and validation requests.
-class Mempool {
+class MempoolExecutorServer {
 public:
   using rpc_service = SchedulerCoord1;
 
@@ -41,10 +41,10 @@ public:
   {}
 
   // Disable copy and move.
-  Mempool(const Mempool &) = delete;
-  Mempool &operator=(const Mempool &) = delete;
-  Mempool(Mempool &&) = delete;
-  Mempool &operator=(Mempool &&) = delete;
+  MempoolExecutorServer(const MempoolExecutorServer &) = delete;
+  MempoolExecutorServer &operator=(const MempoolExecutorServer &) = delete;
+  MempoolExecutorServer(MempoolExecutorServer &&) = delete;
+  MempoolExecutorServer &operator=(MempoolExecutorServer &&) = delete;
 
   Scheduler &scheduler() { return scheduler_; }
   Authentication &authentication() { return authentication_; }
@@ -138,6 +138,6 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_SchedulerCoord1<Mempool *, x23::Async>);
+static_assert(is_SchedulerCoord1<MempoolExecutorServer *, x23::Async>);
 
 } // namespace hogd

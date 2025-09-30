@@ -37,7 +37,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/mempool/coordinator.h"
-#include "hogd/mempool/mempool.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -271,7 +271,7 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
-  std::unique_ptr<Mempool> interface;
+  std::unique_ptr<MempoolCoordinatorServer> interface;
 };
 
 inline Clients
@@ -311,9 +311,10 @@ create_clients(const MempoolTestServer &server)
           ->client(ExecutorSched1{});
 
   auto interface =
-      std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
-                                std::move(db_sched_client),
-                                std::move(exec_client));
+      std::make_unique<MempoolCoordinatorServer>(/*current_block_id=*/0,
+                                                 std::move(coord_client),
+                                                 std::move(db_sched_client),
+                                                 std::move(exec_client));
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_sched_pool = std::move(db_sched_pool),
