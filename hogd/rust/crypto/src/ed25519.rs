@@ -59,7 +59,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     let signature = Signature::from(signature_bytes);
 
     // Verify signature
-    match verifying_key.verify(message_bytes, &signature) {
+    match verifying_key.verify_strict(message_bytes, &signature) {
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
     }

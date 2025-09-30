@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,6 +45,8 @@ TEST(StringTest, Encode)
   std::string test_str("hello world!");
   EXPECT_EQ(encode_hex(byte_view(test_str.data(), test_str.size())),
             "68656c6c6f20776f726c6421");
+  auto decoded = decode_hex("68656c6c6f20776f726c6421");
+  EXPECT_EQ(std::memcmp(decoded.data(), test_str.data(), test_str.size()), 0);
   EXPECT_EQ(encode_base32(byte_view(test_str.data(), test_str.size())),
             "NBSWY3DPEB3W64TMMQQQ");
   EXPECT_EQ(encode_base64(byte_view(test_str.data(), test_str.size())),
