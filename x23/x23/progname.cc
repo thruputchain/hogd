@@ -39,7 +39,6 @@ find_exe(std::filesystem::path prog)
   return prog; // not found
 }
 
-// Set argv0 for debug logging purposes, in case it can't be inferred
 void
 setprogpath(std::string_view argv0)
 {
@@ -53,7 +52,6 @@ setprogpath(std::string_view argv0)
   }
 }
 
-// Get short program name
 const std::string &
 getprogpath()
 {
@@ -77,7 +75,6 @@ getprogpath()
   return progpath;
 }
 
-// Get short program name
 const std::string &
 getprogname()
 {
