@@ -53,7 +53,7 @@ protected:
   // Helper to create a test genesis block
   static GenesisBlock create_test_genesis_block()
   {
-    GenesisBlock genesis_block;
+    GenesisBlock genesis_block{};
 
     // Add a preset contract entry
     InitialConfigurationEntry preset_entry;
