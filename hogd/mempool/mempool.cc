@@ -73,12 +73,14 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
 
   // TODO(jhumphri): Register the mempool with the coordinator with
   // [coordscheduler_intro_sched()].
+  RpcServer<MempoolCoordinatorRpc> coord(std::move(coord_client),
+                                         std::move(db_clients),
+                                         std::move(exec_clients));
+  CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   const std::string sched_address = create_address(kCoordinatorServerPort);
   SchedulerCard card{.protocol = version::kHogdProtocol,
                      .address = sched_address.c_str()};
-  RpcServer<MempoolCoordinatorRpc> coord(card, std::move(coord_client),
-                                         std::move(db_clients),
-                                         std::move(exec_clients));
+  coord.get_impl().start(card);
 
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");

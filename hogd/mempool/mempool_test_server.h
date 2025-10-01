@@ -69,7 +69,9 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
-    : sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
+    : sched_db_port_(sched_db_server_.start_server(/*port_number=*/0)),
+      sched_exec_server_(sched_db_server_.get_impl()),
+      sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
       executor_coord_server_(exec_card_, kAddress, sched_exec_port_)
@@ -201,6 +203,9 @@ private:
              /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
 
+  RpcServer<MempoolDbRpc> sched_db_server_;
+  uint16_t sched_db_port_;
+
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
   uint16_t sched_exec_port_;
 
@@ -294,6 +299,7 @@ create_clients(const MempoolTestServer &server)
   db_sched_client_t db_sched_client =
       x23::rpc_stream_logged(*db_sched_cp, db_sched_fd.release())
           ->client(DbSched1{});
+  x23::Vec<db_sched_client_t> db_sched_clients = {db_sched_client};
 
   // Mempool-Executor RPC client.
   auto exec_pool = std::make_unique<x23::ThreadPool>(1);
@@ -305,12 +311,13 @@ create_clients(const MempoolTestServer &server)
   exec_client_t exec_client =
       x23::rpc_stream_logged(*exec_cp, exec_fd.release())
           ->client(ExecutorSched1{});
+  x23::Vec<exec_client_t> exec_clients = {exec_client};
 
   auto interface =
-      std::make_unique<MempoolCoordinatorRpc>(/*current_block_id=*/0,
-                                              std::move(coord_client),
-                                              std::move(db_sched_client),
-                                              std::move(exec_client));
+      std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),
+                                              std::move(db_sched_clients),
+                                              std::move(exec_clients));
+  interface->start({.protocol = version::kHogdProtocol, .address = ""});
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_sched_pool = std::move(db_sched_pool),

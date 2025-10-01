@@ -32,25 +32,27 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
 
-  MempoolCoordinatorRpc(const SchedulerCard &card,
-                        coord_client_t &&coord_client,
+  MempoolCoordinatorRpc(coord_client_t &&coord_client,
                         x23::Vec<db_sched_client_t> &&db_sched_clients,
                         x23::Vec<exec_client_t> &&exec_clients)
     : coord_client_(std::move(coord_client)),
       db_sched_clients_(std::move(db_sched_clients)),
       exec_clients_(std::move(exec_clients)), scheduler_(db_sched_clients_[0])
-  {
-    IntroSchedResult res = coordscheduler_intro_sched(card);
-    current_block_id_ = res.current_block_id;
-    authentication_ = std::make_unique<Authentication>(current_block_id_,
-                                                       db_sched_clients_[0]);
-  }
+  {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
+
+  void start(const SchedulerCard &card)
+  {
+    IntroSchedResult res = coordscheduler_intro_sched(card);
+    current_block_id_ = res.current_block_id;
+    authentication_ = std::make_unique<Authentication>(current_block_id_,
+                                                       db_sched_clients_[0]);
+  }
 
   IntroSchedResult coordscheduler_intro_sched(SchedulerCard card)
   {
