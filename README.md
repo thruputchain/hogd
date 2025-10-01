@@ -21,18 +21,6 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
     ~~~~
 
-1. Install the WASM target for rust.
-
-    ~~~~ .sh
-    rustup +nightly target add wasm32-unknown-unknown
-    ~~~~
-
-1. Install the rust sources so that the hogd build process can
-   recompile them in a more compact form to reduce code size.
-
-    ~~~~ .sh
-    rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-    ~~~~
 1. Fetch rust crate dependencies.
     ~~~~ .sh
     ./scripts/fetch.sh
@@ -102,8 +90,7 @@ following:
 
 3. Fetch all the rust git repositories managed by cargo
 
-    * `(cd built_contracts && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch)`
-    * `(cd hogd/hogexec/wasmi CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch)`
+    * `./scripts/fetch.sh`
 
 ## Repair instructions
 
@@ -112,13 +99,8 @@ If your rust installation gets messed up, delete the directories
 
 ```
 curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-rustup +nightly target add wasm32-unknown-unknown
-rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
 cargo install --force cbindgen
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-(cd built_contracts && cargo +nightly fetch)
+./scripts/fetch.sh
 ```
 
-You might have to also fetch some crates that the rust stdlib (core, alloc, std) depend on.
-The easiest way to get those crates is just to do one build in non-offline mode;
-chatgpt suggests you can also do `cd built_contracts && cargo +nightly fetch && cargo +nightly build -Zbuild-std=core,alloc --target wasm32-unknown-unknown --release --frozen || true`.
