@@ -92,7 +92,7 @@ main(int argc, char **argv)
     else if (argv[1] == "-s"s) {
       x23::DestroyInhibit di;
       tcp_rpc_server(cp, std::stoi(argv[2]), [di = x23::RefPtr{di}](auto c) {
-        c->template server<myvers>(&impl, context);
+        c->server(&impl, myvers{}, context);
       });
       di.destroy_wait();
     }
