@@ -38,7 +38,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   SignedTransactionBatch authenticated;
   authenticated.reserve(batch.size());
   for (const SignedTransaction &tx : batch) {
-    if (authentication_.authenticate(tx)) {
+    if (authentication_->authenticate(tx)) {
       authenticated.push_back(tx);
     }
   }
@@ -59,8 +59,8 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
   DbSchedResult res =
-      co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
-                                                        mode);
+      co_await db_sched_clients_[0].dbsched_create_snapshot(prev_block_id,
+                                                            block_id, mode);
   co_return res == DbSchedResult::DbSchedResultOK;
 }
 
@@ -68,7 +68,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
   DbSchedResult res =
-      co_await db_sched_client_.dbsched_abandon_snapshot(block_id);
+      co_await db_sched_clients_[0].dbsched_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbSchedResultOK], but this
   // could change in the future. In the case of a failure, we need to clean up
   // db state.
@@ -80,7 +80,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_client_.dbsched_close_snapshot(block_id);
+      co_await db_sched_clients_[0].dbsched_close_snapshot(block_id);
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -91,7 +91,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_client_.dbsched_commit_snapshot(block_id);
+      co_await db_sched_clients_[0].dbsched_commit_snapshot(block_id);
   // [dbsched_commit_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -101,7 +101,7 @@ MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 x23::Async<void>
 MempoolCoordinatorRpc::finish_block(BlockID block_id)
 {
-  return exec_client_.executorcoord_finish_block(block_id);
+  return exec_clients_[0].executorcoord_finish_block(block_id);
 }
 
 // We add each tx hash to the Merkle trie as a key with an empty value. So in
@@ -163,7 +163,7 @@ MempoolCoordinatorRpc::propose_batch(
   ret.reserve(txs.size());
 
   ExecProposeBatchResult res =
-      co_await exec_client_.executorcoord_propose_batch(block_id, txs);
+      co_await exec_clients_[0].executorcoord_propose_batch(block_id, txs);
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -188,7 +188,7 @@ x23::Async<bool>
 MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 {
   ExecResult res =
-      co_await exec_client_.executorcoord_open_proposal_block(block_id);
+      co_await exec_clients_[0].executorcoord_open_proposal_block(block_id);
   co_return res == ExecResult::ExecResultOK;
 }
 
@@ -259,7 +259,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
 {
   ExecValidateBatchResult res =
-      co_await exec_client_.executorcoord_validate_batch(block_id, txs);
+      co_await exec_clients_[0].executorcoord_validate_batch(block_id, txs);
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
@@ -274,7 +274,7 @@ x23::Async<bool>
 MempoolCoordinatorRpc::open_validation_block(BlockID block_id)
 {
   ExecResult res =
-      co_await exec_client_.executorcoord_open_validation_block(block_id);
+      co_await exec_clients_[0].executorcoord_open_validation_block(block_id);
   co_return res == ExecResult::ExecResultOK;
 }
 
@@ -374,7 +374,7 @@ MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 {
   current_block_id_ = block_id;
   x23::Vec<ContractAddress> changed_accounts =
-      authentication_.update_block_id(current_block_id_);
+      authentication_->update_block_id(current_block_id_);
   for (const ContractAddress &account : changed_accounts) {
     scheduler_.filter_txs_for_account(account, auth_filter_);
   }
@@ -383,13 +383,13 @@ MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 x23::Async<DbTipResult>
 MempoolCoordinatorRpc::schedcoord_get_tip()
 {
-  return db_sched_client_.dbsched_get_tip();
+  return db_sched_clients_[0].dbsched_get_tip();
 }
 
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::schedcoord_load_genesis_block(GenesisBlock genesis_block)
 {
-  return db_sched_client_.dbsched_load_genesis_block(genesis_block);
+  return db_sched_clients_[0].dbsched_load_genesis_block(genesis_block);
 }
 
 x23::Async<void>

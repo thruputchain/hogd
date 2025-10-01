@@ -32,15 +32,19 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
 
-  MempoolCoordinatorRpc(BlockID current_block_id, coord_client_t &&coord_client,
-                        db_sched_client_t &&db_sched_client,
-                        exec_client_t &&exec_client)
+  MempoolCoordinatorRpc(const SchedulerCard &card,
+                        coord_client_t &&coord_client,
+                        x23::Vec<db_sched_client_t> &&db_sched_clients,
+                        x23::Vec<exec_client_t> &&exec_clients)
     : coord_client_(std::move(coord_client)),
-      db_sched_client_(std::move(db_sched_client)),
-      exec_client_(std::move(exec_client)), current_block_id_(current_block_id),
-      scheduler_(db_sched_client_),
-      authentication_(current_block_id_, db_sched_client_)
-  {}
+      db_sched_clients_(std::move(db_sched_clients)),
+      exec_clients_(std::move(exec_clients)), scheduler_(db_sched_clients_[0])
+  {
+    IntroSchedResult res = coordscheduler_intro_sched(card);
+    current_block_id_ = res.current_block_id;
+    authentication_ = std::make_unique<Authentication>(current_block_id_,
+                                                       db_sched_clients_[0]);
+  }
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -48,8 +52,14 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
+  IntroSchedResult coordscheduler_intro_sched(SchedulerCard card)
+  {
+    IntroSchedResult res = coord_client_.coordscheduler_intro_sched(card)();
+    return res;
+  }
+
   Scheduler &scheduler() { return scheduler_; }
-  Authentication &authentication() { return authentication_; }
+  Authentication &authentication() { return *authentication_; }
 
   static coord_client_t get_client(const std::string &coordinator_addr,
                                    x23::CoroPoll &cp)
@@ -99,7 +109,7 @@ private:
 
   const std::function<bool(const SignedTransaction &tx)> auth_filter_ =
       [&](const SignedTransaction &tx) {
-        return authentication_.authenticate(tx);
+        return authentication_->authenticate(tx);
       };
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
@@ -137,13 +147,13 @@ private:
   void mark_block_committed(BlockID block_id);
 
   coord_client_t coord_client_;
-  db_sched_client_t db_sched_client_;
-  exec_client_t exec_client_;
+  x23::Vec<db_sched_client_t> db_sched_clients_;
+  x23::Vec<exec_client_t> exec_clients_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_;
   Scheduler scheduler_;
-  Authentication authentication_;
+  std::unique_ptr<Authentication> authentication_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };

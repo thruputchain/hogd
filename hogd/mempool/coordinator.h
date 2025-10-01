@@ -49,6 +49,12 @@ public:
 
   static x23::Async<void> coordscheduler_null() { co_return; }
 
+  static x23::Async<IntroSchedResult>
+  coordscheduler_intro_sched(SchedulerCard card)
+  {
+    co_return IntroSchedResult{.current_block_id = 0};
+  };
+
   static x23::Async<void>
   coordscheduler_notify_vetted(const SignedTransactionBatch &txs)
   {
