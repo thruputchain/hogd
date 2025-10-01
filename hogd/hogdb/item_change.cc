@@ -4,7 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
-#include <optional>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <variant>
@@ -267,9 +267,10 @@ ItemChange::commit_change(const ItemChange &change)
     // us to release that lock.
     exclusive_ = false;
   }
+  change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
-        if constexpr (!is_monostate<decltype(arg)>)
+        if constexpr (requires { arg.commit_change(std::get<std::decay_t<decltype(arg)>>(change.type_)); })
           arg.commit_change(
               std::get<std::decay_t<decltype(arg)>>(change.type_));
       },
@@ -322,18 +323,21 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
 int128_t
 ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
 {
-  auto ret = std::visit(
-      [cost_model](auto &arg) -> std::optional<int128_t> {
+  assert(snapshot_cost_.has_value());
+  if (!change_committed_) {
+    return *snapshot_cost_;
+  }
+
+  return std::visit(
+      [cost_model](auto &arg) -> int128_t {
+        assert(!is_monostate<decltype(arg)>);
+        
         if constexpr (!is_monostate<decltype(arg)>)
           return arg.committed_storage_cost(cost_model);
-        return std::nullopt;
+        assert(false);
+        return std::numeric_limits<int128_t>::max();
       },
       type_);
-  if (ret) {
-    return *ret;
-  }
-  assert(snapshot_cost_.has_value());
-  return *snapshot_cost_;
 }
 
 HogDBStatus<int128_t>
