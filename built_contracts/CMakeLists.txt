@@ -76,6 +76,7 @@ function(add_spec_json target_name)
         cargo +nightly run
         --features spec
         --locked
+        --release
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_spec
@@ -88,6 +89,7 @@ function(add_spec_json target_name)
     COMMENT "Generating ${target_name}_spec.json"
   )
 
+  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
   add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
 endfunction()
 
