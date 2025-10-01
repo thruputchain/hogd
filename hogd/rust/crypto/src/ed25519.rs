@@ -2,9 +2,6 @@ use ed25519_zebra::{
     Signature, SigningKey, VerificationKey, VerificationKeyBytes,
 };
 
-extern crate alloc;
-use alloc::vec::Vec;
-
 use crate::MessageSpan;
 
 /// Result codes for ed25519 operations
@@ -83,37 +80,34 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
 /// - messages points to valid array of num_messages MessageSpan
 #[no_mangle]
 pub unsafe extern "C" fn ed25519_dalek_verify_batch(
-    public_keys: *const [u8; 32],
-    signatures: *const [u8; 64],
+    public_keys: *const *const [u8; 32],
+    signatures: *const *const [u8; 64],
     messages: *const MessageSpan,
     num_messages: usize,
 ) -> Ed25519Result {
     debug_assert!(!public_keys.is_null());
     debug_assert!(!signatures.is_null());
     debug_assert!(!messages.is_null());
-    let mut pks: Vec<VerificationKey> = Vec::with_capacity(num_messages);
-    let mut sigs = Vec::with_capacity(num_messages);
-    let mut msgs = Vec::with_capacity(num_messages);
+
+    let mut batch = ed25519_zebra::batch::Verifier::new();
 
     for i in 0..num_messages {
-        let public_key = unsafe { &*public_keys.add(i) };
-        let signature = unsafe { &*signatures.add(i) };
+        let public_key: *const [u8; 32] = unsafe { *public_keys.add(i) };
+        let signature: *const [u8; 64] = unsafe { *signatures.add(i) };
         let message = unsafe { &*messages.add(i) };
         let vk_bytes: VerificationKeyBytes = (*public_key).into();
-        pks.push(match vk_bytes.try_into() {
-            Ok(key) => key,
-            Err(_) => return Ed25519Result::InvalidPublicKey,
-        });
-        sigs.push(Signature::from(signature));
-        msgs.push(message.to_slice());
+
+        batch.queue((
+            vk_bytes,
+            Signature::from(*signature),
+            message.to_slice(),
+        ));
     }
 
-    Ed25519Result::VerificationFailed
-
-    //match verify_batch(&msgs, &sigs, &pks) {
-    //     Ok(_) => Ed25519Result::Success,
-    //     Err(_) => Ed25519Result::VerificationFailed,
-    // }
+    match batch.verify(rand::thread_rng()) {
+        Ok(_) => Ed25519Result::Success,
+        Err(_) => Ed25519Result::VerificationFailed,
+    }
 }
 
 /// Sign a message with ed25519

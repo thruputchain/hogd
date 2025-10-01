@@ -173,6 +173,33 @@ ed25519_keygen()
 }
 
 inline bool
+ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
+                     std::vector<Ed25519Signature> signatures,
+                     std::vector<std::span<const std::byte>> msgs)
+{
+  if (public_keys.size() != signatures.size() ||
+      public_keys.size() != msgs.size()) {
+    return false;
+  }
+  using pk_ptr = const uint8_t (*)[32];
+  auto *public_keys_ptr = new pk_ptr[public_keys.size()];
+  using sig_ptr = const uint8_t (*)[64];
+  auto *signatures_ptr = new sig_ptr[public_keys.size()];
+  auto *msgs_ptr = new MessageSpan[public_keys.size()];
+  for (size_t i = 0; i < public_keys.size(); i++) {
+    public_keys_ptr[i] = detail::span_to_pointer(public_keys[i]);
+    signatures_ptr[i] = detail::span_to_pointer(signatures[i]);
+    msgs_ptr[i] = detail::span_to_message_span(msgs[i]);
+  }
+  auto result = ed25519_dalek_verify_batch(public_keys_ptr, signatures_ptr,
+                                           msgs_ptr, public_keys.size());
+  delete[] public_keys_ptr;
+  delete[] signatures_ptr;
+  delete[] msgs_ptr;
+  return result == Ed25519Result::Success;
+}
+
+inline bool
 ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
                x23::is_bytespan auto msg)

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <span>
+#include <string_view>
 #include <vector>
 
 #include "hogd/base/status.h"
@@ -76,6 +78,27 @@ TEST(Ed25519, BasicUsage)
   auto sig = ed25519_sign(sk, msg);
   EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
+}
+
+TEST(Ed25519, BatchUsage)
+{
+  auto [pk1, sk1] = ed25519_keygen();
+  auto [pk2, sk2] = ed25519_keygen();
+  auto [pk3, sk3] = ed25519_keygen();
+
+  std::string_view msg1 = "test message";
+  std::string_view msg2 = "another message";
+  std::string_view msg3 = "yet another message";
+
+  auto sig1 = ed25519_sign(sk1, msg1);
+  auto sig2 = ed25519_sign(sk2, msg2);
+  auto sig3 = ed25519_sign(sk3, msg3);
+
+  EXPECT_EQ(ed25519_verify_batch({pk1, pk2, pk3}, {sig1, sig2, sig3},
+                                 {std::as_bytes(std::span(msg1)),
+                                  std::as_bytes(std::span(msg2)),
+                                  std::as_bytes(std::span(msg3))}),
+            true);
 }
 
 } // namespace hogd
