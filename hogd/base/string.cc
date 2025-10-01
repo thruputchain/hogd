@@ -83,7 +83,7 @@ encode_basen(std::span<const std::byte> buf)
   return out;
 }
 
-bool
+[[maybe_unused]] bool
 is_hex_digit(char c)
 {
   return (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ||
