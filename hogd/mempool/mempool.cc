@@ -62,11 +62,17 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // Register the mempool with the coordinator.
-  // TODO(jhumphri): Create clients to connect to the db shards and the
-  // executors.
-  // Then we can create the [MempoolCoordinatorRpc] and have it register itself
-  // with the coordinator.
+  // Create the RPC clients that the mempool uses to communicate with the
+  // coordinator, the executors, and the db shards.
+  x23::ThreadPool client_pool;
+  x23::CoroPoll cp(client_pool);
+  coord_client_t coord_client =
+      MempoolCoordinatorRpc::get_client(coordinator_addr, cp);
+  x23::Vec<db_sched_client_t> db_clients = db_rpc.get_clients(cp);
+  x23::Vec<exec_client_t> exec_clients = exec_rpc.get_clients(cp);
+
+  // TODO(jhumphri): Register the mempool with the coordinator with
+  // [coordscheduler_intro_sched()].
   // RpcServer<MempoolCoordinatorRpc> coord;
 
   // The mempool is initialized. Now block forever.

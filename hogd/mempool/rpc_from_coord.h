@@ -51,6 +51,14 @@ public:
   Scheduler &scheduler() { return scheduler_; }
   Authentication &authentication() { return authentication_; }
 
+  static coord_client_t get_client(const std::string &coordinator_addr,
+                                   x23::CoroPoll &cp)
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(server_address_to_sockaddr(coordinator_addr));
+    return x23::rpc_stream_logged(cp, fd.release())->client(CoordScheduler1{});
+  }
+
   static x23::Async<void> schedulercoord_null() { co_return; }
 
   // Submit an unvetted tx.

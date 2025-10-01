@@ -83,4 +83,14 @@ private:
   std::optional<uint16_t> port_;
 };
 
+inline sockaddr_storage
+server_address_to_sockaddr(std::string_view server_address)
+{
+  x23::HostPort helper;
+  CHECK(helper.parse(server_address));
+  std::expected<sockaddr_storage, x23::GaiError> addr = helper.to_addr();
+  CHECK(addr.has_value());
+  return *addr;
+}
+
 } // namespace hogd

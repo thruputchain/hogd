@@ -52,6 +52,20 @@ public:
     return execs_;
   }
 
+  x23::Vec<exec_client_t> get_clients(x23::CoroPoll &cp)
+  {
+    x23::Vec<exec_client_t> ret;
+    ret.reserve(execs_.size());
+
+    for (const ExecCard &card : execs_) {
+      x23::UniqueFd fd =
+          x23::tcpconnect(server_address_to_sockaddr(card.address));
+      ret.push_back(
+          x23::rpc_stream_logged(cp, fd.release())->client(ExecutorSched1{}));
+    }
+    return ret;
+  }
+
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
