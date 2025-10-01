@@ -38,5 +38,5 @@ target_link_libraries(protocol INTERFACE crypto_interface)
 
 add_xdr_rs(
 	ffi_enum_rs 
-	${CMAKE_SOURCE_DIR}/hogd/hogexec/wasmi/src
+	${CMAKE_SOURCE_DIR}/hogd/rust/wasmi/src
 	../../protocol/ffi_enums.x)

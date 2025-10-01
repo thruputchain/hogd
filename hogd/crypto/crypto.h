@@ -2,12 +2,13 @@
 
 #pragma once
 
+#include <cstdio>
 extern "C" {
 #include "blake3.h"
 }
 
-#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
-#include <sodium.h>
+#include <openssl/rand.h> // NOLINT(misc-include-cleaner)
+#include <openssl/sha.h>  // NOLINT(misc-include-cleaner)
 
 #include <array>
 #include <cassert>
@@ -22,8 +23,8 @@ extern "C" {
 #include <utility>
 
 #include "hogd/base/compiler.h"
-
 #include "hogd/base/types.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "types.hh"
 
 namespace hogd {
@@ -33,7 +34,10 @@ namespace hogd {
 inline void
 read_random(x23::is_bytespan auto buf)
 {
-  randombytes_buf(reinterpret_cast<uint8_t *>(buf.data()), buf.size());
+  if (RAND_bytes(reinterpret_cast<uint8_t *>(buf.data()), buf.size()) != 1) {
+    perror("Failed to read random bytes");
+    exit(EXIT_FAILURE);
+  }
 }
 
 // sha256 returns the SHA256 hash of buf.
@@ -80,8 +84,41 @@ blake3(const T &value)
   return blake3(x23::serialize(value));
 }
 
+namespace detail {
+
+template<size_t N>
+auto
+span_to_pointer(std::span<const std::byte, N> span)
+{
+  return reinterpret_cast<const uint8_t (*)[N]>(span.data());
+}
+
+template<size_t N>
+auto
+span_to_pointer(std::array<uint8_t, N> const &data)
+{
+  return span_to_pointer(std::as_bytes(std::span(data)));
+}
+
+template<size_t N>
+auto
+span_to_writable_pointer(std::array<uint8_t, N> &data)
+{
+  return reinterpret_cast<uint8_t (*)[N]>(data.data());
+}
+
+inline MessageSpan
+span_to_message_span(x23::is_bytespan auto msg)
+{
+  return MessageSpan{.message_ptr =
+                         reinterpret_cast<const uint8_t *>(msg.data()),
+                     .message_len = msg.size()};
+}
+
+} // namespace detail
+
 // SipHash24Key is the secret key used by SipHash24.
-using SipHash24Key = std::array<uint8_t, 16>;
+using SipHash24Key = std::array<uint64_t, 2>;
 
 // SipHash24 is a non-cryptographic hash function that is designed to prevent
 // denial of service attacks by making it more difficult for an adversary to
@@ -112,22 +149,11 @@ private:
   SipHash24Key key_;
 };
 
-// confirm our types are the same as libsodium.
-static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
-static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
-
 uint64_t
 SipHash24::operator()(x23::is_bytespan auto buf)
 {
-  uint64_t out;
-  [[maybe_unused]]
-  int ret =
-      crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
-                                 reinterpret_cast<const uint8_t *>(buf.data()),
-                                 buf.size(), key_.data());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
-  return out;
+  return siphash24_hash(key_[0], key_[1],
+                        detail::span_to_message_span(std::move(buf)));
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
@@ -136,12 +162,41 @@ ed25519_keygen()
 {
   Ed25519PublicKey pk;
   Ed25519SecretKey sk;
-  static_assert(sizeof(Ed25519PublicKey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-  static_assert(sizeof(Ed25519SecretKey) == crypto_sign_ed25519_SECRETKEYBYTES);
-  [[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(), sk.data());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
+  static_assert(sizeof(Ed25519PublicKey) == ED25519_PUBLIC_KEY_SIZE);
+  static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
+  std::array<uint8_t, 32> random_bytes;
+  read_random(random_bytes);
+  ed25519_dalek_keygen(detail::span_to_pointer(random_bytes),
+                       detail::span_to_writable_pointer(pk),
+                       detail::span_to_writable_pointer(sk));
   return {pk, sk};
+}
+
+inline bool
+ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
+                     std::vector<Ed25519Signature> signatures,
+                     std::vector<std::span<const std::byte>> msgs)
+{
+  if (public_keys.size() != signatures.size() ||
+      public_keys.size() != msgs.size()) {
+    return false;
+  }
+  using pk_ptr = const uint8_t (*)[32];
+  auto *public_keys_ptr = new pk_ptr[public_keys.size()];
+  using sig_ptr = const uint8_t (*)[64];
+  auto *signatures_ptr = new sig_ptr[public_keys.size()];
+  auto *msgs_ptr = new MessageSpan[public_keys.size()];
+  for (size_t i = 0; i < public_keys.size(); i++) {
+    public_keys_ptr[i] = detail::span_to_pointer(public_keys[i]);
+    signatures_ptr[i] = detail::span_to_pointer(signatures[i]);
+    msgs_ptr[i] = detail::span_to_message_span(msgs[i]);
+  }
+  auto result = ed25519_dalek_verify_batch(public_keys_ptr, signatures_ptr,
+                                           msgs_ptr, public_keys.size());
+  delete[] public_keys_ptr;
+  delete[] signatures_ptr;
+  delete[] msgs_ptr;
+  return result == Ed25519Result::Success;
 }
 
 inline bool
@@ -149,34 +204,32 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
                x23::is_bytespan auto msg)
 {
-  return crypto_sign_ed25519_verify_detached(
-             reinterpret_cast<const uint8_t *>(signature.data()),
-             reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
-             reinterpret_cast<const uint8_t *>(public_key.data())) == 0;
+  return ed25519_dalek_verify(detail::span_to_pointer(public_key),
+                              detail::span_to_pointer(signature),
+                              detail::span_to_message_span(std::move(msg))) ==
+         Ed25519Result::Success;
 }
 
-// ed25519_verify verifies sig for a msg and publickey.
+// ed25519_verify_rust verifies sig for a msg and publickey using Rust
+// implementation.
 inline bool
 ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                x23::is_bytespan auto msg)
 {
-  return crypto_sign_ed25519_verify_detached(sig.data(),
-                                             reinterpret_cast<const uint8_t *>(
-                                                 msg.data()),
-                                             msg.size(), publickey.data()) == 0;
+  return ed25519_dalek_verify(detail::span_to_pointer(publickey),
+                              detail::span_to_pointer(sig),
+                              detail::span_to_message_span(std::move(msg))) ==
+         Ed25519Result::Success;
 }
 
-// ed25519_sign signs a message with a secret key.
 inline Ed25519Signature
 ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 {
   Ed25519Signature sig;
-  [[maybe_unused]]
-  int ret = crypto_sign_ed25519_detached(sig.data(), nullptr,
-                                         reinterpret_cast<const uint8_t *>(
-                                             msg.data()),
-                                         msg.size(), sk.data());
-  // this libsodium call cannot fail (V1.20).
+  [[maybe_unused]] uint8_t ret =
+      ed25519_dalek_sign(detail::span_to_pointer(sk),
+                         detail::span_to_message_span(std::move(msg)),
+                         detail::span_to_writable_pointer(sig));
   assert(ret == 0);
   return sig;
 }

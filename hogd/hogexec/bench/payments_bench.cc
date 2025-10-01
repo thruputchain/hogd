@@ -133,29 +133,30 @@ run_payments_bench(std::string const &server_addr, uint32_t exec_port,
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
-  uint32_t num_total_txs = std::max(100000 * 5, 204800 * 10);
+  size_t num_reps = 10;
+  uint32_t num_total_txs =
+      std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
   BenchmarkState bs(server_addr, exec_port, coord_port, num_accounts);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
 
   // strong scaling
   for (auto nthread : {16, 64, 128, 256, 512, 1024, 2048}) {
-    assert(offset + 100000 * 5 <= work_txs.size());
+    assert(offset + (100000 * num_reps) <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 100000 * 5),
-                  nthread, 100000, 5);
-    // offset += 10000 * 10;
+                                                                 100000 *
+                                                                     num_reps),
+                  nthread, 100000, num_reps);
   }
   // weak scaling
   for (auto nthread : {1, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
-    assert(offset + 10000 * 5 <= work_txs.size());
+    assert(offset + (100 * nthread * num_reps) <= work_txs.size());
     run_bench_rep(bs,
                   std::span<SignedTransaction>(work_txs).subspan(offset,
                                                                  100 * nthread *
-                                                                     5),
-                  nthread, 100 * nthread, 5);
-    // offset += 10000 * 10;
+                                                                     num_reps),
+                  nthread, 100 * nthread, num_reps);
   }
 }
 } // namespace

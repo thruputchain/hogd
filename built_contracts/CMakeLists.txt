@@ -76,6 +76,7 @@ function(add_spec_json target_name)
         cargo +nightly run
         --features spec
         --locked
+        --release
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_spec
@@ -89,6 +90,9 @@ function(add_spec_json target_name)
   )
 
   add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+  # not strictly necessary as a dependency, but this should prevent concurrent invocations of cargo
+  # on the same crate
+  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
 endfunction()
 
 function(add_contract_header target_name)

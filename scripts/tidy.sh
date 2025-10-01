@@ -26,8 +26,10 @@ done
 BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
 # Run clippy
-cd ${ROOT_DIR}/hogd/hogexec/wasmi
-cargo +nightly clippy --no-deps -- -D warnings &
+{
+  cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
+  cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
+} &
 CLIPPY_PID=$!
 
 # Run clang-tidy

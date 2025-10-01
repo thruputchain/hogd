@@ -1,5 +1,5 @@
 # Build hogexec modules
-add_subdirectory(wasmi)
+# Note: wasmi is now built via the main rust workspace
 add_subdirectory(runtime)
 add_subdirectory(runtime_trampoline)
 add_subdirectory(interface)

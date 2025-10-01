@@ -12,6 +12,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <tuple>

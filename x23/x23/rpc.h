@@ -512,9 +512,11 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 // See RpcTraceMode::getenv for a description of this environment
 // variable.
 int
-tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = 5 + nproc())
+tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
+  if (backlog < 0)
+    backlog = 5 + cp.pool_.nthreads_;
   auto lfd = tcplisten(port, backlog);
   if (port == 0)
     port = get_port(local_addr(lfd));

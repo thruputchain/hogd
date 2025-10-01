@@ -33,6 +33,10 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     ~~~~ .sh
     rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     ~~~~
+1. Fetch rust crate dependencies.
+    ~~~~ .sh
+    ./scripts/fetch.sh
+    ~~~~
 
 1. Install cbindgen.
 
@@ -107,7 +111,7 @@ If your rust installation gets messed up, delete the directories
 `~/.cargo` and `~/.rustup`.  Then start over by reinstalling rustup.
 
 ```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 rustup +nightly target add wasm32-unknown-unknown
 rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
 cargo install --force cbindgen

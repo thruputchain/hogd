@@ -1,8 +1,7 @@
 # create crypto module library
+# Note: rust crypto is now built via the main rust workspace
 
 add_library(crypto_interface INTERFACE)
-add_dependencies(crypto_interface libsodium_build-configure)
-#header files for libsodium are added to global include path in toplevel CMakeLists.txt
 target_link_libraries(crypto_interface
   INTERFACE
   protocol
@@ -10,6 +9,16 @@ target_link_libraries(crypto_interface
   blake3
   OpenSSL::SSL
   OpenSSL::Crypto
+)
+
+target_include_directories(crypto_interface
+  INTERFACE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(
+  crypto_interface 
+  generate_crypto_ffi_h
 )
 
 add_library(crypto_objects OBJECT crypto.cc)
@@ -20,19 +29,27 @@ add_library(
   $<TARGET_OBJECTS:crypto_objects>
 )
 
+target_include_directories(crypto
+  INTERFACE
+  ${CMAKE_BINARY_DIR}
+)
+
 find_package(OpenSSL REQUIRED)
-add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
-  libsodium
   crc32c
   OpenSSL::SSL
   OpenSSL::Crypto
   blake3
+  unified_lib
 )
 
-add_library(crypto_test_objects OBJECT crypto_test.cc)
+add_library(
+  crypto_test_objects OBJECT 
+  crypto_test.cc
+  ed25519_edge_cases.cc
+)
 target_link_libraries(
   crypto_test_objects 
   crypto_interface
@@ -49,7 +66,7 @@ add_executable(
 
 target_link_libraries(
   crypto_test
-  crypto
+  hogd
   GTest::gtest
 )
 gtest_discover_tests(crypto_test)
