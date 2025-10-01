@@ -34,7 +34,7 @@ public:
   MempoolExecutorRpc(MempoolExecutorRpc &&) = delete;
   MempoolExecutorRpc &operator=(MempoolExecutorRpc &&) = delete;
 
-  x23::Async<void> schedexec_intro_exec(ExecCard card);
+  x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card);
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 

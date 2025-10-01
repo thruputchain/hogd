@@ -28,10 +28,11 @@
 
 namespace hogd {
 
-x23::Async<void>
+x23::Async<IntroExecResult>
 MempoolExecutorRpc::schedexec_intro_exec(ExecCard card)
 {
-  co_return;
+  // TODO(jhumphri): Fill this in.
+  co_return IntroExecResult{.exec_id = 0, .shards = {}};
 }
 
 } // namespace hogd

@@ -15,7 +15,6 @@
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
-#include "coord.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "exec_sched.hh"
@@ -68,12 +67,16 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
-    : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
-      exec_card_{.protocol = version::kHogdProtocol,
-                 .upid = {},
-                 .address =
-                     x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
-      executor_coord_server_(exec_card_, kAddress, coordinator_port_)
+    :
+
+      coordinator_sched_port_(
+          coordinator_sched_server_.start_server(/*port_number=*/0)),
+      exec_card_{
+          .protocol = version::kHogdProtocol,
+          .upid = {},
+          .address =
+              x23::HostPort(kAddress.c_str(), coordinator_sched_port_).show()},
+      executor_coord_server_(exec_card_, kAddress, coordinator_sched_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -129,9 +132,6 @@ public:
       }
     }
 
-    coordinator_sched_port_ =
-        coordinator_sched_server_.start_server(/*port_number=*/0);
-
     {
       LocalMockDB db_identifier{.read_port_number_ = executor_db_port_};
       executor_coord_server_.init_from_coord(&db_identifier);
@@ -178,7 +178,6 @@ public:
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t executor_db_port() const { return executor_db_port_; }
-  uint16_t coordinator_port() const { return coordinator_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
   uint16_t executor_port() const { return executor_port_; }
 
@@ -205,11 +204,6 @@ private:
     set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
              /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
-
-  // This is a fake coordinator server that the executor registers itself with
-  // via RPC.
-  Coordinator coordinator_server_;
-  uint16_t coordinator_port_;
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.

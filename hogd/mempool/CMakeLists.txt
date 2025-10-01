@@ -18,15 +18,15 @@ target_link_libraries(
 )
 set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
-add_executable(
-  woah
-  woah.cc
-)
-target_link_libraries(
-  woah
-  mempool
-)
-
+# add_executable(
+#   woah
+#   woah.cc
+# )
+# target_link_libraries(
+#   woah
+#   mempool
+# )
+# 
 add_executable(
   auth_test
   auth_test.cc
