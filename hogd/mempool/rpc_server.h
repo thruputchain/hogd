@@ -51,6 +51,8 @@ public:
     return port_.value();
   }
 
+  RpcImplementation &get_impl() { return rpc_; }
+
 private:
   template<typename T> requires std::is_trivially_copyable_v<T>
   ErrnoStatus<void> sys_getsockname(int sockfd, T &val)

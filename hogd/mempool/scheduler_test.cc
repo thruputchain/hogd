@@ -30,9 +30,7 @@ TEST(Scheduler, ReadAge)
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
-  printf("1\n");
   MempoolTestServer server;
-  printf("2\n");
   Clients clients = create_clients(server);
   Scheduler &scheduler = clients.interface->scheduler();
 

@@ -154,7 +154,6 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       ShardCard card{.protocol = version::kHogdProtocol,
                      .upid = {},
                      .block_height = 0,
-                     .shard_count = 1,
                      .address_for_coord = coord_address.c_str(),
                      .address_for_exec = exec_address.c_str(),
                      .address_for_sched = sched_address.c_str()};

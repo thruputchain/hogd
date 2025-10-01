@@ -1,8 +1,6 @@
 add_library(
   mempool
   rpc_from_coord.cc
-  rpc_from_db.cc
-  rpc_from_exec.cc
   scheduler.cc
 )
 target_link_libraries(
@@ -18,15 +16,15 @@ target_link_libraries(
 )
 set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
-# add_executable(
-#   woah
-#   woah.cc
-# )
-# target_link_libraries(
-#   woah
-#   mempool
-# )
-# 
+add_executable(
+  mempool_exec
+  mempool.cc
+)
+target_link_libraries(
+  mempool_exec
+  mempool
+)
+ 
 add_executable(
   auth_test
   auth_test.cc
