@@ -89,8 +89,10 @@ function(add_spec_json target_name)
     COMMENT "Generating ${target_name}_spec.json"
   )
 
-  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
   add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+  # not strictly necessary as a dependency, but this should prevent concurrent invocations of cargo
+  # on the same crate
+  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
 endfunction()
 
 function(add_contract_header target_name)
