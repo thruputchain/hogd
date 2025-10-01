@@ -8,10 +8,9 @@ resolver = "2"
 
 [workspace.dependencies]
 # Common dependencies that crates can inherit
-ed25519-dalek = { version = "2.2.0", features = ["batch"] }
+ed25519-zebra = { version = "4.1" }
 lru = "0.14.0"
 wasmi = "0.36.0"
-rand = "0.8.5"
 bindgen = "0.71"
 
 # Shared optimization profiles

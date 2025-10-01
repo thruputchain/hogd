@@ -45,7 +45,11 @@ target_link_libraries(
   unified_lib
 )
 
-add_library(crypto_test_objects OBJECT crypto_test.cc)
+add_library(
+  crypto_test_objects OBJECT 
+  crypto_test.cc
+  ed25519_edge_cases.cc
+)
 target_link_libraries(
   crypto_test_objects 
   crypto_interface
@@ -62,7 +66,7 @@ add_executable(
 
 target_link_libraries(
   crypto_test
-  crypto
+  hogd
   GTest::gtest
 )
 gtest_discover_tests(crypto_test)

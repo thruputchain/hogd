@@ -57,6 +57,8 @@ parse_integer(std::string_view str)
 
 // encode_hex converts binary data into a hexadecimal string.
 std::string encode_hex(std::span<const std::byte> buf);
+// decode_hex converts a hexadecimal string into binary data.
+std::vector<std::byte> decode_hex(std::string_view str);
 // encode_base32 converts binary data into a base32 string.
 std::string encode_base32(std::span<const std::byte> buf);
 // encode_base64 converts binary data into a base64 string.
