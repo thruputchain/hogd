@@ -5,7 +5,6 @@
 #include <string_view>
 #include <vector>
 
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
