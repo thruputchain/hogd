@@ -37,6 +37,8 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -67,17 +69,13 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
-    :
-
+    : sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
+      sched_db_port_(sched_db_server_.start_server(/*port_number=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
-      exec_card_{
-          .protocol = version::kHogdProtocol,
-          .upid = {},
-          .address =
-              x23::HostPort(kAddress.c_str(), coordinator_sched_port_).show()},
-      executor_coord_server_(exec_card_, kAddress, coordinator_sched_port_)
+      executor_coord_server_(exec_card_, kAddress, sched_exec_port_)
   {
+    printf("constructor A\n");
     {
       // check the database's integrity and find the highest valid LSN.
       DBStatus<uint64_t> lsn =
@@ -86,24 +84,29 @@ public:
       info("database '{}' passed integrity check; current LSN is {}",
            db_dir_.directory(), *lsn);
 
+      printf("constructor B\n");
       // create the database, loading up to the highest valid LSN.
       // TODO(abelay): When sharding is supported, this will become a separate
       // step.
       DBStatus<std::unique_ptr<Database>> ramdb =
           Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
       CHECK(ramdb.has_value());
+      printf("constructor C\n");
 
       db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
       ctx_ = std::make_unique<RPCContext>(db_, trie_);
       set_dbtip({.height = 0, .hash = {}, .id = 0});
+      printf("constructor D\n");
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
       executor_db_port_ = db_executor_server_->port();
+      printf("constructor E\n");
 
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
       db_scheduler_port_ = db_scheduler_server_->port();
+      printf("constructor F\n");
     }
 
     {
@@ -118,6 +121,7 @@ public:
         throw std::runtime_error("Failed to write contract");
       }
 
+      printf("constructor G\n");
       for (const ContractAddress &address : kAccountAddresses) {
         // Write deployment.
         uint32_t contract_size = bytes.size();
@@ -132,10 +136,14 @@ public:
       }
     }
 
+    printf("constructor H\n");
     {
       LocalMockDB db_identifier{.read_port_number_ = executor_db_port_};
+      printf("constructor I\n");
       executor_coord_server_.init_from_coord(&db_identifier);
+      printf("constructor J\n");
       executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
+      printf("constructor K\n");
     }
   }
 
@@ -205,13 +213,22 @@ private:
              /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
 
+  MempoolExecutorServer sched_exec_server_;
+  uint16_t sched_exec_port_;
+
+  MempoolDbServer sched_db_server_;
+  uint16_t sched_db_port_;
+
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
   CoordinatorSched coordinator_sched_server_;
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  ExecCard exec_card_;
+  const ExecCard exec_card_{
+      .protocol = version::kHogdProtocol,
+      .upid = {},
+      .address = x23::HostPort(/*address=*/"", /*port=*/0).show()};
   ExecCoordServer executor_coord_server_;
   uint16_t executor_port_;
 
@@ -271,6 +288,7 @@ struct Clients {
 inline Clients
 create_clients(const MempoolTestServer &server)
 {
+  printf("A\n");
   // Mempool-Coordinator RPC client.
   auto coord_pool = std::make_unique<x23::ThreadPool>(1);
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
@@ -281,6 +299,7 @@ create_clients(const MempoolTestServer &server)
   coord_client_t coord_client =
       x23::rpc_stream_logged(*coord_cp, coord_fd.release())
           ->client(CoordScheduler1{});
+  printf("B\n");
 
   // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>(1);

@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "coord.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
@@ -25,6 +24,7 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"

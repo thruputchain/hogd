@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cerrno>
 #include <concepts>
 #include <expected>

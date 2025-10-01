@@ -5,10 +5,10 @@
 #include <string>
 #include <utility>
 
-#include "coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "sched_exec.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
@@ -63,7 +63,7 @@ private:
   static std::unique_ptr<DatabaseProxy>
   connect_to_database(DatabaseIdentifier identifier);
 
-  std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+  std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
   connect_to_coord_allocate_service();
 
   IntroExecResult get_exec_result();

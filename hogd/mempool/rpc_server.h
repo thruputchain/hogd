@@ -19,7 +19,7 @@ public:
   {}
 
   // Starts the server on the specified port.
-  void start_server(uint16_t port)
+  uint16_t start_server(uint16_t port)
   {
     auto lfd = x23::tcplisten(port);
     if (!lfd) {
@@ -38,6 +38,8 @@ public:
         x23::rpc_stream_logged(cp, *c)->server(&server);
       }
     }(cp_, rpc_, std::move(lfd));
+
+    return port_.value();
   }
 
   // Returns the port that the server is listening on.

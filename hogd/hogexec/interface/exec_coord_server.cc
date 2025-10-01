@@ -10,11 +10,11 @@
 #include <thread>
 #include <utility>
 
-#include "coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "sched_exec.hh"
 #include "x23/rpc.h"
 
 namespace hogd {
@@ -34,7 +34,7 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
                                                           std::move(db_proxy));
 }
 
-std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
 ExecCoordServer::connect_to_coord_allocate_service()
 {
   auto fd = cp_.tcpconnect(coord_address_, std::to_string(coord_port_))();
@@ -45,20 +45,25 @@ ExecCoordServer::connect_to_coord_allocate_service()
   }
 
   auto client_config = x23::rpc_stream_logged(cp_, *fd);
-  return std::make_optional(client_config->template client<Coordinator1>());
+  return std::make_optional(client_config->template client<SchedExec1>());
 }
 
 IntroExecResult
 ExecCoordServer::get_exec_result()
 {
+  printf("get_exec_result A\n");
   while (true) {
     auto client = connect_to_coord_allocate_service();
+    printf("get_exec_result iter A\n");
     if (!client) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
+    printf("get_exec_result iter B, port is %u\n", coord_port_);
 
-    return client->coordinator_intro_exec(self_card_)();
+    auto ret = client->schedexec_intro_exec(self_card_)();
+    printf("get_exec_result iter C\n");
+    return ret;
   }
 }
 
