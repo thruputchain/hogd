@@ -56,8 +56,7 @@ BytestringArgs::get_current_committed_cost(
 {
   assert(current_model);
   if (committed_) {
-    return current_model->kBaseItemCost +
-           current_model->get_bytestring_cost(bytestring_set_.size());
+    return current_model->get_bytestring_cost(bytestring_set_.size());
   }
   if (base_item) {
     return base_item->storage_cost();
@@ -83,7 +82,6 @@ BytestringArgs::get_marginal_cost_upper_bound_static(
   }
   int128_t locked_amount = base_item ? base_item->storage_cost() : 0;
   int128_t new_cost =
-      current_model->kBaseItemCost +
       current_model->get_bytestring_cost(delta.bytestring().size());
   return std::max<int128_t>(0, new_cost - locked_amount);
 }

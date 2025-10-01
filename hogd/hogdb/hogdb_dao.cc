@@ -16,6 +16,8 @@
 #include "hogd/base/log.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"
@@ -33,6 +35,7 @@ namespace hogd {
 namespace {
 
 constexpr std::string kGlobalTipKey = ">DBTIP";
+constexpr std::string kGlobalCostModelKey = ">COSTMODEL";
 
 // Warning: you may have to update this if you make changes to Prefix.
 constexpr bool
@@ -140,6 +143,34 @@ HogDBDAO::write_dbtip(const DbTip &tip)
   auto buf = x23::serialize(tip);
   return db_.put(std::as_bytes(std::span(kGlobalTipKey)), 0,
                  std::as_bytes(std::span(buf)));
+}
+
+HogDBStatus<void>
+HogDBDAO::write_cost_model(const StorageCostModel &cost_model)
+{
+  auto buf = x23::serialize(cost_model.to_xdr());
+  auto key = std::as_bytes(std::span(kGlobalCostModelKey));
+  if (db_.get(key)) {
+    error("Multiple versions or changing cost models not supported yet");
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return db_.put(key, 0, std::as_bytes(std::span(buf)));
+}
+
+HogDBStatus<StorageCostModel>
+HogDBDAO::read_cost_model()
+{
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(kGlobalCostModelKey)), 0);
+  if (!raw)
+    return raw.error();
+  StorageCostModelXdr cost_model{};
+  try {
+    x23::deserialize(&cost_model, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return StorageCostModel(cost_model);
 }
 
 HogDBStatus<int128_t>
@@ -327,7 +358,8 @@ HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
 }
 
 HogDBStatus<size_t>
-HogDBDAO::get_charged_storage_cost(const ItemKey &key)
+HogDBDAO::get_charged_storage_cost(const ItemKey &key,
+                                   StorageCostModel const *cost_model)
 {
   switch (key.key_type()) {
   case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
@@ -336,6 +368,7 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key)
     return HogDBError(HogDBCode::kNotFound);
   case ItemKeyType::kItemKeyTypeAccountAuthData:
     assert(key.is_account_auth_data());
+    // TODO(geoff): configurable accounting on auth data
     return db_.get_size(
         make_address_key(key.get_address(), Prefix::kAccountAuthData));
   case ItemKeyType::kItemKeyTypeAddressMetadata:
@@ -355,10 +388,26 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key)
         error("failed to deserialize deployed contract hash: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
       }
-      return deployed_contract_hash.contract_size;
+      return cost_model->get_contract_size_cost(
+          deployed_contract_hash.contract_size);
     }
   case ItemKeyType::kItemKeyTypeContractData:
-    return db_.get_size(make_contract_data_key(key.as_bytes()));
+  {
+    auto item = db_.get(make_contract_data_key(key.as_bytes()));
+    if (!item) {
+      return HogDBError(HogDBCode::kNotFound);
+    }
+    switch (item.value().type) {
+    case kNNInt128:
+      return cost_model->get_nnint_cost();
+    case kBytes:
+      return cost_model->get_bytestring_cost(item.value().value.size());
+    default:
+      error("unknown item type loaded from db: key={} type={}", key,
+            item.value().type);
+      return HogDBError(HogDBCode::kInternal);
+    }
+  }
   case ItemKeyType::kItemKeyTypeContractCode:
   case ItemKeyType::kItemKeyTypeContractRefcount:
     // these keys are not charged: storage costs for contracts are charged on

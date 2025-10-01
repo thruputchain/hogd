@@ -19,6 +19,7 @@
 #include "genesis.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -125,7 +126,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
-    ctx_.get_db().enable_debug_invariants();
+    ctx_.get_db().enable_debug_invariants(ctx_.get_cost_model());
   }
   BlockTX *btx = ctx_.get_block_tx(id);
   if (!btx)
@@ -230,6 +231,16 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   if (ctx_.get_tip().height != 0) {
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbResult::DbResultError;
+  }
+
+  ctx_.initialize_cost_model(
+      StorageCostModel(genesis_block.storage_cost_model));
+  {
+    auto r = ctx_.get_db().write_cost_model(ctx_.get_cost_model());
+    if (!r.has_value()) {
+      error("failed to write genesis block cost model: {}", r.error());
+      co_return DbResult::DbResultError;
+    }
   }
 
   auto r = ctx_.open_block_tx(kGenesisBlockID);

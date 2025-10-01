@@ -110,8 +110,7 @@ int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost(
     StorageCostModel const *cost_model) const
 {
-  return cost_model->kBaseItemCost +
-         cost_model->get_bytestring_cost(bytestring_.size());
+  return cost_model->get_bytestring_cost(bytestring_.size());
 }
 
 int128_t

@@ -12,6 +12,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -20,7 +21,10 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
-  BlockTX(HogDBDAO &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
+  BlockTX(HogDBDAO &db, MerkleTriePrefix &trie,
+          const StorageCostModel &cost_model)
+    : db_(db), trie_(trie), cost_model_(cost_model)
+  {}
   ~BlockTX() = default;
 
   // getters
@@ -63,16 +67,18 @@ private:
 
   HogDBDAO &db_;
   MerkleTriePrefix &trie_;
+  StorageCostModel cost_model_;
   SynchronizedMap<Address, ItemLock> addr_balance_locks_;
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
 
   // raw locking operations.
   static inline HogDBStatus<int128_t>
   do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-          const ItemChange &change);
+          const ItemChange &change, const StorageCostModel *cost_model);
   static inline HogDBStatus<int128_t>
   do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-                 const ItemChange &old_change, const ItemChange &new_change);
+                 const ItemChange &old_change, const ItemChange &new_change,
+                 const StorageCostModel *cost_model);
   void inline do_unlock_item(const std::unique_lock<std::mutex> &ul,
                              const ItemKey &key, ItemLock &lock,
                              const ItemChange &change);

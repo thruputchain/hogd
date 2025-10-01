@@ -19,7 +19,8 @@ RPCContext::open_block_tx(BlockTXID bid)
   std::scoped_lock g(lock_);
   auto [it, inserted] =
       block_txes_.emplace(std::piecewise_construct, std::forward_as_tuple(bid),
-                          std::forward_as_tuple(get_db(), get_trie()));
+                          std::forward_as_tuple(get_db(), get_trie(),
+                                                get_cost_model()));
   if (!inserted)
     return HogDBError(HogDBCode::kExists);
   return &(it->second);

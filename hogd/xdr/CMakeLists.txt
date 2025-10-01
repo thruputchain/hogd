@@ -20,6 +20,7 @@ add_xdr(
 	../../protocol/precompiles.x
 	../../protocol/rpc_types.x
 	../../protocol/sched_coord.x
+	../../protocol/storage_cost.x
 	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x
 	../../protocol/storage_lock.x

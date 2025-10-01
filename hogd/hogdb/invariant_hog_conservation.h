@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <span>
 
@@ -8,12 +7,16 @@
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/mvar.h"
 
 namespace hogd {
 
 class HogConservationInvariant : public HogdbInvariant {
 public:
+  HogConservationInvariant(StorageCostModel const &cost_model)
+    : cost_model_(cost_model)
+  {}
   bool check() override;
   void log_item_change(std::span<const std::byte> key,
                        HogDBStatus<DBItem> const &before,
@@ -32,6 +35,7 @@ private:
   void update_total_supply(int128_t change);
 
   x23::MVar<int128_t> total_supply_change_{0};
+  StorageCostModel cost_model_;
 };
 
 } // namespace hogd

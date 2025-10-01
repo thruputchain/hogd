@@ -17,6 +17,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -71,7 +72,7 @@ NNInt128::narrow(const NNInt128 &nnint)
 }
 
 inline HogDBStatus<int128_t>
-NNInt128::merge(const NNInt128 &nnint)
+NNInt128::merge(const NNInt128 &nnint, const StorageCostModel *cost_model)
 {
   assert_is_valid();
   nnint.assert_is_valid();
@@ -101,7 +102,7 @@ NNInt128::merge(const NNInt128 &nnint)
   delta_ += nnint.delta_;
 
   assert_is_valid();
-  return marginal_storage_cost();
+  return marginal_storage_cost(cost_model);
 }
 
 inline void
@@ -220,7 +221,7 @@ ItemChange::narrow(const ItemChange &change)
 }
 
 HogDBStatus<int128_t>
-ItemChange::merge(const ItemChange &change)
+ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
 {
   if (type_.index() != change.type_.index())
     return HogDBError(HogDBCode::kConflict);
@@ -228,9 +229,10 @@ ItemChange::merge(const ItemChange &change)
     return HogDBError(HogDBCode::kConflict);
 
   auto merge_cost = std::visit(
-      [&change](auto &arg) -> HogDBStatus<int128_t> {
+      [&change, cost_model](auto &arg) -> HogDBStatus<int128_t> {
         if constexpr (!is_monostate<decltype(arg)>)
-          return arg.merge(std::get<std::decay_t<decltype(arg)>>(change.type_));
+          return arg.merge(std::get<std::decay_t<decltype(arg)>>(change.type_),
+                           cost_model);
         assert(false);
         return HogDBError(HogDBCode::kInternal);
       },
@@ -287,26 +289,27 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<int128_t>
-ItemChange::marginal_storage_cost(HogDBDAO &db, const ItemKey &key)
+ItemChange::marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
+                                  const StorageCostModel *cost_model)
 {
 
   if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key);
+    auto ret = load_snapshot_cost(db, key, cost_model);
     if (!ret)
       return ret.error();
   }
 
-  return marginal_storage_cost();
+  return marginal_storage_cost(cost_model);
 }
 
 HogDBStatus<int128_t>
-ItemChange::marginal_storage_cost() const
+ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
   assert(snapshot_cost_.has_value());
   auto marginal_item = std::visit(
-      [](auto &arg) -> HogDBStatus<int128_t> {
+      [cost_model](auto &arg) -> HogDBStatus<int128_t> {
         if constexpr (!is_monostate<decltype(arg)>)
-          return arg.marginal_storage_cost();
+          return arg.marginal_storage_cost(cost_model);
         assert(false);
         return HogDBError(HogDBCode::kInternal);
       },
@@ -317,12 +320,12 @@ ItemChange::marginal_storage_cost() const
 }
 
 int128_t
-ItemChange::committed_storage_cost() const
+ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
 {
   auto ret = std::visit(
-      [](auto &arg) -> std::optional<int128_t> {
+      [cost_model](auto &arg) -> std::optional<int128_t> {
         if constexpr (!is_monostate<decltype(arg)>)
-          return arg.committed_storage_cost();
+          return arg.committed_storage_cost(cost_model);
         return std::nullopt;
       },
       type_);
@@ -334,21 +337,23 @@ ItemChange::committed_storage_cost() const
 }
 
 HogDBStatus<int128_t>
-ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key)
+ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key,
+                                   const StorageCostModel *cost_model)
 {
   if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key);
+    auto ret = load_snapshot_cost(db, key, cost_model);
     if (!ret)
       return ret.error();
   }
-  return committed_storage_cost();
+  return committed_storage_cost(cost_model);
 }
 
 HogDBStatus<void>
-ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
+ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
+                               StorageCostModel const *cost_model)
 {
-  auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
-    HogDBStatus<size_t> ret = db.get_charged_storage_cost(key);
+  auto snapshot_cost = [&db, key, cost_model] -> HogDBStatus<size_t> {
+    HogDBStatus<size_t> ret = db.get_charged_storage_cost(key, cost_model);
     if (!ret && ret.error() == HogDBCode::kNotFound) {
       // item does not exist in the snapshot
       return 0UL;
@@ -356,7 +361,7 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key)
     if (!ret)
       return ret.error();
 
-    return storage_cost(*ret);
+    return *ret;
   }();
   if (!snapshot_cost)
     return snapshot_cost.error();
