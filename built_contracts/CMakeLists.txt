@@ -28,9 +28,10 @@ function(add_wasm_build target_name)
 
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
-  # run cargo +nightly update to update the lockfile manually.
+  # run cargo update to update the lockfile manually.
   #
-  # This will not fetch crates during the build process; you need to run cargo +nightly fetch
+  # This will not fetch crates during the build process; you need to run the fetch script
+  # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
