@@ -51,18 +51,14 @@ ExecCoordServer::connect_to_coord_allocate_service()
 IntroExecResult
 ExecCoordServer::get_exec_result()
 {
-  printf("get_exec_result A\n");
   while (true) {
     auto client = connect_to_coord_allocate_service();
-    printf("get_exec_result iter A\n");
     if (!client) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
-    printf("get_exec_result iter B, port is %u\n", coord_port_);
 
     auto ret = client->schedexec_intro_exec(self_card_)();
-    printf("get_exec_result iter C\n");
     return ret;
   }
 }
