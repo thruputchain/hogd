@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/cpputil.h"
@@ -82,6 +83,24 @@ encode_basen(std::span<const std::byte> buf)
   return out;
 }
 
+bool
+is_hex_digit(char c)
+{
+  return (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ||
+         (c >= '0' && c <= '9');
+}
+
+std::byte
+hex_digit_to_nibble(char c)
+{
+  assert(is_hex_digit(c));
+  if (c >= '0' && c <= '9')
+    return static_cast<std::byte>(c - '0');
+  if (c >= 'A' && c <= 'F')
+    return static_cast<std::byte>(c - 'A' + 10);
+  return static_cast<std::byte>(c - 'a' + 10);
+}
+
 } // namespace
 
 std::string
@@ -102,6 +121,19 @@ encode_hex(std::span<const std::byte> buf)
   constexpr StringLiteral kHexDictionary("0123456789abcdef");
   static_assert(kHexDictionary.get().size() == 16);
   return encode_basen<kHexDictionary>(buf);
+}
+
+std::vector<std::byte>
+decode_hex(std::string_view str)
+{
+  std::vector<std::byte> out;
+  out.reserve(str.size() / 2);
+  for (size_t i = 0; i < str.size(); i += 2) {
+    std::byte byte =
+        hex_digit_to_nibble(str[i]) << 4 | hex_digit_to_nibble(str[i + 1]);
+    out.push_back(byte);
+  }
+  return out;
 }
 
 std::string
