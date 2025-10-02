@@ -64,16 +64,11 @@ ExecCoordServer::get_exec_result()
 }
 
 void
-ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
+ExecCoordServer::init_from_coord()
 {
   IntroExecResult exec_result = get_exec_result();
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
-  if (mock_db) {
-    start_rpc_service(*mock_db, exec_result.exec_id);
-  }
-  else {
-    start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
-  }
+  start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
 }
 
 } // namespace hogd

@@ -51,7 +51,7 @@ public:
 
   // Get the database information from the coordinator, and then
   // start the exec to coord RPC interface (which finishes the initialization).
-  void init_from_coord(const LocalMockDB *db);
+  void init_from_coord();
 
 private:
   // Connects to the database and performs initialization of the executor.

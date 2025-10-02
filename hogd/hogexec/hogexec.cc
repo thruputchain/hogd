@@ -45,8 +45,7 @@ hogexec_init(const std::string &coordinator_addr)
                       .upid = {},
                       .address = executor_address.c_str()};
   ExecCoordServer exec(card, coordinator_host, coordinator_port);
-  // TODO(jhumphri): Replace nullptr.
-  exec.init_from_coord(nullptr);
+  exec.init_from_coord();
   CHECK_EQ(exec.start_server(kExecServerPort), kExecServerPort);
 
   return 0;
