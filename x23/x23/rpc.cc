@@ -133,10 +133,10 @@ RpcStreamImpl::reader(SLOC_ARG0)
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())
-          cp_->dwrite(fd_, awaiter.await_resume());
+          cp_->awrite(fd_, awaiter.await_resume());
         else
           [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
-            self->cp_->dwrite(self->fd_, co_await awaitable);
+            self->cp_->awrite(self->fd_, co_await awaitable);
           }(*this, std::move(awaitable));
       }
       else
