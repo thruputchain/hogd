@@ -323,7 +323,10 @@ public:
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
     assert(key_id < MAX_SIGNERS);
-    pk_changes_[key_id].emplace(std::move(pk));
+    pk_changes_[key_id].pk_ = std::move(pk);
+    assert(pk_changes_[key_id].refcount_ == 0);
+    assert(!pk_changes_[key_id].exclusive_);
+    pk_changes_[key_id].refcount_ = 1;
   }
 
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
@@ -352,31 +355,19 @@ public:
     return cost_model->kBaseItemCost;
   }
 
-  AuthDataItem &operator=(const AuthDataItem &auth_data)
-  {
-    assert(base_auth_data_ == auth_data.base_auth_data_);
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-      auto const &pk_change = auth_data.pk_changes_[i];
-      if (pk_change.has_value()) {
-        pk_changes_[i].emplace(*pk_change);
-      }
-      else {
-        pk_changes_[i].reset();
-      }
-    }
-    return *this;
-  }
-
   AccountAuthData build_result() const;
 
 private:
   struct PublicKeyChange {
     PublicKeyChange(PublicKeyConfigOpt pk) : pk_(std::move(pk)) {}
-    bool committed_{false};
-    const PublicKeyConfigOpt pk_;
+    PublicKeyChange() = default;
+    uint32_t refcount_{0};
+    bool exclusive_{false};
+    PublicKeyConfigOpt pk_ = nullptr;
   };
-  std::array<std::optional<PublicKeyChange>, MAX_SIGNERS> pk_changes_;
-  const AccountAuthData base_auth_data_;
+
+  std::array<PublicKeyChange, MAX_SIGNERS> pk_changes_;
+  AccountAuthData base_auth_data_;
 };
 
 static_assert(is_item_commit_required<AuthDataItem>);

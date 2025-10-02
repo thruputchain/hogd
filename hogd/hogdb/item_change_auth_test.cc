@@ -84,7 +84,7 @@ TEST_F(ItemChangeAuthTest, MergeConflict)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
-TEST_F(ItemChangeAuthTest, NarrowConflict)
+TEST_F(ItemChangeAuthTest, Narrow)
 {
   AuthDataItem auth_data_item(base_data_);
 
@@ -98,10 +98,26 @@ TEST_F(ItemChangeAuthTest, NarrowConflict)
   AuthDataItem auth_data_3(base_data_);
   auth_data_3.set_new_pk(0, nullptr);
 
-  {
-    AuthDataItem tmp = auth_data_item;
-    EXPECT_FALSE(tmp.narrow(auth_data_3));
-  }
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_3));
+
+  auto res = auth_data_item.build_result();
+  EXPECT_FALSE(res.public_keys[0]);
+  EXPECT_FALSE(res.public_keys[1]);
+  EXPECT_FALSE(res.public_keys[2]);
+}
+
+TEST_F(ItemChangeAuthTest, NarrowExclusiveConflict)
+{
+  AuthDataItem auth_data_item(base_data_);
+  auth_data_item.set_new_pk(0, make_pk_config(Weight{10}));
+  AuthDataItem auth_data_2(base_data_);
+  auth_data_2.set_new_pk(0, nullptr);
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+
+  AuthDataItem auth_data_3(base_data_);
+  auth_data_3.set_new_pk(0, make_pk_config(Weight{10}));
+
+  EXPECT_FALSE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
 TEST_F(ItemChangeAuthTest, MergeAndUndo)

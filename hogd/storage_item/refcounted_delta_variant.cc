@@ -555,7 +555,7 @@ AuthDataArgs::commit_change_signer(uint32_t key_id,
 std::shared_ptr<const StorageItemWrapper>
 AuthDataArgs::to_item(StorageCostModel const *cost_model) const
 {
-  AccountAuthData new_auth_data;
+  AccountAuthData new_auth_data{};
   if (base_auth_data_) {
     new_auth_data = *base_auth_data_;
   }

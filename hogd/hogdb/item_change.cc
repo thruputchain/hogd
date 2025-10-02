@@ -192,9 +192,7 @@ AuthDataItem::commit(HogDBDAO &db, MerkleTriePrefix &trie,
 {
   if constexpr (is_debug_build()) {
     for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-      if (pk_changes_[i]) {
-        assert(pk_changes_[i]->committed_);
-      }
+      assert(!pk_changes_[i].exclusive_);
     }
     assert(key.is_account_auth_data());
   }
@@ -216,9 +214,9 @@ AuthDataItem::build_result() const
   AccountAuthData result = base_auth_data_;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     auto const &pk_change = pk_changes_[i];
-    if (pk_change.has_value()) {
-      assert(pk_change->committed_);
-      result.public_keys[i] = pk_change->pk_;
+    assert(!pk_change.exclusive_);
+    if (pk_change.refcount_ > 0) {
+      result.public_keys[i] = pk_change.pk_;
     }
   }
   return result;
@@ -229,14 +227,8 @@ AuthDataItem::commit_change(AuthDataItem const &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    if (auth_data_item.pk_changes_[i]) {
-      pk_changes_[i]->committed_ = true;
-      if (pk_changes_[i].has_value()) {
-        assert(pk_changes_[i]->pk_ == auth_data_item.pk_changes_[i]->pk_);
-      }
-      else {
-        pk_changes_[i].emplace(std::move(*auth_data_item.pk_changes_[i]));
-      }
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      pk_changes_[i].exclusive_ = false;
     }
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
@@ -246,19 +238,13 @@ bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    if (pk_changes_[i].has_value() &&
-        auth_data_item.pk_changes_[i].has_value()) {
-      if (pk_changes_[i]->pk_ != auth_data_item.pk_changes_[i]->pk_) {
-        return false;
-      }
+    // Narrow is only called on the changes held by individual invokeTx objects.
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
+           auth_data_item.pk_changes_[i].refcount_ == 1);
+    if (auth_data_item.pk_changes_[i].refcount_ == 1) {
+      pk_changes_[i].refcount_ = 1;
     }
-    if (auth_data_item.pk_changes_[i].has_value()) {
-      if (!pk_changes_[i].has_value()) {
-        pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
-      }
-    }
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    pk_changes_[i].exclusive_ |= auth_data_item.pk_changes_[i].exclusive_;
   }
   return true;
 }
@@ -267,10 +253,36 @@ HogDBStatus<int128_t>
 AuthDataItem::merge(const AuthDataItem &auth_data_item,
                     const StorageCostModel *cost_model)
 {
-  if (!narrow(auth_data_item)) {
-    return HogDBError(HogDBCode::kConflict);
-  }
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    // if merging this pk change requires a lock or updating the change
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
+           auth_data_item.pk_changes_[i].refcount_ == 1);
 
+    if (auth_data_item.pk_changes_[i].refcount_ == 0) {
+      assert(!auth_data_item.pk_changes_[i].exclusive_);
+      continue;
+    }
+
+    if (pk_changes_[i].refcount_ == 0 &&
+        auth_data_item.pk_changes_[i].refcount_ == 1) {
+      pk_changes_[i].refcount_ = 1;
+      assert(pk_changes_[i].exclusive_ == false);
+      pk_changes_[i].exclusive_ = auth_data_item.pk_changes_[i].exclusive_;
+      pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
+      continue;
+    }
+
+    // both have nonzero refcount
+    if (pk_changes_[i].exclusive_ || auth_data_item.pk_changes_[i].exclusive_) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+
+    if (pk_changes_[i].pk_ != auth_data_item.pk_changes_[i].pk_) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+
+    pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
+  }
   // TODO(geoff): auth cost model
   return marginal_storage_cost(cost_model);
 }
@@ -279,8 +291,10 @@ void
 AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    if (auth_data_item.pk_changes_[i]) {
-      pk_changes_[i].reset();
+    pk_changes_[i].refcount_ -= auth_data_item.pk_changes_[i].refcount_;
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      assert(pk_changes_[i].exclusive_);
+      pk_changes_[i].exclusive_ = false;
     }
   }
 }

@@ -575,13 +575,14 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
       }
     };
 
+    const auto &prev_modified_keys =
+        prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
+
     for (auto const &signer :
          delta.auth_data_change().auth_data_change_signers) {
       uint32_t key_id = signer.public_key_id;
 
       // Check if this key_id is already in the previous lock
-      const auto &prev_modified_keys =
-          prev_typeclass_lock.extra_lock_data.auth_data_lock().modified_key_ids;
       bool already_locked = std::ranges::find(prev_modified_keys, key_id) !=
                             prev_modified_keys.end();
 
@@ -591,6 +592,21 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
           return std::nullopt;
         }
         cleanup_keys.insert(key_id);
+        assert(std::ranges::contains(req_lock.full_typeclass_lock()
+                                         .extra_lock_data.auth_data_lock()
+                                         .modified_key_ids,
+                                     key_id));
+      }
+    }
+
+    for (auto key_id : prev_modified_keys) {
+      if (!std::ranges::contains(req_lock.full_typeclass_lock()
+                                     .extra_lock_data.auth_data_lock()
+                                     .modified_key_ids,
+                                 key_id)) {
+        req_lock.full_typeclass_lock()
+            .extra_lock_data.auth_data_lock()
+            .modified_key_ids.push_back(key_id);
       }
     }
 
