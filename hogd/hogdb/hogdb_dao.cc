@@ -62,6 +62,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kWasmCode:
     return true;
   default:
+    error("unknown prefix: {}", std::to_underlying(prefix));
     return false;
   }
 }

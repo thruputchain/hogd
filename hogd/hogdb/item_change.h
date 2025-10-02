@@ -360,6 +360,8 @@ public:
     return *this;
   }
 
+  AccountAuthData build_result() const;
+
 private:
   struct PublicKeyChange {
     PublicKeyChange(PublicKeyConfigOpt pk) : pk_(std::move(pk)) {}

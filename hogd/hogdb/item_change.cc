@@ -189,7 +189,6 @@ HogDBStatus<void>
 AuthDataItem::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                      const ItemKey &key) const
 {
-  // TODO(geoff): implement
   if constexpr (is_debug_build()) {
     for (size_t i = 0; i < MAX_SIGNERS; ++i) {
       if (pk_changes_[i]) {
@@ -198,7 +197,29 @@ AuthDataItem::commit(HogDBDAO &db, MerkleTriePrefix &trie,
     }
     assert(key.is_account_auth_data());
   }
-  return {};
+  auto res = build_result();
+  auto ret = db.write_address_account_auth_data(key.get_address(), res);
+  if (!ret) {
+    return ret.error();
+  }
+  auto buf = x23::serialize(res);
+  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  return ret;
+}
+
+AccountAuthData
+AuthDataItem::build_result() const
+{
+  AccountAuthData result = base_auth_data_;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i]) {
+      assert(pk_changes_[i]->committed_);
+      result.public_keys[i] = pk_changes_[i]->pk_;
+    }
+  }
+  return result;
 }
 
 void
@@ -206,12 +227,12 @@ AuthDataItem::commit_change(AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     if (auth_data_item.pk_changes_[i]) {
+      pk_changes_[i]->committed_ = true;
       if (pk_changes_[i]) {
-        assert(*pk_changes_[i]->pk_ == *auth_data_item.pk_changes_[i]->pk_);
+        assert(pk_changes_[i]->pk_ == auth_data_item.pk_changes_[i]->pk_);
       }
       else {
         pk_changes_[i].emplace(std::move(*auth_data_item.pk_changes_[i]));
-        pk_changes_[i]->committed_ = true;
       }
     }
   }

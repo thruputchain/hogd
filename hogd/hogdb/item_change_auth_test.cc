@@ -123,4 +123,19 @@ TEST_F(ItemChangeAuthTest, MergeAndUndo)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
+TEST_F(ItemChangeAuthTest, CommitAndBuild)
+{
+  AuthDataItem auth_data_item(base_data_);
+
+  auto pk_1 = make_pk_config(Weight{10});
+  auth_data_item.set_new_pk(0, pk_1);
+  auth_data_item.set_new_pk(1, nullptr);
+
+  auth_data_item.commit_change(auth_data_item);
+
+  auto res = auth_data_item.build_result();
+  EXPECT_EQ(res.public_keys[0], pk_1);
+  EXPECT_EQ(res.public_keys[1], nullptr);
+}
+
 } // namespace hogd
