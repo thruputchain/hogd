@@ -16,6 +16,8 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
 
@@ -57,6 +59,15 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     // some items that are in the trie
 
     RPCContext ctx(dao, trie);
+    ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
+        .ext = ExtensionPoint(0),
+        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .bytestring_cost_per_byte = 10,
+        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+    }));
+    ASSERT_TRUE(
+        ctx.get_db().write_cost_model(ctx.get_cost_model()).has_value());
     auto btx = ctx.open_block_tx(1);
     ASSERT_TRUE(btx);
 
@@ -69,7 +80,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
     ASSERT_TRUE(
         itx->request_nnint128(make_address_balance_item_key(ContractAddress{0}),
-                              10000)
+                              ctx.get_cost_model().get_nnint_cost() +
+                                  ctx.get_cost_model().get_bytestring_cost(6))
             .has_value());
     ASSERT_TRUE(itx->request_nnint128(ItemKey(ContractAddress{0},
                                               StorageKeyContractData{0}),
@@ -108,6 +120,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
   dao.load_trie(trie);
   EXPECT_EQ(trie.size(), 3UL);
   ASSERT_EQ(trie.get_root_hash(), initial_tip.hash);
+
+  ASSERT_TRUE(dao.read_cost_model().has_value());
 }
 
 } // namespace hogd

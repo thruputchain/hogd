@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
@@ -22,6 +23,9 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -249,7 +253,14 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
 void
 Benchmark::run()
 {
-  BlockTX block(db_, *trie_);
+  StorageCostModel cost_model = StorageCostModel(StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+  });
+  BlockTX block(db_, *trie_, cost_model);
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block](const Payment &p) {

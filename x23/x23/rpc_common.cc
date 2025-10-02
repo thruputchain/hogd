@@ -3,6 +3,7 @@
 
 #include <netdb.h>
 
+#include "x23/progname.h"
 #include "x23/rpc_common.h"
 #include "x23/sockio.h"
 
@@ -47,6 +48,8 @@ RpcCsvLogger::RpcCsvLogger(int peerfd, int logfd) : logfd_(logfd)
       uformat_to(&srcdest_, "{}/{},", auto{name}, HostPort{ss});
   }
 }
+
+bool RpcTraceMode::disable_env{};
 
 std::string
 msg_show_stat(const rpc_msg &msg)
@@ -100,6 +103,9 @@ replace_percent(std::string target, std::map<char, std::string> subst)
 RpcTraceMode
 RpcTraceMode::getenv(const char *env_var)
 {
+  if (disable_env)
+    return {};
+
   const char *p{};
   const auto &pn = getprogname();
   if (!pn.empty()) {

@@ -100,6 +100,14 @@ TEST(Ed25519, BatchUsage)
             true);
 }
 
+TEST(Ed25519, RandomKeygen)
+{
+  auto [pk, sk] = ed25519_keygen();
+  auto [pk2, sk2] = ed25519_keygen();
+  EXPECT_NE(pk, pk2);
+  EXPECT_NE(sk, sk2);
+}
+
 } // namespace hogd
 
 int

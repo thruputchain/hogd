@@ -42,8 +42,10 @@
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "sched_coord.hh"
+#include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -94,6 +96,13 @@ public:
       db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
       ctx_ = std::make_unique<RPCContext>(db_, trie_);
       set_dbtip({.height = 0, .hash = {}, .id = 0});
+      ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
+          .ext = ExtensionPoint(0),
+          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .bytestring_cost_per_byte = 10,
+          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      }));
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
@@ -198,6 +207,11 @@ public:
   void set_dbtip(const DbTip &db_tip)
   {
     CHECK(db_.write_dbtip(db_tip).has_value());
+  }
+
+  void set_costmodel(const StorageCostModel &cost_model)
+  {
+    CHECK(db_.write_cost_model(cost_model.to_xdr()).has_value());
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }

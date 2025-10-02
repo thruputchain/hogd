@@ -18,6 +18,8 @@ add_library(x23
   format.h
   heap.h
   mvar.h
+  progname.cc
+  progname.h
   refcnt.h
   rpc.cc
   rpc_common.cc
@@ -35,7 +37,6 @@ add_library(x23
   threadpool.h
   typename.h
   uiobuf.h
-  utility.cc
   utility.h
   vec.h
   x23.h

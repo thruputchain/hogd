@@ -2,17 +2,20 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 
 // generated x23 headers
-#include "db_sched.hh"
+#include "db_coord.hh"
 #include "genesis.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/hogdb/block_id_manager.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 #include "hogd/base/types.h"
-#include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
@@ -43,28 +46,25 @@ public:
   static x23::Async<void> dbsched_null() { co_return; }
 
   // RPC methods
-  x23::Async<HogAgeResult>
-  dbsched_get_hog_ages(const ContractAddressBatch &addresses);
-
-  x23::Async<DbSchedResult> dbsched_write_hog_ages(const HogAgeBatch &ages);
-
-  x23::Async<DbAccountAuthDataBatchResult>
-  dbsched_get_account_auth_data(BlockID block_id,
-                                ContractAddressBatch accounts);
-
-  // RPC methods
-  x23::Async<DbSchedResult> dbsched_create_snapshot(BlockID parent_id,
-                                                    BlockID new_id,
-                                                    BlockExecutionMode mode);
+  x23::Async<DbResult> dbsched_create_snapshot(BlockID parent_id,
+                                               BlockID new_id,
+                                               BlockExecutionMode mode);
 
   x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id);
-  x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
+  x23::Async<DbResult> dbsched_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
+
+  static x23::Async<DbCatchupResult> dbsched_catchup(BlockHeight height)
+  {
+    co_return DbCatchupResult{
+        DbResult::DbResultError}; // TODO(geoff): unimplemented
+  }
 
   x23::Async<DbTipResult> dbsched_get_tip();
 
-  x23::Async<DbSchedResult>
-  dbsched_load_genesis_block(GenesisBlock genesis_block);
+  x23::Async<DbResult> dbsched_load_genesis_block(GenesisBlock genesis_block);
+
+  static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
   uint16_t port();
 

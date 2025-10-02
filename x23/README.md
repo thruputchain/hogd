@@ -261,6 +261,12 @@ also create your `RpcStreams` with `rpc_stream_logger` (see below).
 x23::RpcLogger::default_logfd = 2;
 ```
 
+The default value of the file descriptor is given by the environment
+variable `X23TRACE`.  However, logging of simplified servers is
+triggered a different way described [below][server-logging].
+
+[server-logging]: #simplified-tcp-server-logging
+
 ## Coroutines and `Async<T>`
 
 X23 supports asynchronous remote procedure calls using coroutines.
@@ -475,11 +481,12 @@ multiple RPC programs and versions.
 Note that for short RPC functions that always run to completion, you
 do not need to return an `Async<T>`, but rather can return the
 underlying type `T` to save the overhead of allocating a coroutine
-frame.  For example, if `null()` never needs to suspend, fast, it's
-valid to say:
+frame.  For example, if `null()` never needs to suspend, it's valid to
+say:
 
 ``` cpp
 using x23::Async;
+using x23::MaybeAsync;
 
 struct MyVersImpl {
   using rpc_service = myvers;
@@ -489,7 +496,8 @@ struct MyVersImpl {
     // ...
   }
 };
-static_assert(is_myvers<MyVersImpl*, Async>);
+// Note we are asserting "MaybeAsync" instead of "Async"
+static_assert(is_myvers<MyVersImpl*, MaybeAsync>);
 ```
 
 You may also have a method that is fast most of the time and needs to
@@ -514,7 +522,7 @@ struct MyVersImpl {
     return slow_add(a, b);  // no co_await, just return the Async
   }
 };
-static_assert(is_myvers<MyVersImpl*, Async>);
+static_assert(is_myvers<MyVersImpl*, MaybeAsync>);
 ```
 
 ## Using asynchronous RPC over stream sockets
@@ -587,6 +595,60 @@ anything.  The reason for this requirement is to avoid a race
 condition where X23 would reject calls for services that have not yet
 been configured on the socket.
 
+### Simplified asynchronous TCP server setup
+
+If you want to run an RPC server on a TCP port, the function
+`tcp_rpc_server` will spawn an accept loop in the background.  It
+needs a `CoroPoll`, a TCP port (or 0 to listen on any available port),
+and a callback to process the configurator, and returns the TCP port
+on which it is actually listening.  An example of usage is as follows:
+
+``` cpp
+#include <x23/rpc.h>
+#include <x23/refcount.h>
+x23::ThreadPool pool;
+x23::CoroPoll cp(pool);
+
+struct MyVersImpl { /* ... */ };
+MyVersImpl impl;
+
+int
+main()
+{
+  // You only need this if you want to block the main thread while
+  // RPCs are being serviced.
+  std::mutex m;
+
+  tcp_rpc_server(cp, 5665, [lk=std::unique_lock{m}](auto c) {
+    c->server(&impl, myvers{});
+  });
+
+  // Wait until moved lambda is destroyed (will happen if accept
+  // returns an error or cp is destroyed).
+  m.lock();
+}
+```
+
+#### Simplified TCP server logging
+
+If you use `tcp_rpc_server`, you can enable logging of RPC calls by
+setting environment variables.  If your executable is named `myrpcd`,
+the library will first check for the environment variable
+`X23SERVER_TRACE_myrpcd`, then, if that doesn't exist, for
+`X23SERVER_TRACE`.
+
+If the first applicable environment variable is a number, a trace of
+RPCs will be written to that file descriptor number.  If the first
+applicable environment variable starts with `/` or `.`, it is
+interpreted as a file name and a trace of RPCs will be appended to
+that file.  In the file name, `%f` is replaced by the name of the
+executable, `%p` by the process ID, and `%%` by a single percent
+character.
+
+To enable abbreviated CSV-form logging, which includes timestamps but
+not the full arguments, place a comma in front of the value, as in:
+`export X23SERVER_TRACE=,/tmp/%f.%p.rpctrace`.
+
 ## Using synchronous RPC over stream sockets
 
 If you don't want coroutines, there is also a *synchronous* rpc
@@ -620,7 +682,13 @@ server_example(int fd)
 }
 ```
 
-Here's an example of using the synchronous client interface:
+Note there isn't much of a reason to use the synchronous RPC server
+interface, unless you have bidirectional RPCs and want the synchronous
+client on the same connections.  The reason is that the asynchronous
+server can run to completion by just defining functions that directly
+return values rather than coroutines returning `Async`.  On the other
+hand, the synchronous client interface may be useful in situations
+where you are forced to have one thread per outstanding RPC anyway:
 
 ``` cpp
 #include <x23/srpc.h>
@@ -636,6 +704,31 @@ client_example(int fd)
   return client.add(5, 5);
   // file descriptor will be closed on destruction of client
 }
+```
+
+### Synchronous TCP multiclient
+
+To maximize throughput between large machines, it helps to have
+multiple TCP connections between the same client and server.
+`SRpcMulticlient` creates one TCP connection per last-level cache
+(LLC) on the machine.  The synchronous RPC stream implementation uses
+two helper threads, one for reading and one for writing.  These will
+be pinned to the each LLC.  RPC calls will then be routed to the
+appropriate stream for the invoking thread's LLC.  An example:
+
+``` cpp
+  char *server = "server.lan";
+  uint16_t port = 5665;
+
+  sockaddr_storage server_addr;
+  if (auto ea = x23::HostPort{server, port}.to_addr(true))
+    server_addr = *ea;
+  else
+    ea->error().raise("getnameinfo({})", server);
+
+  auto client =
+    SRpcMulticlient<RpcLogger>::make(server_addr)->client(myvers{});
+  client.add(5, 5);
 ```
 
 [XDR]: https://datatracker.ietf.org/doc/html/rfc4506

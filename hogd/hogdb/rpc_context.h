@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -25,6 +26,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
 
@@ -38,6 +40,16 @@ public:
   HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
   DbTip &get_tip() { return tip_; }
+  StorageCostModel const &get_cost_model()
+  {
+    assert(cost_model_.has_value());
+    return *cost_model_;
+  }
+
+  void initialize_cost_model(StorageCostModel cost_model)
+  {
+    cost_model_.emplace(cost_model);
+  }
 
   // opens a new block transaction.
   HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
@@ -69,6 +81,9 @@ private:
   MerkleTriePrefix &trie_;
   // tracks details about the last committed block.
   DbTip tip_ = DbTip{.id = UINT64_MAX};
+  // the storage cost model for computing storage costs at the current block
+  // height.
+  std::optional<StorageCostModel> cost_model_;
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.

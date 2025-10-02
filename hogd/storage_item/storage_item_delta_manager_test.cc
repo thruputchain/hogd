@@ -562,7 +562,8 @@ TEST_P(DeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
   ASSERT_TRUE(lk_6);
 
   ASSERT_EQ(lk_6->locked_tokens_,
-            lk_exclusive->locked_tokens_ + cost_model.get_bytestring_cost(2));
+            lk_exclusive->locked_tokens_ +
+                (cost_model.get_bytestring_cost(2) - cost_model.kBaseItemCost));
 }
 
 TEST_P(DeltaManagerTest, NNIntSetAddInvalidState)
@@ -1266,9 +1267,7 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
               return false;
             }
             return net_storage_cost ==
-                   cost_model.kBaseItemCost +
-                       cost_model.get_bytestring_cost(bytestring.size()) -
-                       cost_model_2.kBaseItemCost -
+                   cost_model.get_bytestring_cost(bytestring.size()) -
                        cost_model_2.get_bytestring_cost(5);
           });
 
@@ -1369,8 +1368,7 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
               return false;
             }
 
-            int128_t initial_cost = cost_model_2.kBaseItemCost +
-                                    cost_model_2.get_bytestring_cost(5);
+            int128_t initial_cost = cost_model_2.get_bytestring_cost(5);
             if (!snapshot) {
               return initial_cost == -net_storage_cost;
             }

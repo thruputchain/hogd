@@ -385,7 +385,12 @@ struct RpcTraceMode {
   //     replaced by the name of the executable.  If the name contains
   //     "%p" it is replaced by the process ID.  If the name contains
   //     "%%" it is replaced by a single '%' character.
+  //
+  // For settings where environment variables could be untrusted, set
+  // disable_env = true to disable this behavior globally.
   static RpcTraceMode getenv(const char *env_var);
+
+  static bool disable_env;
 };
 
 RpcTraceMode &server_trace();

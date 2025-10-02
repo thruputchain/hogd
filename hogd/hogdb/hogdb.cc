@@ -92,6 +92,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
+    if (auto cost_model = db.read_cost_model(); cost_model) {
+      ctx.initialize_cost_model(*cost_model);
+    }
+    else {
+      critical("Failed to read cost model: {}", cost_model.error());
+      return EXIT_FAILURE;
+    }
   }
   else {
     CHECK_EQ(trie.size(), 0UL);
