@@ -32,7 +32,7 @@ namespace hogd {
 // read_random fills buf with high-quality random bytes (e.g., /dev/urandom)
 // suitable for creating secret keys.
 inline void
-read_random(x23::is_bytespan auto buf)
+read_random(std::span<std::byte> buf)
 {
   if (RAND_bytes(reinterpret_cast<uint8_t *>(buf.data()), buf.size()) != 1) {
     perror("Failed to read random bytes");
@@ -165,7 +165,7 @@ ed25519_keygen()
   static_assert(sizeof(Ed25519PublicKey) == ED25519_PUBLIC_KEY_SIZE);
   static_assert(sizeof(Ed25519SecretKey) == ED25519_SECRET_KEYPAIR_SIZE);
   std::array<uint8_t, 32> random_bytes;
-  read_random(random_bytes);
+  read_random(std::as_writable_bytes(std::span(random_bytes)));
   ed25519_dalek_keygen(detail::span_to_pointer(random_bytes),
                        detail::span_to_writable_pointer(pk),
                        detail::span_to_writable_pointer(sk));
