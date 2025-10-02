@@ -214,9 +214,10 @@ AuthDataItem::build_result() const
 {
   AccountAuthData result = base_auth_data_;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    if (pk_changes_[i]) {
-      assert(pk_changes_[i]->committed_);
-      result.public_keys[i] = pk_changes_[i]->pk_;
+    auto const &pk_change = pk_changes_[i];
+    if (pk_change.has_value()) {
+      assert(pk_change->committed_);
+      result.public_keys[i] = pk_change->pk_;
     }
   }
   return result;
@@ -226,15 +227,17 @@ void
 AuthDataItem::commit_change(AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     if (auth_data_item.pk_changes_[i]) {
       pk_changes_[i]->committed_ = true;
-      if (pk_changes_[i]) {
+      if (pk_changes_[i].has_value()) {
         assert(pk_changes_[i]->pk_ == auth_data_item.pk_changes_[i]->pk_);
       }
       else {
         pk_changes_[i].emplace(std::move(*auth_data_item.pk_changes_[i]));
       }
     }
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
 }
 
@@ -242,6 +245,7 @@ bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     if (pk_changes_[i].has_value() &&
         auth_data_item.pk_changes_[i].has_value()) {
       if (pk_changes_[i]->pk_ != auth_data_item.pk_changes_[i]->pk_) {
@@ -251,6 +255,7 @@ AuthDataItem::narrow(const AuthDataItem &auth_data_item)
     if (auth_data_item.pk_changes_[i].has_value()) {
       pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
     }
+    // NOLINTEND(bugprone-unchecked-optional-access)
   }
   return true;
 }

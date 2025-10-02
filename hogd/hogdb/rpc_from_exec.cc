@@ -131,6 +131,11 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     return to_rpc_error(
         tx.request_deploy_contract(addrkey.address,
                                    delta.deployed_contract_hash()));
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeAccountAuthData);
+    return to_rpc_error(
+        tx.request_auth_data(addrkey.address, delta.auth_data_change()));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;

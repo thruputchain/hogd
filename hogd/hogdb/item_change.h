@@ -317,6 +317,7 @@ public:
 
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
+    assert(key_id < MAX_SIGNERS);
     pk_changes_[key_id].emplace(std::move(pk));
   }
 
@@ -350,8 +351,9 @@ public:
   {
     assert(base_auth_data_ == auth_data.base_auth_data_);
     for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-      if (auth_data.pk_changes_[i]) {
-        pk_changes_[i].emplace(*auth_data.pk_changes_[i]);
+      auto const &pk_change = auth_data.pk_changes_[i];
+      if (pk_change.has_value()) {
+        pk_changes_[i].emplace(*pk_change);
       }
       else {
         pk_changes_[i].reset();
@@ -386,6 +388,8 @@ public:
   {}
   ItemChange(NewContractData &&new_contract_data)
     : type_(std::move(new_contract_data))
+  {}
+  ItemChange(AuthDataItem &&auth_data_item) : type_(std::move(auth_data_item))
   {}
   ~ItemChange() = default;
 
