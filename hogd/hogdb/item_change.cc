@@ -242,12 +242,12 @@ bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    if (pk_changes_[i] && auth_data_item.pk_changes_[i]) {
+    if (pk_changes_[i].has_value() && auth_data_item.pk_changes_[i].has_value()) {
       if (pk_changes_[i]->pk_ != auth_data_item.pk_changes_[i]->pk_) {
         return false;
       }
     }
-    if (auth_data_item.pk_changes_[i]) {
+    if (auth_data_item.pk_changes_[i].has_value()) {
       pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
     }
   }
