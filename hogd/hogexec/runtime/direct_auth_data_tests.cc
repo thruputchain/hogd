@@ -52,6 +52,14 @@ public:
     return delta;
   }
 
+  void check_balance(ContractAddress contract_addr, int128_t expected_balance)
+  {
+    auto bal = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(contract_addr));
+    ASSERT_TRUE(bal.has_value());
+    ASSERT_EQ(from_xdr(bal.value().nnint()), expected_balance);
+  }
+
   // check that the two addresses have the same balance,
   // and that that balance is less than or equal to
   // the initial balance
@@ -59,17 +67,8 @@ public:
                       ContractAddress reference_addr, int128_t expected_balance)
   {
     // check that costs are reflected in the balance
-    auto bal = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(contract_addr));
-    auto bal_ref = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(reference_addr));
-    ASSERT_TRUE(bal.has_value());
-    ASSERT_TRUE(bal_ref.has_value());
-    int128_t bal_int = from_xdr(bal.value().nnint());
-    int128_t bal_ref_int = from_xdr(bal_ref.value().nnint());
-
-    EXPECT_EQ(bal_int, bal_ref_int);
-    EXPECT_EQ(bal_int, expected_balance);
+    check_balance(contract_addr, expected_balance);
+    check_balance(reference_addr, expected_balance);
   }
 
   const StorageCostModel *cost_model_;
@@ -135,6 +134,48 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   advance_block();
   check_balances(contract_addr, contract_addr_ref,
                  kInitialBalance - (cost_model_->kBaseItemCost));
+}
+
+TEST_P(DirectAuthDataTest, AuthDataNonconflicting)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  AuthDataChangeArgs auth_data1{};
+  auth_data1.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
+  AuthDataChangeArgs auth_data2{};
+  auth_data2.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data1),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}));
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}));
+  advance_block();
+  check_balances(contract_addr, contract_addr,
+                 kInitialBalance - (cost_model_->kBaseItemCost));
+
+  auto item = lookup_storage_item_from_db(
+      make_account_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  auto db_auth_data = item->auth_data();
+  ASSERT_TRUE(db_auth_data.public_keys[0]);
+  ASSERT_TRUE(db_auth_data.public_keys[1]);
+  ASSERT_EQ(db_auth_data.public_keys[0]->key,
+            auth_data1.auth_data_change_signers[0].public_key->key);
+  ASSERT_EQ(db_auth_data.public_keys[1]->key,
+            auth_data2.auth_data_change_signers[0].public_key->key);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

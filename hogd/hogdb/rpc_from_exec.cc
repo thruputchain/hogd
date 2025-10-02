@@ -236,6 +236,18 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
     ret.item() = out;
     return ret;
   }
+  if (key.is_account_auth_data()) {
+    HogDBStatus<AccountAuthData> auth_data =
+        ctx_.get_db().read_address_account_auth_data(key.get_address());
+    if (!auth_data)
+      return ExpectedStorageItem(to_rpc_error(auth_data.error()));
+    StorageItem out(StorageItemType::kItemTypeAuthData);
+    out.auth_data() = *auth_data;
+    ExpectedStorageItem ret;
+    ret.error(RPCError::kRPCNone);
+    ret.item() = out;
+    return ret;
+  }
 
   HogDBStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
   if (!item)
