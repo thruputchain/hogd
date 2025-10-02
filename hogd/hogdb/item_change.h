@@ -86,6 +86,11 @@ concept is_item =
       { t.committed_storage_cost(cost_model) } -> std::same_as<int128_t>;
     };
 
+template<typename T>
+concept is_item_commit_required = requires(T t, const T &arg) {
+  { t.commit_change(arg) } -> std::same_as<void>;
+} && is_item<T>;
+
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
 // plus does not overflow. The item's value at commit time is base + delta.
 class NNInt128 {
@@ -324,7 +329,7 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
 
-  void commit_change(AuthDataItem &auth_data_item);
+  void commit_change(AuthDataItem const &auth_data_item);
   bool narrow(const AuthDataItem &auth_data_item);
 
   HogDBStatus<int128_t> merge(const AuthDataItem &auth_data_item,
@@ -374,7 +379,7 @@ private:
   const AccountAuthData base_auth_data_;
 };
 
-static_assert(is_item<AuthDataItem>);
+static_assert(is_item_commit_required<AuthDataItem>);
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {

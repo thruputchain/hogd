@@ -307,8 +307,13 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 {
   auto key = make_address_key(addr, Prefix::kAccountAuthData);
   auto buf = x23::serialize(auth);
-  return db_.put(std::as_bytes(std::span(key)), 0,
-                 std::as_bytes(std::span(buf)));
+
+  auto before_item = get_before_item(key);
+
+  auto ret =
+      db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  update_invariants_post(key, before_item);
+  return ret;
 }
 
 HogDBStatus<void>

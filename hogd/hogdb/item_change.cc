@@ -224,7 +224,7 @@ AuthDataItem::build_result() const
 }
 
 void
-AuthDataItem::commit_change(AuthDataItem &auth_data_item)
+AuthDataItem::commit_change(AuthDataItem const &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -253,7 +253,9 @@ AuthDataItem::narrow(const AuthDataItem &auth_data_item)
       }
     }
     if (auth_data_item.pk_changes_[i].has_value()) {
-      pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
+      if (!pk_changes_[i].has_value()) {
+        pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
+      }
     }
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
@@ -369,10 +371,7 @@ ItemChange::commit_change(const ItemChange &change)
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
-        if constexpr (requires {
-                        arg.commit_change(std::get<std::decay_t<decltype(arg)>>(
-                            change.type_));
-                      })
+        if constexpr (is_item_commit_required<std::decay_t<decltype(arg)>>)
           arg.commit_change(
               std::get<std::decay_t<decltype(arg)>>(change.type_));
       },

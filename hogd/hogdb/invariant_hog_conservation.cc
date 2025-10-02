@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <iterator>
 #include <span>
-#include <stdexcept>
 #include <utility>
 
 #include "account.hh"
@@ -137,7 +136,7 @@ void
 HogConservationInvariant::handle_account_auth_data_item_change(
     HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
 {
-  auto get_storage_cost = [](HogDBStatus<DBItem> const &item) -> int128_t {
+  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
       return 0;
     }
@@ -150,8 +149,7 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       assert(false);
       return 0;
     }
-    throw std::runtime_error(
-        "account auth data type not yet implemented in hogdb");
+    return cost_model_.kBaseItemCost;
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
