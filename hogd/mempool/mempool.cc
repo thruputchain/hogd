@@ -68,13 +68,16 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   x23::CoroPoll cp(client_pool);
   coord_client_t coord_client =
       MempoolCoordinatorRpc::get_client(coordinator_addr, cp);
+  // TODO(jhumphri): I think I just need to create a client for one of the
+  // shards? Will the account information that the scheduler needs be
+  // distributed across shards?
   x23::Vec<db_sched_client_t> db_clients = db_rpc.get_clients(cp);
   x23::Vec<exec_client_t> exec_clients = exec_rpc.get_clients(cp);
 
   // TODO(jhumphri): Register the mempool with the coordinator with
   // [coordscheduler_intro_sched()].
   RpcServer<MempoolCoordinatorRpc> coord(std::move(coord_client),
-                                         std::move(db_clients),
+                                         std::move(db_clients[0]),
                                          std::move(exec_clients));
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   const std::string sched_address = create_address(kCoordinatorServerPort);

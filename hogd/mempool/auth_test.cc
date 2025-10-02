@@ -1061,7 +1061,7 @@ TEST(Authentication, SignAndVerifyAuthDataChanged)
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
   server.set_dbtip({.height = 1, .hash = {}, .id = 1});
-  auth.update_block_id(/*block_id=*/1);
+  auth.update_block_id(/*block_id=*/1)();
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -1113,7 +1113,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[1],
                                auth_datas[1]);
   server.set_dbtip({.height = 1, .hash = {}, .id = 1});
-  auth.update_block_id(/*block_id=*/1);
+  auth.update_block_id(/*block_id=*/1)();
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 

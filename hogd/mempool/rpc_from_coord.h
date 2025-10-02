@@ -33,11 +33,11 @@ public:
   static constexpr size_t kMaxBlockSize = 128;
 
   MempoolCoordinatorRpc(coord_client_t &&coord_client,
-                        x23::Vec<db_sched_client_t> &&db_sched_clients,
+                        db_sched_client_t &&db_sched_client,
                         x23::Vec<exec_client_t> &&exec_clients)
     : coord_client_(std::move(coord_client)),
-      db_sched_clients_(std::move(db_sched_clients)),
-      exec_clients_(std::move(exec_clients)), scheduler_(db_sched_clients_[0])
+      db_sched_client_(std::move(db_sched_client)),
+      exec_clients_(std::move(exec_clients)), scheduler_(db_sched_client_)
   {}
 
   // Disable copy and move.
@@ -50,8 +50,8 @@ public:
   {
     IntroSchedResult res = coordscheduler_intro_sched(card);
     current_block_id_ = res.current_block_id;
-    authentication_ = std::make_unique<Authentication>(current_block_id_,
-                                                       db_sched_clients_[0]);
+    authentication_ =
+        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
   }
 
   IntroSchedResult coordscheduler_intro_sched(SchedulerCard card)
@@ -146,10 +146,10 @@ private:
 
   x23::Async<bool> open_validation_block(BlockID block_id);
 
-  void mark_block_committed(BlockID block_id);
+  x23::Async<void> mark_block_committed(BlockID block_id);
 
   coord_client_t coord_client_;
-  x23::Vec<db_sched_client_t> db_sched_clients_;
+  db_sched_client_t db_sched_client_;
   x23::Vec<exec_client_t> exec_clients_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.

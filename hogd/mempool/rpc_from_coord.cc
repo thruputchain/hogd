@@ -59,8 +59,8 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
   DbSchedResult res =
-      co_await db_sched_clients_[0].dbsched_create_snapshot(prev_block_id,
-                                                            block_id, mode);
+      co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
+                                                        mode);
   co_return res == DbSchedResult::DbSchedResultOK;
 }
 
@@ -68,7 +68,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
   DbSchedResult res =
-      co_await db_sched_clients_[0].dbsched_abandon_snapshot(block_id);
+      co_await db_sched_client_.dbsched_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbSchedResultOK], but this
   // could change in the future. In the case of a failure, we need to clean up
   // db state.
@@ -80,7 +80,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_clients_[0].dbsched_close_snapshot(block_id);
+      co_await db_sched_client_.dbsched_close_snapshot(block_id);
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -91,7 +91,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_clients_[0].dbsched_commit_snapshot(block_id);
+      co_await db_sched_client_.dbsched_commit_snapshot(block_id);
   // [dbsched_commit_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -249,7 +249,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
-  mark_block_committed(block_id);
+  co_await mark_block_committed(block_id);
 
   co_return result;
 }
@@ -358,7 +358,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
-  mark_block_committed(block_id);
+  co_await mark_block_committed(block_id);
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
@@ -369,12 +369,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_return result;
 }
 
-void
+x23::Async<void>
 MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 {
+  info("mark blocked committed {} {}", current_block_id_, block_id);
   current_block_id_ = block_id;
   x23::Vec<ContractAddress> changed_accounts =
-      authentication_->update_block_id(current_block_id_);
+      co_await authentication_->update_block_id(current_block_id_);
+  info("now for loop");
   for (const ContractAddress &account : changed_accounts) {
     scheduler_.filter_txs_for_account(account, auth_filter_);
   }
@@ -383,13 +385,13 @@ MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 x23::Async<DbTipResult>
 MempoolCoordinatorRpc::schedcoord_get_tip()
 {
-  return db_sched_clients_[0].dbsched_get_tip();
+  return db_sched_client_.dbsched_get_tip();
 }
 
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::schedcoord_load_genesis_block(GenesisBlock genesis_block)
 {
-  return db_sched_clients_[0].dbsched_load_genesis_block(genesis_block);
+  return db_sched_client_.dbsched_load_genesis_block(genesis_block);
 }
 
 x23::Async<void>
