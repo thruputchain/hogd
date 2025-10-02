@@ -12,30 +12,10 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 1. Install python-yaml, either with your OS package manager (e.g.,
    `pacman -S python-yaml`) or with `pip install pyyaml`.
 
-1. Install [`rustup`](https://rustup.rs/) if you haven't already.  It
-   generally won't suffice to have your OS distribution's rust
-   packages installed, because they won't support WASM.  You can
-   install rustup with:
-
-    ~~~~ .sh
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    ~~~~
-
-1. Fetch rust crate dependencies.
-    ~~~~ .sh
-    ./scripts/fetch.sh
-    ~~~~
-
-1. Install cbindgen.
-
-    ~~~~ .sh
-    cargo install --force cbindgen
-    ~~~~
-
 1. If you plan to use clang as your compiler, install the llvm package as well.
 
     ~~~~ .sh
-    sudo pacman -S llvm
+    sudo pacman -S llvm libc++
     ~~~~
 
 1. Pull all of the submodules.
@@ -44,14 +24,36 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     git submodule update --init --recursive
     ~~~~
 
-1. Configure the build system using "`cmake -B `_builddir_", setting the
-   `CXXFLAGS` environment variable if you don't want to use the default. Also
-    set the `DCMAKE_C_COMPILER` and `DCMAKE_CXX_COMPILER` flags if you want to
-    use clang. For instance, any of the following might be what you want:
+1. Install [`rustup`](https://rustup.rs/) if you haven't already.  It
+   generally won't suffice to have your OS distribution's rust
+   packages installed, because they won't support WASM.  You can
+   install rustup with:
 
-    * `cmake -B build`
-    * `CXXFLAGS=-ggdb cmake -B debug-build`
-    * `cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
+    ~~~~ .sh
+    curl -sSf https://sh.rustup.rs | sh
+    ~~~~
+
+1. Install cbindgen.
+
+    ~~~~ .sh
+    cargo install --force cbindgen
+    ~~~~
+
+1. Fetch rust crate dependencies.
+    ~~~~ .sh
+    ./scripts/fetch.sh
+    ~~~~
+
+1. Use cmake to configure the build, or run
+    ~~~~ .sh
+    ./scripts/build.sh -n
+    ~~~~
+    to get the defaults, or to specify the directory, build type
+    (`Debug` or `Release` [default]) and compiler (`gcc` [default] or
+    `clang`) explicitly:
+    ~~~~ .sh
+    ./scripts/build.sh -n -d build -t Debug -c clang
+    ~~~~
 
 1. Build the system by running `make` in the build directory, E.g.:
 
@@ -100,7 +102,6 @@ If your rust installation gets messed up, delete the directories
 ```
 curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
 cargo install --force cbindgen
-export CARGO_NET_GIT_FETCH_WITH_CLI=true
 ./scripts/fetch.sh
 ```
 
