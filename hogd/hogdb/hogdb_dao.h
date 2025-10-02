@@ -24,8 +24,8 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
-#include "sched_coord.hh"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "sched_coord.hh"
 #include "types.hh"
 
 #include "hogd/base/span.h"
