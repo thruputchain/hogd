@@ -7,8 +7,10 @@
 #include <limits>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -183,6 +185,82 @@ NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
                             std::as_bytes(std::span(buf)));
 }
 
+HogDBStatus<void>
+AuthDataItem::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                     const ItemKey &key) const
+{
+  // TODO(geoff): implement
+  if constexpr (is_debug_build()) {
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      if (pk_changes_[i]) {
+        assert(pk_changes_[i]->committed_);
+      }
+    }
+    assert(key.is_account_auth_data());
+  }
+  return {};
+}
+
+void
+AuthDataItem::commit_change(AuthDataItem &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (auth_data_item.pk_changes_[i]) {
+      if (pk_changes_[i]) {
+        assert(*pk_changes_[i]->pk_ == *auth_data_item.pk_changes_[i]->pk_);
+      }
+      else {
+        pk_changes_[i].emplace(std::move(*auth_data_item.pk_changes_[i]));
+        pk_changes_[i]->committed_ = true;
+      }
+    }
+  }
+}
+
+bool
+AuthDataItem::narrow(const AuthDataItem &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i] && auth_data_item.pk_changes_[i]) {
+      if (*pk_changes_[i]->pk_ != *auth_data_item.pk_changes_[i]->pk_) {
+        return false;
+      }
+    }
+    if (auth_data_item.pk_changes_[i]) {
+      pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
+    }
+  }
+  return true;
+}
+
+HogDBStatus<int128_t>
+AuthDataItem::merge(const AuthDataItem &auth_data_item,
+                    const StorageCostModel *cost_model)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i] && auth_data_item.pk_changes_[i]) {
+      if (*pk_changes_[i]->pk_ != *auth_data_item.pk_changes_[i]->pk_) {
+        return HogDBError(HogDBCode::kConflict);
+      }
+    }
+    if (auth_data_item.pk_changes_[i]) {
+      pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
+    }
+  }
+  // TODO(geoff): auth cost model
+  return marginal_storage_cost(cost_model);
+}
+
+void
+AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (auth_data_item.pk_changes_[i]) {
+      pk_changes_[i].reset();
+    }
+  }
+}
+
 namespace {
 
 template<typename T>
@@ -270,7 +348,10 @@ ItemChange::commit_change(const ItemChange &change)
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
-        if constexpr (requires { arg.commit_change(std::get<std::decay_t<decltype(arg)>>(change.type_)); })
+        if constexpr (requires {
+                        arg.commit_change(std::get<std::decay_t<decltype(arg)>>(
+                            change.type_));
+                      })
           arg.commit_change(
               std::get<std::decay_t<decltype(arg)>>(change.type_));
       },
@@ -331,7 +412,7 @@ ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
   return std::visit(
       [cost_model](auto &arg) -> int128_t {
         assert(!is_monostate<decltype(arg)>);
-        
+
         if constexpr (!is_monostate<decltype(arg)>)
           return arg.committed_storage_cost(cost_model);
         assert(false);

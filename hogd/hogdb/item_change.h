@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -74,17 +75,15 @@ concept is_item =
 
       // Some items, if necessary, have a commit_change method.
       // { t.commit_change(arg) } -> std::same_as<void>;
-      
+
       // Returns the amount of storage tokens that are actually needed to
       // support the item, for all of the changes that are currently committed.
       // The caller is responsible for releasing the difference between the
       // amount returned by merge, and the difference in this cost before and
-      // after a call to commit_change.  
+      // after a call to commit_change.
       //
       // Is not called if no changes have been committed.
-      {
-        t.committed_storage_cost(cost_model)
-      } -> std::same_as<int128_t>;
+      { t.committed_storage_cost(cost_model) } -> std::same_as<int128_t>;
     };
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
@@ -112,8 +111,7 @@ public:
   int128_t base() const { return base_; }
   int128_t delta() const { return delta_; }
 
-  static int128_t
-  committed_storage_cost(const StorageCostModel *cost_model)
+  static int128_t committed_storage_cost(const StorageCostModel *cost_model)
   {
     return marginal_storage_cost(cost_model);
   }
@@ -173,8 +171,7 @@ public:
     return OwningSpan(span, [ref = std::move(buf)] {});
   }
 
-  int128_t
-  committed_storage_cost(const StorageCostModel *cost_model) const
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const
   {
     return marginal_storage_cost(cost_model);
   }
@@ -205,8 +202,7 @@ public:
   static void undo_merge(const Deletion &del) {}
   static size_t storage_size() { return 0; }
 
-  static int128_t
-  committed_storage_cost(const StorageCostModel *cost_model)
+  static int128_t committed_storage_cost(const StorageCostModel *cost_model)
   {
     return marginal_storage_cost(cost_model);
   }
@@ -250,8 +246,7 @@ public:
     return deployed_contract_hash_;
   }
 
-  int128_t
-  committed_storage_cost(const StorageCostModel *cost_model) const
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const
   {
     return marginal_storage_cost(cost_model);
   }
@@ -295,8 +290,7 @@ public:
     return 0;
   }
 
-  static int128_t
-  committed_storage_cost(const StorageCostModel * /*unused*/)
+  static int128_t committed_storage_cost(const StorageCostModel * /*unused*/)
   {
     return 0;
   }
@@ -315,39 +309,34 @@ private:
 
 static_assert(is_item<NewContractData>);
 
-/*
 class AuthDataItem {
 public:
-  AuthDataItem(AccountAuthData auth_data) : base_auth_data_(std::move(auth_data)) {}
+  AuthDataItem(AccountAuthData auth_data)
+    : base_auth_data_(std::move(auth_data))
+  {}
 
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
     pk_changes_[key_id].emplace(std::move(pk));
   }
 
-  void commit_change(AuthDataItem &auth_data_item)
-  {
-    change_committed_ = true;
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-      if (auth_data_item.pk_changes_[i]) {
-        if (pk_changes_[i]) {
-          assert(*pk_changes_[i]->pk_ == *auth_data_item.pk_changes_[i]->pk_);
-        }
-        else {
-          pk_changes_[i].emplace(std::move(*auth_data_item.pk_changes_[i]));
-          pk_changes_[i]->committed_ = true;
-        }
-      }
-    }
-  }
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
 
-  std::optional<int128_t>
-  committed_storage_cost(const StorageCostModel *cost_model) const
+  void commit_change(AuthDataItem &auth_data_item);
+  bool narrow(const AuthDataItem &auth_data_item);
+
+  HogDBStatus<int128_t> merge(const AuthDataItem &auth_data_item,
+                              const StorageCostModel *cost_model);
+
+  void undo_merge(const AuthDataItem &auth_data_item);
+
+  // TODO(geoff): implement or remove storage_size entirely
+  static size_t storage_size() { return 0; }
+
+  static int128_t committed_storage_cost(const StorageCostModel *cost_model)
   {
-    if (change_committed_) {
-      return marginal_storage_cost(cost_model);
-    }
-    return std::nullopt;
+    return marginal_storage_cost(cost_model);
   }
 
   constexpr static int128_t
@@ -357,20 +346,31 @@ public:
     return cost_model->kBaseItemCost;
   }
 
+  AuthDataItem &operator=(const AuthDataItem &auth_data)
+  {
+    assert(base_auth_data_ == auth_data.base_auth_data_);
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      if (auth_data.pk_changes_[i]) {
+        pk_changes_[i].emplace(*auth_data.pk_changes_[i]);
+      }
+      else {
+        pk_changes_[i].reset();
+      }
+    }
+    return *this;
+  }
 
 private:
-
   struct PublicKeyChange {
     PublicKeyChange(PublicKeyConfigOpt pk) : pk_(std::move(pk)) {}
     bool committed_{false};
     const PublicKeyConfigOpt pk_;
   };
-  bool change_committed_{false};
   std::array<std::optional<PublicKeyChange>, MAX_SIGNERS> pk_changes_;
   const AccountAuthData base_auth_data_;
 };
 
-static_assert(is_item<AuthDataItem>); */
+static_assert(is_item<AuthDataItem>);
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {
@@ -485,7 +485,7 @@ private:
   LazySnapshotCost snapshot_cost_;
   bool change_committed_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData>
+               NewContractData, AuthDataItem>
       type_;
 
   size_t storage_size() const;
