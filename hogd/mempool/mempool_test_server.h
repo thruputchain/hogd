@@ -158,8 +158,7 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
-      LocalMockDB db_identifier{.read_port_number_ = db_executor_port_};
-      executor_coord_server_.init_from_coord(&db_identifier);
+      executor_coord_server_.init_from_coord();
       executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
     }
   }

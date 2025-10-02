@@ -372,11 +372,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<void>
 MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 {
-  info("mark blocked committed {} {}", current_block_id_, block_id);
   current_block_id_ = block_id;
   x23::Vec<ContractAddress> changed_accounts =
       co_await authentication_->update_block_id(current_block_id_);
-  info("now for loop");
   for (const ContractAddress &account : changed_accounts) {
     scheduler_.filter_txs_for_account(account, auth_filter_);
   }
