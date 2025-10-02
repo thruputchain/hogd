@@ -131,7 +131,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
         auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
         // Only spawn another coroutine if result not already available
-        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        decltype(auto) awaiter = detail::get_awaiter(awaitable); 
         if (awaiter.await_ready())
           cp_->awrite(fd_, awaiter.await_resume());
         else
