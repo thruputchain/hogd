@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdlib>
 
 #include "exec_sched.hh"
 #include "hogd/base/types.h"

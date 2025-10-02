@@ -26,7 +26,7 @@ class MempoolDbRpc {
 public:
   using rpc_service = SchedDb1;
 
-  MempoolDbRpc() {}
+  MempoolDbRpc() = default;
 
   // Disable copy and move.
   MempoolDbRpc(const MempoolDbRpc &) = delete;

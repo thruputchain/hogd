@@ -54,7 +54,7 @@ public:
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
   }
 
-  IntroSchedResult coordscheduler_intro_sched(SchedulerCard card)
+  IntroSchedResult coordscheduler_intro_sched(const SchedulerCard &card)
   {
     IntroSchedResult res = coord_client_.coordscheduler_intro_sched(card)();
     return res;
@@ -93,7 +93,7 @@ public:
   // hogdb.
   x23::Async<DbTipResult> schedcoord_get_tip();
   x23::Async<DbSchedResult>
-  schedcoord_load_genesis_block(GenesisBlock genesis_block);
+  schedcoord_load_genesis_block(const GenesisBlock &genesis_block);
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.

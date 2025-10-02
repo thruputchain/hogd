@@ -12,6 +12,7 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
+#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -387,7 +388,8 @@ MempoolCoordinatorRpc::schedcoord_get_tip()
 }
 
 x23::Async<DbSchedResult>
-MempoolCoordinatorRpc::schedcoord_load_genesis_block(GenesisBlock genesis_block)
+MempoolCoordinatorRpc::schedcoord_load_genesis_block(
+    const GenesisBlock &genesis_block)
 {
   return db_sched_client_.dbsched_load_genesis_block(genesis_block);
 }
