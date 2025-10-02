@@ -19,14 +19,6 @@ namespace {
 
 constexpr uint16_t kExecServerPort = 8070;
 
-std::string
-get_executor_address()
-{
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, kExecServerPort);
-}
-
 int
 hogexec_init(const std::string &coordinator_addr)
 {
@@ -40,11 +32,7 @@ hogexec_init(const std::string &coordinator_addr)
   const uint16_t coordinator_port = static_cast<uint16_t>(
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
-  const std::string executor_address = get_executor_address();
-  const ExecCard card{.protocol = version::kHogdProtocol,
-                      .upid = {},
-                      .address = executor_address.c_str()};
-  ExecCoordServer exec(card, coordinator_host, coordinator_port);
+  ExecCoordServer exec(coordinator_host, coordinator_port);
   exec.init_from_coord();
   CHECK_EQ(exec.start_server(kExecServerPort), kExecServerPort);
 

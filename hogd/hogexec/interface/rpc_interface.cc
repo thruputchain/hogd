@@ -19,7 +19,8 @@ namespace hogd {
 uint16_t
 ExecutorRpcInterface::start_server(uint16_t port_number)
 {
-  return tcp_rpc_server(cp_, port_number, [this](auto c) { c->server(this); });
+  port_ = tcp_rpc_server(cp_, port_number, [this](auto c) { c->server(this); });
+  return port_;
 }
 
 x23::Async<ExecProposeResult>
@@ -27,7 +28,7 @@ ExecutorRpcInterface::executorcoord_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
-  auto ctx = executor_states_.get_executor_context(block_id);
+  auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
@@ -43,7 +44,7 @@ ExecutorRpcInterface::executorcoord_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
-  auto ctx = executor_states_.get_executor_context(block_id);
+  auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
     co_return ExecResult::ExecResultSystemError;
   }
@@ -60,7 +61,7 @@ ExecutorRpcInterface::executorcoord_propose_batch(
 {
   // TODO(geoff): co_await cp_.pool_.bg();
   co_await cp_.pool_.bg();
-  auto ctx = executor_states_.get_executor_context(block_id);
+  auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
@@ -86,7 +87,7 @@ ExecutorRpcInterface::executorcoord_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
-  auto ctx = executor_states_.get_executor_context(block_id);
+  auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
@@ -108,19 +109,19 @@ ExecutorRpcInterface::executorcoord_validate_batch(
 ExecResult
 ExecutorRpcInterface::executorcoord_open_proposal_block(BlockID id)
 {
-  return executor_states_.open_proposal(id);
+  return executor_states_->open_proposal(id);
 }
 
 ExecResult
 ExecutorRpcInterface::executorcoord_open_validation_block(BlockID id)
 {
-  return executor_states_.open_validation(id);
+  return executor_states_->open_validation(id);
 }
 
 void
 ExecutorRpcInterface::executorcoord_finish_block(BlockID id)
 {
-  executor_states_.remove_block(id);
+  executor_states_->remove_block(id);
 }
 
 TransactionID

@@ -21,11 +21,10 @@ namespace hogd {
 // coordinator.
 class ExecCoordServer {
 public:
-  ExecCoordServer(ExecCard self_card, std::string coord_address,
-                  uint16_t coord_port)
-    : self_card_(std::move(self_card)),
-      coord_address_(std::move(coord_address)), coord_port_(coord_port),
-      cp_(x23_pool_)
+  ExecCoordServer(std::string coord_address, uint16_t coord_port)
+    : coord_address_(std::move(coord_address)), coord_port_(coord_port),
+      cp_(x23_pool_),
+      rpc_interface_(std::make_unique<ExecutorRpcInterface>(cp_))
   {}
 
   ~ExecCoordServer() { await_shutdown_request(); }
@@ -54,6 +53,8 @@ public:
   void init_from_coord();
 
 private:
+  std::string get_executor_address() const;
+
   // Connects to the database and performs initialization of the executor.
   // Then begins serving RPCs to the coordinator.
   void start_rpc_service(DatabaseIdentifier identifier,
@@ -68,7 +69,6 @@ private:
 
   IntroExecResult get_exec_result();
 
-  ExecCard self_card_;
   const std::string coord_address_;
   const uint16_t coord_port_;
   // We want to wait for CoroPoll to shutdown before shutting down WorkerPool,

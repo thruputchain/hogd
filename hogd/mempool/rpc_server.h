@@ -88,7 +88,8 @@ server_address_to_sockaddr(std::string_view server_address)
 {
   x23::HostPort helper;
   CHECK(helper.parse(server_address));
-  std::expected<sockaddr_storage, x23::GaiError> addr = helper.to_addr();
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      helper.to_addr(/*dns=*/true);
   CHECK(addr.has_value());
   return *addr;
 }

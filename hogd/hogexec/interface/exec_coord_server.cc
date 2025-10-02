@@ -11,13 +11,23 @@
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/version.h"
 #include "sched_exec.hh"
 #include "x23/rpc.h"
 
 namespace hogd {
+
+std::string
+ExecCoordServer::get_executor_address() const
+{
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return std::format("{}:{}", hostname, rpc_interface_->port());
+}
 
 std::unique_ptr<DatabaseProxy>
 ExecCoordServer::connect_to_database(DatabaseIdentifier identifier)
@@ -30,8 +40,7 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
                                    uint16_t self_executor_id)
 {
   auto db_proxy = connect_to_database(std::move(identifier));
-  rpc_interface_ = std::make_unique<ExecutorRpcInterface>(self_executor_id, cp_,
-                                                          std::move(db_proxy));
+  rpc_interface_->init(self_executor_id, std::move(db_proxy));
 }
 
 std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
@@ -58,7 +67,10 @@ ExecCoordServer::get_exec_result()
       continue;
     }
 
-    auto ret = client->schedexec_intro_exec(self_card_)();
+    ExecCard card = {.protocol = version::kHogdProtocol,
+                     .upid = {},
+                     .address = get_executor_address().c_str()};
+    auto ret = client->schedexec_intro_exec(card)();
     return ret;
   }
 }

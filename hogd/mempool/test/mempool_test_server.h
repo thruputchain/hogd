@@ -76,7 +76,7 @@ public:
       sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
-      executor_coord_server_(exec_card_, kAddress, sched_exec_port_)
+      executor_coord_server_(kAddress, sched_exec_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -111,7 +111,6 @@ public:
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
       db_scheduler_port_ = db_scheduler_server_->port();
-      info("db scheduler port is {}", db_scheduler_port_);
     }
 
     {
@@ -154,9 +153,6 @@ public:
           std::format("{}:{}", kAddress, db_executor_port_);
       std::string sched_address =
           std::format("{}:{}", kAddress, db_scheduler_port_);
-      info("the address that i think the scheduler is supposed to connected to "
-           "for the db is {}",
-           sched_address);
       client.scheddb_intro_shard(
           {.protocol = version::kHogdProtocol,
            .block_height = 0,
@@ -167,8 +163,8 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
+      executor_coord_server_.start_server(/*port_number=*/0);
       executor_coord_server_.init_from_coord();
-      executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
     }
   }
 
@@ -217,7 +213,9 @@ public:
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t db_executor_port() const { return db_executor_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
-  uint16_t executor_port() const { return executor_port_; }
+
+  MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
+  MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
@@ -255,12 +253,7 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  const ExecCard exec_card_{
-      .protocol = version::kHogdProtocol,
-      .upid = {},
-      .address = x23::HostPort(/*address=*/"", /*port=*/0).show()};
   ExecCoordServer executor_coord_server_;
-  uint16_t executor_port_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
@@ -316,7 +309,7 @@ struct Clients {
 };
 
 inline Clients
-create_clients(const MempoolTestServer &server)
+create_clients(MempoolTestServer &server)
 {
   // Mempool-Coordinator RPC client.
   auto coord_pool = std::make_unique<x23::ThreadPool>();
@@ -332,25 +325,14 @@ create_clients(const MempoolTestServer &server)
   // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>();
   auto db_sched_cp = std::make_unique<x23::CoroPoll>(*db_sched_pool);
-  x23::UniqueFd db_sched_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.db_scheduler_port()}
-                           .to_addr());
   db_sched_client_t db_sched_client =
-      x23::rpc_stream_logged(*db_sched_cp, db_sched_fd.release())
-          ->client(DbSched1{});
+      server.sched_db_rpc().get_clients(*db_sched_cp)[0];
 
   // Mempool-Executor RPC client.
   auto exec_pool = std::make_unique<x23::ThreadPool>();
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  x23::UniqueFd exec_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.executor_port()}
-                           .to_addr());
-  exec_client_t exec_client =
-      x23::rpc_stream_logged(*exec_cp, exec_fd.release())
-          ->client(ExecutorSched1{});
-  x23::Vec<exec_client_t> exec_clients = {exec_client};
+  x23::Vec<exec_client_t> exec_clients =
+      server.sched_exec_rpc().get_clients(*exec_cp);
 
   auto interface =
       std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),

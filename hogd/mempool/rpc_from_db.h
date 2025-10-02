@@ -49,7 +49,7 @@ public:
     return shards_;
   }
 
-  x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
+  x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp) const
   {
     x23::Vec<db_sched_client_t> ret;
     ret.reserve(shards_.size());

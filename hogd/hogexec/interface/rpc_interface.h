@@ -20,13 +20,15 @@ class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorSched1;
 
-  ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
-                       std::unique_ptr<DatabaseProxy> db_proxy)
-    : self_executor_id_(self_executor_id), cp_(cp),
-      executor_states_(std::move(db_proxy))
-  {}
+  ExecutorRpcInterface(x23::CoroPoll &cp) : cp_(cp) {}
 
   uint16_t start_server(uint16_t port_number);
+  void init(uint16_t self_executor_id, std::unique_ptr<DatabaseProxy> db_proxy)
+  {
+    self_executor_id_ = self_executor_id;
+    executor_states_ =
+        std::make_unique<ExecutorStateManager>(std::move(db_proxy));
+  }
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
@@ -61,18 +63,21 @@ public:
   // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
+  uint16_t port() const { return port_; }
+
   void shut_down();
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
   TransactionID allocate_tx_id();
 
+  uint16_t port_ = 0;
   std::atomic<uint64_t> self_id_ = 0;
-  const uint16_t self_executor_id_;
+  uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
 
   x23::CoroPoll &cp_;
 
-  ExecutorStateManager executor_states_;
+  std::unique_ptr<ExecutorStateManager> executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
 };
 
