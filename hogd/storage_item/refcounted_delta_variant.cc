@@ -467,12 +467,13 @@ ReplayCacheArgs::get_current_committed_cost(
 int128_t
 ReplayCacheArgs::get_marginal_cost_upper_bound_static(
     bool is_committed, StorageDelta const &delta,
-    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
+    StorageCostModel const *current_model, StorageItemWrapper const * /*unused*/)
 {
   int128_t base_cost = current_model->kBaseItemCost;
-  if (is_committed || base_item) {
+  if (is_committed) {
     base_cost = 0;
   }
+  // could subtract off the savings by reusing storage from the base item
 
   return base_cost + current_model->get_replay_cache_cost(
                          delta.replay_cache_modify().nonces.size());
@@ -582,10 +583,26 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
     StorageItemWrapper const *base_item) const
 {
   assert(current_model);
+
+  auto has_pk_already = [this](uint32_t key_id) {
+    if (!base_auth_data_) {
+      return false;
+    }
+    return base_auth_data_->public_keys[key_id] != nullptr;
+  };
+
   if (has_committed_delta_) {
-    // TODO(geoff): Implement proper cost model for auth data based on number of
-    // signers
-    return current_model->kBaseItemCost;
+    int128_t base_cost = current_model->kBaseItemCost;
+    for (const auto &[key_id, new_key] : committed_changes_) {
+      if (new_key && !has_pk_already(key_id)) {
+        base_cost += current_model->kAuthPerKeyCost;
+      }
+      if (!new_key && has_pk_already(key_id)) {
+        base_cost -= current_model->kAuthPerKeyCost;
+      }
+    }
+    assert(base_cost >= current_model->kBaseItemCost);
+    return base_cost;
   }
 
   if (base_item) {
@@ -596,16 +613,22 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
 
 int128_t
 AuthDataArgs::get_marginal_cost_upper_bound_static(
-    bool is_committed, StorageDelta const & /*delta*/,
-    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
+    bool is_committed, StorageDelta const & delta,
+    StorageCostModel const *current_model, StorageItemWrapper const * /*unused*/)
 {
+
   int128_t base_cost = current_model->kBaseItemCost;
-  if (is_committed || base_item) {
+  if (is_committed) {
+    // someone else already paid for the cost of the base item,
+    // including any storage cost model changes
     base_cost = 0;
   }
 
-  // TODO(geoff): Consider marginal cost for adding/removing signers
-  return base_cost;
+  assert(delta.type() == StorageDeltaType::kDeltaTypeAuthDataChange);
+  auto const &auth_data_change = delta.auth_data_change();
+  size_t num_keys = auth_data_change.auth_data_change_signers.size();
+
+  return base_cost + (num_keys * current_model->kAuthPerKeyCost);
 }
 
 int128_t

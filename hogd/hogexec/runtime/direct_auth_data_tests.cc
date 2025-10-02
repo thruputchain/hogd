@@ -95,6 +95,45 @@ TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
   ASSERT_TRUE(tx1.commit_transaction({}));
 }
 
+TEST_P(DirectAuthDataTest, AuthDataDoubleWrite) {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  AuthDataChangeArgs auth_data{};
+  auth_data.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(tx1.commit_transaction({}));
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}));
+
+  advance_block();
+  check_balances(contract_addr, contract_addr,
+                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));
+  auto item = lookup_storage_item_from_db(
+      make_account_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  auto db_auth_data = item->auth_data();
+  ASSERT_TRUE(db_auth_data.public_keys[0]);
+  ASSERT_EQ(db_auth_data.public_keys[0]->key, auth_data.auth_data_change_signers[0].public_key->key);
+}
+
 TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
 {
   // Test that auth data creation incurs proper storage costs
@@ -113,14 +152,16 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
 
   auth_data.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
 
-  tx1.add_delta(make_account_auth_data_addrkey(contract_addr_ref),
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_2 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_2.has_value());
+  ASSERT_TRUE(r1_2.value());
   ASSERT_TRUE(tx1.commit_transaction({}));
 
   auto tx2 = make_new_per_tx_db_proxy();
@@ -129,11 +170,20 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
   ASSERT_TRUE(tx2.commit_transaction({}));
 
   advance_block();
   check_balances(contract_addr, contract_addr_ref,
-                 kInitialBalance - (cost_model_->kBaseItemCost));
+                 kInitialBalance - (cost_model_->get_auth_data_cost(2)));
+  auto item = lookup_storage_item_from_db(
+      make_account_auth_data_addrkey(contract_addr));
+  ASSERT_TRUE(item.has_value());
+  auto db_auth_data = item->auth_data();
+  ASSERT_TRUE(db_auth_data.public_keys[0]);
+  ASSERT_TRUE(db_auth_data.public_keys[1]);
+  ASSERT_EQ(db_auth_data.public_keys[0]->key, auth_data.auth_data_change_signers[0].public_key->key);
+  ASSERT_EQ(db_auth_data.public_keys[1]->key, auth_data.auth_data_change_signers[1].public_key->key);
 }
 
 TEST_P(DirectAuthDataTest, AuthDataNonconflicting)
@@ -163,8 +213,8 @@ TEST_P(DirectAuthDataTest, AuthDataNonconflicting)
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(tx2.commit_transaction({}));
   advance_block();
-  check_balances(contract_addr, contract_addr,
-                 kInitialBalance - (cost_model_->kBaseItemCost));
+  check_balance(contract_addr,
+                 kInitialBalance - (cost_model_->get_auth_data_cost(2)));
 
   auto item = lookup_storage_item_from_db(
       make_account_auth_data_addrkey(contract_addr));
@@ -226,7 +276,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
 
   advance_block();
   check_balances(contract_addr, contract_addr_ref,
-                 kInitialBalance - (cost_model_->kBaseItemCost));
+                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));
 
   auto item = lookup_storage_item_from_db(
       make_account_auth_data_addrkey(contract_addr));
