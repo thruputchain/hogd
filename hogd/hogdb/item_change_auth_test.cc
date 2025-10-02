@@ -74,8 +74,9 @@ TEST_F(ItemChangeAuthTest, MergeConflict)
   AuthDataItem auth_data_2(base_data_);
   auth_data_2.set_new_pk(0, make_pk_config(Weight{10}));
 
-  EXPECT_EQ(auth_data_item.merge(auth_data_2, &cost_model_).error(),
-            HogDBError(HogDBCode::kConflict));
+  auto r = auth_data_item.merge(auth_data_2, &cost_model_);
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
 
   AuthDataItem auth_data_3(base_data_);
   auth_data_3.set_new_pk(0, pk_1);
