@@ -296,7 +296,6 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
-  info("Requesting change for {}: {}", key, change);
   assert(!key.is_address_balance());
   std::vector<ItemVersion> &v = changes_[key];
 
@@ -306,6 +305,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     if (!ret) {
       return ret.error();
     }
+
     v.emplace_back(std::move(change), tx_depth_);
 
     int128_t marginal_storage = std::max<int128_t>(0, *ret);
@@ -329,6 +329,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   if (!ret) {
     return ret.error();
   }
+
   int128_t previous_locked_storage = item.locked_storage_cost;
 
   if (item.tx_depth == tx_depth_) {

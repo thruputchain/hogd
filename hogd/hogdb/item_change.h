@@ -24,6 +24,7 @@
 #include <format>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -48,46 +49,47 @@ namespace hogd {
 // tracks a change to a DB item. Each class that implements this concept is an
 // item type.
 template<typename T>
-concept is_item =
-    requires(T t, HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key,
-             const T &arg, const StorageCostModel *cost_model) {
-      // applies the change to the ramdb.
-      { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
-      // makes the change's reservation at least as restrictive as arg. However,
-      // does not merge the value change in arg. Returns true if narrowing was
-      // successful.
-      { t.narrow(arg) } -> std::same_as<bool>;
-      // merges the change and reservation in arg (will fail if there is a
-      // conflict).
-      // Returns an upper bound of the TOTAL amount of storage tokens
-      // that must be locked to support the item, after the merge.
-      // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
-      // The actual amount of storage tokens that are locked
-      // will be reduced by the amount locked for the current snapshot.
-      { t.merge(arg, cost_model) } -> std::same_as<HogDBStatus<int128_t>>;
-      // An upper bound on the amount of storage tokens needed to support the
-      // item change, for the case where the change is the first one applied to
-      // the item. I.e. this is the amount returned by t.merge() for t = empty
-      // ItemChange.
-      { t.marginal_storage_cost(cost_model) } -> std::same_as<int128_t>;
+concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key, const T &arg,
+                           const StorageCostModel *cost_model) {
+  // applies the change to the ramdb.
+  { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
+  // makes the change's reservation at least as restrictive as arg. However,
+  // does not merge the value change in arg. Returns true if narrowing was
+  // successful.
+  { t.narrow(arg) } -> std::same_as<bool>;
+  // merges the change and reservation in arg (will fail if there is a
+  // conflict).
+  // Returns an upper bound of the TOTAL amount of storage tokens
+  // that must be locked to support the item, after the merge.
+  // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
+  // The actual amount of storage tokens that are locked
+  // will be reduced by the amount locked for the current snapshot.
+  // IMPORTANT: merge() must be a NO-OP if the result is a HogDBError.
+  { t.merge(arg, cost_model) } -> std::same_as<HogDBStatus<int128_t>>;
+  // An upper bound on the amount of storage tokens needed to support the
+  // item change, for the case where the change is the first one applied to
+  // the item. I.e. this is the amount returned by t.merge() for t = empty
+  // ItemChange.
+  { t.marginal_storage_cost(cost_model) } -> std::same_as<int128_t>;
 
-      // reverts the change and reservation in arg that was previously merged.
-      { t.undo_merge(arg) } -> std::same_as<void>;
-      // returns the size in bytes of storage required in ramdb.
-      { t.storage_size() } -> std::same_as<size_t>;
+  // reverts the change and reservation in arg that was previously merged.
+  { t.undo_merge(arg) } -> std::same_as<void>;
+  // returns the size in bytes of storage required in ramdb.
+  { t.storage_size() } -> std::same_as<size_t>;
 
-      // Some items, if necessary, have a commit_change method.
-      // { t.commit_change(arg) } -> std::same_as<void>;
+  // Some items, if necessary, have a commit_change method.
+  // { t.commit_change(arg) } -> std::same_as<void>;
 
-      // Returns the amount of storage tokens that are actually needed to
-      // support the item, for all of the changes that are currently committed.
-      // The caller is responsible for releasing the difference between the
-      // amount returned by merge, and the difference in this cost before and
-      // after a call to commit_change.
-      //
-      // Is not called if no changes have been committed.
-      { t.committed_storage_cost(cost_model) } -> std::same_as<int128_t>;
-    };
+  // Returns the amount of storage tokens that are actually needed to
+  // support the item, for all of the changes that are currently committed.
+  // The caller is responsible for releasing the difference between the
+  // amount returned by merge, and the difference in this cost before and
+  // after a call to commit_change.
+  //
+  // Is not called if no changes have been committed.
+  { t.committed_storage_cost(cost_model) } -> std::same_as<int128_t>;
+} && std::formattable<T, char>;
 
 template<typename T>
 concept is_item_commit_required = requires(T t, const T &arg) {
@@ -151,7 +153,19 @@ private:
   }
 };
 
-static_assert(is_item<NNInt128>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::NNInt128> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::NNInt128 &nnint, auto &ctx)
+  {
+    return format_to(ctx.out(), "NNInt128{{base={}}}", nnint.value());
+  }
+};
+static_assert(hogd::is_item<hogd::NNInt128>);
+
+namespace hogd {
 
 // Bytes is an item type that manages an opaque variable-length arrays of
 // bytes. It commutes with other Bytes's if the array is equal.
@@ -193,7 +207,21 @@ private:
   std::vector<std::byte> buf_;
 };
 
-static_assert(is_item<Bytes>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::Bytes> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::Bytes &bytes, auto &ctx)
+  {
+    auto value = bytes.value();
+    auto hex = hogd::encode_hex(value);
+    return format_to(ctx.out(), "Bytes{{hex:{}}}", hex);
+  }
+};
+static_assert(hogd::is_item<hogd::Bytes>);
+
+namespace hogd {
 
 // Deletion is an item type that removes the item. It commutes with other
 // Deletion's to the same item.
@@ -222,7 +250,19 @@ public:
   }
 };
 
-static_assert(is_item<Deletion>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::Deletion> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::Deletion & /*unused*/, auto &ctx)
+  {
+    return format_to(ctx.out(), "Deletion");
+  }
+};
+
+static_assert(hogd::is_item<hogd::Deletion>);
+
+namespace hogd {
 
 class DeployedContractData {
 public:
@@ -269,7 +309,22 @@ private:
   DeployedContractHash deployed_contract_hash_;
 };
 
-static_assert(is_item<DeployedContractData>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::DeployedContractData> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::DeployedContractData &deployed_contract_data,
+                     auto &ctx)
+  {
+    return format_to(ctx.out(),
+                     "DeployedContractData{{deployed_contract_hash:{}}}",
+                     x23::show(
+                         deployed_contract_data.deployed_contract_hash()));
+  }
+};
+static_assert(hogd::is_item<hogd::DeployedContractData>);
+
+namespace hogd {
 
 class NewContractData {
 public:
@@ -315,7 +370,19 @@ private:
   Contract new_contract_;
 };
 
-static_assert(is_item<NewContractData>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::NewContractData> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::NewContractData &new_contract_data, auto &ctx)
+  {
+    return format_to(ctx.out(), "NewContractData{{new_contract:{}}}",
+                     x23::show(new_contract_data.new_contract()));
+  }
+};
+static_assert(hogd::is_item<hogd::NewContractData>);
+
+namespace hogd {
 
 class AuthDataItem {
 public:
@@ -375,7 +442,29 @@ private:
   friend struct std::formatter<AuthDataItem>;
 };
 
-static_assert(is_item_commit_required<AuthDataItem>);
+} // namespace hogd
+
+template<> struct std::formatter<hogd::AuthDataItem> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::AuthDataItem &auth_data_item, auto &ctx)
+  {
+    format_to(ctx.out(), "AuthDataItem{{");
+    for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
+      auto pk = auth_data_item.pk_changes_[i].pk_;
+      if (pk) {
+        format_to(ctx.out(), "{{index:{}, pk:{}, exclusive:{}, refcount:{}}}",
+                  i, x23::show(pk), auth_data_item.pk_changes_[i].exclusive_,
+                  auth_data_item.pk_changes_[i].refcount_);
+      }
+    }
+    format_to(ctx.out(), "}}");
+    return ctx.out();
+  }
+};
+static_assert(hogd::is_item_commit_required<hogd::AuthDataItem>);
+
+namespace hogd {
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {
@@ -541,92 +630,21 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
 
 } // namespace hogd
 
-template <>
-struct std::formatter<hogd::NNInt128> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  static auto format(const hogd::NNInt128& nnint, format_context& ctx) {
-    return format_to(ctx.out(), "NNInt128{{base={}}}", nnint.value());
-  }
-};
-
-template <>
-struct std::formatter<hogd::Bytes> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  static auto format(const hogd::Bytes& bytes, format_context& ctx) {
-    auto value = bytes.value();
-    auto hex = hogd::encode_hex(value);
-    return format_to(ctx.out(), "Bytes{{hex:{}}}", hex);
-  }
-};
-
-template <>
-struct std::formatter<hogd::AuthDataItem> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  static auto format(const hogd::AuthDataItem& auth_data_item, format_context& ctx) {
-    format_to(ctx.out(), "AuthDataItem{{");
-    for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
-      auto pk = auth_data_item.pk_changes_[i].pk_;
-      if (pk) {
-        format_to(ctx.out(), "{{index:{}, pk:{}, exclusive:{}, refcount:{}}}", i, x23::show(pk), auth_data_item.pk_changes_[i].exclusive_, auth_data_item.pk_changes_[i].refcount_);
-      }
-    }
-    format_to(ctx.out(), "}}");
-    return ctx.out();
-  }
-};
-
-template<>
-struct std::formatter<hogd::Deletion> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-  static auto format(const hogd::Deletion& /*unused*/, format_context& ctx) {
-    return format_to(ctx.out(), "Deletion");
-  }
-};
-
-template<>
-struct std::formatter<hogd::DeployedContractData> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-  static auto format(const hogd::DeployedContractData& deployed_contract_data, format_context& ctx) {
-    return format_to(ctx.out(), "DeployedContractData{{deployed_contract_hash:{}}}", x23::show(deployed_contract_data.deployed_contract_hash()));
-  }
-};
-
-template<>
-struct std::formatter<hogd::NewContractData> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-  static auto format(const hogd::NewContractData& new_contract_data, format_context& ctx) {
-    return format_to(ctx.out(), "NewContractData{{new_contract:{}}}", x23::show(new_contract_data.new_contract()));
-  }
-};
-
-template<>
-struct std::formatter<hogd::ItemChange> {
-  static constexpr auto parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-  static auto format(const hogd::ItemChange& item_change, format_context& ctx) {
-    std::visit([&ctx](auto&& arg) {
-      if constexpr (!std::same_as<std::decay_t<decltype(arg)>, std::monostate>) {
-        format_to(ctx.out(), "{}", arg);
-      } else {
-        format_to(ctx.out(), "monostate");
-      }
-    }, item_change.type_);
+template<> struct std::formatter<hogd::ItemChange> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::ItemChange &item_change, auto &ctx)
+  {
+    std::visit(
+        [&ctx](auto &&arg) {
+          if constexpr (!std::same_as<std::decay_t<decltype(arg)>,
+                                      std::monostate>) {
+            format_to(ctx.out(), "{}", arg);
+          }
+          else {
+            format_to(ctx.out(), "monostate");
+          }
+        },
+        item_change.type_);
     return ctx.out();
   }
 };

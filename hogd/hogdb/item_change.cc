@@ -264,23 +264,32 @@ AuthDataItem::merge(const AuthDataItem &auth_data_item,
 
     if (pk_changes_[i].refcount_ == 0 &&
         auth_data_item.pk_changes_[i].refcount_ == 1) {
-      pk_changes_[i].refcount_ = 1;
       assert(pk_changes_[i].exclusive_ == false);
-      pk_changes_[i].exclusive_ = auth_data_item.pk_changes_[i].exclusive_;
-      pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
       continue;
     }
 
     // both have nonzero refcount
-    if (pk_changes_[i].exclusive_ || auth_data_item.pk_changes_[i].exclusive_) {
+    if (pk_changes_[i].exclusive_) {
+      assert(!auth_data_item.pk_changes_[i].exclusive_);
       return HogDBError(HogDBCode::kConflict);
     }
 
     if (pk_changes_[i].pk_ != auth_data_item.pk_changes_[i].pk_) {
       return HogDBError(HogDBCode::kConflict);
     }
+  }
 
+  // Conflicts checked; now do merge
+
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
+
+    if (auth_data_item.pk_changes_[i].refcount_ == 1) {
+      pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
+    }
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      pk_changes_[i].exclusive_ = true;
+    }
   }
   // TODO(geoff): auth cost model
   return marginal_storage_cost(cost_model);
@@ -290,7 +299,7 @@ void
 AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||  
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
            auth_data_item.pk_changes_[i].refcount_ == 1);
     pk_changes_[i].refcount_ -= auth_data_item.pk_changes_[i].refcount_;
     if (auth_data_item.pk_changes_[i].exclusive_) {
@@ -354,9 +363,12 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
         return HogDBError(HogDBCode::kInternal);
       },
       type_);
-  if (!merge_cost)
+  if (!merge_cost) {
+    info("merge error {}", merge_cost.error());
     return merge_cost.error();
+  }
   assert(snapshot_cost_.has_value());
+  info("merge cost {}", *merge_cost);
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
 

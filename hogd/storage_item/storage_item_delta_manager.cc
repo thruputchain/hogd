@@ -623,7 +623,8 @@ std::optional<MeteredStorageLock>
 StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
                                      StorageLock const &previous_lock)
 {
-  trace("Trying to reserve delta {} on lock {}", x23::show(delta), x23::show(previous_lock));
+  trace("Trying to reserve delta {} on lock {}", x23::show(delta),
+        x23::show(previous_lock));
   assert(!round_committed_);
   switch (previous_lock.lock_type()) {
   case StorageLockType::kNone:
