@@ -1,9 +1,15 @@
 #include <gtest/gtest.h>
 
 #include "account.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -59,39 +65,60 @@ protected:
 
 TEST_F(ItemChangeAuthTest, MergeConflict)
 {
-  auto base_data = AccountAuthData{.public_keys = {
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       make_pk_config(Weight{1}),
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       make_pk_config(Weight{2}),
-                                       nullptr,
-                                       make_pk_config(Weight{3}),
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                   }};
-  AuthDataItem auth_data_item(base_data);
+  AuthDataItem auth_data_item(base_data_);
 
   auto pk_1 = make_pk_config(Weight{10});
 
   auth_data_item.set_new_pk(0, pk_1);
 
-  AuthDataItem auth_data_2(base_data);
+  AuthDataItem auth_data_2(base_data_);
   auth_data_2.set_new_pk(0, make_pk_config(Weight{10}));
 
   EXPECT_EQ(auth_data_item.merge(auth_data_2, &cost_model_).error(),
             HogDBError(HogDBCode::kConflict));
 
-  AuthDataItem auth_data_3(base_data);
+  AuthDataItem auth_data_3(base_data_);
   auth_data_3.set_new_pk(0, pk_1);
+
+  EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
+}
+
+TEST_F(ItemChangeAuthTest, NarrowConflict)
+{
+  AuthDataItem auth_data_item(base_data_);
+
+  AuthDataItem auth_data_2(base_data_);
+  auto pk_1 = make_pk_config(Weight{10});
+  auth_data_2.set_new_pk(0, pk_1);
+
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+
+  AuthDataItem auth_data_3(base_data_);
+  auth_data_3.set_new_pk(0, nullptr);
+
+  {
+    AuthDataItem tmp = auth_data_item;
+    EXPECT_FALSE(tmp.narrow(auth_data_3));
+  }
+}
+
+TEST_F(ItemChangeAuthTest, MergeAndUndo)
+{
+  AuthDataItem auth_data_item(base_data_);
+
+  auto pk_1 = make_pk_config(Weight{10});
+  AuthDataItem auth_data_2(base_data_);
+  auth_data_2.set_new_pk(0, pk_1);
+
+  EXPECT_TRUE(auth_data_item.merge(auth_data_2, &cost_model_).has_value());
+
+  AuthDataItem auth_data_3(base_data_);
+  auth_data_3.set_new_pk(0, nullptr);
+
+  EXPECT_FALSE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
+
+  auth_data_item.undo_merge(auth_data_2);
 
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }

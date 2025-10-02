@@ -222,7 +222,7 @@ AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     if (pk_changes_[i] && auth_data_item.pk_changes_[i]) {
-      if (*pk_changes_[i]->pk_ != *auth_data_item.pk_changes_[i]->pk_) {
+      if (pk_changes_[i]->pk_ != auth_data_item.pk_changes_[i]->pk_) {
         return false;
       }
     }
@@ -237,16 +237,10 @@ HogDBStatus<int128_t>
 AuthDataItem::merge(const AuthDataItem &auth_data_item,
                     const StorageCostModel *cost_model)
 {
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    if (pk_changes_[i] && auth_data_item.pk_changes_[i]) {
-      if (*pk_changes_[i]->pk_ != *auth_data_item.pk_changes_[i]->pk_) {
-        return HogDBError(HogDBCode::kConflict);
-      }
-    }
-    if (auth_data_item.pk_changes_[i]) {
-      pk_changes_[i].emplace(*auth_data_item.pk_changes_[i]);
-    }
+  if (!narrow(auth_data_item)) {
+    return HogDBError(HogDBCode::kConflict);
   }
+
   // TODO(geoff): auth cost model
   return marginal_storage_cost(cost_model);
 }
