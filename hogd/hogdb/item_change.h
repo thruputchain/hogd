@@ -21,6 +21,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <format>
 #include <optional>
 #include <span>
 #include <utility>
@@ -31,6 +32,7 @@
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
@@ -38,6 +40,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -368,6 +371,8 @@ private:
 
   std::array<PublicKeyChange, MAX_SIGNERS> pk_changes_;
   AccountAuthData base_auth_data_;
+
+  friend struct std::formatter<AuthDataItem>;
 };
 
 static_assert(is_item_commit_required<AuthDataItem>);
@@ -491,6 +496,8 @@ private:
       type_;
 
   size_t storage_size() const;
+
+  friend struct std::formatter<ItemChange>;
 };
 
 inline std::optional<int128_t>
@@ -533,3 +540,93 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
 }
 
 } // namespace hogd
+
+template <>
+struct std::formatter<hogd::NNInt128> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  static auto format(const hogd::NNInt128& nnint, format_context& ctx) {
+    return format_to(ctx.out(), "NNInt128{{base={}}}", nnint.value());
+  }
+};
+
+template <>
+struct std::formatter<hogd::Bytes> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  static auto format(const hogd::Bytes& bytes, format_context& ctx) {
+    auto value = bytes.value();
+    auto hex = hogd::encode_hex(value);
+    return format_to(ctx.out(), "Bytes{{hex:{}}}", hex);
+  }
+};
+
+template <>
+struct std::formatter<hogd::AuthDataItem> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  static auto format(const hogd::AuthDataItem& auth_data_item, format_context& ctx) {
+    format_to(ctx.out(), "AuthDataItem{{");
+    for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
+      auto pk = auth_data_item.pk_changes_[i].pk_;
+      if (pk) {
+        format_to(ctx.out(), "{{index:{}, pk:{}, exclusive:{}, refcount:{}}}", i, x23::show(pk), auth_data_item.pk_changes_[i].exclusive_, auth_data_item.pk_changes_[i].refcount_);
+      }
+    }
+    format_to(ctx.out(), "}}");
+    return ctx.out();
+  }
+};
+
+template<>
+struct std::formatter<hogd::Deletion> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  static auto format(const hogd::Deletion& /*unused*/, format_context& ctx) {
+    return format_to(ctx.out(), "Deletion");
+  }
+};
+
+template<>
+struct std::formatter<hogd::DeployedContractData> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  static auto format(const hogd::DeployedContractData& deployed_contract_data, format_context& ctx) {
+    return format_to(ctx.out(), "DeployedContractData{{deployed_contract_hash:{}}}", x23::show(deployed_contract_data.deployed_contract_hash()));
+  }
+};
+
+template<>
+struct std::formatter<hogd::NewContractData> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  static auto format(const hogd::NewContractData& new_contract_data, format_context& ctx) {
+    return format_to(ctx.out(), "NewContractData{{new_contract:{}}}", x23::show(new_contract_data.new_contract()));
+  }
+};
+
+template<>
+struct std::formatter<hogd::ItemChange> {
+  static constexpr auto parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+  static auto format(const hogd::ItemChange& item_change, format_context& ctx) {
+    std::visit([&ctx](auto&& arg) {
+      if constexpr (!std::same_as<std::decay_t<decltype(arg)>, std::monostate>) {
+        format_to(ctx.out(), "{}", arg);
+      } else {
+        format_to(ctx.out(), "monostate");
+      }
+    }, item_change.type_);
+    return ctx.out();
+  }
+};

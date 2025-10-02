@@ -296,6 +296,7 @@ InvokeTX::request_balance_change(Address const &addr, int128_t delta)
 HogDBStatus<void>
 InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
+  info("Requesting change for {}: {}", key, change);
   assert(!key.is_address_balance());
   std::vector<ItemVersion> &v = changes_[key];
 

@@ -7,7 +7,6 @@
 #include <limits>
 #include <span>
 #include <type_traits>
-#include <utility>
 #include <variant>
 
 #include "account.hh"
@@ -291,6 +290,8 @@ void
 AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||  
+           auth_data_item.pk_changes_[i].refcount_ == 1);
     pk_changes_[i].refcount_ -= auth_data_item.pk_changes_[i].refcount_;
     if (auth_data_item.pk_changes_[i].exclusive_) {
       assert(pk_changes_[i].exclusive_);

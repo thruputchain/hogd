@@ -246,6 +246,77 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   ASSERT_EQ(db_auth_data, db_auth_data_ref);
 }
 
+TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto pk1 = make_pk_config(Weight{1});
+  AuthDataChangeArgs auth_data1{};
+  auth_data1.auth_data_change_signers.push_back({0, pk1});
+  AuthDataChangeArgs auth_data2{};
+  auth_data2.auth_data_change_signers.push_back({0, make_pk_config(Weight{2})});
+
+  AuthDataChangeArgs auth_data_conflict{};
+  auth_data_conflict.auth_data_change_signers.push_back({0, nullptr});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data1),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data1),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_2.has_value());
+  ASSERT_FALSE(r1_2.value());
+
+  ASSERT_TRUE(tx2.pop_subtransactions(1).has_value());
+
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_3 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_3.has_value());
+  ASSERT_TRUE(r1_3.value());
+
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_2.has_value());
+  ASSERT_TRUE(r2_2.value());
+
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data_conflict),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_3 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_3.has_value());
+  ASSERT_FALSE(r2_3.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+  check_balance(contract_addr, kInitialBalance - (cost_model_->kBaseItemCost));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectAuthDataTest,
