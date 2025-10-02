@@ -123,6 +123,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs->xidmap_.erase(it);
       cs.reset();
       cb(std::move(b));
+
       if constexpr (kMinBuf)
         b.reserve(kMinBuf);
     }
