@@ -374,7 +374,8 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
 
 TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
 {
-  // This test would fail if tx2 were to be charged more than the marginal cost of adding two new keys.
+  // This test would fail if tx2 were to be charged more than the marginal cost
+  // of adding two new keys.
   auto contract_addr = make_contract_address(0);
   // NOLINTNEXTLINE(readability-identifier-naming)
   const int128_t kInitialBalance = cost_model_->get_auth_data_cost(4);
@@ -383,7 +384,8 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   {
     // Initialize the account with 1 key
     AuthDataChangeArgs auth_data0{};
-    auth_data0.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
+    auth_data0.auth_data_change_signers.push_back(
+        {0, make_pk_config(Weight{1})});
 
     auto tx0 = make_new_per_tx_db_proxy();
     tx0.add_delta(make_account_auth_data_addrkey(contract_addr),
@@ -394,7 +396,8 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
     ASSERT_TRUE(r0.value());
     ASSERT_TRUE(tx0.commit_transaction({}).has_value());
     advance_block();
-    check_balance(contract_addr, kInitialBalance - (cost_model_->get_auth_data_cost(1)));
+    check_balance(contract_addr,
+                  kInitialBalance - (cost_model_->get_auth_data_cost(1)));
   }
 
   AuthDataChangeArgs auth_data1{};
@@ -420,6 +423,66 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+  check_balance(contract_addr, 0);
+}
+
+TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
+{
+  // This test would fail if tx2 were to be charged more than the marginal cost
+  // of adding two new keys.
+  auto contract_addr = make_contract_address(0);
+  // NOLINTNEXTLINE(readability-identifier-naming)
+  const int128_t kInitialBalance = cost_model_->get_auth_data_cost(4);
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  {
+    // Initialize the account with 1 key
+    AuthDataChangeArgs auth_data0{};
+    auth_data0.auth_data_change_signers.push_back(
+        {0, make_pk_config(Weight{1})});
+
+    auto tx0 = make_new_per_tx_db_proxy();
+    tx0.add_delta(make_account_auth_data_addrkey(contract_addr),
+                  make_auth_data_delta(auth_data0),
+                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r0 = tx0.try_push_current_subtransaction();
+    ASSERT_TRUE(r0.has_value());
+    ASSERT_TRUE(r0.value());
+    ASSERT_TRUE(tx0.commit_transaction({}).has_value());
+    advance_block();
+    check_balance(contract_addr,
+                  kInitialBalance - (cost_model_->get_auth_data_cost(1)));
+  }
+
+  AuthDataChangeArgs auth_data2{};
+  auth_data2.auth_data_change_signers.push_back({2, make_pk_config(Weight{1})});
+  auth_data2.auth_data_change_signers.push_back({3, make_pk_config(Weight{2})});
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // reverse order from above AuthDataMarginalCosts
+  AuthDataChangeArgs auth_data1{};
+  auth_data1.auth_data_change_signers.push_back({0, make_pk_config(Weight{1})});
+  auth_data1.auth_data_change_signers.push_back({1, make_pk_config(Weight{2})});
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data1),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());

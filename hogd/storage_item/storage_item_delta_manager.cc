@@ -628,7 +628,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
   if constexpr (is_debug_build()) {
     assert(is_valid_delta(delta));
   }
-  
+
   trace("Trying to reserve delta {} on lock {}", x23::show(delta),
         x23::show(previous_lock));
   assert(!round_committed_);

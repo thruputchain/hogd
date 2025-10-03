@@ -255,7 +255,7 @@ AuthDataItem::committed_storage_cost(const StorageCostModel *cost_model) const
   return cost_model->get_auth_data_cost(active_keys);
 }
 
-int128_t 
+int128_t
 AuthDataItem::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
   size_t new_keys_upper_bound = 0;
@@ -328,7 +328,8 @@ AuthDataItem::merge(const AuthDataItem &auth_data_item,
     }
 
     // mirroring the logic in marginal_storage_cost
-    if (auth_data_item.pk_changes_[i].refcount_ == 1 || base_auth_data_.public_keys[i]) {
+    if (auth_data_item.pk_changes_[i].refcount_ == 1 ||
+        base_auth_data_.public_keys[i]) {
       max_new_keys++;
     }
   }

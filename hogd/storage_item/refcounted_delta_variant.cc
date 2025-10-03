@@ -615,12 +615,12 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
 int128_t
 AuthDataArgs::get_marginal_cost_upper_bound_static(
     bool is_committed, StorageDelta const &delta,
-    StorageCostModel const *current_model,
-    StorageItemWrapper const *base_item)
+    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
 {
 
   int128_t snapshot_cost = base_item ? base_item->storage_cost() : 0;
-  int128_t base_cost = std::max<int128_t>(0, current_model->kBaseItemCost - snapshot_cost);
+  int128_t base_cost =
+      std::max<int128_t>(0, current_model->kBaseItemCost - snapshot_cost);
   if (is_committed) {
     // someone else already paid for the cost of the base item,
     // including any storage cost model changes
