@@ -468,9 +468,11 @@ int128_t
 ReplayCacheArgs::get_marginal_cost_upper_bound_static(
     bool is_committed, StorageDelta const &delta,
     StorageCostModel const *current_model,
-    StorageItemWrapper const * /*unused*/)
+    StorageItemWrapper const *base_item)
 {
-  int128_t base_cost = current_model->kBaseItemCost;
+  int128_t snapshot_cost = base_item ? base_item->storage_cost() : 0;
+  int128_t base_cost =
+      std::max<int128_t>(0, current_model->kBaseItemCost - snapshot_cost);
   if (is_committed) {
     base_cost = 0;
   }
