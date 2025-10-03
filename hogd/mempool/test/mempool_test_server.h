@@ -314,13 +314,10 @@ create_clients(MempoolTestServer &server)
   // Mempool-Coordinator RPC client.
   auto coord_pool = std::make_unique<x23::ThreadPool>();
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  x23::UniqueFd coord_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.coordinator_sched_port()}
-                           .to_addr());
-  coord_client_t coord_client =
-      x23::rpc_stream_logged(*coord_cp, coord_fd.release())
-          ->client(CoordScheduler1{});
+  coord_client_t coord_client = MempoolCoordinatorRpc::get_client(
+      std::format("{}:{}", MempoolTestServer::kAddress,
+                  server.coordinator_sched_port()),
+      *coord_cp);
 
   // Mempool-DB RPC client.
   auto db_sched_pool = std::make_unique<x23::ThreadPool>();
