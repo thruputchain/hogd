@@ -112,6 +112,7 @@ target_link_libraries(
   unified_lib
   protocol
   metrics
+  event
   hogd
 )
 

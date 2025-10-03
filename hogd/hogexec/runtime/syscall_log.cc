@@ -37,8 +37,13 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler,
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
-  // unimplemented
-  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall, 0};
+  if (data.size() > kMaxLogMessageLen) {
+    // log message too long, return error
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+
+  syscall_handler.log_event(topic0, topic1, topic2, data);
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 // NOLINTEND(misc-unused-parameters)
 

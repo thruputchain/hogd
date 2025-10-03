@@ -12,12 +12,14 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "event.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/event/event.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -439,19 +441,20 @@ SystemCallHandler::get_proposal_data() const
   return std::get<ProposalModeData>(execution_mode_data_);
 }
 
-SyscallStatus<void>
-SystemCallHandler::log(std::span<const std::byte> message)
+void
+SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
+                             SHA256Hash const *topic2,
+                             std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
+  assert(data.size() <= kMaxLogMessageLen);
 
-  if (message.size() > kMaxLogMessageLen) {
-    // log message too long, return error
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  auto message = make_tx_emitted_event(
+      invocation_frame_stack_.get_active_frame().address(), topic0, topic1,
+      topic2, data);
 
-  invocation_frame_stack_.get_active_frame().log(message);
-  return {};
+  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
 }
 
 ContractAddress

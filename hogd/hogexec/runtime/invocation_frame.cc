@@ -4,11 +4,11 @@
 #include <cstddef>
 #include <iterator>
 #include <optional>
-#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -19,7 +19,6 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -40,8 +39,8 @@ void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
   child_return_buffer_ = std::move(frame.to_return_);
-  logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
-               std::make_move_iterator(frame.logs_.end()));
+  events_.insert(events_.end(), std::make_move_iterator(frame.events_.begin()),
+                 std::make_move_iterator(frame.events_.end()));
 
   for (auto const &[addr, hash] : frame.new_contract_deployments_) {
     [[maybe_unused]] auto [_, inserted_new] =
@@ -78,13 +77,9 @@ InvocationFrame::commit_failed_child_frame()
 }
 
 void
-InvocationFrame::log(std::span<const std::byte> message)
+InvocationFrame::log_event(TxEmittedEvent event)
 {
-  std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
-                                    message.data()),
-                                message.size()};
-  logs_.emplace_back(address_,
-                     x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
+  events_.emplace_back(std::move(event));
 }
 
 void
