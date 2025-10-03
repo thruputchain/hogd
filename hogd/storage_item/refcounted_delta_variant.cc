@@ -467,8 +467,7 @@ ReplayCacheArgs::get_current_committed_cost(
 int128_t
 ReplayCacheArgs::get_marginal_cost_upper_bound_static(
     bool is_committed, StorageDelta const &delta,
-    StorageCostModel const *current_model,
-    StorageItemWrapper const *base_item)
+    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
 {
   int128_t snapshot_cost = base_item ? base_item->storage_cost() : 0;
   int128_t base_cost =
