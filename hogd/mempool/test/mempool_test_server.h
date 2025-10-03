@@ -30,7 +30,7 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"

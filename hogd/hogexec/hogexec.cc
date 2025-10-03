@@ -6,7 +6,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
 #include "x23/sockio.h"
 

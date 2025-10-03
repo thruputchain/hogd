@@ -1,4 +1,4 @@
-#include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/interface/executor.h"
 
 #include <cassert>
 #include <chrono>
@@ -13,7 +13,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/interface/rpc_interface.h"
+#include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/version.h"
 #include "sched_exec.hh"

@@ -1,4 +1,4 @@
-#include "hogd/hogexec/interface/rpc_interface.h"
+#include "hogd/hogexec/interface/rpc_from_coord.h"
 
 #include <atomic>
 #include <cassert>
