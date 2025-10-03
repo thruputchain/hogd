@@ -181,6 +181,8 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
   EXPECT_EQ(res.public_keys[1], nullptr);
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // These tests check that the cost result from change.merge()
 // matches that returned by change.marginal_storage_cost().
 // This is required to guarantee that block proposal matches block validation,
@@ -394,6 +396,7 @@ TEST_F(ItemChangeAuthTest, MergeCosts2)
 
     ASSERT_EQ(actions.run(), model::ActionResult::kOk);
 
+    ASSERT_TRUE(merged.to_auth_data().has_value());
     auto auth_data = merged.to_auth_data().value().build_result();
 
     EXPECT_EQ(auth_data.public_keys[0], nullptr);
@@ -403,5 +406,6 @@ TEST_F(ItemChangeAuthTest, MergeCosts2)
     work_queue.advance_cursor();
   }
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
