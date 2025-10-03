@@ -490,6 +490,7 @@ public:
   // getters
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
+  std::optional<AuthDataItem> to_auth_data() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
@@ -499,6 +500,10 @@ public:
   }
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
+  bool is_auth_data() const
+  {
+    return std::holds_alternative<AuthDataItem>(type_);
+  }
 
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
@@ -599,6 +604,14 @@ ItemChange::to_bytes() const
   if (const auto *tmp = std::get_if<Bytes>(&type_); tmp)
     return tmp->value();
   return {};
+}
+
+inline std::optional<AuthDataItem>
+ItemChange::to_auth_data() const
+{
+  if (const auto *tmp = std::get_if<AuthDataItem>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
 }
 
 inline std::optional<NNInt128>
