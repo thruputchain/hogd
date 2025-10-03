@@ -264,7 +264,6 @@ AuthDataItem::marginal_storage_cost(const StorageCostModel *cost_model) const
       new_keys_upper_bound++;
     }
   }
-  info("num keys: {}", new_keys_upper_bound);
   return cost_model->get_auth_data_cost(new_keys_upper_bound);
 }
 
@@ -287,7 +286,7 @@ HogDBStatus<int128_t>
 AuthDataItem::merge(const AuthDataItem &auth_data_item,
                     const StorageCostModel *cost_model)
 {
-  size_t max_new_keys = 0;
+  auto marginal_cost = marginal_storage_cost(cost_model);
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     // if merging this pk change requires a lock or updating the change
     assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
@@ -316,7 +315,7 @@ AuthDataItem::merge(const AuthDataItem &auth_data_item,
   }
 
   // Conflicts checked; now do merge
-
+  size_t max_new_keys = 0;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
 
