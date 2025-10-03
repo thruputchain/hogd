@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <stdexcept>
+#include <utility>
 
 #include "account.hh"
 #include "hogd/base/types.h"
@@ -7,6 +9,8 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "model_checker/async.h"
+#include "model_checker/work_queue.h"
 #include "storage_cost.hh"
 #include "types.hh"
 #include "x23/x23.h"
@@ -175,6 +179,114 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
   auto res = auth_data_item.build_result();
   EXPECT_EQ(res.public_keys[0], pk_1);
   EXPECT_EQ(res.public_keys[1], nullptr);
+}
+
+TEST_F(ItemChangeAuthTest, MergeCosts)
+{
+  AuthDataItem base(base_data_);
+  const auto pk_0 = make_pk_config(Weight{10});
+  const auto pk_1 = make_pk_config(Weight{10});
+  base.set_new_pk(0, pk_0);
+  base.set_new_pk(1, pk_1);
+  ItemChange compare = ItemChange(std::move(base));
+  // base_data_ has 3 public keys
+  compare.set_snapshot_cost(cost_model_.get_auth_data_cost(3));
+
+  int128_t expected_cost = compare.marginal_storage_cost(&cost_model_).value();
+
+  model::WorkQueue work_queue;
+
+  while (!work_queue.done()) {
+    model::RunnableActionSet actions(work_queue);
+
+    ItemChange merged = compare;
+
+    // the actual query action
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self, ItemChange &merged,
+           const auto &pk0, const auto &pk1,
+           int128_t &expected_cost) -> model::Async {
+          co_await set.bg();
+
+          AuthDataItem base(self->base_data_);
+          base.set_new_pk(0, pk0);
+          base.set_new_pk(1, pk1);
+          auto change1 = ItemChange(std::move(base));
+
+          auto r = merged.merge(change1, &self->cost_model_);
+
+          if (!r.has_value()) {
+            // this coroutine just exits
+            co_return;
+          }
+
+          if (r.value() != expected_cost) {
+            throw std::runtime_error("Merge cost mismatch");
+          }
+
+          co_return;
+        },
+        this, merged, pk_0, pk_1, expected_cost);
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self,
+           ItemChange &merged) -> model::Async {
+          co_await set.bg();
+
+          AuthDataItem base(self->base_data_);
+          base.set_new_pk(0, nullptr);
+          base.set_new_pk(2, make_pk_config(Weight{10}));
+          auto change1 = ItemChange(std::move(base));
+
+          auto r = merged.merge(change1, &self->cost_model_);
+
+          if (!r.has_value()) {
+            // this coroutine just exits
+            co_return;
+          }
+
+          co_await set.bg();
+          auto choice = set.choice(2);
+          if (choice == 0) {
+            merged.commit_change(change1);
+          }
+          else {
+            merged.undo_merge(change1);
+          }
+        },
+        this, merged);
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self, ItemChange &merged,
+           const auto &pk0) -> model::Async {
+          co_await set.bg();
+
+          AuthDataItem base(self->base_data_);
+          base.set_new_pk(0, pk0);
+          auto change1 = ItemChange(std::move(base));
+
+          auto r = merged.merge(change1, &self->cost_model_);
+
+          if (!r.has_value()) {
+            // this coroutine just exits
+            co_return;
+          }
+
+          co_await set.bg();
+          auto choice = set.choice(2);
+          if (choice == 0) {
+            merged.commit_change(change1);
+          }
+          else {
+            merged.undo_merge(change1);
+          }
+        },
+        this, merged, pk_0);
+
+    ASSERT_EQ(actions.run(), model::ActionResult::kOk);
+
+    work_queue.advance_cursor();
+  }
 }
 
 } // namespace hogd

@@ -71,6 +71,10 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // item change, for the case where the change is the first one applied to
   // the item. I.e. this is the amount returned by t.merge() for t = empty
   // ItemChange.
+  // IMPORTANT: Unless we implement retrocausal nnints,
+  // this MUST return the same value as merge() (for the same reason that merge
+  // must return a deterministic function of the snapshot item + the current
+  // change).)
   { t.marginal_storage_cost(cost_model) } -> std::same_as<int128_t>;
 
   // reverts the change and reservation in arg that was previously merged.

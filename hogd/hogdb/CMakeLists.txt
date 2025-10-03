@@ -63,6 +63,7 @@ add_executable(
 target_link_libraries(
   hogdb_test
   hogdb
+  model_checker
   GTest::gtest_main
 )
 gtest_discover_tests(
