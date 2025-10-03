@@ -413,16 +413,17 @@ public:
   // TODO(geoff): implement or remove storage_size entirely
   static size_t storage_size() { return 0; }
 
-  static int128_t committed_storage_cost(const StorageCostModel *cost_model)
-  {
-    return marginal_storage_cost(cost_model);
-  }
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
 
-  constexpr static int128_t
-  marginal_storage_cost(const StorageCostModel *cost_model)
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const
   {
-    // TODO(geoff): vary cost based on number of signers
-    return cost_model->kBaseItemCost;
+    size_t new_keys_upper_bound = 0;
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      if (pk_changes_[i].refcount_ > 0) {
+        new_keys_upper_bound++;
+      }
+    }
+    return cost_model->get_auth_data_cost(new_keys_upper_bound);
   }
 
   AccountAuthData build_result() const;
@@ -433,6 +434,7 @@ private:
     PublicKeyChange() = default;
     uint32_t refcount_{0};
     bool exclusive_{false};
+    bool committed_{false};
     PublicKeyConfigOpt pk_ = nullptr;
   };
 

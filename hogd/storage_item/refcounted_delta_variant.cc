@@ -467,7 +467,8 @@ ReplayCacheArgs::get_current_committed_cost(
 int128_t
 ReplayCacheArgs::get_marginal_cost_upper_bound_static(
     bool is_committed, StorageDelta const &delta,
-    StorageCostModel const *current_model, StorageItemWrapper const * /*unused*/)
+    StorageCostModel const *current_model,
+    StorageItemWrapper const * /*unused*/)
 {
   int128_t base_cost = current_model->kBaseItemCost;
   if (is_committed) {
@@ -613,8 +614,9 @@ AuthDataArgs::get_current_committed_cost( // NOLINT
 
 int128_t
 AuthDataArgs::get_marginal_cost_upper_bound_static(
-    bool is_committed, StorageDelta const & delta,
-    StorageCostModel const *current_model, StorageItemWrapper const * /*unused*/)
+    bool is_committed, StorageDelta const &delta,
+    StorageCostModel const *current_model,
+    StorageItemWrapper const * /*unused*/)
 {
 
   int128_t base_cost = current_model->kBaseItemCost;

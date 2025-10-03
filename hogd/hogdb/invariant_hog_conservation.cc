@@ -149,7 +149,13 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       assert(false);
       return 0;
     }
-    return cost_model_.kBaseItemCost;
+    size_t active_keys = 0;
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      if (auth_data.public_keys[i]) {
+        active_keys++;
+      }
+    }
+    return cost_model_.get_auth_data_cost(active_keys);
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);

@@ -95,7 +95,8 @@ TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
   ASSERT_TRUE(tx1.commit_transaction({}));
 }
 
-TEST_P(DirectAuthDataTest, AuthDataDoubleWrite) {
+TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
+{
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
     return;
@@ -131,7 +132,8 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite) {
   ASSERT_TRUE(item.has_value());
   auto db_auth_data = item->auth_data();
   ASSERT_TRUE(db_auth_data.public_keys[0]);
-  ASSERT_EQ(db_auth_data.public_keys[0]->key, auth_data.auth_data_change_signers[0].public_key->key);
+  ASSERT_EQ(db_auth_data.public_keys[0]->key,
+            auth_data.auth_data_change_signers[0].public_key->key);
 }
 
 TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
@@ -182,8 +184,10 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
   auto db_auth_data = item->auth_data();
   ASSERT_TRUE(db_auth_data.public_keys[0]);
   ASSERT_TRUE(db_auth_data.public_keys[1]);
-  ASSERT_EQ(db_auth_data.public_keys[0]->key, auth_data.auth_data_change_signers[0].public_key->key);
-  ASSERT_EQ(db_auth_data.public_keys[1]->key, auth_data.auth_data_change_signers[1].public_key->key);
+  ASSERT_EQ(db_auth_data.public_keys[0]->key,
+            auth_data.auth_data_change_signers[0].public_key->key);
+  ASSERT_EQ(db_auth_data.public_keys[1]->key,
+            auth_data.auth_data_change_signers[1].public_key->key);
 }
 
 TEST_P(DirectAuthDataTest, AuthDataNonconflicting)
@@ -214,7 +218,7 @@ TEST_P(DirectAuthDataTest, AuthDataNonconflicting)
   ASSERT_TRUE(tx2.commit_transaction({}));
   advance_block();
   check_balance(contract_addr,
-                 kInitialBalance - (cost_model_->get_auth_data_cost(2)));
+                kInitialBalance - (cost_model_->get_auth_data_cost(2)));
 
   auto item = lookup_storage_item_from_db(
       make_account_auth_data_addrkey(contract_addr));
@@ -364,7 +368,8 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   advance_block();
-  check_balance(contract_addr, kInitialBalance - (cost_model_->kBaseItemCost));
+  check_balance(contract_addr,
+                kInitialBalance - (cost_model_->get_auth_data_cost(1)));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

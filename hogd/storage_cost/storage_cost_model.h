@@ -17,8 +17,7 @@ struct StorageCostModel {
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
       kBaseContractDeploymentCost(kBaseItemCost),
-      kContractDeploymentCostPerByte(1), 
-      kAuthPerKeyCost(1),
+      kContractDeploymentCostPerByte(1), kAuthPerKeyCost(1),
       kRCQCostPerEntry(rcq_cost_per_entry),
       kRCQCostPerBlock(rcq_cost_per_block),
       kReplayCacheCostPerEntry(replay_cache_cost_per_entry)

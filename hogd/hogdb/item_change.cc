@@ -225,12 +225,34 @@ void
 AuthDataItem::commit_change(AuthDataItem const &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     if (auth_data_item.pk_changes_[i].exclusive_) {
       pk_changes_[i].exclusive_ = false;
     }
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    if (auth_data_item.pk_changes_[i].refcount_ > 0) {
+      assert(pk_changes_[i].refcount_ > 0);
+      assert(!auth_data_item.pk_changes_[i].committed_);
+      pk_changes_[i].committed_ = true;
+    }
   }
+}
+
+int128_t
+AuthDataItem::committed_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t active_keys = 0;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i].committed_) {
+      if (pk_changes_[i].pk_) {
+        active_keys++;
+      }
+    }
+    else {
+      if (base_auth_data_.public_keys[i]) {
+        active_keys++;
+      }
+    }
+  }
+  return cost_model->get_auth_data_cost(active_keys);
 }
 
 bool
@@ -252,6 +274,7 @@ HogDBStatus<int128_t>
 AuthDataItem::merge(const AuthDataItem &auth_data_item,
                     const StorageCostModel *cost_model)
 {
+  size_t max_new_keys = 0;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     // if merging this pk change requires a lock or updating the change
     assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
@@ -285,14 +308,15 @@ AuthDataItem::merge(const AuthDataItem &auth_data_item,
     pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
 
     if (auth_data_item.pk_changes_[i].refcount_ == 1) {
+      max_new_keys++;
       pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
     }
     if (auth_data_item.pk_changes_[i].exclusive_) {
       pk_changes_[i].exclusive_ = true;
     }
   }
-  // TODO(geoff): auth cost model
-  return marginal_storage_cost(cost_model);
+
+  return cost_model->get_auth_data_cost(max_new_keys);
 }
 
 void
