@@ -11,6 +11,7 @@ add_xdr(
 	../../protocol/db_coord.x
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
+	../../protocol/event.x
 	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/ffi_enums.x

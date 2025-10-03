@@ -146,7 +146,6 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
     return type_ret.error();
   }
 
-  info("Deletion::commit (calling remove_item)");
   HogDBStatus<void> remove_ret = db.remove_item(key);
   if (!remove_ret) {
     return remove_ret;
