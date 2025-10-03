@@ -214,7 +214,7 @@ AuthDataItem::build_result() const
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     auto const &pk_change = pk_changes_[i];
     assert(!pk_change.exclusive_);
-    if (pk_change.refcount_ > 0) {
+    if (pk_change.committed_) {
       result.public_keys[i] = pk_change.pk_;
     }
   }

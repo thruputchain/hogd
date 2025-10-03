@@ -106,6 +106,23 @@ TEST_F(ItemChangeAuthTest, Narrow)
   EXPECT_FALSE(res.public_keys[2]);
 }
 
+TEST_F(ItemChangeAuthTest, NarrowUncommitted)
+{
+  AuthDataItem auth_data_item(base_data_);
+  auth_data_item.set_new_pk(0, make_pk_config(Weight{10}));
+
+  AuthDataItem auth_data_2(base_data_);
+  auth_data_2.set_new_pk(1, make_pk_config(Weight{10}));
+
+  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+
+  auth_data_item.commit_change(auth_data_item);
+
+  auto res = auth_data_item.build_result();
+  EXPECT_TRUE(res.public_keys[0]);
+  EXPECT_FALSE(res.public_keys[1]);
+}
+
 TEST_F(ItemChangeAuthTest, NarrowExclusiveConflict)
 {
   AuthDataItem auth_data_item(base_data_);
