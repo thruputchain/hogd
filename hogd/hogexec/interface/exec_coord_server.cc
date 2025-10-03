@@ -22,21 +22,24 @@
 namespace hogd {
 
 std::string
-ExecCoordServer::get_executor_address() const
+MempoolExecutorClient::get_executor_address(uint16_t executor_port)
 {
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, rpc_interface_->port());
+  return std::format("{}:{}", hostname, executor_port);
 }
 
 std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-ExecCoordServer::connect_to_coordinator()
+MempoolExecutorClient::connect_to_coordinator()
 {
+  // TODO(jhumphri): Take these out!!!
+  static x23::ThreadPool pool;
+  static x23::CoroPoll cp(pool);
   while (true) {
     auto fd =
-        cp_.tcpconnect(coordinator_host_, std::to_string(coordinator_port_))();
+        cp.tcpconnect(coordinator_host_, std::to_string(coordinator_port_))();
     if (fd) {
-      auto client_config = x23::rpc_stream_logged(cp_, *fd);
+      auto client_config = x23::rpc_stream_logged(cp, *fd);
       return std::make_optional(client_config->template client<SchedExec1>());
     }
     error("Failed to connect to coord allocate service on {}:{}, error={}",
@@ -47,21 +50,15 @@ ExecCoordServer::connect_to_coordinator()
 }
 
 IntroExecResult
-ExecCoordServer::register_with_coordinator()
+MempoolExecutorClient::register_with_coordinator(uint16_t executor_port)
 {
   auto client = connect_to_coordinator();
   const ExecCard card = {.protocol = version::kHogdProtocol,
                          .upid = {},
-                         .address = get_executor_address().c_str()};
-  return client->schedexec_intro_exec(card)();
-}
-
-void
-ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
-                                   uint16_t self_executor_id)
-{
-  auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
-  rpc_interface_->init(self_executor_id, std::move(db_proxy));
+                         .address =
+                             get_executor_address(executor_port).c_str()};
+  auto ret = client->schedexec_intro_exec(card)();
+  return ret;
 }
 
 } // namespace hogd

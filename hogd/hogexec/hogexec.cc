@@ -29,8 +29,10 @@ hogexec_init(const std::string &coordinator_addr)
   const uint16_t coordinator_port = static_cast<uint16_t>(
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
-  ExecCoordServer exec(coordinator_host, coordinator_port);
-  CHECK_EQ(exec.start_server(kExecServerPort), kExecServerPort);
+  x23::ThreadPool x23_pool;
+  x23::CoroPoll cp(x23_pool);
+  Executor executor(coordinator_host, coordinator_port);
+  CHECK_EQ(executor.start_server(kExecServerPort), kExecServerPort);
 
   return 0;
 }

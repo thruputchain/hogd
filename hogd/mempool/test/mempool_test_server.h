@@ -76,7 +76,7 @@ public:
       sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
-      executor_coord_server_(kAddress, sched_exec_port_)
+      cp_(x23_pool_), executor_(kAddress, sched_exec_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -163,15 +163,15 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
-      executor_coord_server_.start_server(/*port_number=*/0);
+      executor_.start_server(/*port_number=*/0);
     }
   }
 
   ~MempoolTestServer()
   {
-    // We need to call [executor_coord_server_.shut_down()] so that the
-    // [ExecCoordServer] destructor does not block.
-    executor_coord_server_.shut_down();
+    // We need to call [executor_.shut_down()] so that the [Exector] destructor
+    // does not block.
+    executor_.shut_down();
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
@@ -252,7 +252,10 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  ExecCoordServer executor_coord_server_;
+  // TODO(jhumphri): Take these out!!
+  x23::ThreadPool x23_pool_;
+  x23::CoroPoll cp_;
+  Executor executor_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;

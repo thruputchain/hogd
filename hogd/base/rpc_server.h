@@ -8,7 +8,12 @@
 #include <sys/socket.h>
 #include <thread>
 
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
+#include "x23/x23/event.h"
+#include "x23/x23/rpc.h"
+#include "x23/x23/sockio.h"
+#include "x23/x23/threadpool.h"
 
 namespace hogd {
 
