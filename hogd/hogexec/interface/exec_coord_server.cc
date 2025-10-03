@@ -29,58 +29,39 @@ ExecCoordServer::get_executor_address() const
   return std::format("{}:{}", hostname, rpc_interface_->port());
 }
 
-std::unique_ptr<DatabaseProxy>
-ExecCoordServer::connect_to_database(DatabaseIdentifier identifier)
+std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+ExecCoordServer::connect_to_coordinator()
 {
-  return std::make_unique<DatabaseProxy>(std::move(identifier));
+  while (true) {
+    auto fd =
+        cp_.tcpconnect(coordinator_host_, std::to_string(coordinator_port_))();
+    if (fd) {
+      auto client_config = x23::rpc_stream_logged(cp_, *fd);
+      return std::make_optional(client_config->template client<SchedExec1>());
+    }
+    error("Failed to connect to coord allocate service on {}:{}, error={}",
+          coordinator_host_, coordinator_port_, fd.error().what());
+    // Wait briefly and then try again on the next iteration...
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+IntroExecResult
+ExecCoordServer::register_with_coordinator()
+{
+  auto client = connect_to_coordinator();
+  const ExecCard card = {.protocol = version::kHogdProtocol,
+                         .upid = {},
+                         .address = get_executor_address().c_str()};
+  return client->schedexec_intro_exec(card)();
 }
 
 void
 ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
                                    uint16_t self_executor_id)
 {
-  auto db_proxy = connect_to_database(std::move(identifier));
+  auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
   rpc_interface_->init(self_executor_id, std::move(db_proxy));
-}
-
-std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-ExecCoordServer::connect_to_coord_allocate_service()
-{
-  auto fd = cp_.tcpconnect(coord_address_, std::to_string(coord_port_))();
-  if (!fd) {
-    error("Failed to connect to coord allocate service on {}:{}, error={}",
-          coord_address_, coord_port_, fd.error().what());
-    return std::nullopt;
-  }
-
-  auto client_config = x23::rpc_stream_logged(cp_, *fd);
-  return std::make_optional(client_config->template client<SchedExec1>());
-}
-
-IntroExecResult
-ExecCoordServer::get_exec_result()
-{
-  while (true) {
-    auto client = connect_to_coord_allocate_service();
-    if (!client) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      continue;
-    }
-
-    ExecCard card = {.protocol = version::kHogdProtocol,
-                     .upid = {},
-                     .address = get_executor_address().c_str()};
-    auto ret = client->schedexec_intro_exec(card)();
-    return ret;
-  }
-}
-
-void
-ExecCoordServer::init_from_coord()
-{
-  IntroExecResult exec_result = get_exec_result();
-  assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
-  start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
 }
 
 } // namespace hogd
