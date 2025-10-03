@@ -57,6 +57,7 @@ public:
   }
 
   RpcImplementation &get_impl() { return rpc_; }
+  x23::CoroPoll &cp() { return cp_; }
 
 private:
   template<typename T> requires std::is_trivially_copyable_v<T>
@@ -87,6 +88,16 @@ private:
   std::condition_variable cv_;
   std::optional<uint16_t> port_;
 };
+
+inline sockaddr_storage
+host_port_to_sockaddr(const std::string &host, uint16_t port)
+{
+  x23::HostPort helper(host, port);
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      helper.to_addr(/*dns=*/true);
+  CHECK(addr.has_value());
+  return *addr;
+}
 
 inline sockaddr_storage
 server_address_to_sockaddr(std::string_view server_address)

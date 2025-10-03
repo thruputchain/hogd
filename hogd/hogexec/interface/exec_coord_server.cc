@@ -32,18 +32,15 @@ MempoolExecutorClient::get_executor_address(uint16_t executor_port)
 std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
 MempoolExecutorClient::connect_to_coordinator()
 {
-  // TODO(jhumphri): Take these out!!!
-  static x23::ThreadPool pool;
-  static x23::CoroPoll cp(pool);
+  sockaddr_storage coordinator_sockaddr =
+      host_port_to_sockaddr(coordinator_host_, coordinator_port_);
   while (true) {
-    auto fd =
-        cp.tcpconnect(coordinator_host_, std::to_string(coordinator_port_))();
+    x23::UniqueFd fd = x23::tcpconnect(coordinator_sockaddr);
     if (fd) {
-      auto client_config = x23::rpc_stream_logged(cp, *fd);
-      return std::make_optional(client_config->template client<SchedExec1>());
+      return x23::rpc_stream_logged(cp_, fd.release())->client(SchedExec1{});
     }
-    error("Failed to connect to coord allocate service on {}:{}, error={}",
-          coordinator_host_, coordinator_port_, fd.error().what());
+    error("Failed to connect to coord allocate service on {}:{}",
+          coordinator_host_, coordinator_port_);
     // Wait briefly and then try again on the next iteration...
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }

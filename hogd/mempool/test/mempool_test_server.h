@@ -163,7 +163,7 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
-      executor_.start_server(/*port_number=*/0);
+      executor_.start(/*port_number=*/0);
     }
   }
 

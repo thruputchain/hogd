@@ -18,8 +18,9 @@ namespace hogd {
 
 class MempoolExecutorClient {
 public:
-  MempoolExecutorClient(std::string coordinator_host, uint16_t coordinator_port)
-    : coordinator_host_(std::move(coordinator_host)),
+  MempoolExecutorClient(x23::CoroPoll &cp, std::string coordinator_host,
+                        uint16_t coordinator_port)
+    : cp_(cp), coordinator_host_(std::move(coordinator_host)),
       coordinator_port_(coordinator_port)
   {}
 
@@ -36,6 +37,7 @@ private:
   std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
   connect_to_coordinator();
 
+  x23::CoroPoll &cp_;
   const std::string coordinator_host_;
   const uint16_t coordinator_port_;
 };
@@ -47,12 +49,12 @@ private:
 class Executor {
 public:
   Executor(std::string coordinator_host, uint16_t coordinator_port)
-    : client_(coordinator_host, coordinator_port)
+    : coordinator_host_(coordinator_host), coordinator_port_(coordinator_port)
   {}
 
   ~Executor() { await_shutdown_request(); }
 
-  uint16_t start_server(uint16_t port_number)
+  uint16_t start(uint16_t port_number)
   {
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
@@ -64,8 +66,10 @@ public:
     uint16_t executor_port = server_.start_server(port_number);
 
     // Now register with the coordinator.
+    MempoolExecutorClient client(server_.cp(), coordinator_host_,
+                                 coordinator_port_);
     IntroExecResult exec_result =
-        client_.register_with_coordinator(executor_port);
+        client.register_with_coordinator(executor_port);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
     server_.get_impl().init(std::move(exec_result));
@@ -77,8 +81,10 @@ public:
   void await_shutdown_request() { server_.get_impl().await_shutdown_request(); }
 
 private:
-  MempoolExecutorClient client_;
   RpcServer<ExecutorMempoolRpc> server_;
+
+  const std::string coordinator_host_;
+  const uint16_t coordinator_port_;
 };
 
 } // namespace hogd
