@@ -187,6 +187,10 @@ SystemCallHandler::root_invoke()
   // update cumulative_invoke_result_ with the final validation data
   check_final_validation_data();
 
+  if (cumulative_invoke_result_.is_root_success()) {
+    root_invoke_succeeded_ = true;
+  }
+
   return cumulative_invoke_result_;
 }
 
@@ -205,6 +209,7 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
   assert(last_frame_.has_value());
+  assert(root_invoke_succeeded_);
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op.
@@ -434,11 +439,26 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame().calldata();
 }
 
-ProposalModeData const &
+NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
-  assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
-  return std::get<ProposalModeData>(execution_mode_data_);
+  assert(root_invoke_succeeded_);
+  return std::visit(
+      [](auto const& arg) -> NondeterministicProposalData const& { return arg.proposal_data(); }, execution_mode_data_);
+}
+
+
+SHA256Hash
+SystemCallHandler::get_proposed_tx_hash() const
+{
+  assert(root_invoke_succeeded_);
+
+  ProposedTransaction proposed_tx {
+    .signed_tx = signed_tx_,
+    .nondeterministic_proposal_data = get_proposal_data()
+  };
+
+  return sha256(proposed_tx);
 }
 
 void

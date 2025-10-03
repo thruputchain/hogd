@@ -79,7 +79,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     assert(invoke_res.result_.error().code() != InvokeErrorCode::kInvokeNone);
     if (invoke_res.result_.error().code() ==
         InvokeErrorCode::kInvokeDeterministic) {
-      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+      out.proposal_data() = syscall_handler.get_proposal_data();
     }
     return out;
   }
@@ -94,7 +94,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 
   if (commit_res.value()) {
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
-    out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+    out.proposal_data() = syscall_handler.get_proposal_data();
     return out;
   }
   return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);

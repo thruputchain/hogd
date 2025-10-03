@@ -25,7 +25,6 @@ syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer)
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 };
 
-// NOLINTBEGIN(misc-unused-parameters)
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_LogEvent_inner(SystemCallHandler &syscall_handler,
                        SHA256Hash const *topic0, SHA256Hash const *topic1,
@@ -45,6 +44,5 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler,
   syscall_handler.log_event(topic0, topic1, topic2, data);
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
-// NOLINTEND(misc-unused-parameters)
 
 } // namespace hogd
