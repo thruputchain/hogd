@@ -286,7 +286,6 @@ HogDBStatus<int128_t>
 AuthDataItem::merge(const AuthDataItem &auth_data_item,
                     const StorageCostModel *cost_model)
 {
-  auto marginal_cost = marginal_storage_cost(cost_model);
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     // if merging this pk change requires a lock or updating the change
     assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
