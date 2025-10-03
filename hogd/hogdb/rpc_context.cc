@@ -57,6 +57,8 @@ RPCContext::close_block_tx(BlockTXID bid)
 {
   // remove the block tx.
   std::scoped_lock g(lock_);
+  // WARNING:
+  // Closing a block tx while it has open InvokeTXs causes a UAF.
   block_txes_.erase(bid);
 
   // remove each copy of the block tx that was cached.

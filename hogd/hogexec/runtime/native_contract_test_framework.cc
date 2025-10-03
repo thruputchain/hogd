@@ -196,6 +196,7 @@ HogdbWrapper::write_item(AddressAndKey const &addrkey,
   }
   case StorageItemType::kItemTypeDeleted:
   {
+    info("write_item: removing item");
     auto ret = db_.remove_item(make_item_key(addrkey));
     if (!ret) {
       throw std::runtime_error("write_item: remove_item failed");

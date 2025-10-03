@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -17,6 +18,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "storage_item.hh"
 
 namespace hogd {
 
@@ -303,6 +305,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     if (!ret) {
       return ret.error();
     }
+
     v.emplace_back(std::move(change), tx_depth_);
 
     int128_t marginal_storage = std::max<int128_t>(0, *ret);
@@ -326,6 +329,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   if (!ret) {
     return ret.error();
   }
+
   int128_t previous_locked_storage = item.locked_storage_cost;
 
   if (item.tx_depth == tx_depth_) {
@@ -382,6 +386,29 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
     base = 0;
   }
   return request_nnint128(key, *base, delta);
+}
+
+HogDBStatus<void>
+InvokeTX::request_auth_data(Address const &addr,
+                            const AuthDataChangeArgs &auth_data_change)
+{
+  auto base_auth_data = block_.get_db().read_address_account_auth_data(addr);
+  if (!base_auth_data) {
+    if (base_auth_data.error() != HogDBCode::kNotFound) {
+      return base_auth_data.error();
+    }
+    base_auth_data = AccountAuthData{};
+  }
+
+  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
+  for (const auto &signer : auth_data_change.auth_data_change_signers) {
+    if (signer.public_key_id >= MAX_SIGNERS) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+    auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
+  }
+  return request_change(make_account_auth_data_item_key(addr),
+                        std::move(auth_data_item));
 }
 
 } // namespace hogd

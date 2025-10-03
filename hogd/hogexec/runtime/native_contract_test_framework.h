@@ -42,6 +42,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -439,6 +440,7 @@ private:
           .bytestring_cost_per_byte = 10,
           .base_contract_deployment_cost = to_xdr(int128_t{12000}),
           .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+          .auth_per_key_cost = to_xdr(int128_t{1111}),
       };
       auto r = coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{
           .storage_cost_model = cost_model_xdr,
