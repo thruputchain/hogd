@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <utility>
 
 #include "account.hh"
@@ -8,6 +9,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "model_checker/async.h"
+#include "model_checker/work_queue.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -489,6 +492,141 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
 
   advance_block();
   check_balance(contract_addr, 0);
+}
+
+TEST_P(DirectAuthDataTest, AuthDataInterleavings)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
+    return;
+  }
+  AuthDataChangeArgs auth_data_init{};
+  auth_data_init.auth_data_change_signers.push_back(
+      {0, make_pk_config(Weight{1})});
+  auth_data_init.auth_data_change_signers.push_back(
+      {1, make_pk_config(Weight{2})});
+  for (uint32_t i = 2; i < MAX_SIGNERS; i++) {
+    auth_data_init.auth_data_change_signers.push_back({i, nullptr});
+  }
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto initialize = [&] {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+                 make_auth_data_delta(auth_data_init),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r = tx.try_push_current_subtransaction();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r.value());
+    ASSERT_TRUE(tx.commit_transaction({}).has_value());
+    advance_block();
+  };
+
+  model::WorkQueue work_queue;
+
+  while (!work_queue.done()) {
+    model::RunnableActionSet actions(work_queue);
+
+    initialize();
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self) -> model::Async {
+          auto contract_addr = make_contract_address(0);
+
+          auto auth_data1 = AuthDataChangeArgs{};
+          auth_data1.auth_data_change_signers.push_back({0, nullptr});
+          auth_data1.auth_data_change_signers.push_back(
+              {5, make_pk_config(Weight{2})});
+
+          co_await set.bg();
+
+          auto tx = self->make_new_per_tx_db_proxy();
+          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+                       make_auth_data_delta(auth_data1),
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone));
+          auto r1 = tx.try_push_current_subtransaction();
+          if (!r1.has_value() || !r1.value()) {
+            throw std::runtime_error(
+                "try_push_current_subtransaction 1-1 error");
+          }
+          co_await set.bg();
+
+          auto auth_data2 = AuthDataChangeArgs{};
+          auth_data2.auth_data_change_signers.push_back(
+              {1, make_pk_config(Weight{2})});
+          auth_data2.auth_data_change_signers.push_back(
+              {6, make_pk_config(Weight{3})});
+
+          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+                       make_auth_data_delta(auth_data2),
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone));
+          auto r2 = tx.try_push_current_subtransaction();
+          if (!r2.has_value() || !r2.value()) {
+            throw std::runtime_error(
+                "try_push_current_subtransaction 1-2 error");
+          }
+          co_await set.bg();
+
+          if (!tx.commit_transaction({}).has_value()) {
+            throw std::runtime_error("commit_transaction error");
+          }
+
+          co_return;
+        },
+        this);
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self) -> model::Async {
+          auto contract_addr = make_contract_address(0);
+
+          auto auth_data3 = AuthDataChangeArgs{};
+          auth_data3.auth_data_change_signers.push_back(
+              {2, make_pk_config(Weight{3})});
+          auth_data3.auth_data_change_signers.push_back({0, nullptr});
+
+          co_await set.bg();
+
+          auto tx = self->make_new_per_tx_db_proxy();
+          tx.add_delta(make_account_auth_data_addrkey(contract_addr),
+                       make_auth_data_delta(auth_data3),
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone));
+          auto r3 = tx.try_push_current_subtransaction();
+          if (!r3.has_value() || !r3.value()) {
+            throw std::runtime_error(
+                "try_push_current_subtransaction 2-1 error");
+          }
+          co_await set.bg();
+
+          if (!tx.commit_transaction({}).has_value()) {
+            throw std::runtime_error("commit_transaction error");
+          }
+
+          co_return;
+        },
+        this);
+
+    advance_block();
+
+    ASSERT_EQ(actions.run(), model::ActionResult::kOk);
+
+    advance_block();
+
+    auto item = lookup_storage_item_from_db(
+        make_account_auth_data_addrkey(contract_addr));
+    ASSERT_TRUE(item.has_value());
+    auto db_auth_data = item->auth_data();
+    ASSERT_FALSE(db_auth_data.public_keys[0]);
+    ASSERT_TRUE(db_auth_data.public_keys[1]);
+    ASSERT_TRUE(db_auth_data.public_keys[2]);
+    ASSERT_TRUE(db_auth_data.public_keys[6]);
+
+    check_balance(contract_addr,
+                  kInitialBalance - (cost_model_->get_auth_data_cost(3)));
+
+    work_queue.advance_cursor();
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
