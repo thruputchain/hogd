@@ -111,16 +111,21 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
   AuthDataItem auth_data_item(base_data_);
   auth_data_item.set_new_pk(0, make_pk_config(Weight{10}));
 
+  // This is a write over a key that already exists in the base data,
+  // and a write over a key that doesn't exist in the base data.
   AuthDataItem auth_data_2(base_data_);
   auth_data_2.set_new_pk(1, make_pk_config(Weight{10}));
+  auth_data_2.set_new_pk(3, make_pk_config(Weight{10}));
 
-  EXPECT_TRUE(auth_data_item.narrow(auth_data_2));
+  AuthDataItem narrowed = auth_data_item;
+  EXPECT_TRUE(narrowed.narrow(auth_data_2));
 
-  auth_data_item.commit_change(auth_data_item);
+  narrowed.commit_change(auth_data_item);
 
-  auto res = auth_data_item.build_result();
+  auto res = narrowed.build_result();
   EXPECT_TRUE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
+  EXPECT_TRUE(res.public_keys[3]);
 }
 
 TEST_F(ItemChangeAuthTest, NarrowExclusiveConflict)
