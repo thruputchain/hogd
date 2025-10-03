@@ -8,9 +8,11 @@
 #include <stdexcept>
 #include <utility>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/debug/delta_validity_checks.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
@@ -623,6 +625,10 @@ std::optional<MeteredStorageLock>
 StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
                                      StorageLock const &previous_lock)
 {
+  if constexpr (is_debug_build()) {
+    assert(is_valid_delta(delta));
+  }
+  
   trace("Trying to reserve delta {} on lock {}", x23::show(delta),
         x23::show(previous_lock));
   assert(!round_committed_);

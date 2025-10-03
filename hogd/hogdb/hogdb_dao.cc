@@ -374,9 +374,23 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
     return HogDBError(HogDBCode::kNotFound);
   case ItemKeyType::kItemKeyTypeAccountAuthData:
     assert(key.is_account_auth_data());
-    // TODO(geoff): configurable accounting on auth data
-    return db_.get_size(
-        make_address_key(key.get_address(), Prefix::kAccountAuthData));
+    {
+      auto r = read_address_account_auth_data(key.get_address());
+      if (!r && r.error() != HogDBCode::kNotFound) {
+        return r.error();
+      }
+      if (!r) {
+        assert(r.error() == HogDBCode::kNotFound);
+        return 0;
+      }
+      size_t active_keys = 0;
+      for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+        if (r.value().public_keys[i]) {
+          active_keys++;
+        }
+      }
+      return cost_model->get_auth_data_cost(active_keys);
+    }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
     {

@@ -255,6 +255,19 @@ AuthDataItem::committed_storage_cost(const StorageCostModel *cost_model) const
   return cost_model->get_auth_data_cost(active_keys);
 }
 
+int128_t 
+AuthDataItem::marginal_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t new_keys_upper_bound = 0;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i].refcount_ > 0 || base_auth_data_.public_keys[i]) {
+      new_keys_upper_bound++;
+    }
+  }
+  info("num keys: {}", new_keys_upper_bound);
+  return cost_model->get_auth_data_cost(new_keys_upper_bound);
+}
+
 bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
@@ -308,11 +321,15 @@ AuthDataItem::merge(const AuthDataItem &auth_data_item,
     pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
 
     if (auth_data_item.pk_changes_[i].refcount_ == 1) {
-      max_new_keys++;
       pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
     }
     if (auth_data_item.pk_changes_[i].exclusive_) {
       pk_changes_[i].exclusive_ = true;
+    }
+
+    // mirroring the logic in marginal_storage_cost
+    if (auth_data_item.pk_changes_[i].refcount_ == 1 || base_auth_data_.public_keys[i]) {
+      max_new_keys++;
     }
   }
 
@@ -388,11 +405,9 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
       },
       type_);
   if (!merge_cost) {
-    info("merge error {}", merge_cost.error());
     return merge_cost.error();
   }
   assert(snapshot_cost_.has_value());
-  info("merge cost {}", *merge_cost);
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
 

@@ -25,7 +25,7 @@ struct StorageCostModel {
 
   // Wrapper class that implements the storage cost model, given a particular
   // config.
-  StorageCostModel(StorageCostModelXdr const &model)
+  constexpr StorageCostModel(StorageCostModelXdr const &model)
     : kBaseItemCost(from_xdr(model.base_data_item_cost)),
       kBytestringCostPerByte(model.bytestring_cost_per_byte),
       kBaseContractDeploymentCost(
