@@ -25,10 +25,10 @@ Errno
 WriteBuffer::Service::write(BufVec &work)
 {
   cp_->write_clear(fd_);
-  if (auto res = work.write(fd_); !res) {
+  auto res = work.write(fd_);
+  got_eagain_ = res && *res == IoResult::kAgain;
+  if (!res)
     cp_->poison(fd_);
-    return res.error();
-  }
   return 0;
 }
 
@@ -55,7 +55,8 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
-      co_await self.cp_->write_wait(self.fd_);
+      if (self.got_eagain_)
+        co_await self.cp_->write_wait(self.fd_);
       if (self.write(work))
         co_return;
     }
