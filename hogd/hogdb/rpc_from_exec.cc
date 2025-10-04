@@ -17,6 +17,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
@@ -131,6 +132,11 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     return to_rpc_error(
         tx.request_deploy_contract(addrkey.address,
                                    delta.deployed_contract_hash()));
+  case StorageDeltaType::kDeltaTypeAuthDataChange:
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeAccountAuthData);
+    return to_rpc_error(
+        tx.request_auth_data(addrkey.address, delta.auth_data_change()));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
@@ -185,6 +191,7 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
   for (auto const &delta : batch) {
     if constexpr (is_debug_build()) {
       check_delta_type(delta.addrkey.key.key_type(), delta.delta.type());
+      assert(is_valid_delta(delta.delta));
     }
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
@@ -226,6 +233,18 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
       return ExpectedStorageItem(to_rpc_error(nnint.error()));
     StorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
+    ExpectedStorageItem ret;
+    ret.error(RPCError::kRPCNone);
+    ret.item() = out;
+    return ret;
+  }
+  if (key.is_account_auth_data()) {
+    HogDBStatus<AccountAuthData> auth_data =
+        ctx_.get_db().read_address_account_auth_data(key.get_address());
+    if (!auth_data)
+      return ExpectedStorageItem(to_rpc_error(auth_data.error()));
+    StorageItem out(StorageItemType::kItemTypeAuthData);
+    out.auth_data() = *auth_data;
     ExpectedStorageItem ret;
     ret.error(RPCError::kRPCNone);
     ret.item() = out;

@@ -227,6 +227,7 @@ GenesisBlockBuilder::build() const
       .bytestring_cost_per_byte = 10,
       .base_contract_deployment_cost = to_xdr(int128_t{12000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .auth_per_key_cost = to_xdr(int128_t{1111}),
   };
   return block;
 }

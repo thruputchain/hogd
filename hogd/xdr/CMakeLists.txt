@@ -9,14 +9,18 @@ add_xdr(
 	../../protocol/coord_sched.x
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
-	../../protocol/exec_sched.x
+	../../protocol/event.x
 	../../protocol/executor_to_db_rpc.x
+	../../protocol/exec_coord.x
+	../../protocol/exec_sched.x
 	../../protocol/ffi_enums.x
 	../../protocol/genesis.x
 	../../protocol/loadgen.x
 	../../protocol/nomination.x
 	../../protocol/precompiles.x
 	../../protocol/rpc_types.x
+	../../protocol/sc_types.x
+	../../protocol/sc_val.x
 	../../protocol/sched_coord.x
 	../../protocol/sched_db.x
 	../../protocol/sched_exec.x

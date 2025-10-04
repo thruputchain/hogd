@@ -16,6 +16,7 @@ target_link_libraries(
 add_library(base STATIC $<TARGET_OBJECTS:base_objects>)
 
 add_library(base_test_objects OBJECT
+  base_test.cc
   bits_test.cc
   cpputil_test.cc
   io_test.cc
@@ -28,7 +29,7 @@ add_library(base_test_objects OBJECT
 )
 target_link_libraries(
   base_test_objects
-  GTest::gtest_main
+  GTest::gtest
 )
 
 # create base module test binary
@@ -39,7 +40,7 @@ add_executable(
 
 target_link_libraries(
   base_test
-  base
-  GTest::gtest_main
+  hogd
+  GTest::gtest
 )
 gtest_discover_tests(base_test)

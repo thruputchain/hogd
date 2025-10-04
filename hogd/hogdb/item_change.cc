@@ -4,11 +4,12 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
-#include <optional>
+#include <limits>
 #include <span>
 #include <type_traits>
 #include <variant>
 
+#include "account.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -183,6 +184,170 @@ NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
                             std::as_bytes(std::span(buf)));
 }
 
+HogDBStatus<void>
+AuthDataItem::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                     const ItemKey &key) const
+{
+  if constexpr (is_debug_build()) {
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      assert(!pk_changes_[i].exclusive_);
+    }
+    assert(key.is_account_auth_data());
+  }
+  auto res = build_result();
+  auto ret = db.write_address_account_auth_data(key.get_address(), res);
+  if (!ret) {
+    return ret.error();
+  }
+  auto buf = x23::serialize(res);
+  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  return ret;
+}
+
+AccountAuthData
+AuthDataItem::build_result() const
+{
+  AccountAuthData result = base_auth_data_;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    auto const &pk_change = pk_changes_[i];
+    assert(!pk_change.exclusive_);
+    if (pk_change.committed_) {
+      result.public_keys[i] = pk_change.pk_;
+    }
+  }
+  return result;
+}
+
+void
+AuthDataItem::commit_change(AuthDataItem const &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      pk_changes_[i].exclusive_ = false;
+    }
+    if (auth_data_item.pk_changes_[i].refcount_ > 0) {
+      assert(pk_changes_[i].refcount_ > 0);
+      assert(!auth_data_item.pk_changes_[i].committed_);
+      pk_changes_[i].committed_ = true;
+    }
+  }
+}
+
+int128_t
+AuthDataItem::committed_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t active_keys = 0;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i].committed_) {
+      if (pk_changes_[i].pk_) {
+        active_keys++;
+      }
+    }
+    else {
+      if (base_auth_data_.public_keys[i]) {
+        active_keys++;
+      }
+    }
+  }
+  return cost_model->get_auth_data_cost(active_keys);
+}
+
+int128_t
+AuthDataItem::marginal_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t new_keys_upper_bound = 0;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i].refcount_ > 0 || base_auth_data_.public_keys[i]) {
+      new_keys_upper_bound++;
+    }
+  }
+  return cost_model->get_auth_data_cost(new_keys_upper_bound);
+}
+
+bool
+AuthDataItem::narrow(const AuthDataItem &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    // Narrow is only called on the changes held by individual invokeTx objects.
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
+           auth_data_item.pk_changes_[i].refcount_ == 1);
+    if (auth_data_item.pk_changes_[i].refcount_ == 1) {
+      pk_changes_[i].refcount_ = 1;
+    }
+    pk_changes_[i].exclusive_ |= auth_data_item.pk_changes_[i].exclusive_;
+  }
+  return true;
+}
+
+HogDBStatus<int128_t>
+AuthDataItem::merge(const AuthDataItem &auth_data_item,
+                    const StorageCostModel *cost_model)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    // if merging this pk change requires a lock or updating the change
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
+           auth_data_item.pk_changes_[i].refcount_ == 1);
+
+    if (auth_data_item.pk_changes_[i].refcount_ == 0) {
+      assert(!auth_data_item.pk_changes_[i].exclusive_);
+      continue;
+    }
+
+    if (pk_changes_[i].refcount_ == 0 &&
+        auth_data_item.pk_changes_[i].refcount_ == 1) {
+      assert(pk_changes_[i].exclusive_ == false);
+      continue;
+    }
+
+    // both have nonzero refcount
+    if (pk_changes_[i].exclusive_) {
+      assert(!auth_data_item.pk_changes_[i].exclusive_);
+      return HogDBError(HogDBCode::kConflict);
+    }
+
+    if (pk_changes_[i].pk_ != auth_data_item.pk_changes_[i].pk_) {
+      return HogDBError(HogDBCode::kConflict);
+    }
+  }
+
+  // Conflicts checked; now do merge
+  size_t max_new_keys = 0;
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    pk_changes_[i].refcount_ += auth_data_item.pk_changes_[i].refcount_;
+
+    if (auth_data_item.pk_changes_[i].refcount_ == 1) {
+      pk_changes_[i].pk_ = auth_data_item.pk_changes_[i].pk_;
+    }
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      pk_changes_[i].exclusive_ = true;
+    }
+
+    // mirroring the logic in marginal_storage_cost
+    if (auth_data_item.pk_changes_[i].refcount_ == 1 ||
+        base_auth_data_.public_keys[i]) {
+      max_new_keys++;
+    }
+  }
+
+  return cost_model->get_auth_data_cost(max_new_keys);
+}
+
+void
+AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
+{
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
+           auth_data_item.pk_changes_[i].refcount_ == 1);
+    pk_changes_[i].refcount_ -= auth_data_item.pk_changes_[i].refcount_;
+    if (auth_data_item.pk_changes_[i].exclusive_) {
+      assert(pk_changes_[i].exclusive_);
+      pk_changes_[i].exclusive_ = false;
+    }
+  }
+}
+
 namespace {
 
 template<typename T>
@@ -237,8 +402,9 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
         return HogDBError(HogDBCode::kInternal);
       },
       type_);
-  if (!merge_cost)
+  if (!merge_cost) {
     return merge_cost.error();
+  }
   assert(snapshot_cost_.has_value());
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
@@ -267,9 +433,10 @@ ItemChange::commit_change(const ItemChange &change)
     // us to release that lock.
     exclusive_ = false;
   }
+  change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
-        if constexpr (!is_monostate<decltype(arg)>)
+        if constexpr (is_item_commit_required<std::decay_t<decltype(arg)>>)
           arg.commit_change(
               std::get<std::decay_t<decltype(arg)>>(change.type_));
       },
@@ -322,18 +489,21 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
 int128_t
 ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
 {
-  auto ret = std::visit(
-      [cost_model](auto &arg) -> std::optional<int128_t> {
+  assert(snapshot_cost_.has_value());
+  if (!change_committed_) {
+    return *snapshot_cost_;
+  }
+
+  return std::visit(
+      [cost_model](auto &arg) -> int128_t {
+        assert(!is_monostate<decltype(arg)>);
+
         if constexpr (!is_monostate<decltype(arg)>)
           return arg.committed_storage_cost(cost_model);
-        return std::nullopt;
+        assert(false);
+        return std::numeric_limits<int128_t>::max();
       },
       type_);
-  if (ret) {
-    return *ret;
-  }
-  assert(snapshot_cost_.has_value());
-  return *snapshot_cost_;
 }
 
 HogDBStatus<int128_t>

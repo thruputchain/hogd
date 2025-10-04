@@ -17,20 +17,22 @@ struct StorageCostModel {
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
       kBaseContractDeploymentCost(kBaseItemCost),
-      kContractDeploymentCostPerByte(1), kRCQCostPerEntry(rcq_cost_per_entry),
+      kContractDeploymentCostPerByte(1), kAuthPerKeyCost(1),
+      kRCQCostPerEntry(rcq_cost_per_entry),
       kRCQCostPerBlock(rcq_cost_per_block),
       kReplayCacheCostPerEntry(replay_cache_cost_per_entry)
   {}
 
   // Wrapper class that implements the storage cost model, given a particular
   // config.
-  StorageCostModel(StorageCostModelXdr const &model)
+  constexpr StorageCostModel(StorageCostModelXdr const &model)
     : kBaseItemCost(from_xdr(model.base_data_item_cost)),
       kBytestringCostPerByte(model.bytestring_cost_per_byte),
       kBaseContractDeploymentCost(
           from_xdr(model.base_contract_deployment_cost)),
       kContractDeploymentCostPerByte(
-          from_xdr(model.contract_deployment_cost_per_byte))
+          from_xdr(model.contract_deployment_cost_per_byte)),
+      kAuthPerKeyCost(from_xdr(model.auth_per_key_cost))
   {}
 
   int128_t get_bytestring_cost(size_t bytestring_len) const;
@@ -46,10 +48,16 @@ struct StorageCostModel {
     return contract_size * kContractDeploymentCostPerByte;
   }
 
+  constexpr int128_t get_auth_data_cost(size_t num_keys) const
+  {
+    return kBaseItemCost + (num_keys * kAuthPerKeyCost);
+  }
+
   const int128_t kBaseItemCost;
   const int32_t kBytestringCostPerByte;
   const int128_t kBaseContractDeploymentCost;
   const int128_t kContractDeploymentCostPerByte;
+  const int128_t kAuthPerKeyCost;
 
   // TODO(geoff): make these part of the XDR, once we settle on
   // cost/design for the RCQs.
