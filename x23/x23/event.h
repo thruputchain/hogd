@@ -176,6 +176,7 @@ private:
     CoroPoll *cp_;
     BorrowedFd fd_;
     std::unique_lock<std::mutex> lk_;
+    bool got_eagain_{false};
 
     Service(Service &&) noexcept = default;
     bool work_needed()
