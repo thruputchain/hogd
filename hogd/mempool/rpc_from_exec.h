@@ -66,6 +66,12 @@ public:
     return ret;
   }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:

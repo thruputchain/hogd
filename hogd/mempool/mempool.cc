@@ -99,6 +99,11 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   info("mempool initialization complete.");
   std::promise<void>().get_future().wait();
 
+  // TODO(jhumphri): Implement shutdown path.
+  // coord.shut_down();
+  // exec.shut_down();
+  // db.shut_down();
+
   return 0;
 }
 
