@@ -14,8 +14,8 @@
 
 namespace hogd {
 
-// Test RPC service that implements ExecutorEvent1 and stores all inputs in std::map
-// for later inspection in tests
+// Test RPC service that implements ExecutorEvent1 and stores all inputs in
+// std::map for later inspection in tests
 class TestEventAggregator {
 public:
   using rpc_service = ExecutorEvent1;
@@ -31,12 +31,11 @@ public:
   uint16_t start_server(uint16_t port_number);
 
   // RPC service methods
-  static void executorevent_null() { }
+  static void executorevent_null() {}
 
   RPCError executorevent_open_block(BlockID block_id);
   RPCError executorevent_close_block(BlockID block_id);
-  RPCError executorevent_emit_event(BlockID block_id,
-                                    TransactionID tx_id,
+  RPCError executorevent_emit_event(BlockID block_id, TransactionID tx_id,
                                     TxEventLog const &event_log);
 
   // Get all events for a specific block and transaction
@@ -50,10 +49,12 @@ private:
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
 
-  bool is_block_open(BlockID block_id) const {
-    return block_refcounts_.contains(block_id) && block_refcounts_.at(block_id) > 0;
+  bool is_block_open(BlockID block_id) const
+  {
+    return block_refcounts_.contains(block_id) &&
+           block_refcounts_.at(block_id) > 0;
   }
-  
+
   // Store events: block_id -> tx_id -> vector of events
   std::map<BlockID, std::map<TransactionID, TxEventLog>> events_;
 };
