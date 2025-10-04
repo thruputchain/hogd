@@ -56,10 +56,13 @@ validate_flags(StorageItemRPCFlagSet flags)
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
-    PerTransactionDatabaseProxy db_proxy, ExecutionModeData execution_mode_data,
+    PerTransactionDatabaseProxy db_proxy,
+    PerTransactionEventServerProxy event_server_proxy,
+    ExecutionModeData execution_mode_data,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
+    event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
@@ -266,6 +269,14 @@ SystemCallHandler::try_commit_transaction()
     return res.error();
   }
 
+  // This is past the point of successful commitment;
+  // now we can safely emit the events to the event server
+  auto emit_events_status = emit_events();
+  if (!emit_events_status.has_value()) {
+    error("emit_events failed: {}", emit_events_status.error());
+    return emit_events_status.error();
+  }
+
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
@@ -443,22 +454,34 @@ NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
   assert(root_invoke_succeeded_);
-  return std::visit(
-      [](auto const& arg) -> NondeterministicProposalData const& { return arg.proposal_data(); }, execution_mode_data_);
+  return std::visit([](auto const &arg) -> NondeterministicProposalData const
+                                            & { return arg.proposal_data(); },
+                    execution_mode_data_);
 }
-
 
 SHA256Hash
 SystemCallHandler::get_proposed_tx_hash() const
 {
   assert(root_invoke_succeeded_);
 
-  ProposedTransaction proposed_tx {
-    .signed_tx = signed_tx_,
-    .nondeterministic_proposal_data = get_proposal_data()
-  };
+  ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
+                                  .nondeterministic_proposal_data =
+                                      get_proposal_data()};
 
   return sha256(proposed_tx);
+}
+
+SystemStatus<void>
+SystemCallHandler::emit_events()
+{
+  assert(last_frame_.has_value());
+  assert(cumulative_invoke_result_.is_root_success());
+  assert(root_invoke_succeeded_);
+  auto events = last_frame_.value().extract_events();
+  return event_server_proxy_.emit_events(TxEventLog{
+      .proposed_tx_hash = get_proposed_tx_hash(),
+      .events = std::move(events),
+  });
 }
 
 void

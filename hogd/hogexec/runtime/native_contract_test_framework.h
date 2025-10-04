@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -32,11 +33,13 @@
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -48,6 +51,7 @@
 #include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -243,9 +247,11 @@ public:
                                std::shared_ptr<RuntimeContext> runtime_context)
   {
     assert(storage_snapshot_cache_);
+    auto txid = allocate_txid();
     return SystemCallHandler(tx, *storage_snapshot_cache_,
-                             make_new_per_tx_db_proxy(), ExecutionModeData{},
-                             std::move(runtime_context));
+                             make_new_per_tx_db_proxy(txid),
+                             make_new_per_tx_event_server_proxy(txid),
+                             ExecutionModeData{}, std::move(runtime_context));
   }
 
   std::optional<StorageItem>
@@ -357,11 +363,21 @@ public:
         db_wrapper_);
   }
 
-  PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
+  PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
-                                       allocate_txid());
+    if (tx_id == UINT64_MAX) {
+      tx_id = allocate_txid();
+    }
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);
+  }
+
+  PerTransactionEventServerProxy
+  make_new_per_tx_event_server_proxy(TransactionID tx_id)
+  {
+    assert(event_server_proxy_);
+    return PerTransactionEventServerProxy(*event_server_proxy_, block_number_,
+                                          tx_id);
   }
 
   void run_genesis_initialization(
@@ -410,9 +426,13 @@ private:
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
     }
+    open_event_block(block_number_);
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
+
+  void open_event_block(BlockID block_id);
+  void close_event_block(BlockID block_id);
 
   void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
@@ -424,10 +444,14 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
+    uint16_t event_server_port = event_server_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
+
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_server_port});
 
     if (!empty_genesis) {
       return;
@@ -462,6 +486,10 @@ private:
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+
+  // TODO(geoff): replace with proper event server connection
+  TestEventAggregator event_server_;
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iterator>
 #include <optional>
+#include <ranges>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -39,8 +40,9 @@ void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
   child_return_buffer_ = std::move(frame.to_return_);
-  events_.insert(events_.end(), std::make_move_iterator(frame.events_.begin()),
-                 std::make_move_iterator(frame.events_.end()));
+  events_.append_range(
+      std::ranges::subrange(std::make_move_iterator(frame.events_.begin()),
+                            std::make_move_iterator(frame.events_.end())));
 
   for (auto const &[addr, hash] : frame.new_contract_deployments_) {
     [[maybe_unused]] auto [_, inserted_new] =

@@ -25,6 +25,7 @@ target_link_libraries(
   precompiles
   runtime
   db_interface
+  runtime_test_util
 )
 
 add_executable(

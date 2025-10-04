@@ -8,7 +8,7 @@ namespace hogd {
 
 TEST(ExecutorStateManagerTest, TestRefcounting)
 {
-  ExecutorStateManager manager(nullptr);
+  ExecutorStateManager manager(nullptr, nullptr);
 
   ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);
   ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);

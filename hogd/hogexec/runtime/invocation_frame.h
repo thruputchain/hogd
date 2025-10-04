@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -67,7 +68,7 @@ public:
   // add a log message to the output of the transaction, associated with the
   // current call frame.
   void log_event(TxEmittedEvent event);
-  std::vector<TxEmittedEvent> extract_events() { return std::move(events_); }
+  x23::Vec<TxEmittedEvent> extract_events() { return std::move(events_); }
 
   bool is_try_invoke() const
   {
@@ -136,7 +137,7 @@ private:
   const InvokeFlagSet flags_;
 
   // Accumulates the events created in the current call frame (and child frames)
-  std::vector<TxEmittedEvent> events_;
+  x23::Vec<TxEmittedEvent> events_;
 
   uint32_t try_invoke_frame_count_ = 0;
 

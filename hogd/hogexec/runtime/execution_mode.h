@@ -34,7 +34,10 @@ public:
   void log_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index,
                                    QueueEntry entry);
 
-  NondeterministicProposalData const& proposal_data() const { return proposal_data_; }
+  NondeterministicProposalData const &proposal_data() const
+  {
+    return proposal_data_;
+  }
 
 private:
   // Proposal data containing nondeterministic choices made during execution
@@ -75,11 +78,14 @@ public:
   // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;
 
-  NondeterministicProposalData const& proposal_data() const { return proposal_data_; }
+  NondeterministicProposalData const &proposal_data() const
+  {
+    return proposal_data_;
+  }
 
 private:
   // Proposal data containing expected nondeterministic choices
-  NondeterministicProposalData proposal_data_;
+  const NondeterministicProposalData proposal_data_;
 
   // Index of next nondeterministic bit to consume from proposal
   uint32_t next_nondeterministic_bit_index_ = 0;

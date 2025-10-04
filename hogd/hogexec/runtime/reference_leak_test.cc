@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <string_view>
@@ -95,6 +96,11 @@ public:
     delta.replay_cache_modify().minimum_threshold = 0;
     delta.replay_cache_modify().nonces = {nonce};
     return delta;
+  }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 };
 

@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -55,6 +56,7 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeData execution_mode_data,
                     std::shared_ptr<RuntimeContext> runtime_context);
 
@@ -87,14 +89,9 @@ public:
   SystemStatus<bool> try_commit_transaction();
 
   // Get the proposal data.
-  // Can only be called after root_invoke() 
+  // Can only be called after root_invoke()
   // (as otherwise the proposal data is not available)
   NondeterministicProposalData const &get_proposal_data() const;
-
-  // Get the hash of the proposed transaction.
-  // Can only be called after root_invoke() 
-  // (as otherwise the proposal data is not available)
-  SHA256Hash get_proposed_tx_hash() const;
 
   // Syscalls: operations within an invocation
 
@@ -184,11 +181,12 @@ public:
   SystemStatus<SyscallStatus<void>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
-  
+
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
   PerTransactionDatabaseProxy db_proxy_;
+  PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current
@@ -238,6 +236,13 @@ private:
                ? BlockExecutionMode::kBlockExecutionModeProposal
                : BlockExecutionMode::kBlockExecutionModeValidation;
   }
+
+  // Get the hash of the proposed transaction.
+  // Can only be called after root_invoke()
+  // (as otherwise the proposal data is not available)
+  SHA256Hash get_proposed_tx_hash() const;
+
+  SystemStatus<void> emit_events();
 };
 
 } // namespace hogd

@@ -20,9 +20,11 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -43,6 +45,8 @@ public:
     start_db_server();
     connect_coord();
     connect_exec();
+    event_server_port_ = event_server_.start_server(0);
+    connect_event();
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
@@ -56,8 +60,11 @@ public:
       txid = allocate_txid();
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
-    return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{}, make_hogexec_context());
+    auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
+                                                      block_number_, txid);
+    return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
+                             std::move(event_proxy), ProposalModeData{},
+                             make_hogexec_context());
   }
 
   void advance_block();
@@ -84,6 +91,12 @@ private:
             client_config->template client<DbCoord1>());
       }
     }();
+  }
+
+  void connect_event()
+  {
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_server_port_});
   }
 
   void connect_exec()
@@ -114,6 +127,7 @@ private:
   std::string server_addr_;
   uint16_t exec_port_;
   uint16_t coord_port_;
+  uint16_t event_server_port_;
 
   uint16_t ci_server_port_;
 
@@ -130,6 +144,10 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
+
+  // TODO(geoff): replace with proper event server connection
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+  TestEventAggregator event_server_;
 
   using coord_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

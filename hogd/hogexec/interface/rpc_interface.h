@@ -21,9 +21,10 @@ public:
   using rpc_service = ExecutorCoord1;
 
   ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
-                       std::unique_ptr<DatabaseProxy> db_proxy)
+                       std::unique_ptr<DatabaseProxy> db_proxy,
+                       std::unique_ptr<EventServerProxy> event_server_proxy)
     : self_executor_id_(self_executor_id), cp_(cp),
-      executor_states_(std::move(db_proxy))
+      executor_states_(std::move(db_proxy), std::move(event_server_proxy))
   {}
 
   uint16_t start_server(uint16_t port_number);

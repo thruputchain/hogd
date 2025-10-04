@@ -9,8 +9,10 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -57,7 +59,7 @@ private:
   // Connects to the database and performs initialization of the executor.
   // Then begins serving RPCs to the coordinator.
   void start_rpc_service(DatabaseIdentifier identifier,
-                         uint16_t self_executor_id);
+                         x23::HostPort event_addr, uint16_t self_executor_id);
 
   // Connect to all relevant database components.
   static std::unique_ptr<DatabaseProxy>
@@ -77,6 +79,10 @@ private:
   x23::ThreadPool x23_pool_;
   x23::CoroPoll cp_;
   std::unique_ptr<ExecutorRpcInterface> rpc_interface_;
+
+  // TODO(geoff): This is only temporary, until the coordinator starts introing
+  // the event server.
+  TestEventAggregator event_server_;
 };
 
 } // namespace hogd

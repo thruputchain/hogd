@@ -15,6 +15,7 @@ add_subdirectory(test_util)
 add_library(runtime_objects OBJECT
   contract_trait.cc
   database_proxy.cc
+  event_server_proxy.cc
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
@@ -55,6 +56,7 @@ add_library(runtime_test_lib
 target_link_libraries(
   runtime_test_lib
   runtime
+  runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
   db_interface
   hogdb
   GTest::gtest

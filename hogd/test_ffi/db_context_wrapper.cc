@@ -6,8 +6,10 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -18,6 +20,8 @@ DBContext::DBContext(uint32_t db_read_port)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = executor_server_.port()});
+  event_server_proxy_ = std::make_unique<EventServerProxy>(
+      x23::HostPort{"localhost", event_server_.start_server(0)});
 
   advance_new_block();
 }
