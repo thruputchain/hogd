@@ -6,7 +6,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 
-LISTEN_DIR="$REPO_ROOT"
+WATCHER_DIR="$REPO_ROOT"
 BUILD_CMD="$REPO_ROOT/scripts/build.sh"
 BUILD_ARGS=("$@") # capture all script arguments
 
@@ -16,7 +16,7 @@ command -v inotifywait >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "Listening to $LISTEN_DIR for changes to .cc, .h, or .txt files..."
+echo "Watching $WATCHER_DIR for changes to .cc, .h, or .txt files..."
 echo "Will kill any in-progress build and start a new one on each matching event."
 echo "Build command: $BUILD_CMD ${BUILD_ARGS[*]}"
 
@@ -51,7 +51,7 @@ stop_build() {
 
 cleanup() {
   echo
-  echo "Stopping listener..."
+  echo "Stopping watches..."
   stop_build
   exit 0
 }
@@ -60,7 +60,7 @@ trap cleanup INT TERM
 # Start the build on launch.
 start_build
 
-# Listen for file changes.
+# Watch for file changes.
 while read -r file event; do
   case "$file" in
   *.cc | *.h | *.txt)
@@ -69,4 +69,4 @@ while read -r file event; do
     start_build
     ;;
   esac
-done < <(inotifywait -m -r -e modify,delete --format '%w%f %e' "$LISTEN_DIR")
+done < <(inotifywait -m -r -e modify,delete --format '%w%f %e' "$WATCHER_DIR")
