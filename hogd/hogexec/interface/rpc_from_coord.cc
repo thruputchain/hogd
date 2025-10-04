@@ -124,12 +124,6 @@ ExecutorMempoolRpc::allocate_tx_id()
   return TransactionID{base + (uint64_t{self_executor_id_} << 48)};
 }
 
-void
-ExecutorMempoolRpc::shut_down()
-{
-  shutdown_flag_ = true;
-}
-
 x23::Async<void>
 ExecutorMempoolRpc::executorcoord_shutdown()
 {

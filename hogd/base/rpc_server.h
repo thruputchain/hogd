@@ -47,6 +47,10 @@ public:
     return port_.value();
   }
 
+  void shut_down() { rpc_.shut_down(); }
+
+  void await_shutdown_request() { rpc_.await_shutdown_request(); }
+
   // Returns the port that the server is listening on.
   uint16_t port()
   {

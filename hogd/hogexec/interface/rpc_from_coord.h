@@ -66,7 +66,12 @@ public:
   // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
-  void shut_down();
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:

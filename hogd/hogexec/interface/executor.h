@@ -77,8 +77,8 @@ public:
     return executor_port;
   }
 
-  void shut_down() { server_.get_impl().shut_down(); }
-  void await_shutdown_request() { server_.get_impl().await_shutdown_request(); }
+  void shut_down() { server_.shut_down(); }
+  void await_shutdown_request() { server_.await_shutdown_request(); }
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;
