@@ -78,12 +78,39 @@ to_span(const Bytestring &bs)
 
 } // namespace
 
-// HogDBExecutorRpc implementations
+void
+HogDBExecutorServer::start_server(uint16_t port)
+{
+  lfd_ = x23::stcplisten(port);
+  if (!lfd_) {
+    perror("listen");
+    exit(EXIT_FAILURE);
+  }
+  port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+  listen_thread_ = std::jthread([this](std::stop_token &&stop) {
+    while (!stop.stop_requested()) {
+
+      sockaddr_storage ss;
+      socklen_t sslen = sizeof(ss);
+      x23::UniqueFd fd{
+          accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+      if (!fd) {
+        info("accept error: {}", Errno{});
+      }
+      else {
+        x23::srpc_stream_logged(fd.release())->server(this);
+      }
+    }
+  });
+}
+
+// HogDBExecutorServer implementations
 
 RPCError
-HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
-                              StorageDelta const &delta,
-                              StorageItemRPCFlagSet /*flags*/)
+HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
+                                 StorageDelta const &delta,
+                                 StorageItemRPCFlagSet /*flags*/)
 {
   // TODO(abelay): support StorageItemRPCFlagSet, which could request exclusive.
   switch (delta.type()) {
@@ -117,8 +144,8 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
 }
 
 RPCError
-HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
-                                     NewContractBatch new_contracts)
+HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
+                                        NewContractBatch new_contracts)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
@@ -142,7 +169,7 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
 }
 
 RPCError
-HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
+HogDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
@@ -153,8 +180,9 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 }
 
 RPCError
-HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch const &batch)
+HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
+                                                 TransactionID tx,
+                                                 StorageDeltaBatch const &batch)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
@@ -176,8 +204,8 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
 }
 
 RPCError
-HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
-                                      uint32_t popcount)
+HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
+                                         uint32_t popcount)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
@@ -189,8 +217,8 @@ HogDBExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
-                                    AddressAndKey const &addrkey)
+HogDBExecutorServer::get_snapshot_item(BlockID /*unused*/,
+                                       AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot
@@ -256,7 +284,7 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
 }
 
 ExpectedContract
-HogDBExecutorRpc::get_contract(BlockID /*block*/, SHA256Hash const &hash)
+HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
@@ -273,8 +301,8 @@ HogDBExecutorRpc::get_contract(BlockID /*block*/, SHA256Hash const &hash)
 }
 
 ExpectedDeployment
-HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
-                                 ContractAddress const &contract_address)
+HogDBExecutorServer::get_deployment(BlockID /*unused*/,
+                                    ContractAddress const &contract_address)
 {
 
   HogDBStatus<DeployedContractHash> hash =
@@ -289,7 +317,7 @@ HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
 }
 
 ExpectedRetrocausalQueueBlock
-HogDBExecutorRpc::get_next_retrocausal_queue_block(
+HogDBExecutorServer::get_next_retrocausal_queue_block(
     BlockID /*block*/, AddressAndKey const & /*addrkey*/,
     uint64_t /*search_start_number*/)
 {
@@ -297,7 +325,7 @@ HogDBExecutorRpc::get_next_retrocausal_queue_block(
 }
 
 ExpectedQueueEntry
-HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
+HogDBExecutorServer::get_concurrent_retrocausal_queue_entry(
     BlockID /*block*/, AddressAndKey const & /*addrkey*/, uint32_t /*index*/)
 {
   return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
