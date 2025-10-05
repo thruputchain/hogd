@@ -20,7 +20,6 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
-#include "x23/event.h"
 #include "x23/threadpool.h"
 
 namespace hogd {

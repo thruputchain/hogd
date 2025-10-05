@@ -3,13 +3,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <span>
 #include <stop_token>
 #include <sys/socket.h>
 #include <thread>
-#include <utility>
 
 // generated x23 headers
 #include "account.hh"
@@ -34,10 +32,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
-#include "x23/cleanup.h"
 #include "x23/serialize.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {

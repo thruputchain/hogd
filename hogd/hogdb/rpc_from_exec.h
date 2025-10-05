@@ -20,7 +20,6 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "x23/cleanup.h"
 
 namespace hogd {
 

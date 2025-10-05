@@ -4,14 +4,9 @@
 
 #include <cassert>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
-#include <mutex>
-#include <netinet/in.h>
 #include <span>
-#include <stdexcept>
 #include <sys/socket.h>
-#include <utility>
 
 // generated x23 headers
 #include "account.hh"
@@ -35,10 +30,6 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
