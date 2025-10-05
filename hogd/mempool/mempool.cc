@@ -49,8 +49,8 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
     throw std::runtime_error(
         std::format("Invalid coordinator address: {}", coordinator_addr));
   }
-  const std::string coordinator_host = {host_port.host.begin(),
-                                        host_port.host.end()};
+  // const std::string coordinator_host = {host_port.host.begin(),
+  //                                       host_port.host.end()};
   // const uint16_t coordinator_port = static_cast<uint16_t>(
   //     std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 

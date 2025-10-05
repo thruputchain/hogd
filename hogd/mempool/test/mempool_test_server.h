@@ -71,9 +71,9 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
-    : sched_db_port_(sched_db_server_.start_server(/*port_number=*/0)),
+    : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
       sched_exec_server_(sched_db_server_.get_impl()),
-      sched_exec_port_(sched_exec_server_.start_server(/*port_number=*/0)),
+      sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
       cp_(x23_pool_), executor_(kAddress, sched_exec_port_)

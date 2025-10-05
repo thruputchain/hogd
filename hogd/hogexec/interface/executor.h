@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -34,7 +33,7 @@ private:
   static std::string get_executor_address(uint16_t executor_port);
 
   // Create an RPC client that is connected to the coordinator.
-  std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+  SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
   connect_to_coordinator();
 
   x23::CoroPoll &cp_;

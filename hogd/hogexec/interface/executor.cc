@@ -4,7 +4,6 @@
 #include <chrono>
 #include <format>
 #include <limits> // NOLINT(misc-include-cleaner)
-#include <optional>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
@@ -29,7 +28,7 @@ MempoolExecutorClient::get_executor_address(uint16_t executor_port)
   return std::format("{}:{}", hostname, executor_port);
 }
 
-std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
 MempoolExecutorClient::connect_to_coordinator()
 {
   sockaddr_storage coordinator_sockaddr =
@@ -54,7 +53,7 @@ MempoolExecutorClient::register_with_coordinator(uint16_t executor_port)
                          .upid = {},
                          .address =
                              get_executor_address(executor_port).c_str()};
-  auto ret = client->schedexec_intro_exec(card)();
+  auto ret = client.schedexec_intro_exec(card)();
   return ret;
 }
 
