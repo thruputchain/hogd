@@ -49,7 +49,8 @@ private:
 class Executor {
 public:
   Executor(std::string coordinator_host, uint16_t coordinator_port)
-    : coordinator_host_(std::move(std::move(coordinator_host))), coordinator_port_(coordinator_port)
+    : coordinator_host_(std::move(std::move(coordinator_host))),
+      coordinator_port_(coordinator_port)
   {}
 
   ~Executor() { await_shutdown_request(); }
