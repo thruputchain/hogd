@@ -3,14 +3,13 @@
 #include <memory>
 
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/mempool/authentication.h"
-#include "hogd/mempool/mempool.h"
-#include "hogd/mempool/mempool_test_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/test/mempool_test_server.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -236,13 +235,14 @@ TEST(Mempool, AuthChanged)
   // TODO(jhumphri): [generate_txs] should returned properly signed txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, Mempool::kMaxBlockSize + 1);
+      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * Mempool::kMaxBlockSize * 2);
+                  /*num_hogs=*/5'000'000'000 *
+                      MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -274,7 +274,7 @@ TEST(Mempool, AuthChanged)
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
-            Mempool::kMaxBlockSize);
+            MempoolCoordinatorRpc::kMaxBlockSize);
 
   // Now check that the last tx is still nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
@@ -291,13 +291,14 @@ TEST(Mempool, AuthInvalidated)
   // TODO(jhumphri): [generate_txs] should returned properly signed txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, Mempool::kMaxBlockSize + 1);
+      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * Mempool::kMaxBlockSize * 2);
+                  /*num_hogs=*/5'000'000'000 *
+                      MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -329,7 +330,7 @@ TEST(Mempool, AuthInvalidated)
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
-            Mempool::kMaxBlockSize);
+            MempoolCoordinatorRpc::kMaxBlockSize);
 
   // Now check that the last tx is not nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
@@ -340,6 +341,29 @@ TEST(Mempool, AuthInvalidated)
   // nominate.
   EXPECT_EQ(res.outcome(),
             SchedulerNominationOutcome::SchedulerNominationError);
+}
+
+TEST(Mempool, Stress)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  auto res_validate = clients.interface->schedulercoord_validate(
+      db_tip, res_nominate.scheduler_nomination().nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
 }
 
 } // namespace hogd

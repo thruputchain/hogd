@@ -15,7 +15,6 @@
 
 #include "account.hh"
 #include "contract.hh"
-#include "db_coord.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -24,13 +23,13 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/db_interface/db_sched_server.h"
 #include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/metrics.h"
@@ -42,6 +41,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -59,7 +59,7 @@ enum class TestDB : int8_t {
 
 class MockDBWrapper {
 public:
-  MockDBWrapper() { coord_port_ = db_coord_server_.start_server(0); }
+  MockDBWrapper() { coord_port_ = db_sched_server_.start_server(0); }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
   uint16_t coord_port() const { return coord_port_; }
@@ -113,7 +113,7 @@ private:
   SrpcDbExecutorServer db_executor_server_ =
       SrpcDbExecutorServer(&block_manager_, 0);
 
-  DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
+  DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
   uint16_t coord_port_ = 0;
 };
 
@@ -121,12 +121,12 @@ class HogdbWrapper {
 public:
   HogdbWrapper() : db_(open_db())
   {
-    db_coord_server_.start_server(0);
+    db_sched_server_.start_server(0);
     db_executor_server_.start_server(0);
   }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_coord_server_.port(); }
+  uint16_t coord_port() { return db_sched_server_.port(); }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
@@ -160,7 +160,7 @@ private:
   MerkleTriePrefix trie_;
   RPCContext ctx_ = RPCContext(db_, trie_);
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
-  HogDBCoordServer db_coord_server_ = HogDBCoordServer(ctx_);
+  HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
 
 class CoordWrapper {
@@ -173,12 +173,12 @@ public:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
 
-        return client_config->template client<DbCoord1>();
+        return client_config->template client<DbSched1>();
       }())
   {}
 
   using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   coord_client_t &client() { return coord_client_; }
 
@@ -405,10 +405,10 @@ private:
   {
     block_number_++;
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
@@ -442,12 +442,12 @@ private:
           .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
           .auth_per_key_cost = to_xdr(int128_t{1111}),
       };
-      auto r = coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{
+      auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
           .storage_cost_model = cost_model_xdr,
       })();
-      if (r != DbResult::DbResultOK) {
+      if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
-            "initialize: dbcoord_load_genesis_block failed");
+            "initialize: dbsched_load_genesis_block failed");
       }
     }
 

@@ -16,8 +16,8 @@
 #include <utility>
 
 // XDR headers
-#include "coord.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
+#include "sched_db.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -27,7 +27,6 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
@@ -109,7 +108,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // start the coordinator server.
   info("starting coordinator server.");
-  HogDBCoordServer coord_server(ctx);
+  HogDBSchedServer coord_server(ctx);
   coord_server.start_server(kCoordServerPort);
 
   // start the executor server.
@@ -150,7 +149,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     auto client_config = x23::rpc_stream_logged(cp, fd);
     while (true) {
       auto client =
-          std::make_optional(client_config->template client<Coordinator1>());
+          std::make_optional(client_config->template client<SchedDb1>());
       if (!client) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         continue;
@@ -162,11 +161,10 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       ShardCard card{.protocol = version::kHogdProtocol,
                      .upid = {},
                      .block_height = 0,
-                     .shard_count = 1,
                      .address_for_coord = coord_address.c_str(),
                      .address_for_exec = exec_address.c_str(),
                      .address_for_sched = sched_address.c_str()};
-      client->coordinator_intro_shard(card)();
+      client->scheddb_intro_shard(card)();
       break;
     }
   }

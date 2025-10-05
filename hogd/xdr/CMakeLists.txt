@@ -6,14 +6,12 @@ add_xdr(
 	../../protocol/ci_server.x
 	../../protocol/contract.x
 	../../protocol/contract_error.x
-	../../protocol/coord.x
 	../../protocol/coord_sched.x
-	../../protocol/db_coord.x
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
 	../../protocol/event.x
-	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x
+	../../protocol/exec_sched.x
 	../../protocol/ffi_enums.x
 	../../protocol/genesis.x
 	../../protocol/loadgen.x
@@ -23,6 +21,8 @@ add_xdr(
 	../../protocol/sc_types.x
 	../../protocol/sc_val.x
 	../../protocol/sched_coord.x
+	../../protocol/sched_db.x
+	../../protocol/sched_exec.x
 	../../protocol/storage_cost.x
 	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x

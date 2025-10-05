@@ -5,13 +5,13 @@
 #include <unordered_map>
 
 #include "account.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/authentication.h"
-#include "hogd/mempool/mempool.h"
-#include "hogd/mempool/mempool_test_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/test/mempool_test_server.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -1061,7 +1061,7 @@ TEST(Authentication, SignAndVerifyAuthDataChanged)
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
   server.set_dbtip({.height = 1, .hash = {}, .id = 1});
-  auth.update_block_id(/*block_id=*/1);
+  auth.update_block_id(/*block_id=*/1)();
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 
@@ -1113,7 +1113,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[1],
                                auth_datas[1]);
   server.set_dbtip({.height = 1, .hash = {}, .id = 1});
-  auth.update_block_id(/*block_id=*/1);
+  auth.update_block_id(/*block_id=*/1)();
   EXPECT_FALSE(auth.authenticate(signed_tx));
 }
 

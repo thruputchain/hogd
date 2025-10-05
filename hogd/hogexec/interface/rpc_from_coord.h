@@ -4,7 +4,8 @@
 #include <memory>
 #include <utility>
 
-#include "exec_coord.hh"
+#include "exec_sched.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -16,23 +17,27 @@
 namespace hogd {
 
 // Calls from coordinator into executor
-class ExecutorRpcInterface {
+class ExecutorMempoolRpc {
 public:
-  using rpc_service = ExecutorCoord1;
+  using rpc_service = ExecutorSched1;
 
-  ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
-                       std::unique_ptr<DatabaseProxy> db_proxy)
-    : self_executor_id_(self_executor_id), cp_(cp),
-      executor_states_(std::move(db_proxy))
-  {}
+  ExecutorMempoolRpc() = default;
 
-  uint16_t start_server(uint16_t port_number);
+  void init(IntroExecResult &&exec_result)
+  {
+    self_executor_id_ = exec_result.exec_id;
+
+    DatabaseIdentifier identifier{ShardedDB(exec_result)};
+    auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
+    executor_states_ =
+        std::make_unique<ExecutorStateManager>(std::move(db_proxy));
+  }
 
   // Disable copy and move
-  ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
-  ExecutorRpcInterface &operator=(ExecutorRpcInterface const &) = delete;
-  ExecutorRpcInterface(ExecutorRpcInterface &&) = delete;
-  ExecutorRpcInterface &operator=(ExecutorRpcInterface &&) = delete;
+  ExecutorMempoolRpc(ExecutorMempoolRpc const &) = delete;
+  ExecutorMempoolRpc &operator=(ExecutorMempoolRpc const &) = delete;
+  ExecutorMempoolRpc(ExecutorMempoolRpc &&) = delete;
+  ExecutorMempoolRpc &operator=(ExecutorMempoolRpc &&) = delete;
 
   static x23::Async<void> executorcoord_null() { co_return; }
 
@@ -53,29 +58,32 @@ public:
   ExecResult executorcoord_open_proposal_block(BlockID id);
   ExecResult executorcoord_open_validation_block(BlockID id);
   // Indicates that state associated with this block can be garbage collected.
-  // Does not block.  State will not be garbage collected until all transactions
-  // on this block have been committed or aborted.
+  // Does not block.  State will not be garbage collected until all
+  // transactions on this block have been committed or aborted.
   void executorcoord_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
-  void shut_down();
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
   TransactionID allocate_tx_id();
 
   std::atomic<uint64_t> self_id_ = 0;
-  const uint16_t self_executor_id_;
+  uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
 
-  x23::CoroPoll &cp_;
-
-  ExecutorStateManager executor_states_;
+  std::unique_ptr<ExecutorStateManager> executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_ExecutorCoord1<ExecutorRpcInterface *, x23::MaybeAsync>);
+static_assert(is_ExecutorSched1<ExecutorMempoolRpc *, x23::MaybeAsync>);
 
 } // namespace hogd
