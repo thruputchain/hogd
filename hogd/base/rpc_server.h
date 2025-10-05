@@ -77,8 +77,9 @@ private:
     sockaddr_in saddr;
     // retrieve the port number if it was assigned automatically.
     ErrnoStatus<void> ret = sys_getsockname(fd, saddr);
-    if (!ret)
+    if (!ret) {
       throw std::runtime_error("Failed to get socket name");
+    }
     return ntohs(saddr.sin_port);
   }
 
