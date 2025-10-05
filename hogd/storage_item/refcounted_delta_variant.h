@@ -146,7 +146,7 @@ private:
 // Deleted state
 struct DeleteArgs {
   static bool typeclass_match() { return true; }
-  static std::shared_ptr<const StorageItemWrapper> to_item()
+  std::shared_ptr<const StorageItemWrapper> to_item() const
   {
     assert(committed_);
     return nullptr;
@@ -368,7 +368,7 @@ struct ExclusiveLockedState {
     throw std::runtime_error("Impossible state");
   }
   static int128_t
-  get_current_committed_cost(StorageCostModel const * /*cost_model*/,
+  get_current_committed_cost(StorageCostModel const *cost_model,
                              StorageItemWrapper const *base_item)
   {
     assert(cost_model);
