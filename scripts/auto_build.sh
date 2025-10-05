@@ -16,7 +16,7 @@ command -v inotifywait >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "Watching $WATCHER_DIR for changes to .cc, .h, or .txt files..."
+echo "Watching $WATCHER_DIR for changes to .cc, .h, .x, or .txt files..."
 echo "Will kill any in-progress build and start a new one on each matching event."
 echo "Build command: $BUILD_CMD ${BUILD_ARGS[*]}"
 
@@ -63,7 +63,7 @@ start_build
 # Watch for file changes.
 while read -r file event; do
   case "$file" in
-  *.cc | *.h | *.txt)
+  *.cc | *.h | *.x | *.txt)
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] Change detected: $event on $file"
     stop_build
     start_build
