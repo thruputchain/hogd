@@ -21,7 +21,7 @@ class ExecutorMempoolRpc {
 public:
   using rpc_service = ExecutorSched1;
 
-  ExecutorMempoolRpc() {}
+  ExecutorMempoolRpc() = default;
 
   void init(IntroExecResult &&exec_result)
   {

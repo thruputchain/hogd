@@ -12,7 +12,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/debug/delta_validity_checks.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"

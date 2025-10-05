@@ -31,7 +31,7 @@ private:
   // Generates the address of this executor, which includes both the hostname
   // and the port of the executor RPC server. We send this address to the
   // coordinator when we register this executor with it.
-  std::string get_executor_address(uint16_t executor_port);
+  static std::string get_executor_address(uint16_t executor_port);
 
   // Create an RPC client that is connected to the coordinator.
   std::optional<SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
@@ -49,7 +49,7 @@ private:
 class Executor {
 public:
   Executor(std::string coordinator_host, uint16_t coordinator_port)
-    : coordinator_host_(coordinator_host), coordinator_port_(coordinator_port)
+    : coordinator_host_(std::move(std::move(coordinator_host))), coordinator_port_(coordinator_port)
   {}
 
   ~Executor() { await_shutdown_request(); }

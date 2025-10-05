@@ -9,8 +9,6 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
