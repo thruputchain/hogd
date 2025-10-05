@@ -51,8 +51,8 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   }
   const std::string coordinator_host = {host_port.host.begin(),
                                         host_port.host.end()};
-  const uint16_t coordinator_port = static_cast<uint16_t>(
-      std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
+  // const uint16_t coordinator_port = static_cast<uint16_t>(
+  //     std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
