@@ -60,7 +60,7 @@ to_db_result(HogDBStatus<T> ret)
 } // namespace
 
 x23::Async<HogAgeResult>
-HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 {
   HogDBDAO &db = ctx_.get_db();
   HogAgeResult ret(DbSchedResult::DbSchedResultOK);
@@ -78,7 +78,7 @@ HogDBSchedServer::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 }
 
 x23::Async<DbSchedResult>
-HogDBSchedServer::dbsched_write_hog_ages(const HogAgeBatch &ages)
+HogDBSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
 {
   HogDBDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
@@ -90,8 +90,8 @@ HogDBSchedServer::dbsched_write_hog_ages(const HogAgeBatch &ages)
 }
 
 x23::Async<DbAccountAuthDataBatchResult>
-HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
-                                                ContractAddressBatch accounts)
+HogDBSchedRpc::dbsched_get_account_auth_data(BlockID block_id,
+                                             ContractAddressBatch accounts)
 {
   HogDBDAO &db = ctx_.get_db();
   {
@@ -119,7 +119,7 @@ HogDBSchedServer::dbsched_get_account_auth_data(BlockID block_id,
 }
 
 x23::Async<DbTipResult>
-HogDBSchedServer::dbsched_get_tip()
+HogDBSchedRpc::dbsched_get_tip()
 {
   DbTipResult ret(DbSchedResult::DbSchedResultOK);
   ret.db_tip() = ctx_.get_tip();
@@ -127,7 +127,7 @@ HogDBSchedServer::dbsched_get_tip()
 }
 
 HogDBStatus<void>
-HogDBSchedServer::commit_block(BlockID id)
+HogDBSchedRpc::commit_block(BlockID id)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -169,8 +169,8 @@ HogDBSchedServer::commit_block(BlockID id)
 }
 
 x23::Async<DbSchedResult>
-HogDBSchedServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
-                                          BlockExecutionMode mode)
+HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
+                                       BlockExecutionMode mode)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_open(parent_id, new_id);
@@ -181,7 +181,7 @@ HogDBSchedServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-HogDBSchedServer::dbsched_commit_snapshot(BlockID id)
+HogDBSchedRpc::dbsched_commit_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_commit(id);
@@ -200,7 +200,7 @@ HogDBSchedServer::dbsched_commit_snapshot(BlockID id)
 }
 
 x23::Async<DbSchedResult>
-HogDBSchedServer::dbsched_abandon_snapshot(BlockID id)
+HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_abandon(id);
@@ -216,7 +216,7 @@ HogDBSchedServer::dbsched_abandon_snapshot(BlockID id)
 }
 
 x23::Async<DbBlockResult>
-HogDBSchedServer::dbsched_close_snapshot(BlockID id) // NOLINT
+HogDBSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
 {
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_close(id);
@@ -246,45 +246,10 @@ sys_getsockname(int sockfd, T &val)
       getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
 }
 
-uint16_t
-get_port(int fd)
-{
-  sockaddr_in saddr;
-  // retrieve the port number if it was assigned automatically.
-  ErrnoStatus<void> ret = sys_getsockname(fd, saddr);
-  if (!ret)
-    throw std::runtime_error("Failed to get socket name");
-  return ntohs(saddr.sin_port);
-}
-
 } // namespace
 
-void
-HogDBSchedServer::start_server(uint16_t port)
-{
-  {
-    auto lfd = x23::tcplisten(port);
-    if (!lfd) {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
-
-    std::lock_guard lock(mtx_);
-    port_ = get_port(lfd.get());
-    cv_.notify_all();
-
-    [](x23::CoroPoll &cp, HogDBSchedServer *server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await cp.pool_.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c)->server(server);
-      }
-    }(cp_, this, std::move(lfd));
-  }
-}
-
 x23::Async<DbSchedResult>
-HogDBSchedServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
+HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
 {
   constexpr static BlockID kGenesisBlockID = 0;
   if (ctx_.get_tip().height != 0) {
@@ -367,18 +332,9 @@ HogDBSchedServer::dbsched_load_genesis_block(GenesisBlock genesis_block)
 }
 
 x23::Async<DbShardResult>
-HogDBSchedServer::dbsched_shard_restore(BlockHeight height)
+HogDBSchedRpc::dbsched_shard_restore(BlockHeight height)
 {
   co_return DbShardResult::ShardOK;
-}
-
-uint16_t
-HogDBSchedServer::port()
-{
-  std::unique_lock lk(mtx_);
-  cv_.wait(lk, [this] { return port_.has_value(); });
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  return port_.value();
 }
 
 } // namespace hogd
