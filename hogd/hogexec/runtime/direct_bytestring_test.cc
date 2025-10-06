@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#include <bits/basic_string.h>
-=======
 #include <cstdint>
->>>>>>> 23a1abcdb2f81a310dca0ee458b228a32ebd1d23
 #include <gtest/gtest.h>
 
 #include <print>
