@@ -2,9 +2,11 @@
 
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <span>
 
 #include "event.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -41,6 +43,19 @@ make_tx_emitted_event(ContractAddress const &contract_address,
       .contract_address = contract_address,
       .serialized_event = x23::serialize(data),
   };
+}
+
+std::optional<EventData>
+try_parse_event_data(TxEmittedEvent const &emitted_event)
+{
+  EventData data{};
+  try {
+    x23::deserialize(&data, x23::BufView{emitted_event.serialized_event});
+  } catch (const x23::XdrBadInput &e) {
+    warn("Failed to parse event data: {}", e.what());
+    return std::nullopt;
+  }
+  return data;
 }
 
 } // namespace hogd

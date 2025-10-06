@@ -17,6 +17,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "event.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
@@ -262,6 +263,11 @@ public:
     }
   }
 
+  struct EphemeralTxIdentifier {
+    BlockID block_id;
+    TransactionID tx_id;
+  };
+
   // Commits the current block and creates a new one.
   void advance_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
@@ -272,10 +278,15 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::shared_ptr<RuntimeContext> runtime_context)
+                               std::shared_ptr<RuntimeContext> runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);
     auto txid = allocate_txid();
+    if (identifier) {
+      identifier->block_id = block_number_;
+      identifier->tx_id = txid;
+    }
     return SystemCallHandler(tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
@@ -438,6 +449,11 @@ public:
 
     return DeployedContractHash{.hash = contract_hash,
                                 .contract_size = contract_size};
+  }
+
+  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
+  {
+    return event_server_.get_events(tx_id.block_id, tx_id.tx_id);
   }
 
 private:

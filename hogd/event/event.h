@@ -17,4 +17,7 @@ TxEmittedEvent make_tx_emitted_event(ContractAddress const &contract_address,
                                      SHA256Hash const *topic2,
                                      std::span<const std::byte> event);
 
+std::optional<EventData>
+try_parse_event_data(TxEmittedEvent const &emitted_event);
+
 } // namespace hogd

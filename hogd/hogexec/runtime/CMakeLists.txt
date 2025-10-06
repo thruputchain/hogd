@@ -71,6 +71,7 @@ add_library(runtime_test_objects OBJECT
   direct_bytestring_test.cc
   direct_nnint_test.cc
   error_handling_test.cc
+  event_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
   gas_api_test.cc
