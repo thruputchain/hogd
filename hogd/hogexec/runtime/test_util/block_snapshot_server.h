@@ -12,6 +12,7 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -32,48 +33,11 @@ namespace hogd {
 //
 // Not a full mock database; extra test logic (as in the lazy loading tests)
 // is implemented here.
-class BlockSnapshotServer {
+class BlockSnapshotRpc {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  BlockSnapshotServer(BlockID block_id, uint16_t port = 0) : block_id_(block_id)
-  {
-    lfd_ = x23::stcplisten(port);
-    if (!lfd_) {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
-    port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
-
-    listen_thread_ = std::jthread([this](std::stop_token &&stop) {
-      while (!stop.stop_requested()) {
-
-        sockaddr_storage ss;
-        socklen_t sslen = sizeof(ss);
-        x23::UniqueFd fd{
-            accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
-        if (!fd) {
-          if (errno == EINTR)
-            continue;
-          // If the listening socket was closed, accept will fail with
-          // EBADF/EINVAL Break the loop so the thread can exit.
-          if (errno == EBADF || errno == EINVAL)
-            break;
-          std::println(stderr, "accept: {}", Errno{});
-        }
-        else {
-          x23::srpc_stream_logged(fd.release())->server(this);
-        }
-      }
-    });
-  }
-
-  ~BlockSnapshotServer()
-  {
-    listen_thread_.request_stop();
-    shutdown(lfd_.get(), SHUT_RDWR);
-    lfd_.reset();
-  }
+  BlockSnapshotRpc(BlockID block_id) : block_id_(block_id) {}
 
   static void db_snapshot_read_null();
 
@@ -111,13 +75,7 @@ public:
 
   void setup_ban_item(AddressAndKey const &addrkey);
 
-  uint16_t port() const { return port_number_; }
-
 private:
-  uint16_t port_number_ = 0;
-  std::jthread listen_thread_;
-  x23::UniqueFd lfd_;
-
   BlockID block_id_;
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
@@ -130,8 +88,12 @@ private:
   // Creates a set of items that throw an error if they are accessed at all
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
 };
+static_assert(
+    is_DatabaseToExecutorInterfaceV1<BlockSnapshotRpc *, std::type_identity_t>);
 
-static_assert(is_DatabaseToExecutorInterfaceV1<BlockSnapshotServer *,
-                                               std::type_identity_t>);
+class BlockSnapshotServer : public RpcServer<BlockSnapshotRpc> {
+public:
+  BlockSnapshotServer(BlockID block_id) : RpcServer(block_id) {}
+};
 
 } // namespace hogd

@@ -28,9 +28,10 @@ protected:
   {
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = server_.port()});
+    server_.start_server(/*port=*/0);
   }
 
-  BlockSnapshotServer server_ = BlockSnapshotServer(1);
+  BlockSnapshotServer server_ = BlockSnapshotServer(/*block_id=*/1);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
 
@@ -55,8 +56,9 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
   });
 
   StorageCostModel cost_model(12000, 1, 5, 100, 5);
-  server_.setup_create_item(AddressAndKey{},
-                            StorageItemWrapper(std::move(queue), &cost_model));
+  server_.get_impl().setup_create_item(AddressAndKey{},
+                                       StorageItemWrapper(std::move(queue),
+                                                          &cost_model));
 
   SnapshotStorageItem test_item(StorageItem(
                                     StorageItemType::kItemTypeRetrocausalQueue),
@@ -116,22 +118,22 @@ TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
   check_concurrent_entry(0, std::nullopt);
   check_concurrent_entry(1, std::nullopt);
 
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                        make_test_queue_entry(1));
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                        make_test_queue_entry(2));
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                        make_test_queue_entry(3));
+  server_.get_impl().setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                   make_test_queue_entry(1));
+  server_.get_impl().setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                   make_test_queue_entry(2));
+  server_.get_impl().setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                   make_test_queue_entry(3));
 
   check_concurrent_entry(0, make_test_queue_entry(1));
   check_concurrent_entry(1, make_test_queue_entry(2));
   check_concurrent_entry(2, make_test_queue_entry(3));
   check_concurrent_entry(3, std::nullopt);
 
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                        make_test_queue_entry(4));
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                        make_test_queue_entry(5));
+  server_.get_impl().setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                   make_test_queue_entry(4));
+  server_.get_impl().setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                   make_test_queue_entry(5));
 
   check_concurrent_entry(0, make_test_queue_entry(1));
   check_concurrent_entry(1, make_test_queue_entry(2));
