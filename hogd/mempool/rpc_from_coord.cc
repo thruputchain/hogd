@@ -102,7 +102,7 @@ MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 x23::Async<void>
 MempoolCoordinatorRpc::finish_block(BlockID block_id)
 {
-  return exec_clients_[0].executorcoord_finish_block(block_id);
+  return exec_clients_[0].executorsched_finish_block(block_id);
 }
 
 // We add each tx hash to the Merkle trie as a key with an empty value. So in
@@ -164,7 +164,7 @@ MempoolCoordinatorRpc::propose_batch(
   ret.reserve(txs.size());
 
   ExecProposeBatchResult res =
-      co_await exec_clients_[0].executorcoord_propose_batch(block_id, txs);
+      co_await exec_clients_[0].executorsched_propose_batch(block_id, txs);
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -189,7 +189,7 @@ x23::Async<bool>
 MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 {
   ExecResult res =
-      co_await exec_clients_[0].executorcoord_open_proposal_block(block_id);
+      co_await exec_clients_[0].executorsched_open_proposal_block(block_id);
   co_return res == ExecResult::ExecResultOK;
 }
 
@@ -260,7 +260,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
 {
   ExecValidateBatchResult res =
-      co_await exec_clients_[0].executorcoord_validate_batch(block_id, txs);
+      co_await exec_clients_[0].executorsched_validate_batch(block_id, txs);
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
@@ -275,7 +275,7 @@ x23::Async<bool>
 MempoolCoordinatorRpc::open_validation_block(BlockID block_id)
 {
   ExecResult res =
-      co_await exec_clients_[0].executorcoord_open_validation_block(block_id);
+      co_await exec_clients_[0].executorsched_open_validation_block(block_id);
   co_return res == ExecResult::ExecResultOK;
 }
 
