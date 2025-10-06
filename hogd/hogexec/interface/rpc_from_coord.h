@@ -39,32 +39,32 @@ public:
   ExecutorMempoolRpc(ExecutorMempoolRpc &&) = delete;
   ExecutorMempoolRpc &operator=(ExecutorMempoolRpc &&) = delete;
 
-  static x23::Async<void> executorcoord_null() { co_return; }
+  static x23::Async<void> executorsched_null() { co_return; }
 
   x23::Async<ExecProposeResult>
-  executorcoord_propose_transaction(BlockID block_id,
+  executorsched_propose_transaction(BlockID block_id,
                                     SignedTransaction signed_tx);
   x23::Async<ExecResult>
-  executorcoord_validate_transaction(BlockID block_id,
+  executorsched_validate_transaction(BlockID block_id,
                                      ProposedTransaction proposed_tx);
 
   x23::Async<ExecProposeBatchResult>
-  executorcoord_propose_batch(BlockID block_id,
+  executorsched_propose_batch(BlockID block_id,
                               SignedTransactionBatch signed_txs);
   x23::Async<ExecValidateBatchResult>
-  executorcoord_validate_batch(BlockID block_id,
+  executorsched_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);
 
-  ExecResult executorcoord_open_proposal_block(BlockID id);
-  ExecResult executorcoord_open_validation_block(BlockID id);
+  ExecResult executorsched_open_proposal_block(BlockID id);
+  ExecResult executorsched_open_validation_block(BlockID id);
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all
   // transactions on this block have been committed or aborted.
-  void executorcoord_finish_block(BlockID id);
+  void executorsched_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.
-  x23::Async<void> executorcoord_shutdown();
+  x23::Async<void> executorsched_shutdown();
 
   void shut_down()
   {

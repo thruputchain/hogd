@@ -14,7 +14,7 @@
 namespace hogd {
 
 x23::Async<ExecProposeResult>
-ExecutorMempoolRpc::executorcoord_propose_transaction(
+ExecutorMempoolRpc::executorsched_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
@@ -30,7 +30,7 @@ ExecutorMempoolRpc::executorcoord_propose_transaction(
 }
 
 x23::Async<ExecResult>
-ExecutorMempoolRpc::executorcoord_validate_transaction(
+ExecutorMempoolRpc::executorsched_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
@@ -46,7 +46,7 @@ ExecutorMempoolRpc::executorcoord_validate_transaction(
 }
 
 x23::Async<ExecProposeBatchResult>
-ExecutorMempoolRpc::executorcoord_propose_batch(
+ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
@@ -74,7 +74,7 @@ ExecutorMempoolRpc::executorcoord_propose_batch(
 }
 
 x23::Async<ExecValidateBatchResult>
-ExecutorMempoolRpc::executorcoord_validate_batch(
+ExecutorMempoolRpc::executorsched_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
   // TODO(geoff): co_await cp_.pool_.bg();
@@ -98,19 +98,19 @@ ExecutorMempoolRpc::executorcoord_validate_batch(
 }
 
 ExecResult
-ExecutorMempoolRpc::executorcoord_open_proposal_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
 {
   return executor_states_->open_proposal(id);
 }
 
 ExecResult
-ExecutorMempoolRpc::executorcoord_open_validation_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
 {
   return executor_states_->open_validation(id);
 }
 
 void
-ExecutorMempoolRpc::executorcoord_finish_block(BlockID id)
+ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 {
   executor_states_->remove_block(id);
 }
@@ -123,7 +123,7 @@ ExecutorMempoolRpc::allocate_tx_id()
 }
 
 x23::Async<void>
-ExecutorMempoolRpc::executorcoord_shutdown()
+ExecutorMempoolRpc::executorsched_shutdown()
 {
   shut_down();
   co_return;
