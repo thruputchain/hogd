@@ -16,7 +16,7 @@
 #include <utility>
 
 // xdr types
-#include "db_coord.hh"
+#include "sched_coord.hh"
 
 #include "hogd/base/perthread.h"
 #include "hogd/container/merkle/merkle_trie.h"

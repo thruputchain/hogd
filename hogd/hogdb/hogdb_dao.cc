@@ -11,7 +11,6 @@
 
 // xdr types
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/container/merkle/merkle_trie.h"

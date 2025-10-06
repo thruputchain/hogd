@@ -233,7 +233,7 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
           fail("write_worker: {}", res.error());
         return;
       }
-      if (!*res)
+      if (*res == IoResult::kComplete)
         break;
     }
   }

@@ -25,7 +25,7 @@ connect_to_event_server(x23::HostPort host_port)
         std::format("failed server error: {}", server_addr.error()));
   }
   return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-      ->client(ExecutorEvent1{});
+      ->client(EventExecutor1{});
 }
 
 } // namespace
@@ -43,7 +43,7 @@ SystemStatus<void>
 EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
                              TxEventLog const &tx_event_log)
 {
-  auto r = client_.executorevent_emit_event(block_id, tx_id, tx_event_log);
+  auto r = client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log);
   switch (r) {
   case RPCError::kRPCNone:
     return {};

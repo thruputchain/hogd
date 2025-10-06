@@ -14,8 +14,8 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "x23/threadpool.h"
@@ -45,8 +45,8 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   // Start the coordinator server
   std::println("Starting coordinator server on port {}", coord_port);
-  HogDBCoordServer db_coord_server(ctx);
-  db_coord_server.start_server(coord_port);
+  HogDBSchedServer db_sched_server(ctx);
+  db_sched_server.start_server(coord_port);
 
   // Start the executor server
   std::println("Starting executor server on port {}", exec_port);

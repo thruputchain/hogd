@@ -16,7 +16,7 @@
 
 #include "account.hh"
 #include "contract.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
@@ -26,13 +26,13 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/db_interface/db_sched_server.h"
 #include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -46,11 +46,13 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -65,7 +67,7 @@ enum class TestDB : int8_t {
 
 class MockDBWrapper {
 public:
-  MockDBWrapper() { coord_port_ = db_coord_server_.start_server(0); }
+  MockDBWrapper() { coord_port_ = db_sched_server_.start_server(0); }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
   uint16_t coord_port() const { return coord_port_; }
@@ -119,7 +121,7 @@ private:
   SrpcDbExecutorServer db_executor_server_ =
       SrpcDbExecutorServer(&block_manager_, 0);
 
-  DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
+  DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
   uint16_t coord_port_ = 0;
 };
 
@@ -127,12 +129,12 @@ class HogdbWrapper {
 public:
   HogdbWrapper() : db_(open_db())
   {
-    db_coord_server_.start_server(0);
+    db_sched_server_.start_server(0);
     db_executor_server_.start_server(0);
   }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_coord_server_.port(); }
+  uint16_t coord_port() { return db_sched_server_.port(); }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
@@ -166,7 +168,7 @@ private:
   MerkleTriePrefix trie_;
   RPCContext ctx_ = RPCContext(db_, trie_);
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
-  HogDBCoordServer db_coord_server_ = HogDBCoordServer(ctx_);
+  HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
 
 class CoordWrapper {
@@ -179,12 +181,12 @@ public:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
 
-        return client_config->template client<DbCoord1>();
+        return client_config->template client<DbSched1>();
       }())
   {}
 
   using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   coord_client_t &client() { return coord_client_; }
 
@@ -195,28 +197,27 @@ private:
   coord_client_t coord_client_;
 };
 
-class EventCoordWrapper {
+class EventSchedWrapper {
 public:
-  EventCoordWrapper(uint16_t port)
-    : event_coord_client_(connect_to_event_coord_server(port))
+  EventSchedWrapper(uint16_t port)
+    : event_sched_client_(connect_to_event_sched_server(port))
   {}
 
-  auto &client() { return event_coord_client_; }
+  auto &client() { return event_sched_client_; }
 
 private:
-  using client_t = CoordEvent1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+  using client_t = EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
 
-
-  static client_t connect_to_event_coord_server(uint16_t port)
+  static client_t connect_to_event_sched_server(uint16_t port)
   {
     auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
     if (!server_addr) {
       throw std::runtime_error("Failed to connect to event server");
     }
     return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-        ->client(CoordEvent1{});
+        ->client(EventSched1{});
   }
-  client_t event_coord_client_;
+  client_t event_sched_client_;
 };
 
 // Common setup utilities for testing native contracts.
@@ -447,10 +448,10 @@ private:
   {
     block_number_++;
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
     open_event_block(block_number_);
     storage_snapshot_cache_ =
@@ -471,12 +472,12 @@ private:
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
     uint16_t event_server_exec_port = event_server_exec_rpc_.start_server(0);
-    uint16_t event_server_coord_port = event_server_coord_rpc_.start_server(0);
+    uint16_t event_server_sched_port = event_server_sched_rpc_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
-    event_coord_wrapper_ = std::make_unique<EventCoordWrapper>(event_server_coord_port);
+    event_sched_wrapper_ = std::make_unique<EventSchedWrapper>(event_server_sched_port);
 
     event_server_proxy_ = std::make_unique<EventServerProxy>(
         x23::HostPort{"localhost", event_server_exec_port});
@@ -494,12 +495,12 @@ private:
           .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
           .auth_per_key_cost = to_xdr(int128_t{1111}),
       };
-      auto r = coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{
+      auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
           .storage_cost_model = cost_model_xdr,
       })();
-      if (r != DbResult::DbResultOK) {
+      if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
-            "initialize: dbcoord_load_genesis_block failed");
+            "initialize: dbsched_load_genesis_block failed");
       }
     }
 
@@ -515,12 +516,12 @@ private:
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  std::unique_ptr<EventCoordWrapper> event_coord_wrapper_;
+  std::unique_ptr<EventSchedWrapper> event_sched_wrapper_;
 
   // TODO(geoff): replace with proper event server connection
   TestEventAggregator event_server_;
   TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
-  TestEventAggregatorCoordRpc event_server_coord_rpc_ = TestEventAggregatorCoordRpc(event_server_);
+  TestEventAggregatorSchedRpc event_server_sched_rpc_ = TestEventAggregatorSchedRpc(event_server_);
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

@@ -4,7 +4,6 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <span>

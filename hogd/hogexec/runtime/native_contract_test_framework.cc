@@ -8,7 +8,7 @@
 #include <variant>
 
 #include "account.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -30,15 +30,15 @@ void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbcoord_close_snapshot(block_number_)();
-    if (r.result() != DbResult::DbResultOK) {
-      throw std::runtime_error("advance_block: dbcoord_close_snapshot failed");
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
   }
   {
-    auto r = coord_wrapper_->client().dbcoord_commit_snapshot(block_number_)();
-    if (r.result() != DbResult::DbResultOK) {
-      throw std::runtime_error("advance_block: dbcoord_commit_snapshot failed");
+    auto r = coord_wrapper_->client().dbsched_commit_snapshot(block_number_)();
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
     }
   }
   close_event_block(block_number_);
@@ -47,10 +47,10 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 
   {
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
   }
   open_event_block(block_number_);
@@ -63,9 +63,9 @@ void
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbcoord_close_snapshot(block_number_)();
-    if (r.result() != DbResult::DbResultOK) {
-      throw std::runtime_error("advance_block: dbcoord_close_snapshot failed");
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    if (r.result() != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
   }
   close_event_block(block_number_);
@@ -73,10 +73,10 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 
   {
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("advance_block: dbcoord_create_snapshot failed");
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
   }
   open_event_block(block_number_);
@@ -156,10 +156,10 @@ NativeContractTestFramework::run_genesis_initialization(
   assert(!storage_snapshot_cache_);
   assert(block_number_ == 0);
 
-  auto r = coord_wrapper_->client().dbcoord_load_genesis_block(genesis_block)();
-  if (r != DbResult::DbResultOK) {
+  auto r = coord_wrapper_->client().dbsched_load_genesis_block(genesis_block)();
+  if (r != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
-        "run_genesis_initialization: dbcoord_load_genesis_block failed");
+        "run_genesis_initialization: dbsched_load_genesis_block failed");
   }
   open_block(mode);
 }
@@ -239,16 +239,16 @@ void
 NativeContractTestFramework::open_event_block(BlockID block_id)
 {
   // rpc is infallible
-  event_coord_wrapper_->client().coordevent_open_block(block_id);
+  event_sched_wrapper_->client().eventsched_open_block(block_id);
 }
 
 void
 NativeContractTestFramework::close_event_block(BlockID block_id)
 {
-  auto r = event_coord_wrapper_->client().coordevent_close_block(block_id);
+  auto r = event_sched_wrapper_->client().eventsched_close_block(block_id);
   if (r.error() != RPCError::kRPCNone) {
     throw std::runtime_error(
-        "close_event_block: coordevent_close_block failed");
+        "close_event_block: eventsched_close_block failed");
   }
 }
 

@@ -1,4 +1,3 @@
-#include <cstring>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -6,14 +5,14 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/mempool.h"
-#include "hogd/mempool/mempool_test_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/scheduler.h"
+#include "hogd/mempool/test/mempool_test_server.h"
 #include "transaction.hh"
 #include "types.hh"
 

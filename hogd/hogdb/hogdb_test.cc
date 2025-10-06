@@ -8,7 +8,7 @@
 
 // xdr types
 #include "account.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"

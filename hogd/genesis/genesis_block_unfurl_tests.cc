@@ -7,7 +7,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -248,10 +248,10 @@ TEST_P(GenesisBlockUnfurlTest, DoubleLoadError)
 {
   GenesisBlock genesis_block{};
 
-  auto r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
-  ASSERT_EQ(r, DbResult::DbResultOK);
-  r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
-  ASSERT_EQ(r, DbResult::DbResultError);
+  auto r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
+  r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

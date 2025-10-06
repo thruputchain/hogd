@@ -4,8 +4,10 @@
 #include "event_rpc.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
+#include "sched_event.hh"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
+#include <stdexcept>
 
 namespace hogd {
 
@@ -13,18 +15,22 @@ class EventServerProxy {
 public:
   EventServerProxy(x23::HostPort host_port);
 
-  // Delete copy and move constructor and assignment
-  EventServerProxy(EventServerProxy const &) = delete;
-  EventServerProxy &operator=(EventServerProxy const &) = delete;
-  EventServerProxy(EventServerProxy &&) = delete;
-  EventServerProxy &operator=(EventServerProxy &&) = delete;
+  static EventServerProxy make_from_exec_result(EventCard const &event)
+  {
+    // TODO(geoff): validate the other fields in event card.
+    x23::HostPort host_port;
+    if (!host_port.parse(event.address)) {
+      throw std::runtime_error("Failed to parse event server address");
+    }
+    return EventServerProxy(host_port);
+  }
 
   SystemStatus<void> emit_event(BlockID block_id, TransactionID tx_id,
                                 TxEventLog const &tx_event_log);
 
 private:
   using client_t =
-      ExecutorEvent1::client<x23::SRpcMulticlient<x23::RpcLogger>::ClientRef>;
+      EventExecutor1::client<x23::SRpcMulticlient<x23::RpcLogger>::ClientRef>;
   client_t client_;
 };
 

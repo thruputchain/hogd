@@ -60,11 +60,11 @@ struct TestEventAggregatorExecRpc {
     : event_aggregator_(event_aggregator)
   {}
 
-  using rpc_service = ExecutorEvent1;
+  using rpc_service = EventExecutor1;
 
-  static void executorevent_null() {}
+  static void eventexecutor_null() {}
 
-  RPCError executorevent_emit_event(BlockID block_id, TransactionID tx_id,
+  RPCError eventexecutor_emit_event(BlockID block_id, TransactionID tx_id,
                                     TxEventLog const &event_log)
   {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
@@ -80,21 +80,21 @@ private:
   TestEventAggregator &event_aggregator_;
 };
 
-struct TestEventAggregatorCoordRpc {
-  TestEventAggregatorCoordRpc(TestEventAggregator &event_aggregator)
+struct TestEventAggregatorSchedRpc {
+  TestEventAggregatorSchedRpc(TestEventAggregator &event_aggregator)
     : event_aggregator_(event_aggregator)
   {}
 
-  using rpc_service = CoordEvent1;
+  using rpc_service = EventSched1;
 
-  static void coordevent_null() {}
+  static void eventsched_null() {}
 
-  RPCError coordevent_open_block(BlockID block_id)
+  RPCError eventsched_open_block(BlockID block_id)
   {
     return event_aggregator_.open_block(block_id);
   }
 
-  EventBlockResult coordevent_close_block(BlockID block_id)
+  EventBlockResult eventsched_close_block(BlockID block_id)
   {
     return event_aggregator_.close_block(block_id);
   }
@@ -109,8 +109,8 @@ private:
   TestEventAggregator &event_aggregator_;
 };
 
-static_assert(is_CoordEvent1<TestEventAggregatorCoordRpc *, x23::MaybeAsync>);
+static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
 
-static_assert(is_ExecutorEvent1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
+static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
 
 } // namespace hogd

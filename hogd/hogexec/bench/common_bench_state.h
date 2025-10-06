@@ -10,8 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "coord.hh"
-#include "db_coord.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -26,6 +24,8 @@
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
+#include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
@@ -88,7 +88,7 @@ private:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
         return std::make_unique<coord_client_t>(
-            client_config->template client<DbCoord1>());
+            client_config->template client<DbSched1>());
       }
     }();
   }
@@ -151,7 +151,7 @@ private:
   TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
 
   using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
 };
@@ -159,20 +159,20 @@ private:
 inline void
 CommonBenchState::advance_block()
 {
-  auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
-  if (r.result() != DbResult::DbResultOK) {
+  auto r = coord_client_->dbsched_close_snapshot(block_number_)();
+  if (r.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
 
-  auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
-  if (r2.result() != DbResult::DbResultOK) {
+  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_)();
+  if (r2.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
 
-  auto r3 = coord_client_->dbcoord_create_snapshot(
+  auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal)();
-  if (r3 != DbResult::DbResultOK) {
+  if (r3 != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
 
@@ -200,16 +200,16 @@ CommonBenchState::run_genesis_block(
 
   assert(block_number_ == 0);
   {
-    auto r = coord_client_->dbcoord_load_genesis_block(genesis_block)();
-    if (r != DbResult::DbResultOK) {
+    auto r = coord_client_->dbsched_load_genesis_block(genesis_block)();
+    if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to write genesis block");
     }
   }
 
   {
-    auto r = coord_client_->dbcoord_create_snapshot(
+    auto r = coord_client_->dbsched_create_snapshot(
         0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
-    if (r != DbResult::DbResultOK) {
+    if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
   }

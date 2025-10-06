@@ -20,7 +20,7 @@ public:
 
   // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any
   // accounts whose [AccountAuthData] has changed.
-  x23::Vec<ContractAddress> update_block_id(BlockID block_id)
+  x23::Async<x23::Vec<ContractAddress>> update_block_id(BlockID block_id)
   {
     current_block_id_ = block_id;
 
@@ -31,8 +31,8 @@ public:
     }
 
     DbAccountAuthDataBatchResult res =
-        db_sched_client_.dbsched_get_account_auth_data(current_block_id_,
-                                                       accounts)();
+        co_await db_sched_client_.dbsched_get_account_auth_data(
+            current_block_id_, accounts);
     CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
     CHECK_EQ(res.account_auth_data_batch().size(), accounts.size());
 
@@ -46,7 +46,7 @@ public:
         ret.push_back(account);
       }
     }
-    return ret;
+    co_return ret;
   }
 
   bool authenticate(const SignedTransaction &tx)

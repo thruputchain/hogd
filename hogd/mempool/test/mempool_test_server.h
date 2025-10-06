@@ -15,11 +15,9 @@
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
-#include "coord.hh"
 #include "coord_sched.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -29,22 +27,24 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
-#include "hogd/mempool/coordinator.h"
-#include "hogd/mempool/mempool.h"
+#include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/test/coordinator.h"
 #include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "sched_coord.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -71,12 +71,12 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
-    : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
-      exec_card_{.protocol = version::kHogdProtocol,
-                 .upid = {},
-                 .address =
-                     x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
-      executor_coord_server_(exec_card_, kAddress, coordinator_port_)
+    : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
+      sched_exec_server_(sched_db_server_.get_impl()),
+      sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
+      coordinator_sched_port_(
+          coordinator_sched_server_.start_server(/*port_number=*/0)),
+      cp_(x23_pool_), executor_(kAddress, sched_exec_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -106,11 +106,7 @@ public:
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
-      executor_db_port_ = db_executor_server_->port();
-
-      db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
-      db_coordinator_server_->start_server(/*port=*/0);
-      db_coordinator_port_ = db_coordinator_server_->port();
+      db_executor_port_ = db_executor_server_->port();
 
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
@@ -143,21 +139,39 @@ public:
       }
     }
 
-    coordinator_sched_port_ =
-        coordinator_sched_server_.start_server(/*port_number=*/0);
+    {
+      // Now have the db register itself with the mempool.
+      x23::ThreadPool pool;
+      x23::CoroPoll cp(pool);
+      x23::UniqueFd fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_db_port_}
+               .to_addr());
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
+          x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
+
+      std::string exec_address =
+          std::format("{}:{}", kAddress, db_executor_port_);
+      std::string sched_address =
+          std::format("{}:{}", kAddress, db_scheduler_port_);
+      client.scheddb_intro_shard(
+          {.protocol = version::kHogdProtocol,
+           .block_height = 0,
+           .address_for_coord = "fail",
+           .address_for_exec = exec_address.c_str(),
+           .address_for_sched = sched_address.c_str()})();
+    }
 
     {
-      LocalMockDB db_identifier{.read_port_number_ = executor_db_port_};
-      executor_coord_server_.init_from_coord(&db_identifier);
-      executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
+      // Now have the executor register itself with the mempool.
+      executor_.start(/*port_number=*/0);
     }
   }
 
   ~MempoolTestServer()
   {
-    // We need to call [executor_coord_server_.shut_down()] so that the
-    // [ExecCoordServer] destructor does not block.
-    executor_coord_server_.shut_down();
+    // We need to call [executor_.shut_down()] so that the [Exector] destructor
+    // does not block.
+    executor_.shut_down();
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
@@ -196,11 +210,11 @@ public:
   }
 
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
-  uint16_t executor_db_port() const { return executor_db_port_; }
-  uint16_t coordinator_port() const { return coordinator_port_; }
-  uint16_t db_coordinator_port() const { return db_coordinator_port_; }
+  uint16_t db_executor_port() const { return db_executor_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
-  uint16_t executor_port() const { return executor_port_; }
+
+  MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
+  MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
@@ -226,10 +240,11 @@ private:
              /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
   }
 
-  // This is a fake coordinator server that the executor registers itself with
-  // via RPC.
-  Coordinator coordinator_server_;
-  uint16_t coordinator_port_;
+  RpcServer<MempoolDbRpc> sched_db_server_;
+  uint16_t sched_db_port_;
+
+  RpcServer<MempoolExecutorRpc> sched_exec_server_;
+  uint16_t sched_exec_port_;
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
@@ -237,17 +252,14 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  ExecCard exec_card_;
-  ExecCoordServer executor_coord_server_;
-  uint16_t executor_port_;
+  // TODO(jhumphri): Take these out!!
+  x23::ThreadPool x23_pool_;
+  x23::CoroPoll cp_;
+  Executor executor_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-  uint16_t executor_db_port_;
-
-  // The database server that the coordinator accesses.
-  std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
-  uint16_t db_coordinator_port_;
+  uint16_t db_executor_port_;
 
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
@@ -289,74 +301,45 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> coord_pool;
   std::unique_ptr<x23::CoroPoll> coord_cp;
 
-  std::unique_ptr<x23::ThreadPool> db_coord_pool;
-  std::unique_ptr<x23::CoroPoll> db_coord_cp;
-
   std::unique_ptr<x23::ThreadPool> db_sched_pool;
   std::unique_ptr<x23::CoroPoll> db_sched_cp;
 
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
-  std::unique_ptr<Mempool> interface;
+  std::unique_ptr<MempoolCoordinatorRpc> interface;
 };
 
 inline Clients
-create_clients(const MempoolTestServer &server)
+create_clients(MempoolTestServer &server)
 {
   // Mempool-Coordinator RPC client.
-  auto coord_pool = std::make_unique<x23::ThreadPool>(1);
+  auto coord_pool = std::make_unique<x23::ThreadPool>();
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  x23::UniqueFd coord_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.coordinator_sched_port()}
-                           .to_addr());
-  coord_client_t coord_client =
-      x23::rpc_stream_logged(*coord_cp, coord_fd.release())
-          ->client(CoordScheduler1{});
-
-  // Coordinator-DB RPC client.
-  auto db_coord_pool = std::make_unique<x23::ThreadPool>(1);
-  auto db_coord_cp = std::make_unique<x23::CoroPoll>(*db_coord_pool);
-  x23::UniqueFd db_coord_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.db_coordinator_port()}
-                           .to_addr());
-  db_coord_client_t db_coord_client =
-      x23::rpc_stream_logged(*db_coord_cp, db_coord_fd.release())
-          ->client(DbCoord1{});
+  coord_client_t coord_client = MempoolCoordinatorRpc::get_client(
+      std::format("{}:{}", MempoolTestServer::kAddress,
+                  server.coordinator_sched_port()),
+      *coord_cp);
 
   // Mempool-DB RPC client.
-  auto db_sched_pool = std::make_unique<x23::ThreadPool>(1);
+  auto db_sched_pool = std::make_unique<x23::ThreadPool>();
   auto db_sched_cp = std::make_unique<x23::CoroPoll>(*db_sched_pool);
-  x23::UniqueFd db_sched_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.db_scheduler_port()}
-                           .to_addr());
   db_sched_client_t db_sched_client =
-      x23::rpc_stream_logged(*db_sched_cp, db_sched_fd.release())
-          ->client(DbSched1{});
+      server.sched_db_rpc().get_clients(*db_sched_cp)[0];
 
   // Mempool-Executor RPC client.
-  auto exec_pool = std::make_unique<x23::ThreadPool>(1);
+  auto exec_pool = std::make_unique<x23::ThreadPool>();
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  x23::UniqueFd exec_fd =
-      x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                     server.executor_port()}
-                           .to_addr());
-  exec_client_t exec_client =
-      x23::rpc_stream_logged(*exec_cp, exec_fd.release())
-          ->client(ExecutorCoord1{});
+  x23::Vec<exec_client_t> exec_clients =
+      server.sched_exec_rpc().get_clients(*exec_cp);
 
   auto interface =
-      std::make_unique<Mempool>(/*current_block_id=*/0, std::move(coord_client),
-                                std::move(db_coord_client),
-                                std::move(db_sched_client),
-                                std::move(exec_client));
+      std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),
+                                              std::move(db_sched_client),
+                                              std::move(exec_clients));
+  interface->start({.protocol = version::kHogdProtocol, .address = ""});
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
-          .db_coord_pool = std::move(db_coord_pool),
-          .db_coord_cp = std::move(db_coord_cp),
           .db_sched_pool = std::move(db_sched_pool),
           .db_sched_cp = std::move(db_sched_cp),
           .exec_pool = std::move(exec_pool),

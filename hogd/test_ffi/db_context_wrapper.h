@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <memory>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
