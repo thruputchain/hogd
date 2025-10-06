@@ -393,7 +393,7 @@ create_clients(MempoolTestServer &server)
                                               std::move(db_sched_client),
                                               std::move(exec_clients),
                                               std::move(event_sched_client));
-  interface->start({.protocol = version::kHogdProtocol, .address = ""});
+  // TODO(jhumphri): Coordinator needs to register itself with the mempool.
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
           .db_sched_pool = std::move(db_sched_pool),

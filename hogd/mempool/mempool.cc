@@ -14,6 +14,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -100,10 +101,6 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
                                          std::move(exec_clients),
                                          std::move(event_sched_client));
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
-  const std::string sched_address = create_address(kCoordinatorServerPort);
-  SchedulerCard card{.protocol = version::kHogdProtocol,
-                     .address = sched_address.c_str()};
-  coord.get_impl().start(card);
 
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");

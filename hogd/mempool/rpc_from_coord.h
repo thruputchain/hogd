@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -52,20 +53,6 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  void start(const SchedulerCard &card)
-  {
-    IntroSchedResult res = coordscheduler_intro_sched(card);
-    current_block_id_ = res.current_block_id;
-    authentication_ =
-        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
-  }
-
-  IntroSchedResult coordscheduler_intro_sched(const SchedulerCard &card)
-  {
-    IntroSchedResult res = coord_client_.coordscheduler_intro_sched(card)();
-    return res;
-  }
-
   Scheduler &scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
@@ -78,6 +65,19 @@ public:
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
+
+  x23::Async<CoordinatorRegistrationOutcome>
+  schedulercoord_intro_coord(CoordCard card)
+  {
+    if (card.protocol.c_str() != version::kHogdProtocol) {
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationInvalidProtocol;
+    }
+    current_block_id_ = card.current_block_id;
+    authentication_ =
+        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
+  }
 
   // Submit an unvetted tx.
   x23::Async<void> schedulercoord_submit_unvetted(SignedTransactionBatch batch);
