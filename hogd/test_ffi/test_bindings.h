@@ -79,6 +79,15 @@ void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                            unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);
 
+// Get the event log for the current transaction.
+// Returns 0 on success, 1 otherwise.
+// syscall_handler must have been returned by open_syscall_handler()
+// buffer must be of the proper size for the event log for the tx (query from
+// get_event_log_len)
+int get_event_log(void *syscall_handler, unsigned char *buffer,
+                  uint32_t buffer_len);
+uint32_t get_event_log_len(void *syscall_handler);
+
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,
                                                    uint64_t arg3, uint64_t arg4,

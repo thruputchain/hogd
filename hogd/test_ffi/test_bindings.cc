@@ -7,7 +7,6 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <string>
 #include <utility>
 
 #include "account.hh"
@@ -216,6 +215,52 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
       std::make_shared<StorageItemWrapper>(int128_t{tokens}, &kCostModel));
 }
 
+int
+get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
+{
+  if (!syscall_handler) {
+    error("get_event_log error: no syscall handler!");
+    return 1;
+  }
+  if (!buffer) {
+    error("get_event_log error: no buffer!");
+    return 1;
+  }
+
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto event_log = context->get_tx_event_log();
+  if (!event_log) {
+    debug("No events for current tx");
+    if (buffer_len > 0) {
+      return 1;
+    }
+    return 0;
+  }
+  auto serialized_event_log = x23::serialize(event_log.value());
+  if (serialized_event_log.size() != buffer_len) {
+    error("get_event_log error: buffer too small!");
+    return 1;
+  }
+  std::memcpy(buffer, serialized_event_log.data(), serialized_event_log.size());
+  return 0;
+}
+
+uint32_t
+get_event_log_len(void *syscall_handler)
+{
+  if (!syscall_handler) {
+    error("get_event_log_len error: no syscall handler!");
+    return 0;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto event_log = context->get_tx_event_log();
+  if (!event_log) {
+    return 0;
+  }
+  auto serialized_event_log = x23::serialize(event_log.value());
+  return serialized_event_log.size();
+}
+
 } // namespace
 
 } // namespace hogd
@@ -362,6 +407,18 @@ enable_syscall_logging()
 {
   hogd::swap_logger(
       std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
+}
+
+int
+get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
+{
+  return hogd::get_event_log(syscall_handler, buffer, buffer_len);
+}
+
+uint32_t
+get_event_log_len(void *syscall_handler)
+{
+  return hogd::get_event_log_len(syscall_handler);
 }
 
 #ifdef __cplusplus
