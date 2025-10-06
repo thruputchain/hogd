@@ -5,10 +5,8 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
-#include <utility>
 
 #include "event.hh"
-#include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -25,7 +23,7 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(uint32_t db_read_port = 0);
+  DBContext();
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
