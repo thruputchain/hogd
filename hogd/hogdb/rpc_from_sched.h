@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
@@ -67,15 +68,17 @@ public:
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
-private:
-  RPCContext &ctx_;
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
 
-  // protect port_ during initialization
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::optional<uint16_t> port_;
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
+private:
+  std::atomic<bool> shutdown_flag_ = false;
+  RPCContext &ctx_;
 
   std::conditional_t<is_debug_build(), BlockIDStateManager,
                      UncheckedBlockIDStateManager>

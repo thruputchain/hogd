@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -49,19 +50,17 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ~HogDBExecutorRpc()
+  void shut_down()
   {
-    listen_thread_.request_stop();
-    shutdown(lfd_.get(), SHUT_RDWR);
-    lfd_.reset();
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
   }
 
-private:
-  RPCContext &ctx_;
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
 
-  uint16_t port_number_ = 0;
-  std::jthread listen_thread_;
-  x23::UniqueFd lfd_;
+private:
+  std::atomic<bool> shutdown_flag_ = false;
+  RPCContext &ctx_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
