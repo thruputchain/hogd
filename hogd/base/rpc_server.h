@@ -26,9 +26,7 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    port = tcp_rpc_server(cp_, port, [this](auto c) {
-      c->server(&rpc_, typename RpcImplementation::rpc_service{});
-    });
+    port = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
 
     int fds[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
