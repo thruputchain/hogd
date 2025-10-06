@@ -61,7 +61,7 @@ class MockDBWrapper {
 public:
   MockDBWrapper() { coord_port_ = db_sched_server_.start_server(0); }
 
-  uint16_t exec_port() const { return db_executor_server_.port(); }
+  uint16_t exec_port() { return db_executor_server_.port(); }
   uint16_t coord_port() const { return coord_port_; }
 
   void write_item(AddressAndKey const &addrkey,
