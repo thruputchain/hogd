@@ -102,6 +102,11 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.close_block(block_id);
   }
 
+  void eventsched_abandon_block(BlockID block_id)
+  {
+    event_aggregator_.close_block(block_id);
+  }
+
   uint16_t start_server(uint16_t port_number)
   {
     auto ret = tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,

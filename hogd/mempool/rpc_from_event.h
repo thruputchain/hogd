@@ -5,10 +5,16 @@
 #include <optional>
 #include <utility>
 
+#include "event_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -43,6 +49,13 @@ public:
     std::unique_lock lk(mutex_);
     cv_.wait(lk, [this] { return event_.has_value(); });
     return event_.value();
+  }
+
+  auto get_client(x23::CoroPoll &cp)
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(server_address_to_sockaddr(event_.value().address));
+    return x23::rpc_stream_logged(cp, fd.release())->client(EventSched1{});
   }
 
 private:

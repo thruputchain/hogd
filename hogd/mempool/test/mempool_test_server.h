@@ -18,6 +18,7 @@
 #include "contract_loader.h"
 #include "coord_sched.hh"
 #include "db_sched.hh"
+#include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
@@ -240,6 +241,7 @@ public:
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t db_executor_port() const { return db_executor_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
+  uint16_t event_sched_port() const { return event_sched_port_; }
 
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
@@ -347,6 +349,9 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
+  std::unique_ptr<x23::ThreadPool> event_sched_pool;
+  std::unique_ptr<x23::CoroPoll> event_sched_cp;
+
   std::unique_ptr<MempoolCoordinatorRpc> interface;
 };
 
@@ -373,10 +378,21 @@ create_clients(MempoolTestServer &server)
   x23::Vec<exec_client_t> exec_clients =
       server.sched_exec_rpc().get_clients(*exec_cp);
 
+  // Mempool-Event RPC client.
+  auto event_sched_pool = std::make_unique<x23::ThreadPool>();
+  auto event_sched_cp = std::make_unique<x23::CoroPoll>(*event_sched_pool);
+  x23::UniqueFd fd = x23::tcpconnect(server_address_to_sockaddr(
+      std::format("{}:{}", MempoolTestServer::kAddress,
+                  server.event_sched_port())));
+  event_sched_client_t event_sched_client =
+      x23::rpc_stream_logged(*event_sched_cp, fd.release())
+          ->client(EventSched1{});
+
   auto interface =
       std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),
                                               std::move(db_sched_client),
-                                              std::move(exec_clients));
+                                              std::move(exec_clients),
+                                              std::move(event_sched_client));
   interface->start({.protocol = version::kHogdProtocol, .address = ""});
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
@@ -384,6 +400,8 @@ create_clients(MempoolTestServer &server)
           .db_sched_cp = std::move(db_sched_cp),
           .exec_pool = std::move(exec_pool),
           .exec_cp = std::move(exec_cp),
+          .event_sched_pool = std::move(event_sched_pool),
+          .event_sched_cp = std::move(event_sched_cp),
           .interface = std::move(interface)};
 }
 

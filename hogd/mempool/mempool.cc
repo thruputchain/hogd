@@ -91,12 +91,14 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   // distributed across shards?
   x23::Vec<db_sched_client_t> db_clients = db_rpc.get_clients(cp);
   x23::Vec<exec_client_t> exec_clients = exec_rpc.get_clients(cp);
+  auto event_sched_client = event_rpc.get_client(cp);
 
   // TODO(jhumphri): Register the mempool with the coordinator with
   // [coordscheduler_intro_sched()].
   RpcServer<MempoolCoordinatorRpc> coord(std::move(coord_client),
                                          std::move(db_clients[0]),
-                                         std::move(exec_clients));
+                                         std::move(exec_clients),
+                                         std::move(event_sched_client));
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   const std::string sched_address = create_address(kCoordinatorServerPort);
   SchedulerCard card{.protocol = version::kHogdProtocol,

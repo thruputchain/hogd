@@ -14,7 +14,7 @@ namespace hogd {
 RPCError
 TestEventAggregator::open_block(BlockID block_id)
 {
-  error("Opening block {}", block_id);
+  info("Opening block {}", block_id);
   std::lock_guard<std::mutex> lock(mtx_);
   block_refcounts_[block_id]++;
   return RPCError::kRPCNone;
@@ -23,13 +23,14 @@ TestEventAggregator::open_block(BlockID block_id)
 EventBlockResult
 TestEventAggregator::close_block(BlockID block_id)
 {
-  error("Closing block {}", block_id);
   std::lock_guard<std::mutex> lock(mtx_);
   if (!block_refcounts_.contains(block_id)) {
+    error("Block {} is not open", block_id);
     return EventBlockResult(RPCError::kRPCBadBlockID);
   }
 
   if (block_refcounts_.at(block_id) == 0) {
+    error("Block {} is not open", block_id);
     return EventBlockResult(RPCError::kRPCBadBlockID);
   }
 
@@ -37,6 +38,7 @@ TestEventAggregator::close_block(BlockID block_id)
   SHA256Hash root_hash{}; // TODO(geoff): Implement
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = root_hash;
+  info("Closed block {}", block_id);
   return result;
 }
 
@@ -44,7 +46,6 @@ RPCError
 TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
                                 TxEventLog const &event_log)
 {
-  error("Emitting event for block {} and tx {}", block_id, tx_id);
   std::lock_guard<std::mutex> lock(mtx_);
   if (!is_block_open(block_id)) {
     return RPCError::kRPCBadBlockID;

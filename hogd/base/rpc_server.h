@@ -4,12 +4,14 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <mutex>
+#include <string_view>
 #include <sys/socket.h>
-#include <thread>
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 #include "x23/x23/event.h"
 #include "x23/x23/rpc.h"
 #include "x23/x23/sockio.h"
@@ -106,7 +108,6 @@ host_port_to_sockaddr(const std::string &host, uint16_t port)
 inline sockaddr_storage
 server_address_to_sockaddr(std::string_view server_address)
 {
-  info("server_address_to_sockaddr: {}", server_address);
   x23::HostPort helper;
   CHECK(helper.parse(server_address));
   std::expected<sockaddr_storage, x23::GaiError> addr =

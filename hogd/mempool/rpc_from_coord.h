@@ -2,10 +2,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <utility>
 
 #include "coord_sched.hh"
+#include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
+#include "genesis.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -34,10 +37,13 @@ public:
 
   MempoolCoordinatorRpc(coord_client_t &&coord_client,
                         db_sched_client_t &&db_sched_client,
-                        x23::Vec<exec_client_t> &&exec_clients)
+                        x23::Vec<exec_client_t> &&exec_clients,
+                        event_sched_client_t &&event_sched_client)
     : coord_client_(std::move(coord_client)),
       db_sched_client_(std::move(db_sched_client)),
-      exec_clients_(std::move(exec_clients)), scheduler_(db_sched_client_)
+      exec_clients_(std::move(exec_clients)),
+      event_sched_client_(std::move(event_sched_client)),
+      scheduler_(db_sched_client_)
   {}
 
   // Disable copy and move.
@@ -157,6 +163,7 @@ private:
   coord_client_t coord_client_;
   db_sched_client_t db_sched_client_;
   x23::Vec<exec_client_t> exec_clients_;
+  event_sched_client_t event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_;
