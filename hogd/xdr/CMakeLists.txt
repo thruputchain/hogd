@@ -23,9 +23,8 @@ add_xdr(
 	../../protocol/sc_val.x
 	../../protocol/sched_coord.x
 	../../protocol/sched_db.x
-  ../../protocol/sched_event.x
+  	../../protocol/sched_event.x
 	../../protocol/sched_exec.x
-	../../protocol/sched_event.x
 	../../protocol/storage_cost.x
 	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x
