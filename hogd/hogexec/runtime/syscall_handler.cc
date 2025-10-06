@@ -487,6 +487,10 @@ SystemCallHandler::emit_events()
   assert(cumulative_invoke_result_.is_root_success());
   assert(root_invoke_succeeded_);
   auto events = last_frame_.value().extract_events();
+  if (events.empty()) {
+    trace("No events to emit, skipping emit_events RPC");
+    return {};
+  }
   return event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_proposed_tx_hash(),
       .events = std::move(events),
