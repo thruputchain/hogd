@@ -26,9 +26,11 @@ class SnapshotStorageItemTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    // We call [server_.start_server()] before constructing [db_proxy_] because
+    // we need to pass [server_]'s port to the proxy.
+    server_.start_server(/*port=*/0);
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = server_.port()});
-    server_.start_server(/*port=*/0);
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(/*block_id=*/1);
