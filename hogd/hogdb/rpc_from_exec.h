@@ -10,7 +10,6 @@
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
@@ -24,11 +23,14 @@
 namespace hogd {
 
 // Core logic handler for the db rpc server.
-class HogDBExecutorRpc {
+class HogDBExecutorServer {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  explicit HogDBExecutorRpc(RPCContext &ctx) : ctx_(ctx) {}
+  explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
+
+  // Start the server on the specified port
+  void start_server(uint16_t port);
 
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
@@ -49,29 +51,28 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  void shut_down()
+  uint16_t port() const { return port_number_; }
+
+  ~HogDBExecutorServer()
   {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
+    listen_thread_.request_stop();
+    shutdown(lfd_.get(), SHUT_RDWR);
+    lfd_.reset();
   }
 
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
 private:
-  std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
+
+  uint16_t port_number_ = 0;
+  std::jthread listen_thread_;
+  x23::UniqueFd lfd_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
                               StorageItemRPCFlagSet flags);
 };
 
-static_assert(
-    is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);
-
-class HogDBExecutorServer : public RpcServer<HogDBExecutorRpc> {
-public:
-  explicit HogDBExecutorServer(RPCContext &ctx) : RpcServer(ctx) {}
-};
+static_assert(is_DatabaseToExecutorInterfaceV1<HogDBExecutorServer *,
+                                               std::type_identity_t>);
 
 } // namespace hogd
