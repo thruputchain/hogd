@@ -23,14 +23,11 @@
 namespace hogd {
 
 // Core logic handler for the db rpc server.
-class HogDBExecutorServer {
+class HogDBExecutorRpc {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
-
-  // Start the server on the specified port
-  void start_server(uint16_t port);
+  explicit HogDBExecutorRpc(RPCContext &ctx) : ctx_(ctx) {}
 
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
@@ -51,9 +48,7 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  uint16_t port() const { return port_number_; }
-
-  ~HogDBExecutorServer()
+  ~HogDBExecutorRpc()
   {
     listen_thread_.request_stop();
     shutdown(lfd_.get(), SHUT_RDWR);
@@ -72,7 +67,12 @@ private:
                               StorageItemRPCFlagSet flags);
 };
 
-static_assert(is_DatabaseToExecutorInterfaceV1<HogDBExecutorServer *,
-                                               std::type_identity_t>);
+static_assert(
+    is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);
+
+class HogDBExecutorServer : public RpcServer<HogDBExecutorRpc> {
+public:
+  HogDBExecutorRpc(RPCContext &ctx) : ctx_(ctx) {}
+};
 
 } // namespace hogd
