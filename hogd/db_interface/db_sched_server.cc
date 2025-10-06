@@ -1,6 +1,5 @@
 #include "hogd/db_interface/db_sched_server.h"
 
-
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "rpc_types.hh"
