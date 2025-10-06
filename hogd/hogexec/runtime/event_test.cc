@@ -3,6 +3,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -19,6 +20,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -146,7 +148,7 @@ TEST_F(EventTest, EventSuccess)
                       Invocation{.invoked_address = contract_0_addr,
                                  .entrypoint = entrypoint_from_method_id(2),
                                  .gas_limit = UINT64_MAX,
-                                 .calldata = {0, 1, 2, 3, 4, 5}},
+                                 .calldata = {}},
               }},
       runtime_context, &tx_id);
 
@@ -175,6 +177,109 @@ TEST_F(EventTest, EventSuccess)
   ASSERT_EQ(event_data1.value().topics.size(), 1);
   ASSERT_EQ(event_data1.value().topics[0], sha256(std::string("topic")));
   ASSERT_EQ(event_data1.value().event, make_vec("test 1 topic"));
+}
+
+TEST_F(EventTest, BadEventInputs)
+{
+  auto native_contract_0 = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             SHA256Hash topic0 = sha256(std::string("topic"));
+             SHA256Hash topic1 = sha256(std::string("topic"));
+             SHA256Hash topic2 = sha256(std::string("topic"));
+
+             x23::Vec<uint8_t> too_long_event;
+             too_long_event.resize(kMaxLogMessageLen + 1);
+
+             {
+               auto [status, gas] =
+                   syscall_LogEvent_inner(handler, nullptr, &topic1, nullptr,
+                                          std::as_bytes(std::span(
+                                              "test bad topic organization")));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               if (status.value() !=
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+
+             {
+               auto [status, gas] =
+                   syscall_LogEvent_inner(handler, &topic0, nullptr, &topic2,
+                                          std::as_bytes(std::span(
+                                              "test bad topic organization")));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               if (status.value() !=
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+
+             {
+               auto [status, gas] =
+                   syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
+                                          std::as_bytes(
+                                              std::span(too_long_event)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               if (status.value() !=
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+  auto contract_0_addr = make_contract_address(0xFF);
+  write_deployment(contract_0_addr, contract_0);
+  // This test is not focused on storage token costs, so we just grant
+  // an arbitrarily large number.
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = contract_0_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(*r);
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id);
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log.value().events.size(), 0);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
