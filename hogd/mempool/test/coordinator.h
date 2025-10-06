@@ -37,7 +37,6 @@ public:
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
 
-public
-CoordinatorSchedServer : public RpcServer<CoordinatorSchedRpc>{};
+class CoordinatorSchedServer : public RpcServer<CoordinatorSchedRpc> {};
 
 } // namespace hogd
