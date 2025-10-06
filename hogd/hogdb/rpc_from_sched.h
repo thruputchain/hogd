@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
@@ -15,23 +16,23 @@
 #include "rpc_types.hh"
 #include "types.hh"
 
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
-#include "x23/event.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
 
 // Async server implementing the DbSched interface
-class HogDBSchedServer {
+class HogDBSchedRpc {
 public:
   using rpc_service = DbSched1;
 
   // TODO(geoff): Some kind of check on ctx, to determine whether
   // the ledger has been initialized or do we have a truly empty database
-  explicit HogDBSchedServer(RPCContext &ctx) : ctx_(ctx)
+  explicit HogDBSchedRpc(RPCContext &ctx) : ctx_(ctx)
   {
     if constexpr (is_debug_build()) {
       if (ctx_.get_tip().id != UINT64_MAX) {
@@ -39,9 +40,6 @@ public:
       }
     }
   }
-
-  // Start the server on the specified port
-  void start_server(uint16_t port);
 
   static x23::Async<void> dbsched_null() { co_return; }
 
@@ -70,17 +68,17 @@ public:
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
-  uint16_t port();
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  std::atomic<bool> shutdown_flag_ = false;
   RPCContext &ctx_;
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-  // protect port_ during initialization
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::optional<uint16_t> port_;
 
   std::conditional_t<is_debug_build(), BlockIDStateManager,
                      UncheckedBlockIDStateManager>
@@ -90,6 +88,11 @@ private:
   // commit.
   HogDBStatus<void> commit_block(BlockID id);
 };
-static_assert(is_DbSched1<HogDBSchedServer *, x23::Async>);
+static_assert(is_DbSched1<HogDBSchedRpc *, x23::Async>);
+
+class HogDBSchedServer : public RpcServer<HogDBSchedRpc> {
+public:
+  explicit HogDBSchedServer(RPCContext &ctx) : RpcServer(ctx) {}
+};
 
 } // namespace hogd

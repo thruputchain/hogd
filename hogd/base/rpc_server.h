@@ -28,23 +28,18 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    auto lfd = x23::tcplisten(port);
-    if (!lfd) {
-      perror("listen");
-      exit(EXIT_FAILURE);
+    port = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
+
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
+      x23::Errno{}.raise("socketpair");
     }
+    x23::rpc_stream_logged(cp_, fds[1])
+        ->server<typename RpcImplementation::rpc_service>(&rpc_);
 
     std::lock_guard lock(mtx_);
-    port_ = get_port(lfd.get());
+    port_ = port;
     cv_.notify_all();
-
-    [](x23::CoroPoll &cp, RpcImplementation &server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await cp.pool_.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c)->server(&server);
-      }
-    }(cp_, rpc_, std::move(lfd));
 
     return port_.value();
   }
