@@ -28,7 +28,6 @@ public:
   {
     x23::DestroyInhibit di;
     port = tcp_rpc_server(cp_, port, [this, di = x23::RefPtr{di}](auto c) {
-      // x23::rpc_stream_logged(cp, *c)->server(&rpc_);
       c->server(&rpc_, typename RpcImplementation::rpc_service{});
     });
     // Use [di] to wait for the RPC server to start before calling
