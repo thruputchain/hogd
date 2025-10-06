@@ -49,7 +49,7 @@ jobs:
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build test bindings
-      run: ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_BINDINGS=ON" -f "-fsanitize=address"
+      run: ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address"
     - name: run ffi tests
       run: ./build/hogd/test_ffi/test_ffi_test
 
