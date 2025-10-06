@@ -13,14 +13,13 @@
 
 namespace hogd {
 
-// SyncDBExecutorServer implementations
+// DbExecutorRpc implementations
 
 bool
-SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
-                                        TransactionID tx,
-                                        AddressAndKey const &addrkey,
-                                        StorageDelta const &delta,
-                                        StorageItemRPCFlagSet flags)
+DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
+                                 AddressAndKey const &addrkey,
+                                 StorageDelta const &delta,
+                                 StorageItemRPCFlagSet flags)
 {
   if constexpr (is_debug_build()) {
     check_delta_type(addrkey.key.key_type(), delta.type());
@@ -29,8 +28,8 @@ SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
 }
 
 RPCError
-SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
-                                         NewContractBatch new_contracts)
+DbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
+                                  NewContractBatch new_contracts)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -42,7 +41,7 @@ SyncDBExecutorServer::commit_transaction(BlockID block, TransactionID tx,
 }
 
 RPCError
-SyncDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
+DbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -54,8 +53,8 @@ SyncDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 }
 
 RPCError
-SyncDBExecutorServer::try_push_new_subtransaction(
-    BlockID block, TransactionID tx, StorageDeltaBatch const &batch)
+DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
+                                           StorageDeltaBatch const &batch)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -76,8 +75,8 @@ SyncDBExecutorServer::try_push_new_subtransaction(
 }
 
 RPCError
-SyncDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
-                                          uint32_t popcount)
+DbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
+                                   uint32_t popcount)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -89,8 +88,7 @@ SyncDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-SyncDBExecutorServer::get_snapshot_item(BlockID block,
-                                        AddressAndKey const &addrkey)
+DbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -110,8 +108,7 @@ SyncDBExecutorServer::get_snapshot_item(BlockID block,
 }
 
 ExpectedContract
-SyncDBExecutorServer::get_contract(BlockID block,
-                                   SHA256Hash const &contract_hash)
+DbExecutorRpc::get_contract(BlockID block, SHA256Hash const &contract_hash)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -131,8 +128,8 @@ SyncDBExecutorServer::get_contract(BlockID block,
 }
 
 ExpectedDeployment
-SyncDBExecutorServer::get_deployment(BlockID block,
-                                     ContractAddress const &contract_address)
+DbExecutorRpc::get_deployment(BlockID block,
+                              ContractAddress const &contract_address)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -152,8 +149,9 @@ SyncDBExecutorServer::get_deployment(BlockID block,
 }
 
 ExpectedRetrocausalQueueBlock
-SyncDBExecutorServer::get_next_retrocausal_queue_block(
-    BlockID block, AddressAndKey const &addrkey, uint64_t search_start_number)
+DbExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
+                                                AddressAndKey const &addrkey,
+                                                uint64_t search_start_number)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -183,7 +181,7 @@ SyncDBExecutorServer::get_next_retrocausal_queue_block(
 }
 
 ExpectedQueueEntry
-SyncDBExecutorServer::get_concurrent_retrocausal_queue_entry(
+DbExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
   auto block_data = block_manager_->get_block_data(block);

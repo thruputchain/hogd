@@ -5,6 +5,7 @@
 
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/genesis/genesis_block.h"
@@ -18,19 +19,15 @@
 namespace hogd {
 
 // Async server implementing the DbSched interface
-class DbSchedServer {
+class DbSchedRpc {
 public:
   using rpc_service = DbSched1;
 
-  explicit DbSchedServer(BlockManager *block_manager)
+  explicit DbSchedRpc(BlockManager *block_manager)
     : block_manager_(block_manager)
   {
     assert(block_manager_);
   }
-
-  // Start the server on the specified port
-  // Returns the port number that the server is listening on
-  uint16_t start_server(uint16_t port_number);
 
   // RPC methods
   static x23::Async<void> dbsched_null() { co_return; }
@@ -73,12 +70,24 @@ public:
   x23::Async<DbSchedResult>
   dbsched_load_genesis_block(GenesisBlock const &genesis_block);
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   BlockManager *block_manager_;
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 };
+static_assert(is_DbSched1<DbSchedRpc *, x23::Async>);
 
-static_assert(is_DbSched1<DbSchedServer *, x23::Async>);
+class DbSchedServer : public RpcServer<DbSchedRpc> {
+public:
+  DbSchedServer(BlockManager *block_manager) : RpcServer(block_manager) {}
+};
 
 } // namespace hogd

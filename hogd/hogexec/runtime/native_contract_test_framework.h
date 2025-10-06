@@ -68,10 +68,14 @@ enum class TestDB : int8_t {
 
 class MockDBWrapper {
 public:
-  MockDBWrapper() { coord_port_ = db_sched_server_.start_server(0); }
+  MockDBWrapper()
+  {
+    db_sched_server_.start_server(/*port=*/0);
+    db_executor_server_.start_server(/*port=*/0);
+  }
 
   uint16_t exec_port() { return db_executor_server_.port(); }
-  uint16_t coord_port() const { return coord_port_; }
+  uint16_t coord_port() { return db_sched_server_.port(); }
 
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item)
@@ -119,19 +123,17 @@ private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
-  SrpcDbExecutorServer db_executor_server_ =
-      SrpcDbExecutorServer(&block_manager_, 0);
+  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
   DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
-  uint16_t coord_port_ = 0;
 };
 
 class HogdbWrapper {
 public:
   HogdbWrapper() : db_(open_db())
   {
-    db_sched_server_.start_server(0);
-    db_executor_server_.start_server(0);
+    db_sched_server_.start_server(/*port=*/0);
+    db_executor_server_.start_server(/*port=*/0);
   }
 
   uint16_t exec_port() { return db_executor_server_.port(); }

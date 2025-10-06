@@ -41,6 +41,8 @@ class NativeContractTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    snapshot_server_.start_server(/*port=*/0);
+
     auto contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
@@ -100,7 +102,7 @@ protected:
     event_server_.open_block(0);
   }
 
-  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
+  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
   TestEventAggregator event_server_;
   TestEventAggregatorExecRpc event_server_exec_rpc_ =
       TestEventAggregatorExecRpc(event_server_);
@@ -239,8 +241,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.get_impl().setup_create_contract(contract);
+  snapshot_server_.get_impl().setup_create_deployment(address,
+                                                      sha256(contract));
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -319,9 +322,10 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address, sha256(contract));
-  snapshot_server_.setup_ban_item(
+  snapshot_server_.get_impl().setup_create_contract(contract);
+  snapshot_server_.get_impl().setup_create_deployment(address,
+                                                      sha256(contract));
+  snapshot_server_.get_impl().setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   SystemCallHandler handler = make_handler(
@@ -433,9 +437,10 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address, sha256(contract));
-  snapshot_server_.setup_ban_item(
+  snapshot_server_.get_impl().setup_create_contract(contract);
+  snapshot_server_.get_impl().setup_create_deployment(address,
+                                                      sha256(contract));
+  snapshot_server_.get_impl().setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   {

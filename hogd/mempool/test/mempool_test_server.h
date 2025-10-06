@@ -85,7 +85,7 @@ public:
                          sched_event_server_.get_impl()),
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
-          coordinator_sched_server_.start_server(/*port_number=*/0)),
+          coordinator_sched_server_.start_server(/*port=*/0)),
       cp_(x23_pool_), executor_(kAddress, sched_exec_port_)
   {
     {
@@ -281,7 +281,7 @@ private:
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
-  CoordinatorSched coordinator_sched_server_;
+  CoordinatorSchedServer coordinator_sched_server_;
   uint16_t coordinator_sched_port_;
 
   // The executor server.

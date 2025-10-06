@@ -6,6 +6,7 @@ target_link_libraries(
   auth_test
   base
   crypto
+  db_interface
   exec_interface
   hogd
   mempool
@@ -34,6 +35,7 @@ target_link_libraries(
   mempool_test
   base
   crypto
+  db_interface
   exec_interface
   hogd
   mempool
@@ -62,6 +64,7 @@ target_link_libraries(
   scheduler_test
   base
   crypto
+  db_interface
   exec_interface
   hogd
   mempool

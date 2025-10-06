@@ -8,11 +8,8 @@
 #include <mutex>
 #include <optional>
 #include <print>
-#include <stdexcept>
-#include <stop_token>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
-#include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -20,21 +17,28 @@
 
 #include "ci_server.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "x23/cleanup.h"
 #include "x23/format.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 
-class CIControlServer {
+class CIControlRpc {
 public:
   using rpc_service = CIServer1;
+
+  ~CIControlRpc()
+  {
+    // Ensure waitpid thread is stopped
+    if (waitpid_thread_.joinable()) {
+      waitpid_thread_.request_stop();
+      waitpid_thread_.join();
+    }
+  }
 
   CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
                                    ServerConfig const &config)
@@ -247,6 +251,16 @@ public:
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
@@ -296,55 +310,6 @@ private:
     most_recent_exit_code_ = exit_code;
   }
   // NOLINTEND(misc-include-cleaner)
-public:
-  void start_server(uint32_t port)
-  {
-    lfd_ = x23::stcplisten(port);
-    if (!lfd_) {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
-
-    if (port == 0) {
-      throw std::runtime_error("port cannot be 0 for CI control server");
-    }
-
-    port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
-
-    listen_thread_ = std::jthread([this](std::stop_token &&stop) {
-      while (!stop.stop_requested()) {
-
-        sockaddr_storage ss;
-        socklen_t sslen = sizeof(ss);
-        x23::UniqueFd fd{
-            accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
-        if (!fd) {
-          info("accept error: {}", Errno{});
-        }
-        else {
-          x23::srpc_stream_logged(fd.release())->server(this);
-        }
-      }
-    });
-  }
-
-  ~CIControlServer()
-  {
-    listen_thread_.request_stop();
-    shutdown(lfd_.get(), SHUT_RDWR);
-    lfd_.reset();
-
-    // Ensure waitpid thread is stopped
-    if (waitpid_thread_.joinable()) {
-      waitpid_thread_.request_stop();
-      waitpid_thread_.join();
-    }
-  }
-
-private:
-  uint16_t port_number_ = 0;
-  std::jthread listen_thread_;
-  x23::UniqueFd lfd_;
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 
@@ -359,6 +324,8 @@ private:
   // For waiting on child process
   std::jthread waitpid_thread_;
 };
+
+class CIControlServer : public RpcServer<CIControlRpc> {};
 
 } // namespace hogd
 
@@ -400,6 +367,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   control_server.start_server(*control_port);
-  control_server.wait_for_shutdown();
+  control_server.get_impl().wait_for_shutdown();
   return 0;
 }

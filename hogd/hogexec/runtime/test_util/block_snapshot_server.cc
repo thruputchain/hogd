@@ -16,12 +16,11 @@
 namespace hogd {
 
 void
-BlockSnapshotServer::db_snapshot_read_null()
+BlockSnapshotRpc::db_snapshot_read_null()
 {}
 
 ExpectedStorageItem
-BlockSnapshotServer::get_snapshot_item(BlockID block,
-                                       AddressAndKey const &addrkey)
+BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   if (block != block_id_) {
     return ExpectedStorageItem(RPCError::kRPCBadBlockID);
@@ -45,8 +44,7 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
 }
 
 ExpectedContract
-BlockSnapshotServer::get_contract(BlockID block,
-                                  SHA256Hash const &contract_hash)
+BlockSnapshotRpc::get_contract(BlockID block, SHA256Hash const &contract_hash)
 {
   if (block != block_id_) {
     return ExpectedContract(RPCError::kRPCBadBlockID);
@@ -63,8 +61,8 @@ BlockSnapshotServer::get_contract(BlockID block,
 }
 
 ExpectedDeployment
-BlockSnapshotServer::get_deployment(BlockID block,
-                                    ContractAddress const &contract_address)
+BlockSnapshotRpc::get_deployment(BlockID block,
+                                 ContractAddress const &contract_address)
 {
   if (block != block_id_) {
     return ExpectedDeployment(RPCError::kRPCBadBlockID);
@@ -81,7 +79,7 @@ BlockSnapshotServer::get_deployment(BlockID block,
 }
 
 RPCError
-BlockSnapshotServer::try_push_new_subtransaction(
+BlockSnapshotRpc::try_push_new_subtransaction(
     BlockID /*unused*/, TransactionID /*unused*/,
     StorageDeltaBatch const & /*unused*/)
 {
@@ -89,31 +87,32 @@ BlockSnapshotServer::try_push_new_subtransaction(
 }
 
 RPCError
-BlockSnapshotServer::pop_subtransactions(BlockID /*unused*/,
-                                         TransactionID /*unused*/,
-                                         uint32_t /*unused*/)
+BlockSnapshotRpc::pop_subtransactions(BlockID /*unused*/,
+                                      TransactionID /*unused*/,
+                                      uint32_t /*unused*/)
 {
   return RPCError::kRPCUnimplemented;
 }
 
 RPCError
-BlockSnapshotServer::commit_transaction(BlockID /*unused*/,
-                                        TransactionID /*unused*/,
-                                        NewContractBatch const & /*unused*/)
+BlockSnapshotRpc::commit_transaction(BlockID /*unused*/,
+                                     TransactionID /*unused*/,
+                                     NewContractBatch const & /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented
 }
 
 RPCError
-BlockSnapshotServer::abort_transaction(BlockID /*unused*/,
-                                       TransactionID /*unused*/)
+BlockSnapshotRpc::abort_transaction(BlockID /*unused*/,
+                                    TransactionID /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented;
 }
 
 ExpectedRetrocausalQueueBlock
-BlockSnapshotServer::get_next_retrocausal_queue_block(
-    BlockID block, AddressAndKey const &addrkey, uint64_t search_start_number)
+BlockSnapshotRpc::get_next_retrocausal_queue_block(BlockID block,
+                                                   AddressAndKey const &addrkey,
+                                                   uint64_t search_start_number)
 {
   if (block != block_id_) {
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
@@ -134,7 +133,7 @@ BlockSnapshotServer::get_next_retrocausal_queue_block(
 }
 
 ExpectedQueueEntry
-BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
+BlockSnapshotRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
   if (block != block_id_) {
@@ -155,28 +154,28 @@ BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
 }
 
 void
-BlockSnapshotServer::setup_create_contract(Contract const &contract)
+BlockSnapshotRpc::setup_create_contract(Contract const &contract)
 {
   contracts_->emplace(sha256(contract), contract);
 }
 
 void
-BlockSnapshotServer::setup_create_deployment(ContractAddress addr,
-                                             SHA256Hash contract_hash)
+BlockSnapshotRpc::setup_create_deployment(ContractAddress addr,
+                                          SHA256Hash contract_hash)
 {
   deployments_->emplace(addr, contract_hash);
 }
 
 void
-BlockSnapshotServer::setup_create_item(AddressAndKey const &addrkey,
-                                       StorageItemWrapper item)
+BlockSnapshotRpc::setup_create_item(AddressAndKey const &addrkey,
+                                    StorageItemWrapper item)
 {
   items_->emplace(addrkey, std::move(item));
 }
 
 void
-BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
-                                                   QueueEntry entry)
+BlockSnapshotRpc::setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
+                                                QueueEntry entry)
 {
   auto it = concurrent_rcq_items_->find(addrkey);
   if (it == concurrent_rcq_items_->end()) {
@@ -189,7 +188,7 @@ BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
 }
 
 void
-BlockSnapshotServer::setup_ban_item(AddressAndKey const &addrkey)
+BlockSnapshotRpc::setup_ban_item(AddressAndKey const &addrkey)
 {
   blocked_items_->insert(addrkey);
 }
