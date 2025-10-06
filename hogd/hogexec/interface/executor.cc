@@ -3,7 +3,6 @@
 #include <cassert>
 #include <chrono>
 #include <format>
-#include <limits> // NOLINT(misc-include-cleaner)
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
