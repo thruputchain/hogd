@@ -10,6 +10,7 @@
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
@@ -66,13 +67,12 @@ private:
                               StorageDelta const &delta,
                               StorageItemRPCFlagSet flags);
 };
-
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDBExecutorRpc *, std::type_identity_t>);
 
 class HogDBExecutorServer : public RpcServer<HogDBExecutorRpc> {
 public:
-  HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
+  explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
 };
 
 } // namespace hogd
