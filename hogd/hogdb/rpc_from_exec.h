@@ -10,7 +10,6 @@
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"

@@ -12,6 +12,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
