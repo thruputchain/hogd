@@ -6,7 +6,6 @@
 #include <stop_token>
 #include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 
 #include "hogd/base/log.h"
