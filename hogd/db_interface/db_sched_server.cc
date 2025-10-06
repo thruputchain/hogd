@@ -17,8 +17,8 @@
 namespace hogd {
 
 x23::Async<DbSchedResult>
-DbSchedServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
-                                       BlockExecutionMode mode)
+DbSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
+                                    BlockExecutionMode mode)
 {
   if (block_manager_->add_child(parent_id, new_id, mode)) {
     co_return DbSchedResult::DbSchedResultOK;
@@ -27,7 +27,7 @@ DbSchedServer::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
 }
 
 x23::Async<DbBlockResult>
-DbSchedServer::dbsched_commit_snapshot(BlockID id)
+DbSchedRpc::dbsched_commit_snapshot(BlockID id)
 {
   if (block_manager_->commit_block(id)) {
     //(geoff) TODO: Replace with actual BlockHash if available
@@ -40,7 +40,7 @@ DbSchedServer::dbsched_commit_snapshot(BlockID id)
 }
 
 x23::Async<DbBlockResult>
-DbSchedServer::dbsched_close_snapshot(BlockID id)
+DbSchedRpc::dbsched_close_snapshot(BlockID id)
 {
   auto blk = block_manager_->get_block_data(id);
   if (!blk) {
@@ -55,7 +55,7 @@ DbSchedServer::dbsched_close_snapshot(BlockID id)
 }
 
 x23::Async<DbSchedResult>
-DbSchedServer::dbsched_abandon_snapshot(BlockID id)
+DbSchedRpc::dbsched_abandon_snapshot(BlockID id)
 {
   // TODO(geoff): Implement actual abandon logic if needed
   // For now, just return ok for stub. If and when this function can return a
@@ -64,32 +64,8 @@ DbSchedServer::dbsched_abandon_snapshot(BlockID id)
   co_return DbSchedResult::DbSchedResultOK;
 }
 
-uint16_t
-DbSchedServer::start_server(uint16_t port_number)
-{
-  x23::UniqueFd lfd = x23::tcplisten(port_number);
-  if (!lfd) {
-    perror("listen");
-    exit(EXIT_FAILURE);
-  }
-  // If the [port_number] parameter is 0, then the kernel chooses the port
-  // number for us. Thus, in that case, [port_number] will be assigned a
-  // nonzero value below.
-  port_number = x23::get_port(x23::local_addr(lfd.get()));
-
-  [](x23::CoroPoll &cp, DbSchedServer *server,
-     x23::UniqueFd lfd) -> x23::Detached {
-    co_await cp.pool_.bg();
-    while (auto c = co_await cp.accept(lfd)) {
-      x23::rpc_stream_logged(cp, *c)->server(server);
-    }
-  }(cp_, this, std::move(lfd));
-
-  return port_number;
-}
-
 x23::Async<DbSchedResult>
-DbSchedServer::dbsched_load_genesis_block(GenesisBlock const &genesis_block)
+DbSchedRpc::dbsched_load_genesis_block(GenesisBlock const &genesis_block)
 {
   if (block_manager_->initialize_genesis_block(genesis_block)) {
     co_return DbSchedResult::DbSchedResultOK;

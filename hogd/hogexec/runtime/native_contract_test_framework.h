@@ -110,7 +110,7 @@ private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_, 0);
+  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
   DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
   uint16_t coord_port_ = 0;
@@ -120,8 +120,8 @@ class HogdbWrapper {
 public:
   HogdbWrapper() : db_(open_db())
   {
-    db_sched_server_.start_server(0);
-    db_executor_server_.start_server(0);
+    db_sched_server_.start_server(/*port=*/0);
+    db_executor_server_.start_server(/*port=*/0);
   }
 
   uint16_t exec_port() { return db_executor_server_.port(); }
