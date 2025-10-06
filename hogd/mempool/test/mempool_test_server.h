@@ -248,7 +248,7 @@ private:
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
-  CoordinatorSched coordinator_sched_server_;
+  CoordinatorSchedServer coordinator_sched_server_;
   uint16_t coordinator_sched_port_;
 
   // The executor server.
