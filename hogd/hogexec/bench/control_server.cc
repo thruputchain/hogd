@@ -8,11 +8,8 @@
 #include <mutex>
 #include <optional>
 #include <print>
-#include <stdexcept>
-#include <stop_token>
 #include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
-#include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -26,10 +23,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "x23/cleanup.h"
 #include "x23/format.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 

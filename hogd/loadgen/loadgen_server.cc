@@ -1,21 +1,11 @@
 #include "loadgen_server.h"
 
-#include <cstdio>
-#include <cstdlib>
 #include <memory>
-#include <stop_token>
-#include <sys/socket.h>
-#include <thread>
 #include <utility>
 
-#include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
-#include "x23/cleanup.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 

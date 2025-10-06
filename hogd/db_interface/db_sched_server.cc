@@ -1,18 +1,10 @@
 #include "hogd/db_interface/db_sched_server.h"
 
-#include <cstdio>
-#include <cstdlib>
-#include <utility>
 
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
