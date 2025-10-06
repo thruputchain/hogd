@@ -36,9 +36,9 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
 
-  MempoolCoordinatorRpc(coord_client_t &&coord_client,
+  MempoolCoordinatorRpc(coord_sched_client_t &&coord_client,
                         db_sched_client_t &&db_sched_client,
-                        x23::Vec<exec_client_t> &&exec_clients,
+                        x23::Vec<exec_sched_client_t> &&exec_clients,
                         event_sched_client_t &&event_sched_client)
     : coord_client_(std::move(coord_client)),
       db_sched_client_(std::move(db_sched_client)),
@@ -56,8 +56,8 @@ public:
   Scheduler &scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
-  static coord_client_t get_client(const std::string &coordinator_addr,
-                                   x23::CoroPoll &cp)
+  static coord_sched_client_t get_client(const std::string &coordinator_addr,
+                                         x23::CoroPoll &cp)
   {
     x23::UniqueFd fd =
         x23::tcpconnect(server_address_to_sockaddr(coordinator_addr));
@@ -160,9 +160,9 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  coord_client_t coord_client_;
+  coord_sched_client_t coord_client_;
   db_sched_client_t db_sched_client_;
-  x23::Vec<exec_client_t> exec_clients_;
+  x23::Vec<exec_sched_client_t> exec_clients_;
   event_sched_client_t event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.

@@ -45,25 +45,21 @@ public:
     info("executor with card {} connected. {} total executors connected.",
          x23::show(card), execs_.size() + 1);
 
-    std::unique_lock lk(mutex_);
-    execs_.push_back(card);
-    co_return IntroExecResult{.exec_id = execs_.size() - 1,
+    size_t exec_id = Registration::registration().register_executor(card);
+    co_return IntroExecResult{.exec_id = exec_id,
                               .shards = db_rpc_.shards(),
                               .event = event_rpc_.event()};
   }
 
-  x23::Vec<ExecCard> executors()
+  static x23::Vec<exec_sched_client_t> get_clients(x23::CoroPoll &cp)
   {
-    std::unique_lock lk(mutex_);
-    return execs_;
-  }
+    x23::Vec<ExecCard> cards;
+    Registation::registration().executors_registered(&cards);
 
-  x23::Vec<exec_client_t> get_clients(x23::CoroPoll &cp)
-  {
-    x23::Vec<exec_client_t> ret;
-    ret.reserve(execs_.size());
+    x23::Vec<exec_sched_client_t> ret;
+    ret.reserve(cards.size());
 
-    for (const ExecCard &card : execs_) {
+    for (const ExecCard &card : cards) {
       info("getting client for {}", card.address);
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address));
@@ -85,10 +81,6 @@ private:
   MempoolDbRpc &db_rpc_;
   MempoolEventRpc &event_rpc_;
 
-  std::mutex mutex_;
-  x23::Vec<ExecCard> execs_;
-
-  std::atomic<size_t> num_executors_ = 0;
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedExec1<MempoolExecutorRpc *, x23::Async>);

@@ -57,20 +57,29 @@ public:
     coord_card_ = card;
     coordinator_registered_.store(true, std::memory_order_release);
   }
-  bool coordinator_registered() const
+  bool coordinator_registered(CoordCard *card) const
   {
-    return coordinator_registered_.load(std::memory_order_acquire);
+    bool ret = coordinator_registered_.load(std::memory_order_acquire);
+    if (card) {
+      *card = coord_card_;
+    }
   }
 
   // Executors.
-  void register_executor(const ExecCard &card)
+  // Returns the ID of the registered exector.
+  size_t register_executor(const ExecCard &card)
   {
+    std::unique_lock lk(exec_cards_mutex_);
     exec_cards_.push_back(card);
-    num_executors_registered_.fetch_add(1, std::memory_order_release);
+    return exec_cards_.size() - 1;
   }
-  size_t num_executors_registered() const
+  size_t executors_registered(x23::Vec<ExecCard> *cards) const
   {
-    return num_executors_registered_.load(std::memory_order_acquire);
+    std::unique_lock lk(exec_cards_mutex_);
+    if (cards) {
+      *cards = exec_cards_;
+    }
+    return exec_cards_.size();
   }
 
   // Event.
@@ -79,20 +88,29 @@ public:
     event_card_ = card;
     event_registered_.store(true, std::memory_order_release);
   }
-  bool event_registered() const
+  bool event_registered(EventCard *card) const
   {
-    return event_registered_.load(std::memory_order_acquire);
+    bool ret = event_registered_.load(std::memory_order_acquire);
+    if (card) {
+      *card = event_card_;
+    }
   }
 
   // Databases.
-  void register_shard(const ShardCard &card)
+  // Returns the ID of the registered shard.
+  size_t register_shard(const ShardCard &card)
   {
+    std::unique_lock lk(shard_cards_mutex_);
     shard_cards_.push_back(card);
-    num_shards_registered_.fetch_add(1, std::memory_order_release);
+    return shard_cards_.size() - 1;
   }
-  size_t num_shards_registered() const
+  size_t shards_registered(x23::Vec<ShardCard> *cards) const
   {
-    return num_shards_registered_.load(std::memory_order_acquire);
+    std::unique_lock lk(shard_cards_mutex_);
+    if (cards) {
+      *cards = shard_cards;
+    }
+    return shard_cards_.size();
   }
 
 private:
@@ -112,13 +130,13 @@ private:
   std::atomic<bool> coordinator_registered_ = false;
   CoordCard coord_card_;
 
-  std::atomic<size_t> num_executors_registered_ = 0;
+  std::mutex exec_cards_mutex_;
   x23::Vec<ExecCard> exec_cards_;
 
   std::atomic<bool> event_registered_ = false;
   EventCard event_card_;
 
-  std::atomic<size_t> num_shards_registered_ = 0;
+  std::mutex shard_cards_mutex_;
   x23::Vec<ShardCard> shard_cards_;
 };
 

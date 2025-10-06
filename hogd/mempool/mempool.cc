@@ -35,49 +35,37 @@ constexpr uint16_t kExecutorServerPort = 8071;
 constexpr uint16_t kDbServerPort = 8072;
 constexpr uint16_t kEventServerPort = 8073;
 
-std::string
-create_address(uint16_t port)
-{
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-  return std::format("{}:{}", hostname, port);
-}
-
 int
-mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
-             size_t num_exec_shards)
+mempool_init(size_t num_db_shards, size_t num_exec_shards)
 {
-  x23::HostPort host_port;
-  if (!host_port.parse(coordinator_addr)) {
-    throw std::runtime_error(
-        std::format("Invalid coordinator address: {}", coordinator_addr));
-  }
-  // const std::string coordinator_host = {host_port.host.begin(),
-  //                                       host_port.host.end()};
-  // const uint16_t coordinator_port = static_cast<uint16_t>(
-  //     std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
+  Registration &registration = Registration::registration();
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
   CHECK_EQ(db.start_server(kDbServerPort), kDbServerPort);
   MempoolDbRpc &db_rpc = db.get_impl();
   info("Waiting for {} db shards to connect...", num_db_shards);
-  while (db_rpc.shards().size() < num_db_shards) {
+  while (registration.shards_registered(/*cards=*/nullptr).size() <
+         num_db_shards) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  // Wait for the event subsystem to connect.
   RpcServer<MempoolEventRpc> event;
   CHECK_EQ(event.start_server(kEventServerPort), kEventServerPort);
   MempoolEventRpc &event_rpc = event.get_impl();
   info("Waiting for event server to connect...");
-  event_rpc.event();
+  while (!registration.event_registered(/*card=*/nullptr)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 
   // Let the executors connect.
   RpcServer<MempoolExecutorRpc> exec(db_rpc, event_rpc);
   CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
   MempoolExecutorRpc &exec_rpc = exec.get_impl();
   info("Waiting for {} executors to connect...", num_exec_shards);
-  while (exec_rpc.executors().size() < num_exec_shards) {
+  while (registration.executors_registered(/*cards=*/nullptr) <
+         num_exec_shards) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
@@ -85,13 +73,13 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   // coordinator, the executors, and the db shards.
   x23::ThreadPool client_pool;
   x23::CoroPoll cp(client_pool);
-  coord_client_t coord_client =
+  coord_sched_client_t coord_client =
       MempoolCoordinatorRpc::get_client(coordinator_addr, cp);
   // TODO(jhumphri): I think I just need to create a client for one of the
   // shards? Will the account information that the scheduler needs be
   // distributed across shards?
   x23::Vec<db_sched_client_t> db_clients = db_rpc.get_clients(cp);
-  x23::Vec<exec_client_t> exec_clients = exec_rpc.get_clients(cp);
+  x23::Vec<exec_sched_client_t> exec_clients = exec_rpc.get_clients(cp);
   auto event_sched_client = event_rpc.get_client(cp);
 
   // TODO(jhumphri): Register the mempool with the coordinator with
@@ -126,22 +114,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting mempool!");
 
-  if (argc != 4) {
-    std::println(
-        "usage: coordinator_ip:port num_db_shards num_executor_shards");
+  if (argc != 3) {
+    std::println("usage: num_db_shards num_executor_shards");
     return EXIT_FAILURE;
   }
 
-  const std::string coord_address = argv[1];
-  size_t num_db_shards = std::stoul(argv[2], nullptr, 0);
+  size_t num_db_shards = std::stoul(argv[1], nullptr, 0);
   if (num_db_shards <= 0) {
     std::println("[num_db_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
-  size_t num_exec_shards = std::stoul(argv[3], nullptr, 0);
+  size_t num_exec_shards = std::stoul(argv[1], nullptr, 0);
   if (num_exec_shards <= 0) {
     std::println("[num_exec_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
-  return hogd::mempool_init(coord_address, num_db_shards, num_exec_shards);
+  return hogd::mempool_init(num_db_shards, num_exec_shards);
 };

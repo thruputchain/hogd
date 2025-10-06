@@ -40,34 +40,19 @@ public:
       error("event server already connected");
       return RPCError::kRPCUnrecoverable;
     }
-    event_ = std::move(card);
-    cv_.notify_all();
+    Registration::registration.register_event(card);
     return RPCError::kRPCNone;
   }
 
-  EventCard event()
+  event_sched_client_t get_client(x23::CoroPoll &cp)
   {
-    std::unique_lock lk(mutex_);
-    cv_.wait(lk, [this] { return event_.has_value(); });
-    assert(event_.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return event_.value();
-  }
+    EventCard card;
+    CHECK(Registration::registration.event_registered(card));
 
-  auto get_client(x23::CoroPoll &cp)
-  {
-    assert(event_.has_value());
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(event_.value().address));
-    // NOLINTEND(bugprone-unchecked-optional-access)
+        x23::tcpconnect(server_address_to_sockaddr(card.address));
     return x23::rpc_stream_logged(cp, fd.release())->client(EventSched1{});
   }
-
-private:
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::optional<EventCard> event_;
 };
 
 static_assert(is_SchedEvent1<MempoolEventRpc *, x23::MaybeAsync>);

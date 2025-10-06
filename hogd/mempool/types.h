@@ -23,13 +23,13 @@
 
 namespace hogd {
 
-using coord_client_t =
+using coord_sched_client_t =
     CoordScheduler1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using db_sched_client_t =
     DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-using exec_client_t =
+using exec_sched_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using event_sched_client_t =

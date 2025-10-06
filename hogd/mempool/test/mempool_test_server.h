@@ -361,7 +361,7 @@ create_clients(MempoolTestServer &server)
   // Mempool-Coordinator RPC client.
   auto coord_pool = std::make_unique<x23::ThreadPool>();
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  coord_client_t coord_client = MempoolCoordinatorRpc::get_client(
+  coord_sched_client_t coord_client = MempoolCoordinatorRpc::get_client(
       std::format("{}:{}", MempoolTestServer::kAddress,
                   server.coordinator_sched_port()),
       *coord_cp);
@@ -375,7 +375,7 @@ create_clients(MempoolTestServer &server)
   // Mempool-Executor RPC client.
   auto exec_pool = std::make_unique<x23::ThreadPool>();
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  x23::Vec<exec_client_t> exec_clients =
+  x23::Vec<exec_sched_client_t> exec_clients =
       server.sched_exec_rpc().get_clients(*exec_cp);
 
   // Mempool-Event RPC client.
