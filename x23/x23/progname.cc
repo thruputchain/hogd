@@ -1,12 +1,14 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <string_view>
 
 #include <unistd.h>
 
+#include "x23/config.h"
 #include "x23/progname.h"
 
 namespace x23 {
