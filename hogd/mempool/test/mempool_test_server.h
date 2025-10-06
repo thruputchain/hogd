@@ -37,8 +37,10 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/mempool/types.h"
@@ -46,8 +48,10 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -75,7 +79,9 @@ public:
 
   MempoolTestServer()
     : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
-      sched_exec_server_(sched_db_server_.get_impl()),
+      sched_event_port_(sched_event_server_.start_server(/*port=*/0)),
+      sched_exec_server_(sched_db_server_.get_impl(),
+                         sched_event_server_.get_impl()),
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port_number=*/0)),
@@ -114,6 +120,10 @@ public:
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
       db_scheduler_port_ = db_scheduler_server_->port();
+
+      event_sched_port_ =
+          event_server_sched_rpc_.start_server(/*port_number=*/0);
+      event_exec_port_ = event_server_exec_rpc_.start_server(/*port_number=*/0);
     }
 
     {
@@ -162,11 +172,26 @@ public:
            .address_for_coord = "fail",
            .address_for_exec = exec_address.c_str(),
            .address_for_sched = sched_address.c_str()})();
+
+      // make the event server register itself with the mempool.
+      fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_event_port_}
+               .to_addr());
+      SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
+          event_client =
+              x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
+
+      auto r = event_client.schedevent_intro_event(
+          {.protocol = version::kHogdProtocol,
+           .upid = {},
+           .address =
+               std::format("{}:{}", kAddress, event_exec_port_).c_str()})();
+      CHECK_EQ(r, RPCError::kRPCNone);
     }
 
     {
       // Now have the executor register itself with the mempool.
-      executor_.start(/*port_number=*/0);
+      executor_.start(/*port_number=*/0, kAddress);
     }
   }
 
@@ -246,6 +271,9 @@ private:
   RpcServer<MempoolDbRpc> sched_db_server_;
   uint16_t sched_db_port_;
 
+  RpcServer<MempoolEventRpc> sched_event_server_;
+  uint16_t sched_event_port_;
+
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
   uint16_t sched_exec_port_;
 
@@ -273,6 +301,15 @@ private:
   HogDBDAO db_;
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
+
+  // The event server that the mempool accesses.
+  TestEventAggregator event_server_;
+  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
+      TestEventAggregatorSchedRpc(event_server_);
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+  uint16_t event_sched_port_;
+  uint16_t event_exec_port_;
 };
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;

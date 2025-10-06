@@ -6,6 +6,7 @@
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -72,8 +73,10 @@ struct TestEventAggregatorExecRpc {
 
   uint16_t start_server(uint16_t port_number)
   {
-    return tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
-                          [this](auto c) { c->server(this); });
+    auto ret = tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                              [this](auto c) { c->server(this); });
+    info("Starting event exec (test impl) RPC server on port {}", ret);
+    return ret;
   }
 
 private:
@@ -101,8 +104,10 @@ struct TestEventAggregatorSchedRpc {
 
   uint16_t start_server(uint16_t port_number)
   {
-    return tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
-                          [this](auto c) { c->server(this); });
+    auto ret = tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                              [this](auto c) { c->server(this); });
+    info("Starting event sched (test impl) RPC server on port {}", ret);
+    return ret;
   }
 
 private:

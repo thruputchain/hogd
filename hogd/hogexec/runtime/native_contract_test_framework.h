@@ -206,7 +206,8 @@ public:
   auto &client() { return event_sched_client_; }
 
 private:
-  using client_t = EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+  using client_t =
+      EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
 
   static client_t connect_to_event_sched_server(uint16_t port)
   {
@@ -477,7 +478,8 @@ private:
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
-    event_sched_wrapper_ = std::make_unique<EventSchedWrapper>(event_server_sched_port);
+    event_sched_wrapper_ =
+        std::make_unique<EventSchedWrapper>(event_server_sched_port);
 
     event_server_proxy_ = std::make_unique<EventServerProxy>(
         x23::HostPort{"localhost", event_server_exec_port});
@@ -520,8 +522,10 @@ private:
 
   // TODO(geoff): replace with proper event server connection
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
-  TestEventAggregatorSchedRpc event_server_sched_rpc_ = TestEventAggregatorSchedRpc(event_server_);
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
+      TestEventAggregatorSchedRpc(event_server_);
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

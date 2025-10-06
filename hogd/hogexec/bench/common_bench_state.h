@@ -148,7 +148,8 @@ private:
   // TODO(geoff): replace with proper event server connection
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
 
   using coord_client_t =
       DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

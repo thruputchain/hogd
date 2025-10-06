@@ -102,7 +102,8 @@ protected:
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;

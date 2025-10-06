@@ -32,11 +32,12 @@ public:
 
     DatabaseIdentifier identifier{ShardedDB(exec_result)};
     auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
-    auto event_server_proxy = std::make_unique<EventServerProxy>(EventServerProxy::make_from_exec_result(exec_result.event));
+    auto event_server_proxy = std::make_unique<EventServerProxy>(
+        EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
-        std::make_unique<ExecutorStateManager>(std::move(db_proxy), std::move(event_server_proxy));
+        std::make_unique<ExecutorStateManager>(std::move(db_proxy),
+                                               std::move(event_server_proxy));
   }
-
 
   // Disable copy and move
   ExecutorMempoolRpc(ExecutorMempoolRpc const &) = delete;

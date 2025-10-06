@@ -58,8 +58,9 @@ private:
   BlockManager block_manager_;
   SrpcDbExecutorServer executor_server_;
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
-  
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;

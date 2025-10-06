@@ -5,6 +5,7 @@
 #include <format>
 #include <limits> // NOLINT(misc-include-cleaner)
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 
@@ -21,10 +22,9 @@
 namespace hogd {
 
 std::string
-MempoolExecutorClient::get_executor_address(uint16_t executor_port)
+MempoolExecutorClient::get_executor_address(std::string_view hostname,
+                                            uint16_t executor_port)
 {
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
   return std::format("{}:{}", hostname, executor_port);
 }
 
@@ -46,13 +46,17 @@ MempoolExecutorClient::connect_to_coordinator()
 }
 
 IntroExecResult
-MempoolExecutorClient::register_with_coordinator(uint16_t executor_port)
+MempoolExecutorClient::register_with_coordinator(std::string hostname,
+                                                 uint16_t executor_port)
 {
+  if (hostname.empty()) {
+    CHECK_EQ(get_hostname(hostname), 0);
+  }
   auto client = connect_to_coordinator();
-  const ExecCard card = {.protocol = version::kHogdProtocol,
-                         .upid = {},
-                         .address =
-                             get_executor_address(executor_port).c_str()};
+  const ExecCard card = {
+      .protocol = version::kHogdProtocol,
+      .upid = {},
+      .address = get_executor_address(hostname, executor_port).c_str()};
   auto ret = client.schedexec_intro_exec(card)();
   return ret;
 }

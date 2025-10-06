@@ -6,6 +6,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "x23/format.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include <stdexcept>
@@ -19,7 +20,7 @@ public:
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
     // TODO(geoff): validate the other fields in event card.
-    info("Making event server proxy from event card {}", x23::show(event.address));
+    info("Connecting to event server at {}", x23::show(event));
     x23::HostPort host_port;
     if (!host_port.parse(event.address)) {
       throw std::runtime_error("Failed to parse event server address");
