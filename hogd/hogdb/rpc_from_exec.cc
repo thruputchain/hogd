@@ -71,33 +71,6 @@ to_span(const Bytestring &bs)
 
 // HogDBExecutorRpc implementations
 
-void
-HogDBExecutorServer::start_server(uint16_t port)
-{
-  lfd_ = x23::stcplisten(port);
-  if (!lfd_) {
-    perror("listen");
-    exit(EXIT_FAILURE);
-  }
-  port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
-
-  listen_thread_ = std::jthread([this](std::stop_token &&stop) {
-    while (!stop.stop_requested()) {
-
-      sockaddr_storage ss;
-      socklen_t sslen = sizeof(ss);
-      x23::UniqueFd fd{
-          accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
-      if (!fd) {
-        info("accept error: {}", Errno{});
-      }
-      else {
-        x23::srpc_stream_logged(fd.release())->server(this);
-      }
-    }
-  });
-}
-
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
