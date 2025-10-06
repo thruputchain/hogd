@@ -4,8 +4,10 @@
 #include <cassert>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <utility>
 
+#include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
@@ -28,21 +30,35 @@ public:
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
 
+  struct EphemeralTxIdentifier {
+    BlockID block_id;
+    TransactionID tx_id;
+  };
+
   StorageSnapshotCache &get_snapshot()
   {
     assert(snapshot_cache_);
     return *snapshot_cache_;
   }
 
-  std::pair<PerTransactionDatabaseProxy, PerTransactionEventServerProxy>
-  get_new_db_proxy()
+  EphemeralTxIdentifier allocate_identifier()
   {
-    TransactionID tx_id = current_tx_id_.fetch_add(1);
-    return std::make_pair(PerTransactionDatabaseProxy(*db_proxy_,
-                                                      current_block_id_, tx_id),
-                          PerTransactionEventServerProxy(*event_server_proxy_,
-                                                         current_block_id_,
-                                                         tx_id));
+    return EphemeralTxIdentifier{.block_id = current_block_id_,
+                                 .tx_id = allocate_txid()};
+  }
+
+  PerTransactionDatabaseProxy get_new_db_proxy(EphemeralTxIdentifier identifier)
+  {
+    return PerTransactionDatabaseProxy(*db_proxy_, identifier.block_id,
+                                       identifier.tx_id);
+  }
+
+  PerTransactionEventServerProxy
+  get_new_event_server_proxy(EphemeralTxIdentifier identifier)
+  {
+    return PerTransactionEventServerProxy(*event_server_proxy_,
+                                          identifier.block_id,
+                                          identifier.tx_id);
   }
 
   // Allows direct modification of the committed database -- not for use
@@ -52,7 +68,14 @@ public:
 
   BlockID get_current_block_id() const { return current_block_id_; }
 
+  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier identifier)
+  {
+    return event_server_.get_events(identifier.block_id, identifier.tx_id);
+  }
+
 private:
+  TransactionID allocate_txid() { return current_tx_id_.fetch_add(1); }
+
   BlockID current_block_id_ = 0;
   InMemoryDatabase db_;
   BlockManager block_manager_;

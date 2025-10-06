@@ -17,11 +17,11 @@ namespace hogd {
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
-  : handler_([](auto stx, auto &snapshot, auto proxies, auto context) {
-      return SystemCallHandler(std::move(stx), snapshot, proxies.first,
-                               std::move(proxies.second), ProposalModeCtor{},
-                               std::move(context));
-    }(stx, db.get_snapshot(), db.get_new_db_proxy(), std::move(context)))
+  : identifier_(db.allocate_identifier()), db_(db),
+    handler_(stx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+             db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
+             std::move(context))
+
 {}
 
 ForeignRootInvokeResult
