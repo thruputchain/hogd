@@ -16,6 +16,7 @@ DBContext::DBContext()
   : block_manager_(current_block_id_, &db_), executor_server_(&block_manager_),
     db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
+  executor_server_.start_server(0);
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = executor_server_.port()});
   event_server_proxy_ = std::make_unique<EventServerProxy>(
