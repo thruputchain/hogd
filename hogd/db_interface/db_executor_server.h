@@ -71,6 +71,16 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
                                 AddressAndKey const &addrkey,

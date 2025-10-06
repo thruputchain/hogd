@@ -75,6 +75,16 @@ public:
 
   void setup_ban_item(AddressAndKey const &addrkey);
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   BlockID block_id_;
 

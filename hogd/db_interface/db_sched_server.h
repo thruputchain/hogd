@@ -70,6 +70,16 @@ public:
   x23::Async<DbSchedResult>
   dbsched_load_genesis_block(GenesisBlock const &genesis_block);
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   BlockManager *block_manager_;
 };

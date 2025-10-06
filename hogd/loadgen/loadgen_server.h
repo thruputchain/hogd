@@ -25,6 +25,16 @@ public:
   LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
                                            uint64_t num_txs);
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
 private:
   x23::MVar<
       std::unordered_map<LoadgenContextID, std::shared_ptr<ExperimentState>>>

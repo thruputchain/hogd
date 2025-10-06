@@ -34,6 +34,16 @@ public:
   {
     co_return;
   }
+
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void await_shutdown_request()
+  {
+    // TODO(jhumphri): Implement.
+  }
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
 
