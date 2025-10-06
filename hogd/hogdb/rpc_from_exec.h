@@ -72,7 +72,7 @@ static_assert(
 
 class HogDBExecutorServer : public RpcServer<HogDBExecutorRpc> {
 public:
-  HogDBExecutorRpc(RPCContext &ctx) : ctx_(ctx) {}
+  HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
 };
 
 } // namespace hogd
