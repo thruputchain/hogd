@@ -3,11 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstdlib>
 #include <span>
-#include <stop_token>
-#include <sys/socket.h>
-#include <thread>
+#include <utility>
 
 // generated x23 headers
 #include "account.hh"
@@ -15,7 +12,6 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
