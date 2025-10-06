@@ -76,14 +76,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // Create and start the loadgen server
   hogd::LoadgenServer server;
-  auto start_result = server.start_server(port);
-  if (!start_result) {
-    std::println(stderr, "Error: Failed to start server on port {}: {}", port,
-                 start_result.error());
-    return EXIT_FAILURE;
-  }
-
-  uint16_t actual_port = start_result.value();
+  auto actual_port = server.start_server(port);
   hogd::info("Loadgen server started successfully on port {}", actual_port);
 
   // block forever

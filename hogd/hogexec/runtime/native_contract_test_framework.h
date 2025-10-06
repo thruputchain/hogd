@@ -110,8 +110,7 @@ private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
-  SrpcDbExecutorServer db_executor_server_ =
-      SrpcDbExecutorServer(&block_manager_, 0);
+  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_, 0);
 
   DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
   uint16_t coord_port_ = 0;
