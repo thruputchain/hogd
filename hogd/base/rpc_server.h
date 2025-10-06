@@ -26,13 +26,9 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    x23::DestroyInhibit di;
-    port = tcp_rpc_server(cp_, port, [this, di = x23::RefPtr{di}](auto c) {
+    port = tcp_rpc_server(cp_, port, [this](auto c) {
       c->server(&rpc_, typename RpcImplementation::rpc_service{});
     });
-    // Use [di] to wait for the RPC server to start before calling
-    // [socketpair()] below.
-    di.destroy_wait();
 
     int fds[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
