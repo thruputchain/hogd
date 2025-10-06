@@ -125,7 +125,7 @@ public:
     db_executor_server_.start_server(0);
   }
 
-  uint16_t exec_port() const { return db_executor_server_.port(); }
+  uint16_t exec_port() { return db_executor_server_.port(); }
   uint16_t coord_port() { return db_sched_server_.port(); }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
