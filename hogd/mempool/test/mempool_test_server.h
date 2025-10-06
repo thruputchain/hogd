@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -19,6 +20,7 @@
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -45,6 +47,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"

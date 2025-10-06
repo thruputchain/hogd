@@ -24,6 +24,7 @@ namespace hogd {
 
 namespace {
 
+// runs a db server to support an executor benchmark.
 void
 run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 {
@@ -43,8 +44,8 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   MerkleTriePrefix trie;
   RPCContext ctx(db, trie);
 
-  // Start the coordinator server
-  std::println("Starting coordinator server on port {}", coord_port);
+  // Start the scheduler server
+  std::println("Starting scheduler server on port {}", coord_port);
   HogDBSchedServer db_sched_server(ctx);
   db_sched_server.start_server(coord_port);
 
@@ -65,7 +66,7 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port>", argv[0]);
+  std::println("Usage: {} -e <exec_port> -c <sched_port>", argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace

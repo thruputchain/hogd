@@ -32,7 +32,9 @@ connect_to_event_server(x23::HostPort host_port)
 
 EventServerProxy::EventServerProxy(x23::HostPort host_port)
   : client_(connect_to_event_server(std::move(host_port)))
-{}
+{
+  info("Making event server proxy from host port {}", host_port.show());
+}
 
 PerTransactionEventServerProxy::PerTransactionEventServerProxy(
     EventServerProxy &event_server_proxy, BlockID block_id, TransactionID tx_id)
@@ -43,6 +45,7 @@ SystemStatus<void>
 EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
                              TxEventLog const &tx_event_log)
 {
+  info("Emitting event for block {} and tx {}", block_id, tx_id);
   auto r = client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log);
   switch (r) {
   case RPCError::kRPCNone:

@@ -15,7 +15,6 @@ target_link_libraries(
   exec_interface
   hogd
   runtime
-  runtime_test_util
   precompiles
 )
 
