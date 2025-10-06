@@ -10,6 +10,7 @@ add_xdr(
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
 	../../protocol/event.x
+	../../protocol/event_rpc.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/exec_sched.x
 	../../protocol/ffi_enums.x

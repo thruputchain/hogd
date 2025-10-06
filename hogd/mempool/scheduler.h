@@ -2,13 +2,20 @@
 
 #include <iostream>
 #include <map>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
+#include "db_sched.hh"
+#include "exec_sched.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "transaction.hh"
 #include "types.h"
+#include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 

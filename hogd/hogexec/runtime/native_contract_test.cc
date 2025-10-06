@@ -17,6 +17,7 @@
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -26,10 +27,13 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -88,23 +92,45 @@ protected:
     contract_map.emplace(0, std::move(contract_0));
     contract_map.emplace(1, std::move(contract_1));
 
+    auto event_exec_port = event_server_exec_rpc_.start_server(0);
+
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = snapshot_server_.port()});
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_exec_port});
+    event_server_.open_block(0);
   }
 
+<<<<<<< HEAD
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
+=======
+  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+>>>>>>> 23a1abcdb2f81a310dca0ee458b228a32ebd1d23
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::shared_ptr<RuntimeContext> runtime_context_;
+
+  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
+                                 StorageSnapshotCache &snapshot,
+                                 BlockID block_id, TransactionID tx_id)
+  {
+    return SystemCallHandler(
+        signed_tx, snapshot,
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
+        ProposalModeCtor{}, runtime_context_);
+  }
 };
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
   StorageSnapshotCache snapshot(0, *db_proxy_);
-  SystemCallHandler handler(SignedTransaction{}, snapshot,
-                            PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-                            ProposalModeData{}, runtime_context_);
+  SystemCallHandler handler = make_handler(SignedTransaction{}, snapshot, 0, 0);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
@@ -223,7 +249,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   snapshot_server_.get_impl().setup_create_deployment(address,
                                                       sha256(contract));
 
-  SystemCallHandler handler(
+  SystemCallHandler handler = make_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -235,8 +261,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                           .calldata = {},
                       },
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-      ProposalModeData{}, runtime_context_);
+      snapshot, 0, 0);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -307,7 +332,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   snapshot_server_.get_impl().setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
-  SystemCallHandler handler(
+  SystemCallHandler handler = make_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -320,8 +345,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
                       },
               },
       },
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-      ProposalModeData{}, runtime_context_);
+      snapshot, 0, 0);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -424,7 +448,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
       AddressAndKey{.address = address, .key = bad_full_key});
 
   {
-    SystemCallHandler handler(
+    SystemCallHandler handler = make_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -437,14 +461,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        ProposalModeData{}, runtime_context_);
+        snapshot, 0, 0);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
   }
   {
-    SystemCallHandler handler(
+    SystemCallHandler handler = make_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -457,8 +480,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 1),
-        ProposalModeData{}, runtime_context_);
+        snapshot, 0, 1);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);

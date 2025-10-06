@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 #include <bits/basic_string.h>
+=======
+#include <cstdint>
+>>>>>>> 23a1abcdb2f81a310dca0ee458b228a32ebd1d23
 #include <gtest/gtest.h>
 
 #include <print>
@@ -67,6 +71,11 @@ public:
 
     EXPECT_EQ(bal_int, bal_ref_int);
     EXPECT_EQ(bal_int, expected_balance);
+  }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 
   const StorageCostModel *cost_model_;

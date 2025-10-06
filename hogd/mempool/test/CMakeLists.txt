@@ -13,6 +13,7 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  runtime_test_util
   contract_loader
   GTest::gtest_main
 )
@@ -41,6 +42,7 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  runtime_test_util
   contract_loader
   GTest::gtest_main
 )
@@ -69,6 +71,7 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  runtime_test_util
   GTest::gtest_main
 )
 

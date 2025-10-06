@@ -2,13 +2,16 @@
 
 #include <atomic>
 #include <chrono>
+#include <mutex>
 
 #include "discovery.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_event.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -27,7 +30,9 @@ class MempoolExecutorRpc {
 public:
   using rpc_service = SchedExec1;
 
-  MempoolExecutorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
+  MempoolExecutorRpc(MempoolDbRpc &db_rpc, MempoolEventRpc &event_rpc)
+    : db_rpc_(db_rpc), event_rpc_(event_rpc)
+  {}
 
   // Disable copy and move.
   MempoolExecutorRpc(const MempoolExecutorRpc &) = delete;
@@ -37,13 +42,14 @@ public:
 
   x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card)
   {
-    info("executor connected. {} total executors connected.",
-         execs_.size() + 1);
+    info("executor with card {} connected. {} total executors connected.",
+         x23::show(card), execs_.size() + 1);
 
     std::unique_lock lk(mutex_);
     execs_.push_back(card);
     co_return IntroExecResult{.exec_id = execs_.size() - 1,
-                              .shards = db_rpc_.shards()};
+                              .shards = db_rpc_.shards(),
+                              .event = event_rpc_.event()};
   }
 
   x23::Vec<ExecCard> executors()
@@ -58,6 +64,7 @@ public:
     ret.reserve(execs_.size());
 
     for (const ExecCard &card : execs_) {
+      info("getting client for {}", card.address);
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address));
       ret.push_back(
@@ -76,6 +83,7 @@ public:
 
 private:
   MempoolDbRpc &db_rpc_;
+  MempoolEventRpc &event_rpc_;
 
   std::mutex mutex_;
   x23::Vec<ExecCard> execs_;

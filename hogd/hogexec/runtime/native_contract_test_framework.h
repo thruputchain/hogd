@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -15,6 +16,9 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "db_sched.hh"
+#include "event.hh"
+#include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -31,23 +35,28 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "sched_coord.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -188,6 +197,30 @@ private:
   coord_client_t coord_client_;
 };
 
+class EventSchedWrapper {
+public:
+  EventSchedWrapper(uint16_t port)
+    : event_sched_client_(connect_to_event_sched_server(port))
+  {}
+
+  auto &client() { return event_sched_client_; }
+
+private:
+  using client_t =
+      EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+
+  static client_t connect_to_event_sched_server(uint16_t port)
+  {
+    auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
+    if (!server_addr) {
+      throw std::runtime_error("Failed to connect to event server");
+    }
+    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+        ->client(EventSched1{});
+  }
+  client_t event_sched_client_;
+};
+
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
@@ -229,6 +262,11 @@ public:
     }
   }
 
+  struct EphemeralTxIdentifier {
+    BlockID block_id;
+    TransactionID tx_id;
+  };
+
   // Commits the current block and creates a new one.
   void advance_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
@@ -239,12 +277,19 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::shared_ptr<RuntimeContext> runtime_context)
+                               std::shared_ptr<RuntimeContext> runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);
+    auto txid = allocate_txid();
+    if (identifier) {
+      identifier->block_id = block_number_;
+      identifier->tx_id = txid;
+    }
     return SystemCallHandler(tx, *storage_snapshot_cache_,
-                             make_new_per_tx_db_proxy(), ExecutionModeData{},
-                             std::move(runtime_context));
+                             make_new_per_tx_db_proxy(txid),
+                             make_new_per_tx_event_server_proxy(txid),
+                             ProposalModeCtor{}, std::move(runtime_context));
   }
 
   std::optional<StorageItem>
@@ -356,11 +401,21 @@ public:
         db_wrapper_);
   }
 
-  PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
+  PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
-                                       allocate_txid());
+    if (tx_id == UINT64_MAX) {
+      tx_id = allocate_txid();
+    }
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);
+  }
+
+  PerTransactionEventServerProxy
+  make_new_per_tx_event_server_proxy(TransactionID tx_id)
+  {
+    assert(event_server_proxy_);
+    return PerTransactionEventServerProxy(*event_server_proxy_, block_number_,
+                                          tx_id);
   }
 
   void run_genesis_initialization(
@@ -395,6 +450,11 @@ public:
                                 .contract_size = contract_size};
   }
 
+  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
+  {
+    return event_server_.get_events(tx_id.block_id, tx_id.tx_id);
+  }
+
 private:
   void write_deployment(ContractAddress const &addr,
                         DeployedContractHash const &deployment,
@@ -409,9 +469,13 @@ private:
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
+    open_event_block(block_number_);
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
+
+  void open_event_block(BlockID block_id);
+  void close_event_block(BlockID block_id);
 
   void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
@@ -423,10 +487,17 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
+    uint16_t event_server_exec_port = event_server_exec_rpc_.start_server(0);
+    uint16_t event_server_sched_port = event_server_sched_rpc_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
+    event_sched_wrapper_ =
+        std::make_unique<EventSchedWrapper>(event_server_sched_port);
+
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_server_exec_port});
 
     if (!empty_genesis) {
       return;
@@ -461,6 +532,15 @@ private:
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+  std::unique_ptr<EventSchedWrapper> event_sched_wrapper_;
+
+  // TODO(geoff): replace with proper event server connection
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
+      TestEventAggregatorSchedRpc(event_server_);
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

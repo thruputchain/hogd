@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <string_view>
@@ -44,6 +45,11 @@ public:
   constexpr static auto make_delete_delta()
   {
     return StorageDelta(StorageDeltaType::kDeltaTypeDelete);
+  }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 };
 

@@ -12,14 +12,17 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "event.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/event/event.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -54,10 +57,13 @@ validate_flags(StorageItemRPCFlagSet flags)
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
-    PerTransactionDatabaseProxy db_proxy, ExecutionModeData execution_mode_data,
+    PerTransactionDatabaseProxy db_proxy,
+    PerTransactionEventServerProxy event_server_proxy,
+    ExecutionModeCtor execution_mode_ctor,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
+    event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
@@ -72,7 +78,15 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
-    execution_mode_data_(std::move(execution_mode_data)),
+    execution_mode_data_(
+        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
+          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+            return ProposalModeData{};
+          }
+          return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                                   std::get<ValidationModeCtor>(
+                                       execution_mode_ctor)};
+        }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
 {
   assert(runtime_context_);
@@ -185,6 +199,10 @@ SystemCallHandler::root_invoke()
   // update cumulative_invoke_result_ with the final validation data
   check_final_validation_data();
 
+  if (cumulative_invoke_result_.is_root_success()) {
+    root_invoke_succeeded_ = true;
+  }
+
   return cumulative_invoke_result_;
 }
 
@@ -203,6 +221,7 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
   assert(last_frame_.has_value());
+  assert(root_invoke_succeeded_);
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op.
@@ -257,6 +276,14 @@ SystemCallHandler::try_commit_transaction()
   auto res = db_proxy_.commit_transaction(std::move(new_contracts));
   if (!res.has_value()) {
     return res.error();
+  }
+
+  // This is past the point of successful commitment;
+  // now we can safely emit the events to the event server
+  auto emit_events_status = emit_events();
+  if (!emit_events_status.has_value()) {
+    error("emit_events failed: {}", emit_events_status.error());
+    return emit_events_status.error();
   }
 
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
@@ -432,26 +459,58 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame().calldata();
 }
 
-ProposalModeData const &
+NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
-  assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
-  return std::get<ProposalModeData>(execution_mode_data_);
+  assert(root_invoke_succeeded_);
+  return std::visit([](auto const &arg) -> NondeterministicProposalData const
+                                            & { return arg.proposal_data(); },
+                    execution_mode_data_);
 }
 
-SyscallStatus<void>
-SystemCallHandler::log(std::span<const std::byte> message)
+SHA256Hash
+SystemCallHandler::get_proposed_tx_hash() const
+{
+  assert(root_invoke_succeeded_);
+
+  ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
+                                  .nondeterministic_proposal_data =
+                                      get_proposal_data()};
+
+  return sha256(proposed_tx);
+}
+
+SystemStatus<void>
+SystemCallHandler::emit_events()
+{
+  assert(last_frame_.has_value());
+  assert(cumulative_invoke_result_.is_root_success());
+  assert(root_invoke_succeeded_);
+  auto events = last_frame_.value().extract_events();
+  if (events.empty()) {
+    trace("No events to emit, skipping emit_events RPC");
+    return {};
+  }
+  return event_server_proxy_.emit_events(TxEventLog{
+      .proposed_tx_hash = get_proposed_tx_hash(),
+      .events = std::move(events),
+  });
+}
+
+void
+SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
+                             SHA256Hash const *topic2,
+                             std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
+  assert(data.size() <= kMaxLogMessageLen);
 
-  if (message.size() > kMaxLogMessageLen) {
-    // log message too long, return error
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  auto message = make_tx_emitted_event(
+      invocation_frame_stack_.get_active_frame().address(), topic0, topic1,
+      topic2, data);
 
-  invocation_frame_stack_.get_active_frame().log(message);
-  return {};
+  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
 }
 
 ContractAddress

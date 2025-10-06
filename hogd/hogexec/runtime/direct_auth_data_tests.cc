@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <stdexcept>
@@ -72,6 +73,11 @@ public:
     // check that costs are reflected in the balance
     check_balance(contract_addr, expected_balance);
     check_balance(reference_addr, expected_balance);
+  }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 
   const StorageCostModel *cost_model_;

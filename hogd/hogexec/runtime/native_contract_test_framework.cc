@@ -41,6 +41,7 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
     }
   }
+  close_event_block(block_number_);
   dbtip_block_id_ = block_number_;
   block_number_++;
 
@@ -52,6 +53,7 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
   }
+  open_event_block(block_number_);
 
   storage_snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
@@ -66,7 +68,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
   }
-
+  close_event_block(block_number_);
   block_number_++;
 
   {
@@ -77,6 +79,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
   }
+  open_event_block(block_number_);
 
   storage_snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
@@ -229,6 +232,23 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
   auto ret = db_.write_address_metadata(addr, deployment);
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
+  }
+}
+
+void
+NativeContractTestFramework::open_event_block(BlockID block_id)
+{
+  // rpc is infallible
+  event_sched_wrapper_->client().eventsched_open_block(block_id);
+}
+
+void
+NativeContractTestFramework::close_event_block(BlockID block_id)
+{
+  auto r = event_sched_wrapper_->client().eventsched_close_block(block_id);
+  if (r.error() != RPCError::kRPCNone) {
+    throw std::runtime_error(
+        "close_event_block: eventsched_close_block failed");
   }
 }
 

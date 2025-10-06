@@ -2,6 +2,7 @@
 
 #include "exec_sched.hh"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
@@ -13,9 +14,10 @@ namespace hogd {
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
-  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy)
+  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
+                  EventServerProxy &event_server_proxy)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
-      snapshot_cache_(id, db_proxy)
+      event_server_proxy_(event_server_proxy), snapshot_cache_(id, db_proxy)
   {}
 
   // Disable copy and move
@@ -33,10 +35,13 @@ public:
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);
+  PerTransactionEventServerProxy
+  make_per_tx_event_server_proxy(TransactionID tx_id);
 
   const ExecutionMode mode_;
   const BlockID block_id_;
   DatabaseProxy &db_proxy_;
+  EventServerProxy &event_server_proxy_;
   StorageSnapshotCache snapshot_cache_;
 };
 

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -17,8 +18,10 @@
 #include "contract_loader.h"
 #include "coord_sched.hh"
 #include "db_sched.hh"
+#include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -35,8 +38,10 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/mempool/types.h"
@@ -44,7 +49,10 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -72,7 +80,9 @@ public:
 
   MempoolTestServer()
     : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
-      sched_exec_server_(sched_db_server_.get_impl()),
+      sched_event_port_(sched_event_server_.start_server(/*port=*/0)),
+      sched_exec_server_(sched_db_server_.get_impl(),
+                         sched_event_server_.get_impl()),
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port=*/0)),
@@ -111,6 +121,10 @@ public:
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
       db_scheduler_port_ = db_scheduler_server_->port();
+
+      event_sched_port_ =
+          event_server_sched_rpc_.start_server(/*port_number=*/0);
+      event_exec_port_ = event_server_exec_rpc_.start_server(/*port_number=*/0);
     }
 
     {
@@ -159,11 +173,26 @@ public:
            .address_for_coord = "fail",
            .address_for_exec = exec_address.c_str(),
            .address_for_sched = sched_address.c_str()})();
+
+      // make the event server register itself with the mempool.
+      fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_event_port_}
+               .to_addr());
+      SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
+          event_client =
+              x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
+
+      auto r = event_client.schedevent_intro_event(
+          {.protocol = version::kHogdProtocol,
+           .upid = {},
+           .address =
+               std::format("{}:{}", kAddress, event_exec_port_).c_str()})();
+      CHECK_EQ(r, RPCError::kRPCNone);
     }
 
     {
       // Now have the executor register itself with the mempool.
-      executor_.start(/*port_number=*/0);
+      executor_.start(/*port_number=*/0, kAddress);
     }
   }
 
@@ -212,6 +241,7 @@ public:
   uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t db_executor_port() const { return db_executor_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
+  uint16_t event_sched_port() const { return event_sched_port_; }
 
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
@@ -219,7 +249,7 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr size_t kRamDbBytes = 1024 * 1024 * 400; // 400 MiB.
+  static constexpr size_t kRamDbBytes = 1024 * 1024 * 1024; // 1 GiB.
 
   void set_up_grant_storage_token(const ContractAddress &address)
   {
@@ -242,6 +272,9 @@ private:
 
   RpcServer<MempoolDbRpc> sched_db_server_;
   uint16_t sched_db_port_;
+
+  RpcServer<MempoolEventRpc> sched_event_server_;
+  uint16_t sched_event_port_;
 
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
   uint16_t sched_exec_port_;
@@ -270,6 +303,15 @@ private:
   HogDBDAO db_;
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
+
+  // The event server that the mempool accesses.
+  TestEventAggregator event_server_;
+  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
+      TestEventAggregatorSchedRpc(event_server_);
+  TestEventAggregatorExecRpc event_server_exec_rpc_ =
+      TestEventAggregatorExecRpc(event_server_);
+  uint16_t event_sched_port_;
+  uint16_t event_exec_port_;
 };
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
@@ -307,6 +349,9 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
+  std::unique_ptr<x23::ThreadPool> event_sched_pool;
+  std::unique_ptr<x23::CoroPoll> event_sched_cp;
+
   std::unique_ptr<MempoolCoordinatorRpc> interface;
 };
 
@@ -333,10 +378,21 @@ create_clients(MempoolTestServer &server)
   x23::Vec<exec_client_t> exec_clients =
       server.sched_exec_rpc().get_clients(*exec_cp);
 
+  // Mempool-Event RPC client.
+  auto event_sched_pool = std::make_unique<x23::ThreadPool>();
+  auto event_sched_cp = std::make_unique<x23::CoroPoll>(*event_sched_pool);
+  x23::UniqueFd fd = x23::tcpconnect(server_address_to_sockaddr(
+      std::format("{}:{}", MempoolTestServer::kAddress,
+                  server.event_sched_port())));
+  event_sched_client_t event_sched_client =
+      x23::rpc_stream_logged(*event_sched_cp, fd.release())
+          ->client(EventSched1{});
+
   auto interface =
       std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),
                                               std::move(db_sched_client),
-                                              std::move(exec_clients));
+                                              std::move(exec_clients),
+                                              std::move(event_sched_client));
   interface->start({.protocol = version::kHogdProtocol, .address = ""});
   return {.coord_pool = std::move(coord_pool),
           .coord_cp = std::move(coord_cp),
@@ -344,6 +400,8 @@ create_clients(MempoolTestServer &server)
           .db_sched_cp = std::move(db_sched_cp),
           .exec_pool = std::move(exec_pool),
           .exec_cp = std::move(exec_cp),
+          .event_sched_pool = std::move(event_sched_pool),
+          .event_sched_cp = std::move(event_sched_cp),
           .interface = std::move(interface)};
 }
 
