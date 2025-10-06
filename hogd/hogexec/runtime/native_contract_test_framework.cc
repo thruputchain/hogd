@@ -238,20 +238,17 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
 void
 NativeContractTestFramework::open_event_block(BlockID block_id)
 {
-  auto r = event_server_.executorevent_open_block(block_id);
-  if (r != RPCError::kRPCNone) {
-    throw std::runtime_error(
-        "open_event_block: executorevent_open_block failed");
-  }
+  // rpc is infallible
+  event_coord_wrapper_->client().coordevent_open_block(block_id);
 }
 
 void
 NativeContractTestFramework::close_event_block(BlockID block_id)
 {
-  auto r = event_server_.executorevent_close_block(block_id);
-  if (r != RPCError::kRPCNone) {
+  auto r = event_coord_wrapper_->client().coordevent_close_block(block_id);
+  if (r.error() != RPCError::kRPCNone) {
     throw std::runtime_error(
-        "close_event_block: executorevent_close_block failed");
+        "close_event_block: coordevent_close_block failed");
   }
 }
 

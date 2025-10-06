@@ -14,7 +14,6 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
@@ -30,6 +29,7 @@
 #include "transaction.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -45,7 +45,7 @@ public:
     start_db_server();
     connect_coord();
     connect_exec();
-    event_server_port_ = event_server_.start_server(0);
+    event_server_port_ = event_server_exec_rpc_.start_server(0);
     connect_event();
   }
 
@@ -148,6 +148,7 @@ private:
   // TODO(geoff): replace with proper event server connection
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
 
   using coord_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

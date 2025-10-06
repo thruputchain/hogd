@@ -90,17 +90,19 @@ protected:
     contract_map.emplace(0, std::move(contract_0));
     contract_map.emplace(1, std::move(contract_1));
 
-    auto event_port = event_server_.start_server(0);
+    auto event_exec_port = event_server_exec_rpc_.start_server(0);
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = snapshot_server_.port()});
     event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_port});
+        x23::HostPort{"localhost", event_exec_port});
+    event_server_.open_block(0);
   }
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
   TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;

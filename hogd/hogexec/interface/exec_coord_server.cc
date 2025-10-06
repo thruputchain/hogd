@@ -86,7 +86,7 @@ ExecCoordServer::init_from_coord(const LocalMockDB *mock_db)
 
   // TODO(geoff): This won't actually run; but this is pending adding the event
   // server addr to the mempool intro card.
-  auto event_port = event_server_.start_server(0);
+  auto event_port = event_server_exec_rpc_.start_server(0);
 
   if (mock_db) {
     start_rpc_service(*mock_db, x23::HostPort{"localhost", event_port},

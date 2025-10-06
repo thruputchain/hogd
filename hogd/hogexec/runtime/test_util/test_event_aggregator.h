@@ -10,6 +10,7 @@
 #include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
+#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -18,8 +19,6 @@ namespace hogd {
 // std::map for later inspection in tests
 class TestEventAggregator {
 public:
-  using rpc_service = ExecutorEvent1;
-
   TestEventAggregator() = default;
 
   // Disable copy and move
@@ -28,18 +27,15 @@ public:
   TestEventAggregator(TestEventAggregator &&) = delete;
   TestEventAggregator &operator=(TestEventAggregator &&) = delete;
 
-  uint16_t start_server(uint16_t port_number);
-
-  // RPC service methods
-  static void executorevent_null() {}
-
-  RPCError executorevent_open_block(BlockID block_id);
-  RPCError executorevent_close_block(BlockID block_id);
-  RPCError executorevent_emit_event(BlockID block_id, TransactionID tx_id,
-                                    TxEventLog const &event_log);
+  RPCError open_block(BlockID block_id);
+  EventBlockResult close_block(BlockID block_id);
+  RPCError emit_event(BlockID block_id, TransactionID tx_id,
+                      TxEventLog const &event_log);
 
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
+
+  auto &get_coropoll() { return cp_; }
 
 private:
   x23::ThreadPool pool_ = x23::ThreadPool(1);
@@ -59,6 +55,62 @@ private:
   std::map<BlockID, std::map<TransactionID, TxEventLog>> events_;
 };
 
-static_assert(is_ExecutorEvent1<TestEventAggregator *, x23::MaybeAsync>);
+struct TestEventAggregatorExecRpc {
+  TestEventAggregatorExecRpc(TestEventAggregator &event_aggregator)
+    : event_aggregator_(event_aggregator)
+  {}
+
+  using rpc_service = ExecutorEvent1;
+
+  static void executorevent_null() {}
+
+  RPCError executorevent_emit_event(BlockID block_id, TransactionID tx_id,
+                                    TxEventLog const &event_log)
+  {
+    return event_aggregator_.emit_event(block_id, tx_id, event_log);
+  }
+
+  uint16_t start_server(uint16_t port_number)
+  {
+    return tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                          [this](auto c) { c->server(this); });
+  }
+
+private:
+  TestEventAggregator &event_aggregator_;
+};
+
+struct TestEventAggregatorCoordRpc {
+  TestEventAggregatorCoordRpc(TestEventAggregator &event_aggregator)
+    : event_aggregator_(event_aggregator)
+  {}
+
+  using rpc_service = CoordEvent1;
+
+  static void coordevent_null() {}
+
+  RPCError coordevent_open_block(BlockID block_id)
+  {
+    return event_aggregator_.open_block(block_id);
+  }
+
+  EventBlockResult coordevent_close_block(BlockID block_id)
+  {
+    return event_aggregator_.close_block(block_id);
+  }
+
+  uint16_t start_server(uint16_t port_number)
+  {
+    return tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                          [this](auto c) { c->server(this); });
+  }
+
+private:
+  TestEventAggregator &event_aggregator_;
+};
+
+static_assert(is_CoordEvent1<TestEventAggregatorCoordRpc *, x23::MaybeAsync>);
+
+static_assert(is_ExecutorEvent1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
 
 } // namespace hogd

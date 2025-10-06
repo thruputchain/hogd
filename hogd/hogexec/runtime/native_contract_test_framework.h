@@ -17,6 +17,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "db_coord.hh"
+#include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -52,6 +53,7 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -191,6 +193,30 @@ private:
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   coord_client_t coord_client_;
+};
+
+class EventCoordWrapper {
+public:
+  EventCoordWrapper(uint16_t port)
+    : event_coord_client_(connect_to_event_coord_server(port))
+  {}
+
+  auto &client() { return event_coord_client_; }
+
+private:
+  using client_t = CoordEvent1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+
+
+  static client_t connect_to_event_coord_server(uint16_t port)
+  {
+    auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
+    if (!server_addr) {
+      throw std::runtime_error("Failed to connect to event server");
+    }
+    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+        ->client(CoordEvent1{});
+  }
+  client_t event_coord_client_;
 };
 
 // Common setup utilities for testing native contracts.
@@ -444,14 +470,16 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
-    uint16_t event_server_port = event_server_.start_server(0);
+    uint16_t event_server_exec_port = event_server_exec_rpc_.start_server(0);
+    uint16_t event_server_coord_port = event_server_coord_rpc_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
+    event_coord_wrapper_ = std::make_unique<EventCoordWrapper>(event_server_coord_port);
 
     event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_server_port});
+        x23::HostPort{"localhost", event_server_exec_port});
 
     if (!empty_genesis) {
       return;
@@ -487,9 +515,12 @@ private:
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
+  std::unique_ptr<EventCoordWrapper> event_coord_wrapper_;
 
   // TODO(geoff): replace with proper event server connection
   TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorCoordRpc event_server_coord_rpc_ = TestEventAggregatorCoordRpc(event_server_);
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

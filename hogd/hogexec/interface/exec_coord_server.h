@@ -83,6 +83,7 @@ private:
   // TODO(geoff): This is only temporary, until the coordinator starts introing
   // the event server.
   TestEventAggregator event_server_;
+  TestEventAggregatorExecRpc event_server_exec_rpc_ = TestEventAggregatorExecRpc(event_server_);
 };
 
 } // namespace hogd
