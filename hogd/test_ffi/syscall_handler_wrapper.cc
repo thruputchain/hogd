@@ -19,7 +19,7 @@ SyscallHandlerContext::SyscallHandlerContext(
     DBContext &db)
   : handler_([](auto stx, auto &snapshot, auto proxies, auto context) {
       return SystemCallHandler(std::move(stx), snapshot, proxies.first,
-                               std::move(proxies.second), ProposalModeData{},
+                               std::move(proxies.second), ProposalModeCtor{},
                                std::move(context));
     }(stx, db.get_snapshot(), db.get_new_db_proxy(), std::move(context)))
 {}

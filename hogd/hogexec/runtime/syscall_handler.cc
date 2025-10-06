@@ -22,6 +22,7 @@
 #include "hogd/event/event.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -58,7 +59,7 @@ SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
-    ExecutionModeData execution_mode_data,
+    ExecutionModeCtor execution_mode_ctor,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
@@ -77,7 +78,15 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
-    execution_mode_data_(std::move(execution_mode_data)),
+    execution_mode_data_(
+        [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
+          if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
+            return ProposalModeData{};
+          }
+          return ExecutionModeData{std::in_place_type<ValidationModeData>,
+                                   std::get<ValidationModeCtor>(
+                                       execution_mode_ctor)};
+        }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
 {
   assert(runtime_context_);

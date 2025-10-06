@@ -279,7 +279,7 @@ public:
     return SystemCallHandler(tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
-                             ExecutionModeData{}, std::move(runtime_context));
+                             ProposalModeCtor{}, std::move(runtime_context));
   }
 
   std::optional<StorageItem>

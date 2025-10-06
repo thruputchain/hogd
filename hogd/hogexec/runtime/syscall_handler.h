@@ -57,7 +57,7 @@ public:
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
-                    ExecutionModeData execution_mode_data,
+                    ExecutionModeCtor execution_mode_ctor,
                     std::shared_ptr<RuntimeContext> runtime_context);
 
   // Disable move and copy.

@@ -117,7 +117,7 @@ protected:
         signed_tx, snapshot,
         PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
-        ProposalModeData{}, runtime_context_);
+        ProposalModeCtor{}, runtime_context_);
   }
 };
 
@@ -242,7 +242,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   snapshot_server_.setup_create_contract(contract);
   snapshot_server_.setup_create_deployment(address, sha256(contract));
 
-  SystemCallHandler handler(
+  SystemCallHandler handler = make_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -254,9 +254,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                           .calldata = {},
                       },
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-      PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-      ProposalModeData{}, runtime_context_);
+      snapshot, 0, 0);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -326,7 +324,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   snapshot_server_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
-  SystemCallHandler handler(
+  SystemCallHandler handler = make_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -339,9 +337,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
                       },
               },
       },
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-      PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-      ProposalModeData{}, runtime_context_);
+      snapshot, 0, 0);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -443,7 +439,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
       AddressAndKey{.address = address, .key = bad_full_key});
 
   {
-    SystemCallHandler handler(
+    SystemCallHandler handler = make_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -456,9 +452,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-        PerTransactionEventServerProxy(*event_server_proxy_, 0, 0),
-        ProposalModeData{}, runtime_context_);
+        snapshot, 0, 0);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);

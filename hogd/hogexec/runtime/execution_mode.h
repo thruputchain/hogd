@@ -51,7 +51,7 @@ class ValidationModeData {
 public:
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
-  ValidationModeData(ValidationModeData &&) noexcept = default;
+  ValidationModeData(ValidationModeData &&) noexcept = delete;
   ValidationModeData &operator=(ValidationModeData &&) noexcept = delete;
   // Constructs validation data with proposal to validate against
   ValidationModeData(NondeterministicProposalData proposal_data)
@@ -96,5 +96,9 @@ private:
 
 // Variant type that holds either proposal or validation mode data
 using ExecutionModeData = std::variant<ProposalModeData, ValidationModeData>;
+
+using ProposalModeCtor = std::monostate;
+using ValidationModeCtor = NondeterministicProposalData;
+using ExecutionModeCtor = std::variant<ProposalModeCtor, ValidationModeCtor>;
 
 } // namespace hogd

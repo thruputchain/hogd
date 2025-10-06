@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <condition_variable>
 #include <mutex>
 #include <optional>
@@ -48,13 +49,18 @@ public:
   {
     std::unique_lock lk(mutex_);
     cv_.wait(lk, [this] { return event_.has_value(); });
+    assert(event_.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return event_.value();
   }
 
   auto get_client(x23::CoroPoll &cp)
   {
+    assert(event_.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     x23::UniqueFd fd =
         x23::tcpconnect(server_address_to_sockaddr(event_.value().address));
+    // NOLINTEND(bugprone-unchecked-optional-access)
     return x23::rpc_stream_logged(cp, fd.release())->client(EventSched1{});
   }
 

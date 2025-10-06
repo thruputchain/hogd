@@ -19,7 +19,7 @@ namespace {
 auto
 connect_to_event_server(x23::HostPort host_port)
 {
-
+  info("Connecting to event server on host port {}", host_port.show());
   auto server_addr = host_port.to_addr(true);
   if (!server_addr) {
     throw std::runtime_error(
@@ -33,9 +33,7 @@ connect_to_event_server(x23::HostPort host_port)
 
 EventServerProxy::EventServerProxy(x23::HostPort host_port)
   : client_(connect_to_event_server(std::move(host_port)))
-{
-  info("Connecting to event server on host port {}", host_port.show());
-}
+{}
 
 PerTransactionEventServerProxy::PerTransactionEventServerProxy(
     EventServerProxy &event_server_proxy, BlockID block_id, TransactionID tx_id)

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -25,6 +26,7 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/event.h"
@@ -63,7 +65,7 @@ public:
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
-                             std::move(event_proxy), ProposalModeData{},
+                             std::move(event_proxy), ProposalModeCtor{},
                              make_hogexec_context());
   }
 

@@ -72,7 +72,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
-                                    ProposalModeData{}, make_hogexec_context());
+                                    ProposalModeCtor{}, make_hogexec_context());
   auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
@@ -118,7 +118,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   SystemCallHandler syscall_handler(
       proposed_tx.signed_tx, snapshot_cache_, proxy,
       make_per_tx_event_server_proxy(tx_id),
-      ValidationModeData{proposed_tx.nondeterministic_proposal_data},
+      ValidationModeCtor{proposed_tx.nondeterministic_proposal_data},
       make_hogexec_context());
 
   auto invoke_res = syscall_handler.root_invoke();
