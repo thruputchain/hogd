@@ -36,14 +36,17 @@ public:
 
   x23::Async<void> scheddb_intro_shard(ShardCard card)
   {
-    info("db shard connected. {} total shards connected.", shards_.size() + 1);
-    co_return Registration::registration().register_shard(card);
+    // We add 1 because we print this before we actually add the shard below.
+    info("db shard connected. {} total shards connected.",
+         Registration::registration().shards_registered(/*cards=*/nullptr) + 1);
+    Registration::registration().register_shard(card);
+    co_return;
   }
 
   x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp) const
   {
     x23::Vec<ShardCard> cards;
-    Registration::registration.shards_registered(&cards);
+    Registration::registration().shards_registered(&cards);
 
     x23::Vec<db_sched_client_t> ret;
     ret.reserve(cards.size());

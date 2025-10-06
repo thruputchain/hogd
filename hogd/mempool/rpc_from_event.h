@@ -2,13 +2,13 @@
 
 #include <cassert>
 #include <condition_variable>
-#include <mutex>
 #include <optional>
 #include <utility>
 
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/mempool/registration.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
@@ -35,19 +35,18 @@ public:
   {
     info("event server connected");
 
-    std::lock_guard lk(mutex_);
-    if (event_.has_value()) {
+    if (Registration::registration().event_registered(/*card=*/nullptr)) {
       error("event server already connected");
       return RPCError::kRPCUnrecoverable;
     }
-    Registration::registration.register_event(card);
+    Registration::registration().register_event(card);
     return RPCError::kRPCNone;
   }
 
   event_sched_client_t get_client(x23::CoroPoll &cp)
   {
     EventCard card;
-    CHECK(Registration::registration.event_registered(card));
+    CHECK(Registration::registration().event_registered(&card));
 
     x23::UniqueFd fd =
         x23::tcpconnect(server_address_to_sockaddr(card.address));

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -40,17 +41,6 @@ public:
     return registration;
   }
 
-  void wait_for_registration(size_t num_executors, size_t num_shards) const
-  {
-    wait_for([this] { return coordinator_registered(); });
-    wait_for([this, num_executors] {
-      return num_executors < num_executors_registered();
-    });
-    wait_for([this] { return event_registered(); });
-    wait_for(
-        [this, num_shards] { return num_shards < num_shards_registered(); });
-  }
-
   // Coordinator.
   void register_coordinator(const CoordCard &card)
   {
@@ -63,6 +53,7 @@ public:
     if (card) {
       *card = coord_card_;
     }
+    return ret;
   }
 
   // Executors.
@@ -73,7 +64,7 @@ public:
     exec_cards_.push_back(card);
     return exec_cards_.size() - 1;
   }
-  size_t executors_registered(x23::Vec<ExecCard> *cards) const
+  size_t executors_registered(x23::Vec<ExecCard> *cards)
   {
     std::unique_lock lk(exec_cards_mutex_);
     if (cards) {
@@ -94,6 +85,7 @@ public:
     if (card) {
       *card = event_card_;
     }
+    return ret;
   }
 
   // Databases.
@@ -104,11 +96,11 @@ public:
     shard_cards_.push_back(card);
     return shard_cards_.size() - 1;
   }
-  size_t shards_registered(x23::Vec<ShardCard> *cards) const
+  size_t shards_registered(x23::Vec<ShardCard> *cards)
   {
     std::unique_lock lk(shard_cards_mutex_);
     if (cards) {
-      *cards = shard_cards;
+      *cards = shard_cards_;
     }
     return shard_cards_.size();
   }
@@ -119,13 +111,6 @@ private:
   // registration instance for the entire process.
   Registration() = default;
   ~Registration() = default;
-
-  void wait_for(const std::function<bool(void)> &cond) const
-  {
-    while (!cond()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-  }
 
   std::atomic<bool> coordinator_registered_ = false;
   CoordCard coord_card_;

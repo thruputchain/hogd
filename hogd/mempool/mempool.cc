@@ -45,8 +45,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   CHECK_EQ(db.start_server(kDbServerPort), kDbServerPort);
   MempoolDbRpc &db_rpc = db.get_impl();
   info("Waiting for {} db shards to connect...", num_db_shards);
-  while (registration.shards_registered(/*cards=*/nullptr).size() <
-         num_db_shards) {
+  while (registration.shards_registered(/*cards=*/nullptr) < num_db_shards) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
@@ -60,7 +59,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   }
 
   // Let the executors connect.
-  RpcServer<MempoolExecutorRpc> exec(db_rpc, event_rpc);
+  RpcServer<MempoolExecutorRpc> exec;
   CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
   MempoolExecutorRpc &exec_rpc = exec.get_impl();
   info("Waiting for {} executors to connect...", num_exec_shards);

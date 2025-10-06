@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "nomination.hh"
@@ -30,10 +31,6 @@ class MempoolExecutorRpc {
 public:
   using rpc_service = SchedExec1;
 
-  MempoolExecutorRpc(MempoolDbRpc &db_rpc, MempoolEventRpc &event_rpc)
-    : db_rpc_(db_rpc), event_rpc_(event_rpc)
-  {}
-
   // Disable copy and move.
   MempoolExecutorRpc(const MempoolExecutorRpc &) = delete;
   MempoolExecutorRpc &operator=(const MempoolExecutorRpc &) = delete;
@@ -43,18 +40,26 @@ public:
   x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card)
   {
     info("executor with card {} connected. {} total executors connected.",
-         x23::show(card), execs_.size() + 1);
+         x23::show(card),
+         // We add 1 because we print this before we actually add the executor
+         // below.
+         Registration::registration().executors_registered(/*card=*/nullptr) +
+             1);
 
     size_t exec_id = Registration::registration().register_executor(card);
+    x23::Vec<ShardCard> shard_cards;
+    CHECK_GT(Registration::registration().shards_registered(&shard_cards), 0UL);
+    EventCard event_card;
+    CHECK(Registration::registration().event_registered(&event_card));
     co_return IntroExecResult{.exec_id = exec_id,
-                              .shards = db_rpc_.shards(),
-                              .event = event_rpc_.event()};
+                              .shards = shard_cards,
+                              .event = event_card};
   }
 
   static x23::Vec<exec_sched_client_t> get_clients(x23::CoroPoll &cp)
   {
     x23::Vec<ExecCard> cards;
-    Registation::registration().executors_registered(&cards);
+    Registration::registration().executors_registered(&cards);
 
     x23::Vec<exec_sched_client_t> ret;
     ret.reserve(cards.size());
@@ -78,9 +83,6 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  MempoolDbRpc &db_rpc_;
-  MempoolEventRpc &event_rpc_;
-
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedExec1<MempoolExecutorRpc *, x23::Async>);
