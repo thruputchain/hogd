@@ -102,14 +102,10 @@ protected:
     event_server_.open_block(0);
   }
 
-<<<<<<< HEAD
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
-=======
-  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
   TestEventAggregator event_server_;
   TestEventAggregatorExecRpc event_server_exec_rpc_ =
       TestEventAggregatorExecRpc(event_server_);
->>>>>>> 23a1abcdb2f81a310dca0ee458b228a32ebd1d23
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
