@@ -8,6 +8,7 @@
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -30,5 +31,8 @@ using db_sched_client_t =
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+using event_sched_client_t =
+    EventSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 } // namespace hogd

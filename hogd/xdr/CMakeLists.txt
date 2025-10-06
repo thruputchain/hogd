@@ -10,6 +10,7 @@ add_xdr(
 	../../protocol/db_sched.x
 	../../protocol/discovery.x
 	../../protocol/event.x
+	../../protocol/event_rpc.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/exec_sched.x
 	../../protocol/ffi_enums.x
@@ -22,7 +23,7 @@ add_xdr(
 	../../protocol/sc_val.x
 	../../protocol/sched_coord.x
 	../../protocol/sched_db.x
-  ../../protocol/sched_event.x
+  	../../protocol/sched_event.x
 	../../protocol/sched_exec.x
 	../../protocol/storage_cost.x
 	../../protocol/storage_delta_flags.x

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include "exec_sched.hh"
@@ -9,10 +11,11 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "rpc_types.hh"
+#include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/async.h"
-#include "x23/event.h"
 
 namespace hogd {
 
@@ -29,8 +32,11 @@ public:
 
     DatabaseIdentifier identifier{ShardedDB(exec_result)};
     auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
+    auto event_server_proxy = std::make_unique<EventServerProxy>(
+        EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
-        std::make_unique<ExecutorStateManager>(std::move(db_proxy));
+        std::make_unique<ExecutorStateManager>(std::move(db_proxy),
+                                               std::move(event_server_proxy));
   }
 
   // Disable copy and move

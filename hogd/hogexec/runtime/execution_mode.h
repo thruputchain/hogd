@@ -34,7 +34,10 @@ public:
   void log_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index,
                                    QueueEntry entry);
 
-  NondeterministicProposalData proposal_data() const { return proposal_data_; }
+  NondeterministicProposalData const &proposal_data() const
+  {
+    return proposal_data_;
+  }
 
 private:
   // Proposal data containing nondeterministic choices made during execution
@@ -48,7 +51,7 @@ class ValidationModeData {
 public:
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
-  ValidationModeData(ValidationModeData &&) noexcept = default;
+  ValidationModeData(ValidationModeData &&) noexcept = delete;
   ValidationModeData &operator=(ValidationModeData &&) noexcept = delete;
   // Constructs validation data with proposal to validate against
   ValidationModeData(NondeterministicProposalData proposal_data)
@@ -75,9 +78,14 @@ public:
   // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;
 
+  NondeterministicProposalData const &proposal_data() const
+  {
+    return proposal_data_;
+  }
+
 private:
   // Proposal data containing expected nondeterministic choices
-  NondeterministicProposalData proposal_data_;
+  const NondeterministicProposalData proposal_data_;
 
   // Index of next nondeterministic bit to consume from proposal
   uint32_t next_nondeterministic_bit_index_ = 0;
@@ -88,5 +96,9 @@ private:
 
 // Variant type that holds either proposal or validation mode data
 using ExecutionModeData = std::variant<ProposalModeData, ValidationModeData>;
+
+using ProposalModeCtor = std::monostate;
+using ValidationModeCtor = NondeterministicProposalData;
+using ExecutionModeCtor = std::variant<ProposalModeCtor, ValidationModeCtor>;
 
 } // namespace hogd

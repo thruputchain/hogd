@@ -16,6 +16,7 @@
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/types.h"
 #include "hogd/version.h"
@@ -31,6 +32,7 @@ namespace {
 constexpr uint16_t kCoordinatorServerPort = 8070;
 constexpr uint16_t kExecutorServerPort = 8071;
 constexpr uint16_t kDbServerPort = 8072;
+constexpr uint16_t kEventServerPort = 8073;
 
 std::string
 create_address(uint16_t port)
@@ -63,8 +65,14 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  RpcServer<MempoolEventRpc> event;
+  CHECK_EQ(event.start_server(kEventServerPort), kEventServerPort);
+  MempoolEventRpc &event_rpc = event.get_impl();
+  info("Waiting for event server to connect...");
+  event_rpc.event();
+
   // Let the executors connect.
-  RpcServer<MempoolExecutorRpc> exec(db_rpc);
+  RpcServer<MempoolExecutorRpc> exec(db_rpc, event_rpc);
   CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
   MempoolExecutorRpc &exec_rpc = exec.get_impl();
   info("Waiting for {} executors to connect...", num_exec_shards);
@@ -83,12 +91,14 @@ mempool_init(const std::string &coordinator_addr, size_t num_db_shards,
   // distributed across shards?
   x23::Vec<db_sched_client_t> db_clients = db_rpc.get_clients(cp);
   x23::Vec<exec_client_t> exec_clients = exec_rpc.get_clients(cp);
+  auto event_sched_client = event_rpc.get_client(cp);
 
   // TODO(jhumphri): Register the mempool with the coordinator with
   // [coordscheduler_intro_sched()].
   RpcServer<MempoolCoordinatorRpc> coord(std::move(coord_client),
                                          std::move(db_clients[0]),
-                                         std::move(exec_clients));
+                                         std::move(exec_clients),
+                                         std::move(event_sched_client));
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   const std::string sched_address = create_address(kCoordinatorServerPort);
   SchedulerCard card{.protocol = version::kHogdProtocol,

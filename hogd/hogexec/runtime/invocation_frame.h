@@ -4,13 +4,13 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
-#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "account.hh"
+#include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -66,8 +67,8 @@ public:
 
   // add a log message to the output of the transaction, associated with the
   // current call frame.
-  void log(std::span<const std::byte> message);
-  std::vector<LogEntry> extract_logs() { return std::move(logs_); }
+  void log_event(TxEmittedEvent event);
+  x23::Vec<TxEmittedEvent> extract_events() { return std::move(events_); }
 
   bool is_try_invoke() const
   {
@@ -135,9 +136,8 @@ private:
   // flags on the invocation
   const InvokeFlagSet flags_;
 
-  // Accumulates log entries created in the current call frame (and child
-  // frames)
-  std::vector<LogEntry> logs_;
+  // Accumulates the events created in the current call frame (and child frames)
+  x23::Vec<TxEmittedEvent> events_;
 
   uint32_t try_invoke_frame_count_ = 0;
 

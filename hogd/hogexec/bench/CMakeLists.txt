@@ -10,6 +10,7 @@ target_link_libraries(
   exec_interface
   db_interface
   hogdb
+  runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
   contract_loader
 )
 
@@ -33,6 +34,7 @@ target_link_libraries(
   exec_interface
   db_interface
   hogdb
+  runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
   contract_loader
   loadgen
 )

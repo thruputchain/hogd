@@ -1,11 +1,14 @@
 #pragma once
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/types.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23/serialize.h"
 #include <unordered_map>
 

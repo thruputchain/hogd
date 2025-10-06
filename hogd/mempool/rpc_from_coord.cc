@@ -62,7 +62,11 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
   DbSchedResult res =
       co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
                                                         mode);
-  co_return res == DbSchedResult::DbSchedResultOK;
+  if (res != DbSchedResult::DbSchedResultOK) {
+    co_return false;
+  }
+  co_await event_sched_client_.eventsched_open_block(block_id);
+  co_return true;
 }
 
 x23::Async<void>
@@ -74,6 +78,7 @@ MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
   // could change in the future. In the case of a failure, we need to clean up
   // db state.
   CHECK_EQ(res, DbSchedResult::DbSchedResultOK);
+  co_await event_sched_client_.eventsched_abandon_block(block_id);
   co_return;
 }
 
@@ -85,6 +90,11 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
+  auto r = co_await event_sched_client_.eventsched_close_block(block_id);
+  CHECK_EQ(r.error(), RPCError::kRPCNone);
+  // TODO(geoff): forward the root hash of the event block back to the block
+  // header
+  // TODO(geoff): consider whether this should be called from commit instead
   co_return;
 }
 
