@@ -510,18 +510,33 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 // X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
 // See RpcTraceMode::getenv for a description of this environment
 // variable.
-int
+//
+// Returns a pair consisting of the port number on which it is
+// listening and the listening file descriptor.  The only reasonable
+// thing to do for the listening file descriptor is to poison it when
+// you want to shut the server down, i.e.:
+//
+//   auto [port, fd] = tcp_rpc_server(cp, 0, [](auto c) {
+//        c->server(&impl, myvers{});
+//     });
+//
+//   // ...
+//   // later on to shut down server
+//   cp.poison(fd);
+std::pair<uint16_t, BorrowedFd>
 tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
   if (backlog < 0)
     backlog = 5 + cp.pool_.nthreads_;
   auto lfd = tcplisten(port, backlog);
+  int rawfd = lfd.get();
   if (port == 0)
     port = get_port(local_addr(lfd));
 
   [&cp, lfd = std::move(lfd),
    cb = std::move(cb)](this auto /*copy*/) -> Detached {
+    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
     while (auto c = co_await (cp.accept(lfd))) {
       server_trace().with_logger(*c, [&](auto logger) {
         std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
@@ -530,24 +545,23 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     }
   }();
 
-  return port;
+  return std::pair{port, rawfd};
 }
 
 // Similar to tcp_rpc_server, but doesn't return unless/until it
 // accept returns an error or the CoroPoll is destroyed.
-int
+void
 tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
   std::mutex m;
-  port = tcp_rpc_server(
+  tcp_rpc_server(
       cp, port,
       [cb = std::move(cb), _ul = std::unique_lock{m}](auto configurator) {
         std::invoke(cb, std::move(configurator));
       },
       backlog);
   std::unique_lock _ul(m);
-  return port;
 }
 
 } // namespace x23

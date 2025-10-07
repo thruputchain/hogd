@@ -73,10 +73,11 @@ struct TestEventAggregatorExecRpc {
 
   uint16_t start_server(uint16_t port_number)
   {
-    auto ret = tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
-                              [this](auto c) { c->server(this); });
-    info("Starting event exec (test impl) RPC server on port {}", ret);
-    return ret;
+    auto [port, fd] =
+        tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                       [this](auto c) { c->server(this); });
+    info("Starting event exec (test impl) RPC server on port {}", port);
+    return port;
   }
 
 private:
@@ -109,10 +110,11 @@ struct TestEventAggregatorSchedRpc {
 
   uint16_t start_server(uint16_t port_number)
   {
-    auto ret = tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
-                              [this](auto c) { c->server(this); });
-    info("Starting event sched (test impl) RPC server on port {}", ret);
-    return ret;
+    auto [port, fd] =
+        tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                       [this](auto c) { c->server(this); });
+    info("Starting event sched (test impl) RPC server on port {}", port);
+    return port;
   }
 
 private:

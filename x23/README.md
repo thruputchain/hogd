@@ -601,7 +601,9 @@ If you want to run an RPC server on a TCP port, the function
 `tcp_rpc_server` will spawn an accept loop in the background.  It
 needs a `CoroPoll`, a TCP port (or 0 to listen on any available port),
 and a callback to process the configurator, and returns the TCP port
-on which it is actually listening.  An example of usage is as follows:
+on which it is actually listening.  It returns a pair consisting of
+the tcp port number on which it is listening (useful if you passed in
+0) and the file descriptor.  An example of usage is as follows:
 
 ``` cpp
 #include <x23/rpc.h>
@@ -620,9 +622,10 @@ main()
   // RPCs are being serviced.
   std::mutex m;
 
-  tcp_rpc_server(cp, 5665, [lk=std::unique_lock{m}](auto c) {
-    c->server(&impl, myvers{});
-  });
+  auto [port, lfd] =
+      tcp_rpc_server(cp, 5665, [lk=std::unique_lock{m}](auto c) {
+        c->server(&impl, myvers{});
+      });
 
   // Wait until moved lambda is destroyed (will happen if accept
   // returns an error or cp is destroyed).

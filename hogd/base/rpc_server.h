@@ -28,23 +28,12 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    port = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
-
-    int fds[2];
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
-      x23::Errno{}.raise("socketpair");
-    }
-    x23::rpc_stream_logged(cp_, fds[1])
-        ->server<typename RpcImplementation::rpc_service>(&rpc_);
-
-    std::lock_guard lock(mtx_);
-    port_ = port;
-    cv_.notify_all();
-
-    return port_.value();
+    std::tie(port, listen_fd_) =
+        tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
+    return port;
   }
 
-  void shut_down() { rpc_.shut_down(); }
+  void shut_down() { cp_.poison(listen_fd_); }
 
   void await_shutdown_request() { rpc_.await_shutdown_request(); }
 
@@ -61,6 +50,8 @@ public:
   x23::CoroPoll &cp() { return cp_; }
 
 private:
+  x23::BorrowedFd listen_fd_{-1};
+
   template<typename T> requires std::is_trivially_copyable_v<T>
   ErrnoStatus<void> sys_getsockname(int sockfd, T &val)
   {
