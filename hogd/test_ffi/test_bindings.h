@@ -34,6 +34,12 @@ struct ForeignHostFnResult {
   int32_t panic; // HostFnErrorCode
 };
 
+// Translation of try_commit_transaction result into an FFI-safe type.
+struct ForeignTryCommitResult {
+  int32_t result_code; // boolean
+  int32_t panic;       // SystemErrorCode
+};
+
 void *create_db();
 void free_db(void *ptr);
 
@@ -95,6 +101,7 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg7);
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
+struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
 
 void enable_syscall_logging();
 
