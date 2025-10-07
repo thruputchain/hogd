@@ -228,7 +228,7 @@ public:
     executor_.shut_down();
   }
 
-  void wait_for_registration()
+  static void wait_for_registration()
   {
     Registration &registration = Registration::registration();
     while (!registration.shards_registered(/*cards=*/nullptr)) {
@@ -242,7 +242,7 @@ public:
     }
     // We manually call [schedulercoord_intro_coord()], so
     // [registration.coordinator_registered()] must be true.
-    CHECK(registration.coordinator_registered(/*cards=*/nullptr));
+    CHECK(registration.coordinator_registered(/*card=*/nullptr));
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
