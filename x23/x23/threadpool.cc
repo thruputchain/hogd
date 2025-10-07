@@ -295,4 +295,10 @@ ThreadPool::Worker::work()
   }
 }
 
+bool
+in_thread_pool()
+{
+  return ThreadPool::get_thread_pool();
+}
+
 } // namespace x23
