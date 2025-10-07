@@ -86,6 +86,10 @@ public:
           coordinator_sched_server_.start_server(/*port=*/0)),
       executor_(kAddress, sched_exec_port_)
   {
+    // Multiple tests run within the same process, so we need to clear the
+    // registration at the beginning of each test.
+    Registration::registration().clear();
+
     {
       // check the database's integrity and find the highest valid LSN.
       DBStatus<uint64_t> lsn =

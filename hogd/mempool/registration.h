@@ -105,6 +105,23 @@ public:
     return shard_cards_.size();
   }
 
+  // There is one shared registration instance for the process. There is no
+  // circumstance in which the registration should be cleared, apart from in
+  // tests. No one should call this function except for tests.
+  void clear()
+  {
+    coordinator_registered_ = false;
+    {
+      std::unique_lock lk(exec_cards_mutex_);
+      exec_cards_.clear();
+    }
+    event_registered_ = false;
+    {
+      std::unique_lock lk(shard_cards_mutex_);
+      shard_cards_.clear();
+    }
+  }
+
 private:
   // No one should construct a [Registration] instance directly. Instead, use
   // the shared instance returned by [registration()]. There is a single shared
