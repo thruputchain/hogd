@@ -29,19 +29,9 @@ public:
   uint16_t start_server(uint16_t port)
   {
     port = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
-
-    int fds[2];
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
-      x23::Errno{}.raise("socketpair");
-    }
-    x23::rpc_stream_logged(cp_, fds[1])
-        ->server<typename RpcImplementation::rpc_service>(&rpc_);
-
-    std::lock_guard lock(mtx_);
-    port_ = port;
-    cv_.notify_all();
-
-    return port_.value();
+    port_.store(port, std::memory_order_release);
+    port_.notify_all();
+    return port;
   }
 
   void shut_down() { rpc_.shut_down(); }
@@ -51,10 +41,8 @@ public:
   // Returns the port that the server is listening on.
   uint16_t port()
   {
-    std::unique_lock lk(mtx_);
-    cv_.wait(lk, [this] { return port_.has_value(); });
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return port_.value();
+    port_.wait(/*old=*/0, std::memory_order_acquire);
+    return port_.load(std::memory_order_relaxed);
   }
 
   RpcImplementation &get_impl() { return rpc_; }
@@ -83,11 +71,7 @@ private:
 
   x23::ThreadPool pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-  // Protects [port_] during initialization.
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::optional<uint16_t> port_;
+  std::atomic<uint16_t> port_;
 };
 
 inline sockaddr_storage
