@@ -7,6 +7,7 @@
 #include <limits>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
 #include <variant>
 
 #include "account.hh"
@@ -346,6 +347,153 @@ AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
       pk_changes_[i].exclusive_ = false;
     }
   }
+}
+
+HogDBStatus<void>
+ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
+{
+  {
+    auto it =
+        std::ranges::find_if(additions_,
+                             [&uniquifier](UniquifierAddition const &addition) {
+                               return uniquifier.nonce == addition.u_.nonce;
+                             });
+    // nonce was in list of recent additions
+    if (it != additions_.end())
+      return HogDBError(HogDBCode::kConflict);
+  }
+  {
+    auto it = std::ranges::find_if(base_replay_cache_.uniquifiers,
+                                   [&uniquifier](Uniquifier const &base) {
+                                     return base.nonce == uniquifier.nonce;
+                                   });
+    // nonce was in the base replay cache
+    if (it != base_replay_cache_.uniquifiers.end())
+      return HogDBError(HogDBCode::kConflict);
+  }
+  return {};
+}
+
+HogDBStatus<void>
+ReplayCacheIt::try_consume_uniquifier(BlockHeight block_height,
+                                      Uniquifier const &uniquifier)
+{
+  // reject uniquifiers that are used too late
+  if (uniquifier.block_expiry_height <= block_height)
+    return HogDBError(HogDBCode::kConflict);
+
+  // reject uniquifiers that are already used
+  HogDBStatus<void> ret = check_conflict(uniquifier);
+  if (!ret)
+    return ret;
+
+  additions_.emplace_back(uniquifier);
+  return {};
+}
+
+HogDBStatus<void>
+ReplayCacheIt::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                      const ItemKey &key) const
+{
+  assert_is_valid();
+
+  // TODO(stutsman) fetch tip here and prune expired
+
+  auto res = build_result();
+  auto ret = db.write_address_replay_cache(key.get_address(), res);
+  if (!ret) {
+    return ret.error();
+  }
+  auto buf = x23::serialize(res);
+  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  return ret;
+}
+
+ReplayCacheData
+ReplayCacheIt::build_result() const
+{
+  ReplayCacheData result = base_replay_cache_;
+  for (auto const &addition : additions_) {
+    if (addition.committed_)
+      result.uniquifiers.push_back(addition.u_);
+  }
+  return result;
+}
+
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX What is the arg here?
+void
+ReplayCacheIt::commit_change(ReplayCacheIt const &replay_cache)
+{
+  for (auto &addition : additions_) {
+    assert(!addition.committed_);
+    addition.committed_ = true;
+  }
+}
+
+int128_t
+ReplayCacheIt::committed_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t active = base_replay_cache_.uniquifiers.size();
+  for (auto const &addition : additions_) {
+    if (addition.committed_) {
+      active++;
+    }
+  }
+  return cost_model->get_replay_cache_cost(active);
+}
+
+int128_t
+ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t committed_additions = 0;
+  for (auto const &addition : additions_) {
+    if (addition.committed_) {
+      committed_additions++;
+    }
+  }
+  return cost_model->get_replay_cache_cost(committed_additions);
+}
+
+bool
+ReplayCacheIt::narrow(const ReplayCacheIt &replay_cache)
+{
+  // Disallow a tx from modifying a replay cache twice.
+  return false;
+}
+
+HogDBStatus<int128_t>
+ReplayCacheIt::merge(const ReplayCacheIt &replay_cache_item,
+                     const StorageCostModel *cost_model)
+{
+  if (base_replay_cache_ != replay_cache_item.base_replay_cache_)
+    return HogDBError(HogDBCode::kConflict);
+
+  // Check that incoming uniquifiers aren't in this cache or additions.
+  for (auto const &other_addition : replay_cache_item.additions_) {
+    HogDBStatus<void> ret = check_conflict(other_addition.u_);
+    if (!ret)
+      return ret.error();
+  }
+
+  // Conflicts checked; now do merge
+  additions_.append_range(replay_cache_item.additions_);
+
+  return cost_model->get_replay_cache_cost(replay_cache_item.additions_.size());
+}
+
+void
+ReplayCacheIt::undo_merge(const ReplayCacheIt &replay_cache)
+{
+  auto removal_nonces = replay_cache.additions_ |
+                        std::views::transform(&UniquifierAddition::u_) |
+                        std::views::transform(&Uniquifier::nonce);
+  std::unordered_set<ReplayNonce> removals(removal_nonces.begin(),
+                                           removal_nonces.end());
+  std::erase_if(additions_, [&removals](UniquifierAddition const &addition) {
+    return removals.contains(addition.u_.nonce);
+  });
 }
 
 namespace {

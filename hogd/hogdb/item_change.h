@@ -25,6 +25,7 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -462,6 +463,82 @@ static_assert(hogd::is_item_commit_required<hogd::AuthDataItem>);
 
 namespace hogd {
 
+class ReplayCacheIt {
+public:
+  ReplayCacheIt(ReplayCacheData cache) : base_replay_cache_(std::move(cache)) {}
+
+  void assert_is_valid() const
+  {
+    // no duplicate nonces anywhere
+    std::unordered_set<ReplayNonce> nonces{};
+    nonces.insert_range(base_replay_cache_.uniquifiers |
+                        std::views::transform(&Uniquifier::nonce));
+    nonces.insert_range(additions_ |
+                        std::views::transform(&UniquifierAddition::u_) |
+                        std::views::transform(&Uniquifier::nonce));
+    assert(nonces.size() == base_reply_cache_.uniquifiers + additions_.size());
+
+    // no expired uniquifiers - can't check this without acccess to dbtip
+  }
+
+  HogDBStatus<void> check_conflict(Uniquifier const &uniquifier);
+  HogDBStatus<void> try_consume_uniquifier(BlockHeight block_height,
+                                           Uniquifier const &uniquifier);
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
+
+  void commit_change(ReplayCacheIt const &ReplayCacheIt);
+  bool narrow(const ReplayCacheIt &replay_cache_item);
+
+  HogDBStatus<int128_t> merge(const ReplayCacheIt &replay_cache_item,
+                              const StorageCostModel *cost_model);
+
+  void undo_merge(const ReplayCacheIt &replay_cache_item);
+
+  // TODO(stutsman): implement or remove storage_size entirely
+  static size_t storage_size() { return 0; }
+
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const;
+
+  ReplayCacheData build_result() const;
+
+  struct UniquifierAddition {
+    UniquifierAddition(Uniquifier u) : u_(std::move(u)) {}
+    bool committed_{false};
+    Uniquifier u_{};
+  };
+
+  std::vector<UniquifierAddition> additions_;
+  ReplayCacheData base_replay_cache_;
+
+  friend struct std::formatter<ReplayCacheIt>;
+};
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::ReplayCacheIt> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::ReplayCacheIt &replay_cache_item, auto &ctx)
+  {
+    format_to(ctx.out(), "ReplayCacheIt{{");
+    format_to(ctx.out(), "base_replay_cache_: {}, ",
+              x23::show(replay_cache_item.base_replay_cache_));
+    format_to(ctx.out(), "additions_:");
+    for (auto const &addition : replay_cache_item.additions_)
+      format_to(ctx.out(), "{{u_: {}, committed_: {}}}", x23::show(addition.u_),
+                addition.committed_);
+    format_to(ctx.out(), "}}");
+    return ctx.out();
+  }
+};
+
+namespace hogd {
+
+static_assert(hogd::is_item_commit_required<hogd::ReplayCacheIt>);
+
 // ItemChange represents a pending modification to an item.
 class ItemChange {
 public:
@@ -477,6 +554,7 @@ public:
   {}
   ItemChange(AuthDataItem &&auth_data_item) : type_(std::move(auth_data_item))
   {}
+  ItemChange(ReplayCacheIt &&replay_cache) : type_(std::move(replay_cache)) {}
   ~ItemChange() = default;
 
   // setters
@@ -491,6 +569,7 @@ public:
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
+  std::optional<ReplayCacheIt> to_replay_cache() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
@@ -503,6 +582,10 @@ public:
   bool is_auth_data() const
   {
     return std::holds_alternative<AuthDataItem>(type_);
+  }
+  bool is_replay_cache() const
+  {
+    return std::holds_alternative<ReplayCacheIt>(type_);
   }
 
   // commit applies the item's changes to the ramdb.
@@ -582,7 +665,7 @@ private:
   LazySnapshotCost snapshot_cost_;
   bool change_committed_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData, AuthDataItem>
+               NewContractData, AuthDataItem, ReplayCacheIt>
       type_;
 
   size_t storage_size() const;
@@ -618,6 +701,14 @@ inline std::optional<NNInt128>
 ItemChange::get_raw_nnint128() const
 {
   if (const auto *tmp = std::get_if<NNInt128>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+inline std::optional<ReplayCacheIt>
+ItemChange::to_replay_cache() const
+{
+  if (const auto *tmp = std::get_if<ReplayCacheIt>(&type_); tmp)
     return *tmp;
   return std::nullopt;
 }

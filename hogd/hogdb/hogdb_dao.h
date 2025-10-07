@@ -25,6 +25,7 @@
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "sched_coord.hh"
 #include "types.hh"
 
@@ -126,6 +127,7 @@ enum class Prefix : char {
   kContractDataKey = 'K',
   kWasmCode = 'C',
   kWasmCodeRefcount = 'R',
+  kReplayCache = 'U',
   // global info, like the db tip, have prefixes that begin with (and may
   // extend) this character
   kGlobalMetadata = '<',
@@ -201,6 +203,7 @@ public:
   HogDBStatus<AccountAuthData>
   read_address_account_auth_data(const Address &addr);
   HogDBStatus<DeployedContractHash> read_address_metadata(const Address &addr);
+  HogDBStatus<ReplayCacheData> read_address_replay_cache(Address const &addr);
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
@@ -209,6 +212,9 @@ public:
                                   const AccountAuthData &auth);
   HogDBStatus<void> write_address_metadata(Address const &addr,
                                            const DeployedContractHash &hash);
+  HogDBStatus<void>
+  write_address_replay_cache(Address const &addr,
+                             ReplayCacheData const &replay_cache);
 
   //
   // WASM Operations

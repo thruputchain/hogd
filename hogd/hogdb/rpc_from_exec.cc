@@ -102,6 +102,13 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
            StorageKeyType::kStorageKeyTypeAccountAuthData);
     return to_rpc_error(
         tx.request_auth_data(addrkey.address, delta.auth_data_change()));
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
+    // Assume addrkey from FlaggedStorageDelta indicates correct ReplayCache for
+    // this tx.
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeReplayCache);
+    return to_rpc_error(tx.request_consume_uniquifier(
+        addrkey.address, delta.consume_uniquifier_args().uniquifier));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;

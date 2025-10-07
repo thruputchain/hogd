@@ -54,6 +54,9 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
   case Prefix::kContractDataKey:
     handle_contract_data_item_change(before, after);
     return;
+  case Prefix::kReplayCache:
+    handle_replay_cache_item_change(before, after);
+    return;
   }
   warn("unknown db item prefix: {}", std::to_underlying(prefix));
 }
@@ -156,6 +159,31 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       }
     }
     return cost_model_.get_auth_data_cost(active_keys);
+  };
+  auto before_storage_cost = get_storage_cost(before);
+  auto after_storage_cost = get_storage_cost(after);
+
+  update_total_supply(after_storage_cost - before_storage_cost);
+}
+
+void
+HogConservationInvariant::handle_replay_cache_item_change(
+    HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
+{
+  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
+    if (!item.has_value()) {
+      return 0;
+    }
+    assert(item.value().type == 0);
+    ReplayCacheData cache_data;
+    try {
+      x23::deserialize(&cache_data, x23::BufViewEnd(item.value().value));
+    } catch (x23::XdrException &e) {
+      warn("failed to deserialize relay cache data: {}", e.what());
+      assert(false);
+      return 0;
+    }
+    return cost_model_.get_replay_cache_cost(cache_data.uniquifiers.size());
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);

@@ -411,4 +411,30 @@ InvokeTX::request_auth_data(Address const &addr,
                         std::move(auth_data_item));
 }
 
+HogDBStatus<void>
+InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
+{
+  auto base_replay_cache = block_.get_db().read_address_replay_cache(addr);
+  if (!base_replay_cache) {
+    if (base_replay_cache.error() != HogDBCode::kNotFound) {
+      return base_replay_cache.error();
+    }
+    base_replay_cache = ReplayCacheData{};
+  }
+
+  HogDBStatus<DbTip> tip = block_.get_db().read_dbtip();
+  if (!tip)
+    return tip.error();
+  BlockHeight block_height = tip->height;
+
+  ReplayCacheIt replay_cache_item(std::move(base_replay_cache.value()));
+  HogDBStatus<void> ret =
+      replay_cache_item.try_consume_uniquifier(block_height, uniquifier);
+  if (!ret)
+    return ret;
+
+  return request_change(make_replay_cache_item_key(addr),
+                        std::move(replay_cache_item));
+}
+
 } // namespace hogd

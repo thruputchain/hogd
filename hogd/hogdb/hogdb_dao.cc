@@ -59,6 +59,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kContractDataKey:
   case Prefix::kWasmCodeRefcount:
   case Prefix::kWasmCode:
+  case Prefix::kReplayCache:
     return true;
   default:
     error("unknown prefix: {}", std::to_underlying(prefix));
@@ -203,6 +204,24 @@ HogDBDAO::read_address_average_hog_age(const Address &addr)
   return age;
 }
 
+HogDBStatus<ReplayCacheData>
+HogDBDAO::read_address_replay_cache(Address const &addr)
+{
+  auto key = make_address_key(addr, Prefix::kReplayCache);
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0);
+  if (!raw)
+    return raw.error();
+
+  ReplayCacheData rcd;
+  try {
+    x23::deserialize(&rcd, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return rcd;
+}
+
 // TODO(jhumphri): Handle [block_id].
 HogDBStatus<AccountAuthData>
 HogDBDAO::read_address_account_auth_data(const Address &addr)
@@ -306,6 +325,21 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 {
   auto key = make_address_key(addr, Prefix::kAccountAuthData);
   auto buf = x23::serialize(auth);
+
+  auto before_item = get_before_item(key);
+
+  auto ret =
+      db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  update_invariants_post(key, before_item);
+  return ret;
+}
+
+HogDBStatus<void>
+HogDBDAO::write_address_replay_cache(Address const &addr,
+                                     ReplayCacheData const &replay_cache)
+{
+  auto key = make_address_key(addr, Prefix::kReplayCache);
+  auto buf = x23::serialize(replay_cache);
 
   auto before_item = get_before_item(key);
 
