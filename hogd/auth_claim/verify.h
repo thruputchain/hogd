@@ -32,5 +32,5 @@ verify_auth(const SignedTransaction &stx,
             const AccountAuthData &source_auth_data,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
                 &aux_auth_data);
-
+                
 } // namespace hogd

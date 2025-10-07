@@ -199,6 +199,39 @@ verify_auth_claim_internal(AuthClaim const &claim,
   }
 }
 
+// This assumes that verify_auth_claim_internal has already been called and passed for each auth claim.
+template<VerificationType VerfType>
+requires (verify_weights_against_auth_data(VerfType))
+bool
+validate_nonce(const SignedTransaction &stx, const AccountAuthData& auth_data, const NonceConfig &nonce_config)
+{
+    assert(stx.tx.auth_claims.size() == stx.signatures.size());
+    Weight total_weight = 0;
+
+    for (size_t i = 0; i < stx.signatures.size(); i++) {
+        const auto &sigs = stx.signatures[i];
+        const auto &auth_claim = stx.tx.auth_claims[i];
+        switch(auth_claim.claim_type()) {
+        case AuthClaimType::kInvokedAddressSignature:
+        case AuthClaimType::kInvokedAddressSignedWeight:
+            for (const auto &sig : sigs) {
+                if (!bitmap_accepts_key(nonce_config.accepted_keys, sig.public_key_id)) {
+                    return false;
+                }
+                total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
+            }
+            break;
+        case AuthClaimType::kOtherAddressSignature:
+        case AuthClaimType::kOtherAddressSignedWeight:
+            // other addresses can't contribute to the nonce weight
+            break;
+        default:
+            panic("Unsupported auth claim type: {}", auth_claim.claim_type());
+        }
+    }
+    return total_weight >= nonce_config.required_weight;
+}
+
 template<VerificationType VerfType>
 bool
 verify_auth_claims_internal(
@@ -249,7 +282,13 @@ verify_auth_claims_internal(
       return false;
     }
   }
-  return true;
+
+  if constexpr (verify_weights_against_auth_data(VerfType)) {
+    assert(source_auth_data);
+    return validate_nonce<VerfType>(stx, *source_auth_data, source_auth_data->nonce_config);
+  } else {
+    return true;
+  }
 }
 
 } // namespace

@@ -60,6 +60,8 @@ protected:
     sk_wrapper.ed25519() = sk;
     return {pk_wrapper, sk_wrapper};
   }
+
+  constexpr static NonceConfig kAnyKeyNonceConfig = NonceConfig{.accepted_keys = 0x000F'FFFF, .required_weight = 0};
 };
 
 TEST_F(AuthClaimTests, IndividualKeyClaim)
@@ -79,16 +81,20 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   AccountAuthData good_data = AccountAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})}};
+          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
+      .nonce_config = kAnyKeyNonceConfig};
 
-  AccountAuthData missing_key = AccountAuthData{};
+  AccountAuthData missing_key = AccountAuthData{
+    .nonce_config = kAnyKeyNonceConfig
+  };
 
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}));
   EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key, {}));
 
   AccountAuthData bad_data = AccountAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
-          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})}};
+          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
+      .nonce_config = kAnyKeyNonceConfig};
 
   EXPECT_TRUE(verify_auth(stx, good_data, {}));
   EXPECT_FALSE(verify_auth(stx, bad_data, {}));
