@@ -22,7 +22,7 @@ public:
     // TODO(geoff): validate the other fields in event card.
     info("Connecting to event server at {}", x23::show(event));
     x23::HostPort host_port;
-    if (!host_port.parse(event.address)) {
+    if (!host_port.parse(event.address_for_exec)) {
       throw std::runtime_error("Failed to parse event server address");
     }
     return EventServerProxy(host_port);

@@ -187,8 +187,10 @@ public:
       auto r = event_client.schedevent_intro_event(
           {.protocol = version::kHogdProtocol,
            .upid = {},
-           .address =
-               std::format("{}:{}", kAddress, event_exec_port_).c_str()})();
+           .address_for_exec =
+               std::format("{}:{}", kAddress, event_exec_port_).c_str(),
+           .address_for_sched =
+               std::format("{}:{}", kAddress, event_sched_port_).c_str()})();
       CHECK_EQ(r, RPCError::kRPCNone);
     }
 
@@ -216,6 +218,7 @@ public:
       CHECK_EQ(client.schedulercoord_intro_coord(card)(),
                CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
     }
+    wait_for_registration();
   }
 
   ~MempoolTestServer()
@@ -223,6 +226,23 @@ public:
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
     // does not block.
     executor_.shut_down();
+  }
+
+  void wait_for_registration()
+  {
+    Registration &registration = Registration::registration();
+    while (!registration.shards_registered(/*cards=*/nullptr)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    while (!registration.event_registered(/*card=*/nullptr)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    while (!registration.executors_registered(/*cards=*/nullptr)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    // We manually call [schedulercoord_intro_coord()], so
+    // [registration.coordinator_registered()] must be true.
+    CHECK(registration.coordinator_registered(/*cards=*/nullptr));
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,

@@ -32,7 +32,6 @@ BlockIDStateManager::log_block_id_tip(BlockID block_id)
               "(double initialization)");
     return;
   }
-  printf("HEREEEE\n");
   last_committed_block_id_ = block_id;
 }
 
@@ -41,7 +40,6 @@ BlockIDStateManager::log_block_open(BlockID parent_id, BlockID block_id)
 {
   std::lock_guard<std::mutex> lock(mtx_);
   if (!last_committed_block_id_) {
-    CHECK(false);
     log_error("BlockIDStateManager: last_committed_block_id_ is not set (block "
               "open before initialization)");
     return;

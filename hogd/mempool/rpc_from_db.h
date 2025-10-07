@@ -38,7 +38,8 @@ public:
   static x23::Async<void> scheddb_intro_shard(ShardCard card)
   {
     // We add 1 because we print this before we actually add the shard below.
-    info("db shard connected. {} total shards connected.",
+    info("db shard with card {} connected. {} total shards connected.",
+         x23::show(card),
          Registration::registration().shards_registered(/*cards=*/nullptr) + 1);
     Registration::registration().register_shard(card);
     co_return;

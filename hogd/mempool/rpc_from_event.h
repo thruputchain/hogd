@@ -49,7 +49,7 @@ public:
     CHECK(Registration::registration().event_registered(&card));
 
     x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(card.address));
+        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
     return x23::rpc_stream_logged(cp, fd.release())->client(EventSched1{});
   }
 };

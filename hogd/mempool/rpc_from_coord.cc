@@ -207,14 +207,12 @@ x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
-  printf("will create snapshot\n");
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  printf("done creating snapshot\n");
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
