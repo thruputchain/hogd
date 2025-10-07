@@ -7,7 +7,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
