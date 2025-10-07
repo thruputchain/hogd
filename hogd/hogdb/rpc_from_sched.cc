@@ -163,6 +163,7 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
                                        BlockExecutionMode mode)
 {
   if constexpr (is_debug_build()) {
+    printf("in here B\n");
     block_id_state_manager_.log_block_open(parent_id, new_id);
   }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
@@ -312,7 +313,9 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
     co_return DbSchedResult::DbSchedResultError;
   }
 
+  // TODO(jhumphri): Why is this here?
   if constexpr (is_debug_build()) {
+    printf("in here A\n");
     block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }
 
