@@ -28,10 +28,8 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    port = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
-    port_.store(port, std::memory_order_release);
-    port_.notify_all();
-    return port;
+    port_ = tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
+    return port_;
   }
 
   void shut_down() { rpc_.shut_down(); }
@@ -39,11 +37,7 @@ public:
   void await_shutdown_request() { rpc_.await_shutdown_request(); }
 
   // Returns the port that the server is listening on.
-  uint16_t port()
-  {
-    port_.wait(/*old=*/0, std::memory_order_acquire);
-    return port_.load(std::memory_order_relaxed);
-  }
+  uint16_t port() const { return port_; }
 
   RpcImplementation &get_impl() { return rpc_; }
   x23::CoroPoll &cp() { return cp_; }
@@ -71,7 +65,7 @@ private:
 
   x23::ThreadPool pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-  std::atomic<uint16_t> port_;
+  uint16_t port_;
 };
 
 inline sockaddr_storage
