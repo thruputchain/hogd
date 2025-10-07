@@ -70,12 +70,17 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 x23::Async<DbSchedResult>
 HogDBSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
 {
+  printf("dbsched_write_hog_ages yay in thread %d\n", gettid());
   HogDBDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
+    printf("dbsched_write_hog_ages about to write\n");
     if (!db.write_address_average_hog_age(age)) {
+      printf("dbsched_write_hog_ages ret A\n");
       co_return DbSchedResult::DbSchedResultError;
     }
+    printf("dbsched_write_hog_ages next iteration\n");
   }
+  printf("dbsched_write_hog_ages ret B\n");
   co_return DbSchedResult::DbSchedResultOK;
 }
 

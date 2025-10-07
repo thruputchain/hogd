@@ -16,7 +16,7 @@ target_link_libraries(
   protocol
   runtime
 )
-set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+# set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
   mempool_exec

@@ -266,7 +266,9 @@ Scheduler::cycle_groups(const ContractAddress &account)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account] = new_averages;
+  printf("about to write\n");
   CHECK(write_average_hog_age({account}));
+  printf("done writing\n");
 
   update_accounts({account});
 }
@@ -548,13 +550,16 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
 {
   std::unordered_set<ContractAddress> accounts;
 
+  printf("mark_txs_executed start\n");
   for (const SignedTransactionHash &hash : hashes) {
+    printf("mark_txs_executed for loop A\n");
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
     HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
     accounts.insert(info.account);
 
+    printf("mark_txs_executed for loop B\n");
     const uint128_xdr to_schedule_hogs =
         to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
     const BlockHeight to_schedule_age = block;
@@ -564,6 +569,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
     const BlockHeight already_scheduled_age =
         age.average_ages[kHogAgeGroupAlreadyScheduled];
 
+    printf("mark_txs_executed for loop C\n");
     // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
     bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
     age.num_hogs[kHogAgeGroupAlreadyScheduled] =
@@ -578,6 +584,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                               from_xdr(already_scheduled_hogs),
                               already_scheduled_age);
     }
+    printf("mark_txs_executed for loop D\n");
     {
       const BlockHeight expiry_height =
           info.tx.tx.uniquifier.block_expiry_height;
@@ -586,13 +593,17 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
         CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
       }
     }
+    printf("mark_txs_executed for loop E\n");
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    printf("mark_txs_executed for loop done with iteration\n");
   }
+  printf("mark_txs_executed next\n");
   for (const ContractAddress &account : accounts) {
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
       cycle_groups(account);
     }
   }
+  printf("mark_txs_executed finished\n");
 }
 
 SignedTransactionBatch

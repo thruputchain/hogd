@@ -49,26 +49,32 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
+  printf("executorsched_propose_batch A!!!\n");
   // TODO(geoff): co_await cp_.pool_.bg();
   // TODO(jhumphri): Uncomment this below!!!
   // co_await cp_.pool_.bg();
   auto ctx = executor_states_->get_executor_context(block_id);
+  printf("executorsched_propose_batch B!!!\n");
   if (!ctx) {
+    printf("executorsched_propose_batch ret 1!!!\n");
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
   }
   if (ctx->mode() != ExecutionMode::kProposing) {
+    printf("executorsched_propose_batch ret 2!!!\n");
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
   }
+  printf("executorsched_propose_batch C!!!\n");
 
   x23::Vec<ExecProposeResult> results;
   results.reserve(signed_txs.size());
   for (SignedTransaction const &signed_tx : signed_txs) {
     results.push_back(ctx->propose_transaction(signed_tx, allocate_tx_id()));
   }
+  printf("executorsched_propose_batch D!!!\n");
 
   co_return results;
 }

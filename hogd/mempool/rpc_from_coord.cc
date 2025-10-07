@@ -206,7 +206,9 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  printf("schedulercoord_nominate in thread %d\n", gettid());
   BlockID block_id = get_ns_since_epoch();
+  printf("A\n");
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
@@ -214,12 +216,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  printf("B\n");
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  printf("C\n");
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.scheduler_nomination().block_id = block_id;
@@ -231,6 +235,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_hashes.reserve(kMaxBlockSize);
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
+  printf("D\n");
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
       scheduler_->schedule(/*block_height=*/nomination.block_height,
@@ -242,25 +247,39 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  printf("E\n");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
+  printf("done with propose batch\n");
   for (size_t i = 0; i < statuses.size(); i++) {
+    printf("iteration\n");
     if (statuses[i]) {
+      printf("mark_txs_executed 1\n");
       scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
                                     nomination.block_height);
+      printf("mark_txs_executed 2\n");
     }
     else {
       // TODO(jhumphri): Need to do anything here?
+      printf("mark_txs_failed 1\n");
       scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
+      printf("mark_txs_failed 2\n");
       scheduler_->add_txs({txs[i]});
+      printf("next...\n");
     }
   }
 
+  printf("F\n");
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
+  printf("G\n");
   co_await finish_block(block_id);
+  printf("H\n");
   co_await close_snapshot(block_id);
+  printf("I\n");
   co_await commit_snapshot(block_id);
+  printf("J\n");
   co_await mark_block_committed(block_id);
+  printf("K\n");
 
   co_return result;
 }
