@@ -16,6 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -191,6 +192,39 @@ root_invoke(void *syscall_handler) noexcept
     return kUnrecoverableError;
   }
   return kUnrecoverableError;
+}
+
+ForeignTryCommitResult
+try_commit_transaction(void *syscall_handler) noexcept
+{
+  constexpr ForeignTryCommitResult kUnrecoverableError = {
+      .result_code = 0,
+      .panic = std::to_underlying(SystemErrorCode::kUnrecoverable)};
+
+  try {
+    if (!syscall_handler) {
+      error("try_commit_transaction error: no syscall handler!");
+      return kUnrecoverableError;
+    }
+    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    auto res = context->to_handler().try_commit_transaction();
+    if (!res.has_value()) {
+      error("try_commit_transaction encountered system error {}", res.error());
+      return ForeignTryCommitResult{.result_code = 0,
+                                    .panic =
+                                        std::to_underlying(res.error().code())};
+    }
+    return ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
+  } catch (std::exception const &e) {
+    try {
+      error("error during try_commit_transaction: {}", e.what());
+      return kUnrecoverableError;
+    } catch (...) {
+      return kUnrecoverableError;
+    }
+  } catch (...) {
+    return kUnrecoverableError;
+  }
 }
 
 constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
@@ -391,6 +425,12 @@ struct ForeignRootInvokeResult
 root_invoke(void *syscall_handler)
 {
   return hogd::root_invoke(syscall_handler);
+}
+
+struct ForeignTryCommitResult
+try_commit_transaction(void *syscall_handler)
+{
+  return hogd::try_commit_transaction(syscall_handler);
 }
 
 struct ForeignHostFnResult
