@@ -43,15 +43,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       authenticated.push_back(tx);
     }
   }
-  scheduler_.add_txs(authenticated);
-  co_return co_await coord_client_.coordscheduler_notify_vetted(authenticated);
+  scheduler_->add_txs(authenticated);
+  co_return co_await coord_client_->coordscheduler_notify_vetted(authenticated);
 }
 
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  scheduler_.add_txs(batch);
+  scheduler_->add_txs(batch);
   co_return;
 }
 
@@ -60,12 +60,12 @@ MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
   DbSchedResult res =
-      co_await db_sched_client_.dbsched_create_snapshot(prev_block_id, block_id,
-                                                        mode);
+      co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
+                                                         block_id, mode);
   if (res != DbSchedResult::DbSchedResultOK) {
     co_return false;
   }
-  co_await event_sched_client_.eventsched_open_block(block_id);
+  co_await event_sched_client_->eventsched_open_block(block_id);
   co_return true;
 }
 
@@ -73,12 +73,12 @@ x23::Async<void>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
   DbSchedResult res =
-      co_await db_sched_client_.dbsched_abandon_snapshot(block_id);
+      co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbSchedResultOK], but this
   // could change in the future. In the case of a failure, we need to clean up
   // db state.
   CHECK_EQ(res, DbSchedResult::DbSchedResultOK);
-  co_await event_sched_client_.eventsched_abandon_block(block_id);
+  co_await event_sched_client_->eventsched_abandon_block(block_id);
   co_return;
 }
 
@@ -86,11 +86,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_client_.dbsched_close_snapshot(block_id);
+      co_await db_sched_client_->dbsched_close_snapshot(block_id);
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  auto r = co_await event_sched_client_.eventsched_close_block(block_id);
+  auto r = co_await event_sched_client_->eventsched_close_block(block_id);
   CHECK_EQ(r.error(), RPCError::kRPCNone);
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
@@ -102,7 +102,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 {
   DbBlockResult res =
-      co_await db_sched_client_.dbsched_commit_snapshot(block_id);
+      co_await db_sched_client_->dbsched_commit_snapshot(block_id);
   // [dbsched_commit_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -233,8 +233,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
-      scheduler_.schedule(/*block_height=*/nomination.block_height,
-                          kMaxBlockSize);
+      scheduler_->schedule(/*block_height=*/nomination.block_height,
+                           kMaxBlockSize);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -246,13 +246,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   for (size_t i = 0; i < statuses.size(); i++) {
     if (statuses[i]) {
-      scheduler_.mark_txs_executed({nomination.transaction_hashes[i]},
-                                   nomination.block_height);
+      scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
+                                    nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
-      scheduler_.mark_txs_failed({nomination.transaction_hashes[i]});
-      scheduler_.add_txs({txs[i]});
+      scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
+      scheduler_->add_txs({txs[i]});
     }
   }
 
@@ -323,8 +323,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   x23::Vec<ProposedTransaction> txs;
   {
     x23::Vec<SignedTransaction> signed_txs;
-    if (!scheduler_.find_and_remove_from_runqueue(nomination.transaction_hashes,
-                                                  &signed_txs)) {
+    if (!scheduler_->find_and_remove_from_runqueue(
+            nomination.transaction_hashes, &signed_txs)) {
       co_await finish_block(block_id);
       co_await abandon_snapshot(block_id);
       co_return SchedulerValidationResult(
@@ -341,8 +341,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   CHECK(!txs.empty());
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
-        scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_txs(reenqueue);
+        scheduler_->mark_txs_failed(nomination.transaction_hashes);
+    scheduler_->add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -355,8 +355,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // that all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     SignedTransactionBatch reenqueue =
-        scheduler_.mark_txs_failed(nomination.transaction_hashes);
-    scheduler_.add_txs(reenqueue);
+        scheduler_->mark_txs_failed(nomination.transaction_hashes);
+    scheduler_->add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -364,8 +364,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  scheduler_.mark_txs_executed(nomination.transaction_hashes,
-                               nomination.block_height);
+  scheduler_->mark_txs_executed(nomination.transaction_hashes,
+                                nomination.block_height);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
@@ -387,21 +387,21 @@ MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
   x23::Vec<ContractAddress> changed_accounts =
       co_await authentication_->update_block_id(current_block_id_);
   for (const ContractAddress &account : changed_accounts) {
-    scheduler_.filter_txs_for_account(account, auth_filter_);
+    scheduler_->filter_txs_for_account(account, auth_filter_);
   }
 }
 
 x23::Async<DbTipResult>
 MempoolCoordinatorRpc::schedcoord_get_tip()
 {
-  return db_sched_client_.dbsched_get_tip();
+  return db_sched_client_->dbsched_get_tip();
 }
 
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::schedcoord_load_genesis_block(
     const GenesisBlock &genesis_block)
 {
-  return db_sched_client_.dbsched_load_genesis_block(genesis_block);
+  return db_sched_client_->dbsched_load_genesis_block(genesis_block);
 }
 
 x23::Async<void>

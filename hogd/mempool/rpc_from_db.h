@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/registration.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -43,7 +44,7 @@ public:
     co_return;
   }
 
-  x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp) const
+  static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
   {
     x23::Vec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);

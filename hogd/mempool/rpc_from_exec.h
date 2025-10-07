@@ -31,6 +31,8 @@ class MempoolExecutorRpc {
 public:
   using rpc_service = SchedExec1;
 
+  MempoolExecutorRpc() = default;
+
   // Disable copy and move.
   MempoolExecutorRpc(const MempoolExecutorRpc &) = delete;
   MempoolExecutorRpc &operator=(const MempoolExecutorRpc &) = delete;

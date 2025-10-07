@@ -43,7 +43,7 @@ public:
     return RPCError::kRPCNone;
   }
 
-  event_sched_client_t get_client(x23::CoroPoll &cp)
+  static event_sched_client_t get_client(x23::CoroPoll &cp)
   {
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));
