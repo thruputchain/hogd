@@ -13,6 +13,10 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/rpc_from_db.h"
+#include "hogd/mempool/rpc_from_event.h"
+#include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -35,16 +39,9 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
 
-  MempoolCoordinatorRpc(coord_client_t &&coord_client,
-                        db_sched_client_t &&db_sched_client,
-                        x23::Vec<exec_client_t> &&exec_clients,
-                        event_sched_client_t &&event_sched_client)
-    : coord_client_(std::move(coord_client)),
-      db_sched_client_(std::move(db_sched_client)),
-      exec_clients_(std::move(exec_clients)),
-      event_sched_client_(std::move(event_sched_client)),
-      scheduler_(db_sched_client_)
-  {}
+  MempoolCoordinatorRpc() = default;
+
+  x23::CoroPoll *my_cp_ = nullptr;
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -52,32 +49,34 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  void start(const SchedulerCard &card)
-  {
-    IntroSchedResult res = coordscheduler_intro_sched(card);
-    current_block_id_ = res.current_block_id;
-    authentication_ =
-        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
-  }
-
-  IntroSchedResult coordscheduler_intro_sched(const SchedulerCard &card)
-  {
-    IntroSchedResult res = coord_client_.coordscheduler_intro_sched(card)();
-    return res;
-  }
-
-  Scheduler &scheduler() { return scheduler_; }
+  Scheduler &scheduler() { return *scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
-  static coord_client_t get_client(const std::string &coordinator_addr,
-                                   x23::CoroPoll &cp)
+  static coord_sched_client_t get_client(x23::CoroPoll &cp)
   {
+    CoordCard card;
+    CHECK(Registration::registration().coordinator_registered(&card));
+
     x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(coordinator_addr));
+        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
     return x23::rpc_stream_logged(cp, fd.release())->client(CoordScheduler1{});
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
+
+  x23::Async<CoordinatorRegistrationOutcome>
+  schedulercoord_intro_coord(CoordCard card)
+  {
+    if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationInvalidProtocol;
+    }
+    current_block_id_ = card.current_block_id;
+    Registration::registration().register_coordinator(card);
+    finish_init();
+
+    co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
+  }
 
   // Submit an unvetted tx.
   x23::Async<void> schedulercoord_submit_unvetted(SignedTransactionBatch batch);
@@ -137,6 +136,24 @@ private:
     return ns.count();
   }
 
+  void finish_init()
+  {
+    coord_client_ =
+        std::make_unique<coord_sched_client_t>(get_client(client_cp_));
+    // TODO(jhumphri): I think I just need to create a client for one of the
+    // shards? Will the account information that the scheduler needs be
+    // distributed across shards?
+    db_sched_client_ = std::make_unique<db_sched_client_t>(
+        std::move(MempoolDbRpc::get_clients(client_cp_)[0]));
+    exec_clients_ = MempoolExecutorRpc::get_clients(client_cp_);
+    event_sched_client_ = std::make_unique<event_sched_client_t>(
+        MempoolEventRpc::get_client(client_cp_));
+
+    authentication_ =
+        std::make_unique<Authentication>(current_block_id_, *db_sched_client_);
+    scheduler_ = std::make_unique<Scheduler>(*db_sched_client_);
+  }
+
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
                                    BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
@@ -160,20 +177,25 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  coord_client_t coord_client_;
-  db_sched_client_t db_sched_client_;
-  x23::Vec<exec_client_t> exec_clients_;
-  event_sched_client_t event_sched_client_;
+  x23::ThreadPool client_pool_;
+  x23::CoroPoll client_cp_ = x23::CoroPoll(client_pool_);
+  std::unique_ptr<coord_sched_client_t> coord_client_;
+  std::unique_ptr<db_sched_client_t> db_sched_client_;
+  x23::Vec<exec_sched_client_t> exec_clients_;
+  std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_;
-  Scheduler scheduler_;
+  std::unique_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
+class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {
+public:
+  MempoolCoordinatorServer() { get_impl().my_cp_ = &cp(); }
+};
 
 } // namespace hogd

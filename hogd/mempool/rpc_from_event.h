@@ -2,13 +2,13 @@
 
 #include <cassert>
 #include <condition_variable>
-#include <mutex>
 #include <optional>
 #include <utility>
 
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/mempool/registration.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
@@ -31,43 +31,27 @@ public:
   MempoolEventRpc(MempoolEventRpc &&) = delete;
   MempoolEventRpc &operator=(MempoolEventRpc &&) = delete;
 
-  RPCError schedevent_intro_event(EventCard card)
+  static RPCError schedevent_intro_event(const EventCard &card)
   {
     info("event server connected");
 
-    std::lock_guard lk(mutex_);
-    if (event_.has_value()) {
+    if (Registration::registration().event_registered(/*card=*/nullptr)) {
       error("event server already connected");
       return RPCError::kRPCUnrecoverable;
     }
-    event_ = std::move(card);
-    cv_.notify_all();
+    Registration::registration().register_event(card);
     return RPCError::kRPCNone;
   }
 
-  EventCard event()
+  static event_sched_client_t get_client(x23::CoroPoll &cp)
   {
-    std::unique_lock lk(mutex_);
-    cv_.wait(lk, [this] { return event_.has_value(); });
-    assert(event_.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return event_.value();
-  }
+    EventCard card;
+    CHECK(Registration::registration().event_registered(&card));
 
-  auto get_client(x23::CoroPoll &cp)
-  {
-    assert(event_.has_value());
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(event_.value().address));
-    // NOLINTEND(bugprone-unchecked-optional-access)
+        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
     return x23::rpc_stream_logged(cp, fd.release())->client(EventSched1{});
   }
-
-private:
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::optional<EventCard> event_;
 };
 
 static_assert(is_SchedEvent1<MempoolEventRpc *, x23::MaybeAsync>);

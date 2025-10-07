@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 
 #include <cassert>
-#include <cstddef>
 #include <iterator>
 #include <optional>
 #include <ranges>
