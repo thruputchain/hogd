@@ -133,8 +133,8 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
-    cycle_if_needed(tx.tx.invocation.invoked_address,
-                    tx.tx.invocation.gas_limit);
+    co_await cycle_if_needed(tx.tx.invocation.invoked_address,
+                             tx.tx.invocation.gas_limit);
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
       cached_hogs_[tx.tx.invocation.invoked_address]
@@ -541,7 +541,9 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
   }
-  co_return {hashes, txs};
+  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
+      {hashes, txs};
+  co_return ret;
 }
 
 // TODO(jhumphri): We should remove the [block] parameter. We should know the
@@ -700,7 +702,7 @@ Scheduler::find_and_remove_from_runqueue(
 x23::Async<void>
 Scheduler::filter_txs_for_account(
     const ContractAddress &account,
-    const std::function<bool(const SignedTransaction &tx)> &filter)
+    const std::function<x23::Async<bool>(const SignedTransaction &tx)> &filter)
 {
   x23::Vec<SignedTransactionHash> to_discard;
   {
@@ -710,7 +712,7 @@ Scheduler::filter_txs_for_account(
       const std::unordered_set<TxInfo *> &txs = it->second;
       for (const TxInfo *info : txs) {
         const SignedTransaction &tx = info->tx;
-        if (!filter(tx)) {
+        if (!co_await filter(tx)) {
           to_discard.push_back(info->tx_hash);
         }
       }
@@ -725,7 +727,7 @@ Scheduler::filter_txs_for_account(
       for (const auto &[_, txs] : gas_txs) {
         for (const TxInfo *info : txs) {
           const SignedTransaction &tx = info->tx;
-          if (!filter(tx)) {
+          if (!co_await filter(tx)) {
             to_discard.push_back(info->tx_hash);
           }
         }

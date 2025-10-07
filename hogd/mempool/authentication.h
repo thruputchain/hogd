@@ -215,7 +215,7 @@ private:
   {
     auto it = accounts_.find(account);
     if (it != accounts_.end()) {
-      return &it->second;
+      co_return &it->second;
     }
 
     DbAccountAuthDataBatchResult res =

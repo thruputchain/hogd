@@ -41,8 +41,6 @@ public:
 
   MempoolCoordinatorRpc() = default;
 
-  x23::CoroPoll *my_cp_ = nullptr;
-
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
@@ -120,10 +118,10 @@ private:
   // has at least [kMinHashesPerThread] hashes to insert.
   static constexpr size_t kMinHashesPerThread = 16'384;
 
-  const std::function<bool(const SignedTransaction &tx)> auth_filter_ =
-      [&](const SignedTransaction &tx) {
-        return authentication_->authenticate(tx);
-      };
+  const std::function<x23::Async<bool>(const SignedTransaction &tx)>
+      auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
+    co_return co_await authentication_->authenticate(tx);
+  };
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
   // This will need to be reworked if/when we have multiple threads processing
@@ -193,9 +191,6 @@ private:
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {
-public:
-  MempoolCoordinatorServer() { get_impl().my_cp_ = &cp(); }
-};
+class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
 
 } // namespace hogd

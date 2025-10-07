@@ -146,7 +146,8 @@ public:
 
   x23::Async<void> filter_txs_for_account(
       const ContractAddress &account,
-      const std::function<bool(const SignedTransaction &tx)> &filter);
+      const std::function<x23::Async<bool>(const SignedTransaction &tx)>
+          &filter);
 
   // Debug.
   void dump_runqueue() const;
