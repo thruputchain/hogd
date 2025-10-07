@@ -32,6 +32,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
     auto b = block_manager_.get_block_data(current_block_id_);
     assert(b);
     b->close_block();
+    event_server_.close_block(current_block_id_);
   }
 
   [[maybe_unused]] auto res =
@@ -40,6 +41,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   current_block_id_++;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+  event_server_.open_block(current_block_id_);
 }
 
 } // namespace hogd
