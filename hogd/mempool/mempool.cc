@@ -3,14 +3,10 @@
 #include <format>
 #include <future>
 #include <print>
-#include <stdexcept>
 #include <string>
 #include <thread>
-#include <utility>
 
-#include "coord_sched.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -19,12 +15,6 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/types.h"
-#include "hogd/version.h"
-#include "x23/event.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
-#include "x23/vec.h"
 
 namespace hogd {
 

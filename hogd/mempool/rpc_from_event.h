@@ -31,7 +31,7 @@ public:
   MempoolEventRpc(MempoolEventRpc &&) = delete;
   MempoolEventRpc &operator=(MempoolEventRpc &&) = delete;
 
-  RPCError schedevent_intro_event(EventCard card)
+  static RPCError schedevent_intro_event(const EventCard &card)
   {
     info("event server connected");
 

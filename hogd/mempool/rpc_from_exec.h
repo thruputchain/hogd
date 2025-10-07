@@ -39,13 +39,13 @@ public:
   MempoolExecutorRpc(MempoolExecutorRpc &&) = delete;
   MempoolExecutorRpc &operator=(MempoolExecutorRpc &&) = delete;
 
-  x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card)
+  static x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card)
   {
     info("executor with card {} connected. {} total executors connected.",
          x23::show(card),
          // We add 1 because we print this before we actually add the executor
          // below.
-         Registration::registration().executors_registered(/*card=*/nullptr) +
+         Registration::registration().executors_registered(/*cards=*/nullptr) +
              1);
 
     size_t exec_id = Registration::registration().register_executor(card);

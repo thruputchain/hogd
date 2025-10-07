@@ -35,7 +35,7 @@ public:
   MempoolDbRpc(MempoolDbRpc &&) = delete;
   MempoolDbRpc &operator=(MempoolDbRpc &&) = delete;
 
-  x23::Async<void> scheddb_intro_shard(ShardCard card)
+  static x23::Async<void> scheddb_intro_shard(ShardCard card)
   {
     // We add 1 because we print this before we actually add the shard below.
     info("db shard connected. {} total shards connected.",
