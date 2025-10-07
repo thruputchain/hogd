@@ -606,6 +606,7 @@ on which it is actually listening.  An example of usage is as follows:
 ``` cpp
 #include <x23/rpc.h>
 #include <x23/refcount.h>
+
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
 
@@ -626,8 +627,27 @@ main()
   // Wait until moved lambda is destroyed (will happen if accept
   // returns an error or cp is destroyed).
   m.lock();
+  m.unlock();
 }
 ```
+
+If you want `tcp_rpc_server` not to return while the server is running
+as above, you can do the equivalent of the above function using
+`tcp_rpc_server_wait`, which simplifies the above to:
+
+``` cpp
+struct MyVersImpl { /* ... */ };
+MyVersImpl impl;
+
+int
+main()
+{
+  tcp_rpc_server_wait(cp, 5665, [](auto c) {
+    c->server(&impl, myvers{});
+  });
+}
+```
+
 
 #### Simplified TCP server logging
 
