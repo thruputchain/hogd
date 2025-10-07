@@ -200,82 +200,90 @@ verify_auth_claim_internal(AuthClaim const &claim,
   }
 }
 
-// This assumes that verify_auth_claim_internal has already been called and passed for each auth claim.
+// This assumes that verify_auth_claim_internal has already been called and
+// passed for each auth claim.
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
 bool
-validate_nonce(const SignedTransaction &stx, const AccountAuthData& auth_data, const NonceConfig &nonce_config)
+validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
+               const NonceConfig &nonce_config)
 {
-    assert(stx.tx.auth_claims.size() == stx.signatures.size());
-    Weight total_weight = 0;
+  assert(stx.tx.auth_claims.size() == stx.signatures.size());
+  Weight total_weight = 0;
 
-    for (size_t i = 0; i < stx.signatures.size(); i++) {
-        const auto &sigs = stx.signatures[i];
-        const auto &auth_claim = stx.tx.auth_claims[i];
-        switch(auth_claim.claim_type()) {
-        case AuthClaimType::kInvokedAddressSignature:
-        case AuthClaimType::kInvokedAddressSignedWeight:
-            for (const auto &sig : sigs) {
-                if (!bitmap_accepts_key(nonce_config.accepted_keys, sig.public_key_id)) {
-                    return false;
-                }
-                total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
-            }
-            break;
-        case AuthClaimType::kOtherAddressSignature:
-        case AuthClaimType::kOtherAddressSignedWeight:
-            // other addresses can't contribute to the nonce weight
-            break;
-        default:
-            panic("Unsupported auth claim type: {}", auth_claim.claim_type());
+  for (size_t i = 0; i < stx.signatures.size(); i++) {
+    const auto &sigs = stx.signatures[i];
+    const auto &auth_claim = stx.tx.auth_claims[i];
+    switch (auth_claim.claim_type()) {
+    case AuthClaimType::kInvokedAddressSignature:
+    case AuthClaimType::kInvokedAddressSignedWeight:
+      for (const auto &sig : sigs) {
+        if (!bitmap_accepts_key(nonce_config.accepted_keys,
+                                sig.public_key_id)) {
+          return false;
         }
+        total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
+      }
+      break;
+    case AuthClaimType::kOtherAddressSignature:
+    case AuthClaimType::kOtherAddressSignedWeight:
+      // other addresses can't contribute to the nonce weight
+      break;
+    default:
+      panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
-    return total_weight >= nonce_config.required_weight;
+  }
+  return total_weight >= nonce_config.required_weight;
 }
 
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
 bool
-validate_gas_permission(const SignedTransaction &stx, const GasClaim& gas_claim, const AccountAuthData& auth_data, const x23::Vec<GasPermissionConfig, MAX_GAS_CONFIGS>& gas_config)
+validate_gas_permission(
+    const SignedTransaction &stx, const GasClaim &gas_claim,
+    const AccountAuthData &auth_data,
+    const x23::Vec<GasPermissionConfig, MAX_GAS_CONFIGS> &gas_config)
 {
-    assert(stx.tx.auth_claims.size() == stx.signatures.size());
-    x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(gas_config.size(), 0);
+  assert(stx.tx.auth_claims.size() == stx.signatures.size());
+  x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(gas_config.size(), 0);
 
-    for (size_t i = 0; i < stx.signatures.size(); i++) {
-        const auto &sigs = stx.signatures[i];
-        const auto &auth_claim = stx.tx.auth_claims[i];
-        
-        const auto& claim_addr = [&auth_claim, &stx]() {
-            switch(auth_claim.claim_type()) {
-            case AuthClaimType::kInvokedAddressSignature:
-            case AuthClaimType::kInvokedAddressSignedWeight:
-                return stx.tx.invocation.invoked_address;
-            case AuthClaimType::kOtherAddressSignature:
-                return auth_claim.other_address_signature_id().address;
-            case AuthClaimType::kOtherAddressSignedWeight:
-                return auth_claim.other_address_signed_weight().address;
-            }
-        }();
-        if (claim_addr != gas_claim.sponsored_contract) {
-            continue;
-        }
-        for (const auto &sig : sigs) {
-            for (size_t i = 0; i < gas_config.size(); i++) {
-                if (!bitmap_accepts_key(gas_config[i].accepted_keys, sig.public_key_id)) {
-                    continue;
-                }
-                assert(has_public_key(auth_data, sig.public_key_id));
-                gas_weights[i] += auth_data.public_keys[sig.public_key_id]->max_weight;
-            }
-        }
+  for (size_t i = 0; i < stx.signatures.size(); i++) {
+    const auto &sigs = stx.signatures[i];
+    const auto &auth_claim = stx.tx.auth_claims[i];
+
+    const auto &claim_addr = [&auth_claim, &stx]() {
+      switch (auth_claim.claim_type()) {
+      case AuthClaimType::kInvokedAddressSignature:
+      case AuthClaimType::kInvokedAddressSignedWeight:
+        return stx.tx.invocation.invoked_address;
+      case AuthClaimType::kOtherAddressSignature:
+        return auth_claim.other_address_signature_id().address;
+      case AuthClaimType::kOtherAddressSignedWeight:
+        return auth_claim.other_address_signed_weight().address;
+      }
+    }();
+    if (claim_addr != gas_claim.sponsored_contract) {
+      continue;
     }
-    GasAmount approved_amount = 0;
-    for (size_t i = 0; i < gas_config.size(); i++) {
-        if (gas_weights[i] >= gas_config[i].required_weight) {
-            approved_amount = std::max<GasAmount>(approved_amount, gas_config[i].limit);
+    for (const auto &sig : sigs) {
+      for (size_t i = 0; i < gas_config.size(); i++) {
+        if (!bitmap_accepts_key(gas_config[i].accepted_keys,
+                                sig.public_key_id)) {
+          continue;
         }
+        assert(has_public_key(auth_data, sig.public_key_id));
+        gas_weights[i] += auth_data.public_keys[sig.public_key_id]->max_weight;
+      }
     }
-    return approved_amount >= gas_claim.amount;
+  }
+  GasAmount approved_amount = 0;
+  for (size_t i = 0; i < gas_config.size(); i++) {
+    if (gas_weights[i] >= gas_config[i].required_weight) {
+      approved_amount =
+          std::max<GasAmount>(approved_amount, gas_config[i].limit);
+    }
+  }
+  return approved_amount >= gas_claim.amount;
 }
 
 template<VerificationType VerfType>
@@ -331,13 +339,16 @@ verify_auth_claims_internal(
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(source_auth_data);
-    if (!validate_nonce<VerfType>(stx, *source_auth_data, source_auth_data->nonce_config)) {
-        return false;
+    if (!validate_nonce<VerfType>(stx, *source_auth_data,
+                                  source_auth_data->nonce_config)) {
+      return false;
     }
     for (const auto &gas_claim : stx.tx.gas_claims) {
-        if (!validate_gas_permission<VerfType>(stx, gas_claim, *source_auth_data, source_auth_data->gas_permissions)) {
-            return false;
-        }
+      if (!validate_gas_permission<VerfType>(
+              stx, gas_claim, *source_auth_data,
+              source_auth_data->gas_permissions)) {
+        return false;
+      }
     }
   }
   return true;
