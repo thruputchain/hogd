@@ -31,8 +31,7 @@ TEST(Authentication, SignAndVerify)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -63,8 +62,7 @@ TEST(Authentication, SignAndVerifyNotEnoughSignatureWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
@@ -92,8 +90,7 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -122,8 +119,7 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/2);
@@ -152,8 +148,7 @@ TEST(Authentication, SignAndVerifyNoGasIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -184,8 +179,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGas)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -216,8 +210,7 @@ TEST(Authentication, SignAndVerifyGasWrongIndex)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -248,8 +241,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -280,8 +272,7 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigs)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -316,8 +307,7 @@ TEST(Authentication, SignAndVerifyMismatch)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                get_default_account());
   const Ed25519SecretKey private_key = ed25519_keygen().second;
@@ -342,8 +332,7 @@ TEST(Authentication, SignAndVerifyWrongIndex)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
@@ -370,8 +359,7 @@ TEST(Authentication, SignAndVerifyMultiSig)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -408,8 +396,7 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -448,8 +435,7 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -488,8 +474,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 5;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -528,8 +513,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
@@ -560,8 +544,7 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 7;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -596,8 +579,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 6;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -633,8 +615,7 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
@@ -664,8 +645,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   const std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
@@ -695,8 +675,7 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   std::unordered_map<uint32_t, Ed25519SecretKey> private_keys = {
       {0, create_key_pair(auth_data, /*idx=*/0, /*weight=*/1)},
@@ -730,8 +709,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -772,8 +750,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughSignatureWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -807,8 +784,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -846,8 +822,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -885,8 +860,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -921,8 +895,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -958,8 +931,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -997,8 +969,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   for (size_t i = 0; i < 3; i++) {
@@ -1039,8 +1010,7 @@ TEST(Authentication, SignAndVerifyAuthDataChanged)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -1078,8 +1048,7 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
   }
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
-  Authentication &auth = clients.interface->authentication();
+  Authentication &auth = server.mempool_coord_rpc().authentication();
 
   std::array<std::unordered_map<uint32_t, Ed25519SecretKey>, 3> private_keys;
   std::array<AccountAuthData, 3> auth_datas = {get_default_account(),

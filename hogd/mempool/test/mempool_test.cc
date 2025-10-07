@@ -23,7 +23,6 @@ TEST(Mempool, SubmitUnvetted)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -41,7 +40,7 @@ TEST(Mempool, SubmitUnvetted)
       hogd::Authentication::sign(txs[0].tx, /*signature_weight=*/1,
                                  {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  clients.interface->schedulercoord_submit_unvetted({tx})();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted({tx})();
 }
 
 TEST(Mempool, SubmitVetted)
@@ -50,10 +49,10 @@ TEST(Mempool, SubmitVetted)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
 }
 
 TEST(Mempool, Nominate)
@@ -62,13 +61,13 @@ TEST(Mempool, Nominate)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
@@ -78,13 +77,12 @@ TEST(Mempool, NominateBatch)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
@@ -93,10 +91,9 @@ TEST(Mempool, NominateEmpty)
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(),
             SchedulerNominationOutcome::SchedulerNominationError);
 }
@@ -107,18 +104,20 @@ TEST(Mempool, Validate)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
-  auto res_validate = clients.interface->schedulercoord_validate(
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
@@ -130,18 +129,18 @@ TEST(Mempool, ValidateBatch)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = clients.interface->schedulercoord_validate(
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
@@ -152,11 +151,11 @@ TEST(Mempool, ValidateEmpty)
   fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_validate =
-      clients.interface->schedulercoord_validate(db_tip, Nomination{})();
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip,
+                                                         Nomination{})();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -167,13 +166,13 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
@@ -182,8 +181,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   res_nominate.scheduler_nomination()
       .nomination.transaction_nominations.pop_back();
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = clients.interface->schedulercoord_validate(
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
@@ -198,12 +197,12 @@ TEST(Mempool, ValidateBatchMissingTx)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   {
     MempoolTestServer server;
-    Clients clients = create_clients(server);
 
     ValidatorID validator_id{};
-    clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
 
-    res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+    res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerNominationOutcome::SchedulerNominationOK);
   }
@@ -214,15 +213,15 @@ TEST(Mempool, ValidateBatchMissingTx)
     // transaction below from [txs] will have no effect because [server] will
     // still have the removed transaction as a vetted transaction.
     MempoolTestServer server;
-    Clients clients = create_clients(server);
 
     // Remove a transaction.
     txs.pop_back();
 
     ValidatorID validator_id{};
-    clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
 
-    auto res_validate = clients.interface->schedulercoord_validate(
+    auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
         db_tip, res_nominate.scheduler_nomination().nomination)();
     EXPECT_EQ(res_validate.outcome(),
               SchedulerValidationResult::SchedulerValidationMissingTxs);
@@ -238,7 +237,6 @@ TEST(Mempool, AuthChanged)
       generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
@@ -263,7 +261,7 @@ TEST(Mempool, AuthChanged)
                                    {{0, private_key}},
                                    /*auxiliary_private_keys=*/{}));
   }
-  clients.interface->schedulercoord_submit_unvetted(signed_txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 2;
@@ -271,7 +269,7 @@ TEST(Mempool, AuthChanged)
                                auth_data);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
@@ -280,7 +278,7 @@ TEST(Mempool, AuthChanged)
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
             .hash = res.scheduler_nomination().nomination.block_hash,
             .id = res.scheduler_nomination().block_id};
-  res = clients.interface->schedulercoord_nominate(db_tip)();
+  res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(), 1);
 }
@@ -294,7 +292,6 @@ TEST(Mempool, AuthInvalidated)
       generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
@@ -319,7 +316,7 @@ TEST(Mempool, AuthInvalidated)
                                    {{0, private_key}},
                                    /*auxiliary_private_keys=*/{}));
   }
-  clients.interface->schedulercoord_submit_unvetted(signed_txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 10;
@@ -327,7 +324,7 @@ TEST(Mempool, AuthInvalidated)
                                auth_data);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
@@ -336,7 +333,7 @@ TEST(Mempool, AuthInvalidated)
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
             .hash = res.scheduler_nomination().nomination.block_hash,
             .id = res.scheduler_nomination().block_id};
-  res = clients.interface->schedulercoord_nominate(db_tip)();
+  res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   // [schedulercoord_nominate()] returns an error if there are no vetted txs to
   // nominate.
   EXPECT_EQ(res.outcome(),
@@ -349,18 +346,18 @@ TEST(Mempool, Stress)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = clients.interface->schedulercoord_validate(
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);

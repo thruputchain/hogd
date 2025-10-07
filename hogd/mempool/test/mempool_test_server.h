@@ -81,8 +81,6 @@ public:
   MempoolTestServer()
     : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
       sched_event_port_(sched_event_server_.start_server(/*port=*/0)),
-      sched_exec_server_(sched_db_server_.get_impl(),
-                         sched_event_server_.get_impl()),
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port=*/0)),
@@ -194,6 +192,8 @@ public:
       // Now have the executor register itself with the mempool.
       executor_.start(/*port_number=*/0, kAddress);
     }
+
+    mempool_coord_server_->start_server(/*port=*/0);
   }
 
   ~MempoolTestServer()
@@ -245,6 +245,10 @@ public:
 
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
+  MempoolCoordinatorRpc &mempool_coord_rpc()
+  {
+    return mempool_coord_server_->get_impl();
+  }
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
@@ -312,6 +316,8 @@ private:
       TestEventAggregatorExecRpc(event_server_);
   uint16_t event_sched_port_;
   uint16_t event_exec_port_;
+
+  std::unique_ptr<MempoolCoordinatorServer> mempool_coord_server_;
 };
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
@@ -337,72 +343,6 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
     txs.push_back(tx);
   }
   return txs;
-}
-
-struct Clients {
-  std::unique_ptr<x23::ThreadPool> coord_pool;
-  std::unique_ptr<x23::CoroPoll> coord_cp;
-
-  std::unique_ptr<x23::ThreadPool> db_sched_pool;
-  std::unique_ptr<x23::CoroPoll> db_sched_cp;
-
-  std::unique_ptr<x23::ThreadPool> exec_pool;
-  std::unique_ptr<x23::CoroPoll> exec_cp;
-
-  std::unique_ptr<x23::ThreadPool> event_sched_pool;
-  std::unique_ptr<x23::CoroPoll> event_sched_cp;
-
-  std::unique_ptr<MempoolCoordinatorRpc> interface;
-};
-
-inline Clients
-create_clients(MempoolTestServer &server)
-{
-  // Mempool-Coordinator RPC client.
-  auto coord_pool = std::make_unique<x23::ThreadPool>();
-  auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  coord_sched_client_t coord_client = MempoolCoordinatorRpc::get_client(
-      std::format("{}:{}", MempoolTestServer::kAddress,
-                  server.coordinator_sched_port()),
-      *coord_cp);
-
-  // Mempool-DB RPC client.
-  auto db_sched_pool = std::make_unique<x23::ThreadPool>();
-  auto db_sched_cp = std::make_unique<x23::CoroPoll>(*db_sched_pool);
-  db_sched_client_t db_sched_client =
-      server.sched_db_rpc().get_clients(*db_sched_cp)[0];
-
-  // Mempool-Executor RPC client.
-  auto exec_pool = std::make_unique<x23::ThreadPool>();
-  auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  x23::Vec<exec_sched_client_t> exec_clients =
-      server.sched_exec_rpc().get_clients(*exec_cp);
-
-  // Mempool-Event RPC client.
-  auto event_sched_pool = std::make_unique<x23::ThreadPool>();
-  auto event_sched_cp = std::make_unique<x23::CoroPoll>(*event_sched_pool);
-  x23::UniqueFd fd = x23::tcpconnect(server_address_to_sockaddr(
-      std::format("{}:{}", MempoolTestServer::kAddress,
-                  server.event_sched_port())));
-  event_sched_client_t event_sched_client =
-      x23::rpc_stream_logged(*event_sched_cp, fd.release())
-          ->client(EventSched1{});
-
-  auto interface =
-      std::make_unique<MempoolCoordinatorRpc>(std::move(coord_client),
-                                              std::move(db_sched_client),
-                                              std::move(exec_clients),
-                                              std::move(event_sched_client));
-  // TODO(jhumphri): Coordinator needs to register itself with the mempool.
-  return {.coord_pool = std::move(coord_pool),
-          .coord_cp = std::move(coord_cp),
-          .db_sched_pool = std::move(db_sched_pool),
-          .db_sched_cp = std::move(db_sched_cp),
-          .exec_pool = std::move(exec_pool),
-          .exec_cp = std::move(exec_cp),
-          .event_sched_pool = std::move(event_sched_pool),
-          .event_sched_cp = std::move(event_sched_cp),
-          .interface = std::move(interface)};
 }
 
 inline AccountAuthData
