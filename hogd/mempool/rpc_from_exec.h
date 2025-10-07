@@ -67,7 +67,6 @@ public:
     ret.reserve(cards.size());
 
     for (const ExecCard &card : cards) {
-      info("getting client for {}", card.address);
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address));
       ret.push_back(
