@@ -28,12 +28,16 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    std::tie(port, listen_fd_) =
+    std::tie(port_, listen_fd_) =
         tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
-    return port;
+    return port_;
   }
 
-  void shut_down() { cp_.poison(listen_fd_); }
+  void shut_down()
+  {
+    cp_.poison(listen_fd_);
+    rpc_.shut_down();
+  }
 
   void await_shutdown_request() { rpc_.await_shutdown_request(); }
 
@@ -68,7 +72,7 @@ private:
 
   x23::ThreadPool pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-  uint16_t port_;
+  uint16_t port_ = 0;
 };
 
 inline sockaddr_storage
