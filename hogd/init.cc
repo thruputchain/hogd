@@ -83,14 +83,15 @@ hogd_init(int argc, char *argv[], bool do_print_version)
 {
   // TODO(amb): parse arguments and set up configuration
 
+  // initialize logging
+  // NOTE: this must come before any use of the CHECK macros
+  log_init(std::make_unique<ConsoleLogger>());
+
   // Ensure we have a pathname for our executable
   if (x23::getprogpath().empty()) {
-    CHECK_GE(argc, 1);
+    CHECK_GT(argc, 0);
     x23::setprogpath(argv[0]);
   }
-
-  // initialize logging
-  log_init(std::make_unique<ConsoleLogger>());
 
   // initialize each subsystem
   for (auto [func, name] : init_tbl) {

@@ -7,7 +7,6 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <string>
 #include <utility>
 
 #include "account.hh"
@@ -17,6 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -194,6 +194,39 @@ root_invoke(void *syscall_handler) noexcept
   return kUnrecoverableError;
 }
 
+ForeignTryCommitResult
+try_commit_transaction(void *syscall_handler) noexcept
+{
+  constexpr ForeignTryCommitResult kUnrecoverableError = {
+      .result_code = 0,
+      .panic = std::to_underlying(SystemErrorCode::kUnrecoverable)};
+
+  try {
+    if (!syscall_handler) {
+      error("try_commit_transaction error: no syscall handler!");
+      return kUnrecoverableError;
+    }
+    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    auto res = context->to_handler().try_commit_transaction();
+    if (!res.has_value()) {
+      error("try_commit_transaction encountered system error {}", res.error());
+      return ForeignTryCommitResult{.result_code = 0,
+                                    .panic =
+                                        std::to_underlying(res.error().code())};
+    }
+    return ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
+  } catch (std::exception const &e) {
+    try {
+      error("error during try_commit_transaction: {}", e.what());
+      return kUnrecoverableError;
+    } catch (...) {
+      return kUnrecoverableError;
+    }
+  } catch (...) {
+    return kUnrecoverableError;
+  }
+}
+
 constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
 
 void
@@ -214,6 +247,52 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
               StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
       },
       std::make_shared<StorageItemWrapper>(int128_t{tokens}, &kCostModel));
+}
+
+int
+get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
+{
+  if (!syscall_handler) {
+    error("get_event_log error: no syscall handler!");
+    return 1;
+  }
+  if (!buffer) {
+    error("get_event_log error: no buffer!");
+    return 1;
+  }
+
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto event_log = context->get_tx_event_log();
+  if (!event_log) {
+    debug("No events for current tx");
+    if (buffer_len > 0) {
+      return 1;
+    }
+    return 0;
+  }
+  auto serialized_event_log = x23::serialize(event_log.value());
+  if (serialized_event_log.size() != buffer_len) {
+    error("get_event_log error: buffer too small!");
+    return 1;
+  }
+  std::memcpy(buffer, serialized_event_log.data(), serialized_event_log.size());
+  return 0;
+}
+
+uint32_t
+get_event_log_len(void *syscall_handler)
+{
+  if (!syscall_handler) {
+    error("get_event_log_len error: no syscall handler!");
+    return 0;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto event_log = context->get_tx_event_log();
+  if (!event_log) {
+    return 0;
+  }
+  auto serialized_event_log = x23::serialize(event_log.value());
+  return serialized_event_log.size();
 }
 
 } // namespace
@@ -348,6 +427,12 @@ root_invoke(void *syscall_handler)
   return hogd::root_invoke(syscall_handler);
 }
 
+struct ForeignTryCommitResult
+try_commit_transaction(void *syscall_handler)
+{
+  return hogd::try_commit_transaction(syscall_handler);
+}
+
 struct ForeignHostFnResult
 mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg3, uint64_t arg4, uint64_t arg5,
@@ -362,6 +447,18 @@ enable_syscall_logging()
 {
   hogd::swap_logger(
       std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
+}
+
+int
+get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
+{
+  return hogd::get_event_log(syscall_handler, buffer, buffer_len);
+}
+
+uint32_t
+get_event_log_len(void *syscall_handler)
+{
+  return hogd::get_event_log_len(syscall_handler);
 }
 
 #ifdef __cplusplus
