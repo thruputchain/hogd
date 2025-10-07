@@ -255,6 +255,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     printf("iteration\n");
     if (statuses[i]) {
       printf("mark_txs_executed 1\n");
+      CHECK_PTR(my_cp_);
+      co_await my_cp_->pool_.bg();
       scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
                                     nomination.block_height);
       printf("mark_txs_executed 2\n");

@@ -41,6 +41,8 @@ public:
 
   MempoolCoordinatorRpc() = default;
 
+  x23::CoroPoll *my_cp_ = nullptr;
+
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
@@ -191,6 +193,9 @@ private:
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
+class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {
+public:
+  MempoolCoordinatorServer() { get_impl().my_cp_ = &cp(); }
+};
 
 } // namespace hogd

@@ -89,8 +89,15 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
     ages.push_back(it->second);
   }
   printf("Scheduler::write_average_hog_age A\n");
-  auto ret = db_sched_client_.dbsched_write_hog_ages(ages)() ==
-             DbSchedResult::DbSchedResultOK;
+  bool ret = false;
+  std::atomic<bool> done = false;
+  std::jthread([this, &ages, &ret, &done]() {
+    printf("in thread A\n");
+    ret = db_sched_client_.dbsched_write_hog_ages(ages)() ==
+          DbSchedResult::DbSchedResultOK;
+    printf("in thread B\n");
+    done = true;
+  });
   printf("Scheduler::write_average_hog_age B\n");
   return ret;
 }
@@ -197,7 +204,8 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
     }
 
     // We should cycle if either of the following is true:
-    // 1. Cycling will increase the average age of the [kHogAgeGroupToSchedule]
+    // 1. Cycling will increase the average age of the
+    // [kHogAgeGroupToSchedule]
     //    group.
     // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
     //    schedule tx that requires [gas_limit] hogs, but cycling will add
@@ -219,7 +227,8 @@ Scheduler::cycle_groups(const ContractAddress &account)
   HogAge new_averages;
   new_averages.address = averages.address;
 
-  // We need to add up all of the hogs reserved by txs sitting in the runqueue.
+  // We need to add up all of the hogs reserved by txs sitting in the
+  // runqueue.
   uint128_t reserved_hogs = 0;
   for (const TxInfo *info : account_to_tx_[account]) {
     reserved_hogs += info->tx.tx.invocation.gas_limit;
@@ -308,8 +317,8 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   {
     // See comment above for [compute_average_age()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we check
-    // at the top of this function that [num_received] is not 0.
+    // Note that [compute_average_age()] will never divide by 0 because we
+    // check at the top of this function that [num_received] is not 0.
     new_averages.average_ages[kHogAgeGroupReceived] =
         compute_average_age(from_xdr(received_hogs), received_age,
                             from_xdr(num_received), current_block);
@@ -318,8 +327,8 @@ Scheduler::process_received_hogs(const ContractAddress &account,
 
   // TODO(jhumphri): Add a test for this.
   // No need to call [update_accounts({account})] because receiving hogs does
-  // not affect the [kHogAgeGroupToSchedule] group. So in other words, receiving
-  // hogs does not affect the order in which txs are scheduled.
+  // not affect the [kHogAgeGroupToSchedule] group. So in other words,
+  // receiving hogs does not affect the order in which txs are scheduled.
   //
   // *However*, if there are no txs on the runqueue _and_ there are stranded
   // txs, then we may be able to add those txs to the runqueue with the newly
@@ -526,9 +535,9 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
 
     if (info.size() <= num_remaining) {
-      // All of the txs in [info] in the block, so we add all of them. Note that
-      // [get_txs_all()] removes the txs from [info], so it is important that we
-      // add [info.size()] to [num_scheduled] first.
+      // All of the txs in [info] in the block, so we add all of them. Note
+      // that [get_txs_all()] removes the txs from [info], so it is important
+      // that we add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
       get_txs_all(info, hashes, txs);
     }
