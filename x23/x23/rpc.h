@@ -84,7 +84,6 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
-#include <cstdio>
 #include <exception>
 #include <expected>
 #include <map>
@@ -531,6 +530,23 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     }
   }();
 
+  return port;
+}
+
+// Similar to tcp_rpc_server, but doesn't return unless/until it
+// accept returns an error or the CoroPoll is destroyed.
+int
+tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
+    requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
+{
+  std::mutex m;
+  port = tcp_rpc_server(
+      cp, port,
+      [cb = std::move(cb), _ul = std::unique_lock{m}](auto configurator) {
+        std::invoke(cb, std::move(configurator));
+      },
+      backlog);
+  std::unique_lock _ul(m);
   return port;
 }
 
