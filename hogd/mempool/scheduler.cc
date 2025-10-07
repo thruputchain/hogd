@@ -88,8 +88,11 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
     }
     ages.push_back(it->second);
   }
-  return db_sched_client_.dbsched_write_hog_ages(ages)() ==
-         DbSchedResult::DbSchedResultOK;
+  printf("Scheduler::write_average_hog_age A\n");
+  auto ret = db_sched_client_.dbsched_write_hog_ages(ages)() ==
+             DbSchedResult::DbSchedResultOK;
+  printf("Scheduler::write_average_hog_age B\n");
+  return ret;
 }
 
 void
