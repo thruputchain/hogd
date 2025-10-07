@@ -56,7 +56,7 @@ public:
     CHECK(Registration::registration().coordinator_registered(&card));
 
     x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(card.address));
+        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
     return x23::rpc_stream_logged(cp, fd.release())->client(CoordScheduler1{});
   }
 
@@ -65,11 +65,12 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    if (card.protocol.c_str() != version::kHogdProtocol) {
+    if (strcmp(card.protocol.c_str(), version::kHogdProtocol)) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
     current_block_id_ = card.current_block_id;
+    Registration::registration().register_coordinator(card);
     finish_init();
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;

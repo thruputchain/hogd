@@ -84,7 +84,7 @@ public:
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port=*/0)),
-      cp_(x23_pool_), executor_(kAddress, sched_exec_port_)
+      executor_(kAddress, sched_exec_port_)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -193,7 +193,25 @@ public:
       executor_.start(/*port_number=*/0, kAddress);
     }
 
-    mempool_coord_server_->start_server(/*port=*/0);
+    uint16_t sched_coord_port = mempool_coord_server_.start_server(/*port=*/0);
+    {
+      x23::ThreadPool pool;
+      x23::CoroPoll cp(pool);
+      x23::UniqueFd fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_coord_port}
+               .to_addr());
+      SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
+          client = x23::rpc_stream_logged(cp, fd.release())
+                       ->client(SchedulerCoord1{});
+
+      std::string coord_address =
+          std::format("{}:{}", kAddress, coordinator_sched_port_);
+      CoordCard card{.protocol = version::kHogdProtocol,
+                     .address_for_sched = coord_address.c_str(),
+                     .current_block_id = 0};
+      CHECK_EQ(client.schedulercoord_intro_coord(card)(),
+               CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
+    }
   }
 
   ~MempoolTestServer()
@@ -247,7 +265,7 @@ public:
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
-    return mempool_coord_server_->get_impl();
+    return mempool_coord_server_.get_impl();
   }
 
 private:
@@ -289,9 +307,6 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  // TODO(jhumphri): Take these out!!
-  x23::ThreadPool x23_pool_;
-  x23::CoroPoll cp_;
   Executor executor_;
 
   // The database server that the executor accesses.
@@ -317,7 +332,7 @@ private:
   uint16_t event_sched_port_;
   uint16_t event_exec_port_;
 
-  std::unique_ptr<MempoolCoordinatorServer> mempool_coord_server_;
+  MempoolCoordinatorServer mempool_coord_server_;
 };
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
