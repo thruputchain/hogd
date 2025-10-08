@@ -30,7 +30,7 @@ RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
 
 RpcStreamImpl::~RpcStreamImpl()
 {
-  cp_->reset(fd_.get());
+  cp_->reset(fd_);
 }
 
 void
