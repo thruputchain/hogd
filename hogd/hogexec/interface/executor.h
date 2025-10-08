@@ -53,7 +53,7 @@ public:
                  uint16_t coordinator_port, std::string hostname = "")
   {
     coordinator_host_ = coordinator_host;
-    coordinator_port = coordinator_port;
+    coordinator_port_ = coordinator_port;
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
     // actually start our server (especially because [port_number] could be 0,
