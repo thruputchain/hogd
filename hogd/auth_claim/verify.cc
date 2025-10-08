@@ -260,6 +260,8 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
         return auth_claim.other_address_signature_id().address;
       case AuthClaimType::kOtherAddressSignedWeight:
         return auth_claim.other_address_signed_weight().address;
+      default:
+        panic("Unsupported auth claim type: {}", auth_claim.claim_type());
       }
     }();
     if (claim_addr != gas_claim.sponsored_contract) {
