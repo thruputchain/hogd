@@ -20,6 +20,7 @@
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
@@ -90,8 +91,11 @@ public:
     sched_exec_server_.start_server(/*port=*/0);
     mempool_coord_server_.start_server(/*port=*/0);
 
-    // Start the database RPC servers.
+    // Initialize backend and blockchain state for tests.
     init_db_backend();
+    init_contracts();
+
+    // Start the database RPC servers.
     // [db_executor_server_] handles RPCs from the executor.
     db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
     db_executor_server_->start_server(/*port=*/0);
@@ -128,130 +132,6 @@ public:
     executor_.shut_down();
   }
 
-  void init_db_backend()
-  {
-    // check the database's integrity and find the highest valid LSN.
-    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
-    CHECK(lsn.has_value());
-    info("database '{}' passed integrity check; current LSN is {}",
-         db_dir_.directory(), *lsn);
-
-    // create the database, loading up to the highest valid LSN.
-    // TODO(abelay): When sharding is supported, this will become a separate
-    // step.
-    DBStatus<std::unique_ptr<Database>> ramdb =
-        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
-    CHECK(ramdb.has_value());
-
-    db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(db_, trie_);
-    set_dbtip({.height = 0, .hash = {}, .id = 0});
-    ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
-        .ext = ExtensionPoint(0),
-        .base_data_item_cost = to_xdr(int128_t{12000}),
-        .bytestring_cost_per_byte = 10,
-        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-    }));
-
-    std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
-
-    // Write contract to hogdb.
-    auto bytes = x23::serialize(*contract);
-    auto contract_hash = sha256(*contract);
-    auto ret =
-        db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)));
-    if (!ret) {
-      throw std::runtime_error("Failed to write contract");
-    }
-
-    for (const ContractAddress &address : kAccountAddresses) {
-      // Write deployment.
-      uint32_t contract_size = bytes.size();
-      ret = db_.write_address_metadata(
-          address, DeployedContractHash{.hash = contract_hash,
-                                        .contract_size = contract_size});
-      if (!ret) {
-        throw std::runtime_error("Failed to write deployment");
-      }
-
-      set_up_grant_storage_token(address);
-    }
-  }
-
-  void register_db_with_mempool()
-  {
-    // TODO(jhumphri): Use global pool and cp (here and elsewhere in this file).
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       sched_db_server_.port()}
-                             .to_addr());
-    SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
-        x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
-
-    std::string exec_address =
-        std::format("{}:{}", kAddress, db_executor_server_->port());
-    std::string sched_address =
-        std::format("{}:{}", kAddress, db_scheduler_server_->port());
-    client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
-                                .block_height = 0,
-                                .address_for_coord = "fail",
-                                .address_for_exec = exec_address.c_str(),
-                                .address_for_sched = sched_address.c_str()})();
-  }
-
-  void register_event_with_mempool()
-  {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       sched_event_server_.port()}
-                             .to_addr());
-    SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
-        event_client =
-            x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
-
-    auto r = event_client.schedevent_intro_event(
-        {.protocol = version::kHogdProtocol,
-         .upid = {},
-         .address_for_exec =
-             std::format("{}:{}", kAddress, event_exec_server_.port()).c_str(),
-         .address_for_sched =
-             std::format("{}:{}", kAddress, event_sched_server_.port())
-                 .c_str()})();
-    CHECK_EQ(r, RPCError::kRPCNone);
-  }
-
-  void register_executor_with_mempool()
-  {
-    const sockaddr_storage coordinator_sockaddr =
-        host_port_to_sockaddr(kAddress, sched_exec_server_.port());
-    executor_.start(/*port_number=*/0, coordinator_sockaddr);
-  }
-
-  void register_coordinator_with_mempool()
-  {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       mempool_coord_server_.port()}
-                             .to_addr());
-    SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
-        x23::rpc_stream_logged(cp, fd.release())->client(SchedulerCoord1{});
-
-    std::string coord_address =
-        std::format("{}:{}", kAddress, coordinator_sched_server_.port());
-    CoordCard card{.protocol = version::kHogdProtocol,
-                   .address_for_sched = coord_address.c_str(),
-                   .current_block_id = 0};
-    CHECK_EQ(client.schedulercoord_intro_coord(card)(),
-             CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
-  }
-
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
                 uint128_t num_hogs)
   {
@@ -282,11 +162,7 @@ public:
     CHECK(db_.write_dbtip(db_tip).has_value());
   }
 
-  void set_costmodel(const StorageCostModel &cost_model)
-  {
-    CHECK(db_.write_cost_model(cost_model.to_xdr()).has_value());
-  }
-
+  // This getter is used by [auth_test.cc].
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
     return mempool_coord_server_.impl_;
@@ -297,23 +173,137 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 1024 * 1024 * 1024; // 1 GiB.
 
-  void set_up_grant_storage_token(const ContractAddress &address)
+  static std::string address(const std::string &host, uint16_t port)
+  {
+    return std::format("{}:{}", host, port);
+  }
+
+  void init_db_backend()
+  {
+    // check the database's integrity and find the highest valid LSN.
+    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
+    CHECK(lsn.has_value());
+    info("database '{}' passed integrity check; current LSN is {}",
+         db_dir_.directory(), *lsn);
+
+    // create the database, loading up to the highest valid LSN.
+    // TODO(abelay): When sharding is supported, this will become a separate
+    // step.
+    DBStatus<std::unique_ptr<Database>> ramdb =
+        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+    CHECK(ramdb.has_value());
+
+    db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
+    ctx_ = std::make_unique<RPCContext>(db_, trie_);
+    set_dbtip({.height = 0, .hash = {}, .id = 0});
+    ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
+        .ext = ExtensionPoint(0),
+        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .bytestring_cost_per_byte = 10,
+        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+    }));
+  }
+
+  void init_contracts()
+  {
+    std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
+
+    // Write contract to hogdb.
+    auto bytes = x23::serialize(*contract);
+    auto contract_hash = sha256(*contract);
+    CHECK(db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
+              .has_value());
+
+    for (const ContractAddress &address : kAccountAddresses) {
+      // Write deployment.
+      uint32_t contract_size = bytes.size();
+      CHECK(
+          db_.write_address_metadata(address,
+                                     DeployedContractHash{.hash = contract_hash,
+                                                          .contract_size =
+                                                              contract_size})
+              .has_value());
+      grant_initial_tokens_for_account(address);
+    }
+  }
+
+  void grant_initial_tokens_for_account(const ContractAddress &address)
   {
     static_assert(kStorageTokenAmount >= 0);
     static_assert(kStorageTokenAmount <=
                   uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
-    // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
-    Address addr(address);
-    auto ret = db_.write_address_balance(addr, kStorageTokenAmount);
-    if (!ret) {
-      throw std::runtime_error("Failed to grant storage token");
-    }
-
+    CHECK(db_.write_address_balance(address, kStorageTokenAmount).has_value());
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
     // account unlimited hogs with UINT128_MAX.
     set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
              /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
+  }
+
+  void register_db_with_mempool()
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
+                                       sched_db_server_.port()}
+                             .to_addr());
+    SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
+        x23::rpc_stream_logged(default_coropoll(), fd.release())
+            ->client(SchedDb1{});
+
+    std::string exec_address = address(kAddress, db_executor_server_->port());
+    std::string sched_address = address(kAddress, db_scheduler_server_->port());
+    client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
+                                .block_height = 0,
+                                .address_for_coord = "fail",
+                                .address_for_exec = exec_address.c_str(),
+                                .address_for_sched = sched_address.c_str()})();
+  }
+
+  void register_event_with_mempool()
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
+                                       sched_event_server_.port()}
+                             .to_addr());
+    SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
+        event_client = x23::rpc_stream_logged(default_coropoll(), fd.release())
+                           ->client(SchedEvent1{});
+
+    auto r = event_client.schedevent_intro_event(
+        {.protocol = version::kHogdProtocol,
+         .upid = {},
+         .address_for_exec =
+             address(kAddress, event_exec_server_.port()).c_str(),
+         .address_for_sched =
+             address(kAddress, event_sched_server_.port()).c_str()})();
+    CHECK_EQ(r, RPCError::kRPCNone);
+  }
+
+  void register_executor_with_mempool()
+  {
+    const sockaddr_storage coordinator_sockaddr =
+        host_port_to_sockaddr(kAddress, sched_exec_server_.port());
+    executor_.start(/*port_number=*/0, coordinator_sockaddr);
+  }
+
+  void register_coordinator_with_mempool()
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
+                                       mempool_coord_server_.port()}
+                             .to_addr());
+    SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
+        x23::rpc_stream_logged(default_coropoll(), fd.release())
+            ->client(SchedulerCoord1{});
+
+    std::string coord_address =
+        address(kAddress, coordinator_sched_server_.port());
+    CoordCard card{.protocol = version::kHogdProtocol,
+                   .address_for_sched = coord_address.c_str(),
+                   .current_block_id = 0};
+    CHECK_EQ(client.schedulercoord_intro_coord(card)(),
+             CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
   // The database server that the executor accesses.
