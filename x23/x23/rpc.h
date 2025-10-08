@@ -80,6 +80,8 @@
 
 #pragma once
 
+#include "x23/sockio.h"
+#include "x23/utility.h"
 #include <atomic>
 #include <cassert>
 #include <concepts>
