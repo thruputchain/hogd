@@ -190,8 +190,7 @@ public:
            .address_for_exec =
                std::format("{}:{}", kAddress, event_exec_port_).c_str(),
            .address_for_sched =
-               std::format("{}:{}", kAddress, event_sched_server_.port())
-                   .c_str()})();
+               std::format("{}:{}", kAddress, event_sched_port_).c_str()})();
       CHECK_EQ(r, RPCError::kRPCNone);
     }
 
