@@ -367,6 +367,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   control_server.start_server(*control_port);
-  control_server.get_impl().wait_for_shutdown();
+  control_server.impl_.wait_for_shutdown();
   return 0;
 }
