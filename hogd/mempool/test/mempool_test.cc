@@ -7,6 +7,7 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/init.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/mempool_test_server.h"
@@ -368,9 +369,9 @@ TEST(Mempool, Stress)
 int
 main(int argc, char *argv[])
 {
+  auto ret = hogd::hogd_init(argc, argv, false);
+  if (ret != 0)
+    return ret;
   testing::InitGoogleTest(&argc, argv);
-  // Initialize logging. This is needed for the CHECK macros.
-  log_init(std::make_unique<hogd::ConsoleLogger>());
-
   return RUN_ALL_TESTS();
 }

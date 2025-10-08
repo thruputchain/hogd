@@ -1,21 +1,22 @@
 #pragma once
 
 #include <cassert>
-#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <expected>
-#include <mutex>
+#include <stdexcept>
 #include <string_view>
 #include <sys/socket.h>
+#include <tuple>
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "x23/cleanup.h"
 #include "x23/x23/event.h"
-#include "x23/x23/rpc.h"
 #include "x23/x23/sockio.h"
 #include "x23/x23/threadpool.h"
+#include "x23/x23/rpc.h" // IWYU pragma: keep
 
 namespace hogd {
 

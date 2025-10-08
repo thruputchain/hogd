@@ -15,7 +15,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   contract_loader
-  GTest::gtest_main
+  GTest::gtest
 )
 
 # for the generated contract headers
@@ -44,7 +44,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   contract_loader
-  GTest::gtest_main
+  GTest::gtest
 )
 
 # for the generated contract headers
@@ -72,7 +72,7 @@ target_link_libraries(
   protocol
   runtime
   runtime_test_util
-  GTest::gtest_main
+  GTest::gtest
 )
 
 # for the generated contract headers
