@@ -83,7 +83,7 @@ public:
       sched_event_port_(sched_event_server_.start_server(/*port=*/0)),
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
-          coordinator_sched_server_.start_server(/*port=*/0)),
+          coordinator_sched_server_.start_server(/*port=*/0))
   {
     executor_ = std::make_unique<Executor>(kAddress, sched_exec_port_);
 
