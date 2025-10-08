@@ -65,13 +65,13 @@ public:
     uint16_t executor_port = server_.start_server(port_number);
 
     // Now register with the coordinator.
-    MempoolExecutorClient client(server_.cp(), coordinator_host_,
+    MempoolExecutorClient client(server_.cp_, coordinator_host_,
                                  coordinator_port_);
     IntroExecResult exec_result =
         client.register_with_coordinator(executor_port);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
-    server_.get_impl().init(std::move(exec_result));
+    server_.impl_.init(std::move(exec_result));
 
     return executor_port;
   }
