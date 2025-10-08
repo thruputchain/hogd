@@ -73,8 +73,8 @@ class MempoolTestInfra {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
   static constexpr auto kAccountAddresses = [] {
-    constexpr auto make = NativeContractTestFramework::make_contract_address;
-    return std::array{make(3), make(4), make(5), make(6)};
+    constexpr auto kMake = NativeContractTestFramework::make_contract_address;
+    return std::array{kMake(3), kMake(4), kMake(5), kMake(6)};
   }();
 
   MempoolTestInfra()
@@ -100,8 +100,8 @@ public:
     db_scheduler_server_->start_server(/*port=*/0);
 
     // Start the event RPC servers.
-    event_sched_server_.start_server(/*port_number=*/0);
-    event_exec_server_.start_server(/*port_number=*/0);
+    event_sched_server_.start_server(/*port=*/0);
+    event_exec_server_.start_server(/*port=*/0);
 
     // Start the executor RPC server.
     executor_ = std::make_unique<Executor>(kAddress, sched_exec_server_.port());
