@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <tuple>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -23,56 +24,39 @@ namespace hogd {
 template<typename RpcImplementation> class RpcServer {
 public:
   template<typename... Args>
-  explicit RpcServer(Args &&...args) : rpc_(std::forward<Args>(args)...)
+  explicit RpcServer(x23::CoroPoll &cp, Args &&...args)
+    : cp_(cp), impl_(std::forward<Args>(args)...)
+  {}
+
+  template<typename... Args>
+  explicit RpcServer(Args &&...args)
+    : RpcServer(default_coropoll(), std::forward<Args>(args)...)
   {}
 
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
     std::tie(port_, listen_fd_) =
-        tcp_rpc_server(cp_, port, [this](auto c) { c->server(&rpc_); });
+        tcp_rpc_server(cp_, port, [this](auto c) { c->server(&impl_); });
     return port_;
   }
 
   void shut_down()
   {
     cp_.poison(listen_fd_);
-    rpc_.shut_down();
+    impl_.shut_down();
   }
 
-  void await_shutdown_request() { rpc_.await_shutdown_request(); }
+  void await_shutdown_request() { impl_.await_shutdown_request(); }
 
   // Returns the port that the server is listening on.
   uint16_t port() const { return port_; }
 
-  RpcImplementation &get_impl() { return rpc_; }
-  x23::CoroPoll &cp() { return cp_; }
+  x23::CoroPoll &cp_;
+  RpcImplementation impl_;
 
 private:
   x23::BorrowedFd listen_fd_{-1};
-
-  template<typename T> requires std::is_trivially_copyable_v<T>
-  ErrnoStatus<void> sys_getsockname(int sockfd, T &val)
-  {
-    socklen_t len = sizeof(val); // NOLINT(misc-include-cleaner)
-    return make_errno_status<void>(
-        getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
-  }
-
-  uint16_t get_port(int fd)
-  {
-    sockaddr_in saddr;
-    // retrieve the port number if it was assigned automatically.
-    ErrnoStatus<void> ret = sys_getsockname(fd, saddr);
-    if (!ret)
-      throw std::runtime_error("Failed to get socket name");
-    return ntohs(saddr.sin_port);
-  }
-
-  RpcImplementation rpc_;
-
-  x23::ThreadPool pool_;
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
   uint16_t port_ = 0;
 };
 
