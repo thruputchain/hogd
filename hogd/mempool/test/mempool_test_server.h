@@ -159,10 +159,9 @@ public:
       // Now have the db register itself with the mempool.
       x23::ThreadPool pool;
       x23::CoroPoll cp(pool);
-      x23::UniqueFd fd =
-          x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                         sched_db_server_.port()}
-                               .to_addr());
+      x23::UniqueFd fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_db_port_}
+               .to_addr());
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
           x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
 
