@@ -332,7 +332,7 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  std::make_unique<Executor> executor_;
+  std::unique_ptr<Executor> executor_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
