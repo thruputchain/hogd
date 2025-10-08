@@ -85,11 +85,11 @@ public:
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port=*/0)),
   {
+    executor_ = std::make_unique<Executor>(kAddress, sched_exec_port_);
+
     // Multiple tests run within the same process, so we need to clear the
     // registration at the beginning of each test.
     Registration::registration().clear();
-
-    executor_ = std::make_unique<Executor>(kAddress, sched_exec_port_);
 
     {
       // check the database's integrity and find the highest valid LSN.
