@@ -118,15 +118,12 @@ public:
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
-      db_executor_port_ = db_executor_server_->port();
 
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
-      db_scheduler_port_ = db_scheduler_server_->port();
 
-      event_sched_port_ =
-          event_server_sched_rpc_.start_server(/*port_number=*/0);
-      event_exec_port_ = event_server_exec_rpc_.start_server(/*port_number=*/0);
+      event_sched_server_.start_server(/*port_number=*/0);
+      event_exec_server_.start_server(/*port_number=*/0);
     }
 
     {
@@ -167,9 +164,9 @@ public:
           x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
 
       std::string exec_address =
-          std::format("{}:{}", kAddress, db_executor_port_);
+          std::format("{}:{}", kAddress, db_executor_server_->port());
       std::string sched_address =
-          std::format("{}:{}", kAddress, db_scheduler_port_);
+          std::format("{}:{}", kAddress, db_scheduler_server_->port());
       client.scheddb_intro_shard(
           {.protocol = version::kHogdProtocol,
            .block_height = 0,
@@ -189,9 +186,11 @@ public:
           {.protocol = version::kHogdProtocol,
            .upid = {},
            .address_for_exec =
-               std::format("{}:{}", kAddress, event_exec_port_).c_str(),
+               std::format("{}:{}", kAddress, event_exec_server_.port())
+                   .c_str(),
            .address_for_sched =
-               std::format("{}:{}", kAddress, event_sched_port_).c_str()})();
+               std::format("{}:{}", kAddress, event_sched_server_.port())
+                   .c_str()})();
       CHECK_EQ(r, RPCError::kRPCNone);
     }
 
@@ -285,9 +284,9 @@ public:
   {
     return coordinator_sched_server_.port();
   }
-  uint16_t db_executor_port() const { return db_executor_port_; }
-  uint16_t db_scheduler_port() const { return db_scheduler_port_; }
-  uint16_t event_sched_port() const { return event_sched_port_; }
+  uint16_t db_executor_port() const { return db_executor_server_->port(); }
+  uint16_t db_scheduler_port() const { return db_scheduler_server_->port(); }
+  uint16_t event_sched_port() const { return event_sched_server_.port(); }
 
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
@@ -335,11 +334,9 @@ private:
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-  uint16_t db_executor_port_;
 
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
-  uint16_t db_scheduler_port_;
 
   // The database server that the mempool accesses.
   TmpDir db_dir_;
@@ -349,12 +346,10 @@ private:
 
   // The event server that the mempool accesses.
   TestEventAggregator event_server_;
-  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
-      TestEventAggregatorSchedRpc(event_server_);
-  TestEventAggregatorExecRpc event_server_exec_rpc_ =
-      TestEventAggregatorExecRpc(event_server_);
-  uint16_t event_sched_port_;
-  uint16_t event_exec_port_;
+  TestEventAggregatorSchedServer event_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
+  TestEventAggregatorExecServer event_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
 
   MempoolCoordinatorServer mempool_coord_server_;
 };
