@@ -19,6 +19,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23/async.h"
 
 namespace hogd {
 namespace {
@@ -39,7 +40,7 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
-bool
+x23::Async<bool>
 Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
                                 bool force)
 {
@@ -55,17 +56,17 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     }
   }
   if (to_send.empty()) {
-    return true;
+    co_return true;
   }
 
-  HogAgeResult res = db_sched_client_.dbsched_get_hog_ages(to_send)();
+  HogAgeResult res = co_await db_sched_client_.dbsched_get_hog_ages(to_send);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
-    return false;
+    co_return false;
   }
   for (const HogAge &age : res.hog_age_batch()) {
     cached_hogs_[age.address] = age;
   }
-  return true;
+  co_return true;
 }
 
 HogAge &
@@ -76,7 +77,7 @@ Scheduler::get_cached_hog_age(const ContractAddress &address)
   return it->second;
 }
 
-bool
+x23::Async<bool>
 Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
 {
   HogAgeBatch ages;
@@ -84,15 +85,15 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
   for (const ContractAddress &a : addresses) {
     auto it = cached_hogs_.find(a);
     if (it == cached_hogs_.end()) {
-      return false;
+      co_return false;
     }
     ages.push_back(it->second);
   }
-  return db_sched_client_.dbsched_write_hog_ages(ages)() ==
-         DbSchedResult::DbSchedResultOK;
+  co_return (co_await db_sched_client_.dbsched_write_hog_ages(ages)) ==
+      DbSchedResult::DbSchedResultOK;
 }
 
-void
+x23::Async<void>
 Scheduler::write_cache()
 {
   for (auto &[account, age] : cached_hogs_) {
@@ -103,12 +104,12 @@ Scheduler::write_cache()
     }
     age.num_hogs[kHogAgeGroupToSchedule] =
         to_xdr(delta + from_xdr(starting_balance));
-    CHECK(write_average_hog_age({account}));
+    CHECK(co_await write_average_hog_age({account}));
     age.num_hogs[kHogAgeGroupToSchedule] = starting_balance;
   }
 }
 
-void
+x23::Async<void>
 Scheduler::add_txs(const SignedTransactionBatch &txs)
 {
   // TODO(jhumphri): Optimize this with coroutines.
@@ -121,8 +122,8 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
 
     // The mempool should not call [add_txs()] for txs that have an
     // invalid account.
-    CHECK(read_average_hog_age({tx.tx.invocation.invoked_address},
-                               /*force=*/false));
+    CHECK(co_await read_average_hog_age({tx.tx.invocation.invoked_address},
+                                        /*force=*/false));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo info{.age = age,
@@ -132,8 +133,8 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
-    cycle_if_needed(tx.tx.invocation.invoked_address,
-                    tx.tx.invocation.gas_limit);
+    co_await cycle_if_needed(tx.tx.invocation.invoked_address,
+                             tx.tx.invocation.gas_limit);
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
       cached_hogs_[tx.tx.invocation.invoked_address]
@@ -158,7 +159,7 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
   }
 }
 
-void
+x23::Async<void>
 Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
@@ -202,7 +203,7 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
     //    enough hogs to the group to schedule it.
     if (already_scheduled_average_older || combined_averages_older ||
         (account_to_tx_[account].empty() && gas_limit > to_schedule)) {
-      cycle_groups(account);
+      co_await cycle_groups(account);
     }
     else {
       break;
@@ -210,7 +211,7 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
   }
 }
 
-void
+x23::Async<void>
 Scheduler::cycle_groups(const ContractAddress &account)
 {
   const HogAge &averages = cached_hogs_[account];
@@ -268,7 +269,7 @@ Scheduler::cycle_groups(const ContractAddress &account)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account] = new_averages;
-  CHECK(write_average_hog_age({account}));
+  CHECK(co_await write_average_hog_age({account}));
 
   update_accounts({account});
 }
@@ -284,16 +285,16 @@ Scheduler::dump_runqueue() const
   }
 }
 
-void
+x23::Async<void>
 Scheduler::process_received_hogs(const ContractAddress &account,
                                  uint128_xdr num_received,
                                  BlockHeight current_block)
 {
   if (!from_xdr(num_received)) {
-    return;
+    co_return;
   }
 
-  CHECK(read_average_hog_age({account}, /*force=*/false));
+  CHECK(co_await read_average_hog_age({account}, /*force=*/false));
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages = averages;
 
@@ -325,8 +326,8 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   // runqueue. We need to call [cycle_groups()] twice to get the
   // [kHogAgeGroupReceived] hogs into the [kHogAgeGroupToSchedule] group.
   if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-    cycle_groups(account);
-    cycle_groups(account);
+    co_await cycle_groups(account);
+    co_await cycle_groups(account);
   }
 }
 
@@ -450,7 +451,7 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
   }
 }
 
-void
+x23::Async<void>
 Scheduler::discard_expired_txs(BlockHeight current_height)
 {
   x23::Vec<SignedTransactionHash> to_discard;
@@ -463,10 +464,10 @@ Scheduler::discard_expired_txs(BlockHeight current_height)
       to_discard.push_back(info->tx_hash);
     }
   }
-  discard_txs(to_discard);
+  co_await discard_txs(to_discard);
 }
 
-void
+x23::Async<void>
 Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -501,12 +502,13 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
   for (const ContractAddress &account : accounts) {
     update_accounts({account});
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      cycle_groups(account);
+      co_await cycle_groups(account);
     }
   }
 }
 
-std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
+x23::Async<
+    std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
 Scheduler::schedule(BlockHeight block_height, size_t block_size)
 {
   x23::Vec<SignedTransactionHash> hashes;
@@ -515,7 +517,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   txs.reserve(block_size);
 
   // Discard any expired txs before scheduling the current block.
-  discard_expired_txs(block_height);
+  co_await discard_expired_txs(block_height);
 
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
@@ -539,12 +541,14 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
   }
-  return {hashes, txs};
+  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
+      {hashes, txs};
+  co_return ret;
 }
 
 // TODO(jhumphri): We should remove the [block] parameter. We should know the
 // current block number based on the block number passed to [schedule()].
-void
+x23::Async<void>
 Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                              BlockHeight block)
 {
@@ -592,12 +596,12 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
   }
   for (const ContractAddress &account : accounts) {
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      cycle_groups(account);
+      co_await cycle_groups(account);
     }
   }
 }
 
-SignedTransactionBatch
+x23::Async<SignedTransactionBatch>
 Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -632,10 +636,10 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
   for (const ContractAddress &account : accounts) {
     update_accounts({account});
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      cycle_groups(account);
+      co_await cycle_groups(account);
     }
   }
-  return txs;
+  co_return txs;
 }
 
 bool
@@ -695,10 +699,10 @@ Scheduler::find_and_remove_from_runqueue(
   return true;
 }
 
-void
+x23::Async<void>
 Scheduler::filter_txs_for_account(
     const ContractAddress &account,
-    const std::function<bool(const SignedTransaction &tx)> &filter)
+    const std::function<x23::Async<bool>(const SignedTransaction &tx)> &filter)
 {
   x23::Vec<SignedTransactionHash> to_discard;
   {
@@ -708,7 +712,7 @@ Scheduler::filter_txs_for_account(
       const std::unordered_set<TxInfo *> &txs = it->second;
       for (const TxInfo *info : txs) {
         const SignedTransaction &tx = info->tx;
-        if (!filter(tx)) {
+        if (!co_await filter(tx)) {
           to_discard.push_back(info->tx_hash);
         }
       }
@@ -723,14 +727,14 @@ Scheduler::filter_txs_for_account(
       for (const auto &[_, txs] : gas_txs) {
         for (const TxInfo *info : txs) {
           const SignedTransaction &tx = info->tx;
-          if (!filter(tx)) {
+          if (!co_await filter(tx)) {
             to_discard.push_back(info->tx_hash);
           }
         }
       }
     }
   }
-  discard_txs(to_discard);
+  co_await discard_txs(to_discard);
 }
 
 } // namespace hogd

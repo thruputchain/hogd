@@ -59,26 +59,27 @@ public:
     co_return ret;
   }
 
-  bool authenticate(const SignedTransaction &tx)
+  x23::Async<bool> authenticate(const SignedTransaction &tx)
   {
     AccountAuthData *auth_data =
-        get_account(current_block_id_, tx.tx.invocation.invoked_address);
+        co_await get_account(current_block_id_,
+                             tx.tx.invocation.invoked_address);
     if (!auth_data) {
-      return false;
+      co_return false;
     }
 
     std::unordered_set<ContractAddress> aux_contracts = get_aux_addresses(tx.tx);
     std::unordered_map<ContractAddress, const AccountAuthData *> aux_auth_map;
     for (auto const& aux_contract : aux_contracts) {
       const auto *aux_auth_data =
-          get_account(current_block_id_, aux_contract);
+          co_await get_account(current_block_id_, aux_contract);
       if (!aux_auth_data) {
-        return false;
+        co_return false;
       }
       aux_auth_map[aux_contract] = aux_auth_data;
     }
 
-    return verify_auth(tx, *auth_data, aux_auth_map);
+    co_return verify_auth(tx, *auth_data, aux_auth_map);
   }
 
   static SignedTransaction
@@ -151,22 +152,24 @@ private:
     return true;
   }
 
-  AccountAuthData *get_account(BlockID block_id, const ContractAddress &account)
+  x23::Async<AccountAuthData *> get_account(BlockID block_id,
+                                            const ContractAddress &account)
   {
     auto it = accounts_.find(account);
     if (it != accounts_.end()) {
-      return it->second.get();
+      co_return it->second.get();
     }
 
     DbAccountAuthDataBatchResult res =
-        db_sched_client_.dbsched_get_account_auth_data(block_id, {account})();
+        co_await db_sched_client_.dbsched_get_account_auth_data(block_id,
+                                                                {account});
     if (res.result() != DbSchedResult::DbSchedResultOK) {
-      return nullptr;
+      co_return nullptr;
     }
     CHECK_EQ(res.account_auth_data_batch().size(), 1UL);
     accounts_[account] =
         std::make_unique<AccountAuthData>(res.account_auth_data_batch()[0]);
-    return accounts_[account].get();
+    co_return accounts_[account].get();
   }
 
   BlockID current_block_id_;
