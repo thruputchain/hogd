@@ -84,73 +84,33 @@ public:
     // registration at the beginning of each test.
     Registration::registration().clear();
 
+    // Start the mempool RPC servers.
     sched_db_server_.start_server(/*port=*/0);
     sched_event_server_.start_server(/*port=*/0);
     sched_exec_server_.start_server(/*port=*/0);
+    mempool_coord_server_.start_server(/*port=*/0);
+
+    // Start the fake coordinator. We need a coordinator to register itself with
+    // the mempool. The real coordinator implementation is in the chuckd repo
+    // and is written in go. So to ease test implementation, we use a fake
+    // coordinator.
     coordinator_sched_server_.start_server(/*port=*/0);
+
+    // Start the database RPC servers.
+    init_db_backend();
+    // [db_executor_server_] handles RPCs from the executor.
+    db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
+    db_executor_server_->start_server(/*port=*/0);
+    // [db_scheduler_server_] handles RPCs from the mempool.
+    db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
+    db_scheduler_server_->start_server(/*port=*/0);
+
+    // Start the executor RPC server.
     executor_ = std::make_unique<Executor>(kAddress, sched_exec_server_.port());
 
-    {
-      // check the database's integrity and find the highest valid LSN.
-      DBStatus<uint64_t> lsn =
-          Database::check(db_dir_.directory(), kRamDbBytes);
-      CHECK(lsn.has_value());
-      info("database '{}' passed integrity check; current LSN is {}",
-           db_dir_.directory(), *lsn);
-
-      // create the database, loading up to the highest valid LSN.
-      // TODO(abelay): When sharding is supported, this will become a separate
-      // step.
-      DBStatus<std::unique_ptr<Database>> ramdb =
-          Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
-      CHECK(ramdb.has_value());
-
-      db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
-      ctx_ = std::make_unique<RPCContext>(db_, trie_);
-      set_dbtip({.height = 0, .hash = {}, .id = 0});
-      ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
-          .ext = ExtensionPoint(0),
-          .base_data_item_cost = to_xdr(int128_t{12000}),
-          .bytestring_cost_per_byte = 10,
-          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-      }));
-
-      db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-      db_executor_server_->start_server(/*port=*/0);
-
-      db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-      db_scheduler_server_->start_server(/*port=*/0);
-
-      event_sched_server_.start_server(/*port_number=*/0);
-      event_exec_server_.start_server(/*port_number=*/0);
-    }
-
-    {
-      std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
-
-      // Write contract to hogdb.
-      auto bytes = x23::serialize(*contract);
-      auto contract_hash = sha256(*contract);
-      auto ret =
-          db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)));
-      if (!ret) {
-        throw std::runtime_error("Failed to write contract");
-      }
-
-      for (const ContractAddress &address : kAccountAddresses) {
-        // Write deployment.
-        uint32_t contract_size = bytes.size();
-        ret = db_.write_address_metadata(
-            address, DeployedContractHash{.hash = contract_hash,
-                                          .contract_size = contract_size});
-        if (!ret) {
-          throw std::runtime_error("Failed to write deployment");
-        }
-
-        set_up_grant_storage_token(address);
-      }
-    }
+    // Start the event RPC servers.
+    event_sched_server_.start_server(/*port_number=*/0);
+    event_exec_server_.start_server(/*port_number=*/0);
 
     {
       // Now have the db register itself with the mempool.
@@ -195,17 +155,19 @@ public:
     }
 
     {
-      // Now have the executor register itself with the mempool.
+      // Now have the executor register itself with the mempool. The executor
+      // must register itself *after* the database has registered!
       executor_->start(/*port_number=*/0);
     }
 
-    uint16_t sched_coord_port = mempool_coord_server_.start_server(/*port=*/0);
     {
+      // Now have the coordinator register itself with the mempool.
       x23::ThreadPool pool;
       x23::CoroPoll cp(pool);
-      x23::UniqueFd fd = x23::tcpconnect(
-          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_coord_port}
-               .to_addr());
+      x23::UniqueFd fd =
+          x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                         mempool_coord_server_.port()}
+                               .to_addr());
       SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
           client = x23::rpc_stream_logged(cp, fd.release())
                        ->client(SchedulerCoord1{});
@@ -243,6 +205,57 @@ public:
     // We manually call [schedulercoord_intro_coord()], so
     // [registration.coordinator_registered()] must be true.
     CHECK(registration.coordinator_registered(/*card=*/nullptr));
+  }
+
+  void init_db_backend()
+  {
+    // check the database's integrity and find the highest valid LSN.
+    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
+    CHECK(lsn.has_value());
+    info("database '{}' passed integrity check; current LSN is {}",
+         db_dir_.directory(), *lsn);
+
+    // create the database, loading up to the highest valid LSN.
+    // TODO(abelay): When sharding is supported, this will become a separate
+    // step.
+    DBStatus<std::unique_ptr<Database>> ramdb =
+        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+    CHECK(ramdb.has_value());
+
+    db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
+    ctx_ = std::make_unique<RPCContext>(db_, trie_);
+    set_dbtip({.height = 0, .hash = {}, .id = 0});
+    ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
+        .ext = ExtensionPoint(0),
+        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .bytestring_cost_per_byte = 10,
+        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+    }));
+
+    std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
+
+    // Write contract to hogdb.
+    auto bytes = x23::serialize(*contract);
+    auto contract_hash = sha256(*contract);
+    auto ret =
+        db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)));
+    if (!ret) {
+      throw std::runtime_error("Failed to write contract");
+    }
+
+    for (const ContractAddress &address : kAccountAddresses) {
+      // Write deployment.
+      uint32_t contract_size = bytes.size();
+      ret = db_.write_address_metadata(
+          address, DeployedContractHash{.hash = contract_hash,
+                                        .contract_size = contract_size});
+      if (!ret) {
+        throw std::runtime_error("Failed to write deployment");
+      }
+
+      set_up_grant_storage_token(address);
+    }
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
@@ -320,9 +333,7 @@ private:
   }
 
   RpcServer<MempoolDbRpc> sched_db_server_;
-
   RpcServer<MempoolEventRpc> sched_event_server_;
-
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 
   // This is a fake coordinator server that the mempool notifies when txs
@@ -334,7 +345,6 @@ private:
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
 
