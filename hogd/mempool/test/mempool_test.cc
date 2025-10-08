@@ -3,10 +3,12 @@
 #include <memory>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
@@ -36,12 +38,19 @@ TEST(Mempool, SubmitUnvetted)
   // the output of nominations, etc.
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
+  Transaction tx = txs[0].tx;
+  auto make_sign_claim = [&](uint32_t idx) {
+    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+    claim.invoked_address_signature_id() = idx;
+    return claim;
+  };
+  tx.auth_claims.push_back(make_sign_claim(0));
 
-  const SignedTransaction tx =
-      hogd::Authentication::sign(txs[0].tx, /*signature_weight=*/1,
+  const SignedTransaction stx =
+      hogd::Authentication::sign_claims(tx, 
                                  {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted({tx})();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted({stx})();
 }
 
 TEST(Mempool, SubmitVetted)
@@ -256,11 +265,18 @@ TEST(Mempool, AuthChanged)
                                auth_data);
 
   SignedTransactionBatch signed_txs;
-  for (const SignedTransaction &tx : txs) {
-    signed_txs.push_back(
-        hogd::Authentication::sign(tx.tx, /*signature_weight=*/1,
-                                   {{0, private_key}},
-                                   /*auxiliary_private_keys=*/{}));
+
+  for (const SignedTransaction &stx : txs) {
+    auto make_sign_claim = [&](uint32_t idx) {
+      AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+      claim.invoked_address_signature_id() = idx;
+      return claim;
+    };
+    Transaction tx = stx.tx;
+    tx.auth_claims.push_back(make_sign_claim(0));
+    signed_txs.push_back(hogd::Authentication::sign_claims(tx,
+                                                            {{0, private_key}},
+                                                            /*auxiliary_private_keys=*/{}));
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
@@ -271,7 +287,7 @@ TEST(Mempool, AuthChanged)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
 
@@ -280,7 +296,7 @@ TEST(Mempool, AuthChanged)
             .hash = res.scheduler_nomination().nomination.block_hash,
             .id = res.scheduler_nomination().block_id};
   res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(), 1);
 }
 
@@ -311,11 +327,17 @@ TEST(Mempool, AuthInvalidated)
                                auth_data);
 
   SignedTransactionBatch signed_txs;
-  for (const SignedTransaction &tx : txs) {
-    signed_txs.push_back(
-        hogd::Authentication::sign(tx.tx, /*signature_weight=*/1,
-                                   {{0, private_key}},
-                                   /*auxiliary_private_keys=*/{}));
+  for (const SignedTransaction &stx : txs) {
+    auto make_sign_claim = [&](uint32_t idx) {
+      AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+      claim.invoked_address_signature_id() = idx;
+      return claim;
+    };
+    Transaction tx = stx.tx;
+    tx.auth_claims.push_back(make_sign_claim(0));
+    signed_txs.push_back(hogd::Authentication::sign_claims(tx,
+                                                            {{0, private_key}},
+                                                            /*auxiliary_private_keys=*/{}));
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
@@ -326,7 +348,7 @@ TEST(Mempool, AuthInvalidated)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
 
