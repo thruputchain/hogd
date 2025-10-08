@@ -3,6 +3,7 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <type_traits>

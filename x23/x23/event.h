@@ -2,16 +2,27 @@
 
 #pragma once
 
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <memory>
 #include <mutex>
 #include <stop_token>
-
+#include <string>
 #include <sys/socket.h>
+#include <system_error>
+#include <type_traits>
+#include <utility>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corosync.h>
+#include <x23/corotrace.h>
+#include <x23/cpumap.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
