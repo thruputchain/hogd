@@ -45,8 +45,6 @@ public:
     impl_.shut_down();
   }
 
-  void await_shutdown_request() { impl_.await_shutdown_request(); }
-
   // Returns the port that the server is listening on.
   uint16_t port() const { return port_; }
 
