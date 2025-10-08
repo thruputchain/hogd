@@ -178,6 +178,15 @@ private:
     return std::format("{}:{}", host, port);
   }
 
+  template<typename T>
+  static auto create_client(const std::string host, uint16_t port)
+  {
+    x23::UniqueFd fd =
+        x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
+    return x23::rpc_stream_logged(default_coropoll(), fd.release())
+        ->client(T{});
+  }
+
   void init_db_backend()
   {
     // check the database's integrity and find the highest valid LSN.
@@ -243,14 +252,7 @@ private:
 
   void register_db_with_mempool()
   {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       sched_db_server_.port()}
-                             .to_addr());
-    SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
-        x23::rpc_stream_logged(default_coropoll(), fd.release())
-            ->client(SchedDb1{});
-
+    auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port());
     std::string exec_address = address(kAddress, db_executor_server_->port());
     std::string sched_address = address(kAddress, db_scheduler_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
@@ -262,15 +264,9 @@ private:
 
   void register_event_with_mempool()
   {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       sched_event_server_.port()}
-                             .to_addr());
-    SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
-        event_client = x23::rpc_stream_logged(default_coropoll(), fd.release())
-                           ->client(SchedEvent1{});
-
-    auto r = event_client.schedevent_intro_event(
+    auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
+                                             sched_event_server_.port());
+    auto r = client.schedevent_intro_event(
         {.protocol = version::kHogdProtocol,
          .upid = {},
          .address_for_exec =
@@ -289,14 +285,8 @@ private:
 
   void register_coordinator_with_mempool()
   {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
-                                       mempool_coord_server_.port()}
-                             .to_addr());
-    SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
-        x23::rpc_stream_logged(default_coropoll(), fd.release())
-            ->client(SchedulerCoord1{});
-
+    auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                                 mempool_coord_server_.port());
     std::string coord_address =
         address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol,
