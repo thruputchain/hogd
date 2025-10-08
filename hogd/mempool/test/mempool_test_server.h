@@ -168,7 +168,7 @@ public:
       std::string exec_address =
           std::format("{}:{}", kAddress, db_executor_port_);
       std::string sched_address =
-          std::format("{}:{}", kAddress, db_scheduler_server_->port());
+          std::format("{}:{}", kAddress, db_scheduler_port_);
       client.scheddb_intro_shard(
           {.protocol = version::kHogdProtocol,
            .block_height = 0,
