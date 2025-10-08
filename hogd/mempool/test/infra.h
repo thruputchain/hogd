@@ -103,8 +103,7 @@ public:
     event_sched_server_.start_server(/*port=*/0);
     event_exec_server_.start_server(/*port=*/0);
 
-    // Start the executor RPC server.
-    executor_ = std::make_unique<Executor>(kAddress, sched_exec_server_.port());
+    // We start the executor server in [register_executor_with_mempool()].
 
     // Start the fake coordinator. We need a coordinator to register itself with
     // the mempool. The real coordinator implementation is in the chuckd repo
@@ -126,7 +125,7 @@ public:
     // TODO(jhumphri): Implement clean shutdown for all RPC servers.
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
     // does not block.
-    executor_->shut_down();
+    executor_.shut_down();
   }
 
   void init_db_backend()
@@ -226,7 +225,12 @@ public:
     CHECK_EQ(r, RPCError::kRPCNone);
   }
 
-  void register_executor_with_mempool() { executor_->start(/*port_number=*/0); }
+  void register_executor_with_mempool()
+  {
+    const sockaddr_storage coordinator_sockaddr =
+        host_port_to_sockaddr(kAddress, sched_exec_server_.port());
+    executor_.start(/*port_number=*/0, coordinator_sockaddr);
+  }
 
   void register_coordinator_with_mempool()
   {
@@ -330,7 +334,7 @@ private:
       TestEventAggregatorExecServer(event_server_);
 
   // The executor server.
-  std::unique_ptr<Executor> executor_;
+  Executor executor_;
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
