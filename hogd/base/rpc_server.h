@@ -1,22 +1,21 @@
 #pragma once
 
 #include <cassert>
-#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <expected>
-#include <mutex>
+#include <string>
 #include <string_view>
 #include <sys/socket.h>
+#include <tuple>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "x23/cleanup.h"
 #include "x23/x23/event.h"
-#include "x23/x23/rpc.h"
+#include "x23/x23/rpc.h" // IWYU pragma: keep
 #include "x23/x23/sockio.h"
-#include "x23/x23/threadpool.h"
 
 namespace hogd {
 
@@ -46,13 +45,13 @@ public:
     impl_.shut_down();
   }
 
-  void await_shutdown_request() { impl_.await_shutdown_request(); }
-
   // Returns the port that the server is listening on.
   uint16_t port() const { return port_; }
 
   x23::CoroPoll &cp_;
   RpcImplementation impl_;
+
+  ~RpcServer() { cp_.reset(listen_fd_); }
 
 private:
   x23::BorrowedFd listen_fd_{-1};

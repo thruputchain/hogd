@@ -90,9 +90,9 @@
 #include <print>
 #include <stop_token>
 #include <tuple>
-
 #include <type_traits>
 #include <utility>
+
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/corosync.h>
@@ -105,6 +105,8 @@
 #include <x23/rpc_common.h> // IWYU pragma: export
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
+#include <x23/sockio.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 

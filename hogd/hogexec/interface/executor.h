@@ -77,7 +77,7 @@ public:
   }
 
   void shut_down() { server_.shut_down(); }
-  void await_shutdown_request() { server_.await_shutdown_request(); }
+  void await_shutdown_request() { server_.impl_.await_shutdown_request(); }
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;

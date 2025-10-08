@@ -30,7 +30,7 @@ RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
 
 RpcStreamImpl::~RpcStreamImpl()
 {
-  cp_->reset(fd_.get());
+  cp_->reset(fd_);
 }
 
 void
@@ -39,7 +39,7 @@ RpcStreamImpl::fail()
   if (ss_.stop_requested())
     return;
   ss_.request_stop();
-  cp_->poison(fd_.get());
+  cp_->poison(fd_);
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
