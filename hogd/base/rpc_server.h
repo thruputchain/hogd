@@ -35,8 +35,10 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    std::tie(port_, listen_fd_) =
-        tcp_rpc_server(cp_, port, [this](auto c) { c->server(&impl_); });
+    std::tie(port_, listen_fd_) = tcp_rpc_server(cp_, port, [this](auto c) {
+      c->server(&impl_);
+      c->go();
+    });
     return port_;
   }
 

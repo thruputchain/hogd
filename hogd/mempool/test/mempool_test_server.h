@@ -196,6 +196,7 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       executor_->start(/*port_number=*/0, kAddress, sched_exec_port_, kAddress);
     }
 
