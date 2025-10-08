@@ -14,8 +14,8 @@
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
 #include "x23/x23/event.h"
-#include "x23/x23/sockio.h"
 #include "x23/x23/rpc.h" // IWYU pragma: keep
+#include "x23/x23/sockio.h"
 
 namespace hogd {
 

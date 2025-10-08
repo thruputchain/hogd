@@ -21,12 +21,12 @@
 namespace hogd {
 
 namespace {
-  auto make_self_sign_claim = [](uint32_t idx) {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = idx;
-    return claim;
-  };
-}
+auto make_self_sign_claim = [](uint32_t idx) {
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+  claim.invoked_address_signature_id() = idx;
+  return claim;
+};
+} // namespace
 
 TEST(Authentication, SignAndVerify)
 {
@@ -56,7 +56,7 @@ TEST(Authentication, SignAndVerify)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx)());
 }
 
@@ -82,12 +82,11 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
 
-
   Transaction tx = txs[0];
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -118,7 +117,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
   const Transaction &tx = txs[0];
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -139,8 +138,8 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/2);
-  // adding the gas config; verification here should fail because of the missing nonce,
-  // not the lack of gas
+  // adding the gas config; verification here should fail because of the missing
+  // nonce, not the lack of gas
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
                  /*required_weight=*/1);
   const Ed25519SecretKey private_key =
@@ -152,7 +151,7 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -184,7 +183,7 @@ TEST(Authentication, SignAndVerifyNoGasIndices)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -215,7 +214,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGas)
   Transaction tx = txs[0];
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -247,7 +246,7 @@ TEST(Authentication, SignAndVerifyGasWrongIndex)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -281,7 +280,7 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeightMultiConfig)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -318,7 +317,7 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigs)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -355,7 +354,7 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigsSomeInsufficient)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_FALSE(auth.authenticate(signed_tx)());
 }
 
@@ -392,7 +391,7 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigsSomeInsufficient2)
   tx.auth_claims.push_back(make_self_sign_claim(0));
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx)());
 }
 
@@ -423,7 +422,7 @@ TEST(Authentication, SignAndVerifyGasZeroWeight)
   Transaction tx = txs[0];
   const SignedTransaction signed_tx =
       hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+                                        /*auxiliary_private_keys=*/{});
   EXPECT_TRUE(auth.authenticate(signed_tx)());
 }
 

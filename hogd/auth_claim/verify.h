@@ -38,23 +38,23 @@ verify_auth(const SignedTransaction &stx,
 inline std::unordered_set<ContractAddress>
 get_aux_addresses(const Transaction &tx)
 {
-    std::unordered_set<ContractAddress> aux_addresses;
-    for (auto const& gas_claim : tx.gas_claims) {
-        aux_addresses.insert(gas_claim.sponsored_contract);
+  std::unordered_set<ContractAddress> aux_addresses;
+  for (auto const &gas_claim : tx.gas_claims) {
+    aux_addresses.insert(gas_claim.sponsored_contract);
+  }
+  for (auto const &auth_claim : tx.auth_claims) {
+    switch (auth_claim.claim_type()) {
+    case AuthClaimType::kOtherAddressSignature:
+      aux_addresses.insert(auth_claim.other_address_signature_id().address);
+      break;
+    case AuthClaimType::kOtherAddressSignedWeight:
+      aux_addresses.insert(auth_claim.other_address_signed_weight().address);
+      break;
+    default:
+      break;
     }
-    for (auto const& auth_claim : tx.auth_claims) {
-        switch (auth_claim.claim_type()) {
-        case AuthClaimType::kOtherAddressSignature:
-            aux_addresses.insert(auth_claim.other_address_signature_id().address);
-            break;
-        case AuthClaimType::kOtherAddressSignedWeight:
-            aux_addresses.insert(auth_claim.other_address_signed_weight().address);
-            break;
-        default:
-            break;
-        }
-    }
-    return aux_addresses;
+  }
+  return aux_addresses;
 }
 
 } // namespace hogd

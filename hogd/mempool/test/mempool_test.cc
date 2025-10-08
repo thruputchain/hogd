@@ -47,9 +47,8 @@ TEST(Mempool, SubmitUnvetted)
   tx.auth_claims.push_back(make_sign_claim(0));
 
   const SignedTransaction stx =
-      hogd::Authentication::sign_claims(tx, 
-                                 {{0, private_key}},
-                                 /*auxiliary_private_keys=*/{});
+      hogd::Authentication::sign_claims(tx, {{0, private_key}},
+                                        /*auxiliary_private_keys=*/{});
   server.mempool_coord_rpc().schedulercoord_submit_unvetted({stx})();
 }
 
@@ -274,9 +273,9 @@ TEST(Mempool, AuthChanged)
     };
     Transaction tx = stx.tx;
     tx.auth_claims.push_back(make_sign_claim(0));
-    signed_txs.push_back(hogd::Authentication::sign_claims(tx,
-                                                            {{0, private_key}},
-                                                            /*auxiliary_private_keys=*/{}));
+    signed_txs.push_back(
+        hogd::Authentication::sign_claims(tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
@@ -335,9 +334,9 @@ TEST(Mempool, AuthInvalidated)
     };
     Transaction tx = stx.tx;
     tx.auth_claims.push_back(make_sign_claim(0));
-    signed_txs.push_back(hogd::Authentication::sign_claims(tx,
-                                                            {{0, private_key}},
-                                                            /*auxiliary_private_keys=*/{}));
+    signed_txs.push_back(
+        hogd::Authentication::sign_claims(tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
