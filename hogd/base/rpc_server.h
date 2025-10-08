@@ -4,19 +4,17 @@
 #include <cstddef>
 #include <cstring>
 #include <expected>
-#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <sys/socket.h>
 #include <tuple>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
 #include "x23/x23/event.h"
 #include "x23/x23/sockio.h"
-#include "x23/x23/threadpool.h"
 #include "x23/x23/rpc.h" // IWYU pragma: keep
 
 namespace hogd {
@@ -54,6 +52,8 @@ public:
 
   x23::CoroPoll &cp_;
   RpcImplementation impl_;
+
+  ~RpcServer() { cp_.reset(listen_fd_); }
 
 private:
   x23::BorrowedFd listen_fd_{-1};
