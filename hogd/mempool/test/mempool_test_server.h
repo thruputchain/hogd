@@ -166,7 +166,7 @@ public:
           x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
 
       std::string exec_address =
-          std::format("{}:{}", kAddress, db_executor_server_->port());
+          std::format("{}:{}", kAddress, db_executor_port_);
       std::string sched_address =
           std::format("{}:{}", kAddress, db_scheduler_server_->port());
       client.scheddb_intro_shard(
