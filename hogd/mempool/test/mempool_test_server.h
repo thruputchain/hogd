@@ -188,8 +188,7 @@ public:
           {.protocol = version::kHogdProtocol,
            .upid = {},
            .address_for_exec =
-               std::format("{}:{}", kAddress, event_exec_server_.port())
-                   .c_str(),
+               std::format("{}:{}", kAddress, event_exec_port_).c_str(),
            .address_for_sched =
                std::format("{}:{}", kAddress, event_sched_server_.port())
                    .c_str()})();
