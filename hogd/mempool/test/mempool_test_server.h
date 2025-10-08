@@ -211,7 +211,7 @@ public:
                        ->client(SchedulerCoord1{});
 
       std::string coord_address =
-          std::format("{}:{}", kAddress, coordinator_sched_server_.port());
+          std::format("{}:{}", kAddress, coordinator_sched_port_);
       CoordCard card{.protocol = version::kHogdProtocol,
                      .address_for_sched = coord_address.c_str(),
                      .current_block_id = 0};
