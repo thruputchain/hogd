@@ -22,8 +22,7 @@ public:
   {}
 
   // Register this executor with the coordinator.
-  IntroExecResult register_with_coordinator(std::string hostname,
-                                            uint16_t executor_port);
+  IntroExecResult register_with_coordinator(uint16_t executor_port);
 
 private:
   // Generates the address of this executor, which includes both the hostname
@@ -54,7 +53,7 @@ public:
 
   ~Executor() { await_shutdown_request(); }
 
-  uint16_t start(uint16_t port_number, std::string hostname = "")
+  uint16_t start(uint16_t port_number)
   {
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
@@ -69,7 +68,7 @@ public:
     MempoolExecutorClient client(server_.cp(), coordinator_host_,
                                  coordinator_port_);
     IntroExecResult exec_result =
-        client.register_with_coordinator(std::move(hostname), executor_port);
+        client.register_with_coordinator(executor_port);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
     server_.get_impl().init(std::move(exec_result));
