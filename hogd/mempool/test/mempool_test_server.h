@@ -280,14 +280,10 @@ public:
     CHECK(db_.write_cost_model(cost_model.to_xdr()).has_value());
   }
 
-  uint16_t coordinator_sched_port() const
-  {
-    return coordinator_sched_server_.port();
-  }
-  uint16_t db_executor_port() const { return db_executor_server_->port(); }
-  uint16_t db_scheduler_port() const { return db_scheduler_server_->port(); }
-  uint16_t event_sched_port() const { return event_sched_server_->port(); }
-
+  uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
+  uint16_t db_executor_port() const { return db_executor_port_; }
+  uint16_t db_scheduler_port() const { return db_scheduler_port_; }
+  uint16_t event_sched_port() const { return event_sched_port_; }
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
   MempoolCoordinatorRpc &mempool_coord_rpc()
