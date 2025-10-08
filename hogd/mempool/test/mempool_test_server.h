@@ -177,9 +177,9 @@ public:
            .address_for_sched = sched_address.c_str()})();
 
       // make the event server register itself with the mempool.
-      fd = x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                          sched_event_server_.port()}
-                                .to_addr());
+      fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_event_port_}
+               .to_addr());
       SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
           event_client =
               x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
