@@ -79,16 +79,16 @@ public:
       NativeContractTestFramework::make_contract_address(6)};
 
   MempoolTestServer()
+    : sched_db_port_(sched_db_server_.start_server(/*port=*/0)),
+      sched_event_port_(sched_event_server_.start_server(/*port=*/0)),
+      sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
+      coordinator_sched_port_(
+          coordinator_sched_server_.start_server(/*port=*/0)),
+      executor_(kAddress, sched_exec_port_)
   {
     // Multiple tests run within the same process, so we need to clear the
     // registration at the beginning of each test.
     Registration::registration().clear();
-
-    sched_db_server_.start_server(/*port=*/0);
-    sched_event_server_.start_server(/*port=*/0);
-    sched_exec_server_.start_server(/*port=*/0);
-    coordinator_sched_server_.start_server(/*port=*/0);
-    executor_ = std::make_unique<Executor>(kAddress, sched_exec_server_.port());
 
     {
       // check the database's integrity and find the highest valid LSN.
@@ -118,9 +118,11 @@ public:
 
       db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
       db_executor_server_->start_server(/*port=*/0);
+      db_executor_port_ = db_executor_server_->port();
 
       db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
       db_scheduler_server_->start_server(/*port=*/0);
+      db_scheduler_port_ = db_scheduler_server_->port();
 
       event_sched_port_ =
           event_server_sched_rpc_.start_server(/*port_number=*/0);
@@ -157,10 +159,9 @@ public:
       // Now have the db register itself with the mempool.
       x23::ThreadPool pool;
       x23::CoroPoll cp(pool);
-      x23::UniqueFd fd =
-          x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                         sched_db_server_.port()}
-                               .to_addr());
+      x23::UniqueFd fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_db_port_}
+               .to_addr());
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
           x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
 
@@ -176,9 +177,9 @@ public:
            .address_for_sched = sched_address.c_str()})();
 
       // make the event server register itself with the mempool.
-      fd = x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
-                                          sched_event_server_.port()}
-                                .to_addr());
+      fd = x23::tcpconnect(
+          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_event_port_}
+               .to_addr());
       SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
           event_client =
               x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
@@ -195,7 +196,7 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
-      executor_->start(/*port_number=*/0);
+      executor_.start(/*port_number=*/0, kAddress);
     }
 
     uint16_t sched_coord_port = mempool_coord_server_.start_server(/*port=*/0);
@@ -210,7 +211,7 @@ public:
                        ->client(SchedulerCoord1{});
 
       std::string coord_address =
-          std::format("{}:{}", kAddress, coordinator_sched_server_.port());
+          std::format("{}:{}", kAddress, coordinator_sched_port_);
       CoordCard card{.protocol = version::kHogdProtocol,
                      .address_for_sched = coord_address.c_str(),
                      .current_block_id = 0};
@@ -224,7 +225,7 @@ public:
   {
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
     // does not block.
-    executor_->shut_down();
+    executor_.shut_down();
   }
 
   static void wait_for_registration()
@@ -279,10 +280,7 @@ public:
     CHECK(db_.write_cost_model(cost_model.to_xdr()).has_value());
   }
 
-  uint16_t coordinator_sched_port() const
-  {
-    return coordinator_sched_server_.port();
-  }
+  uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
   uint16_t db_executor_port() const { return db_executor_port_; }
   uint16_t db_scheduler_port() const { return db_scheduler_port_; }
   uint16_t event_sched_port() const { return event_sched_port_; }
@@ -319,17 +317,21 @@ private:
   }
 
   RpcServer<MempoolDbRpc> sched_db_server_;
+  uint16_t sched_db_port_;
 
   RpcServer<MempoolEventRpc> sched_event_server_;
+  uint16_t sched_event_port_;
 
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
+  uint16_t sched_exec_port_;
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
   CoordinatorSchedServer coordinator_sched_server_;
+  uint16_t coordinator_sched_port_;
 
   // The executor server.
-  std::unique_ptr<Executor> executor_;
+  Executor executor_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
