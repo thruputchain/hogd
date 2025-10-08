@@ -10,7 +10,6 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/version.h"
 #include "sched_exec.hh"

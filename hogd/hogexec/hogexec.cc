@@ -4,8 +4,10 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <sys/socket.h>
 
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
