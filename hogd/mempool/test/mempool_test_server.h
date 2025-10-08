@@ -159,16 +159,17 @@ public:
       // Now have the db register itself with the mempool.
       x23::ThreadPool pool;
       x23::CoroPoll cp(pool);
-      x23::UniqueFd fd = x23::tcpconnect(
-          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_db_port_}
-               .to_addr());
+      x23::UniqueFd fd =
+          x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                         sched_db_server_.port()}
+                               .to_addr());
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
           x23::rpc_stream_logged(cp, fd.release())->client(SchedDb1{});
 
       std::string exec_address =
-          std::format("{}:{}", kAddress, db_executor_port_);
+          std::format("{}:{}", kAddress, db_executor_server_->port());
       std::string sched_address =
-          std::format("{}:{}", kAddress, db_scheduler_port_);
+          std::format("{}:{}", kAddress, db_scheduler_server_->port());
       client.scheddb_intro_shard(
           {.protocol = version::kHogdProtocol,
            .block_height = 0,
@@ -177,9 +178,9 @@ public:
            .address_for_sched = sched_address.c_str()})();
 
       // make the event server register itself with the mempool.
-      fd = x23::tcpconnect(
-          *x23::HostPort{MempoolTestServer::kAddress.c_str(), sched_event_port_}
-               .to_addr());
+      fd = x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+                                          sched_event_server_.port()}
+                                .to_addr());
       SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
           event_client =
               x23::rpc_stream_logged(cp, fd.release())->client(SchedEvent1{});
@@ -188,9 +189,11 @@ public:
           {.protocol = version::kHogdProtocol,
            .upid = {},
            .address_for_exec =
-               std::format("{}:{}", kAddress, event_exec_port_).c_str(),
+               std::format("{}:{}", kAddress, event_exec_server_.port())
+                   .c_str(),
            .address_for_sched =
-               std::format("{}:{}", kAddress, event_sched_port_).c_str()})();
+               std::format("{}:{}", kAddress, event_sched_server_.port())
+                   .c_str()})();
       CHECK_EQ(r, RPCError::kRPCNone);
     }
 
@@ -211,7 +214,7 @@ public:
                        ->client(SchedulerCoord1{});
 
       std::string coord_address =
-          std::format("{}:{}", kAddress, coordinator_sched_port_);
+          std::format("{}:{}", kAddress, coordinator_sched_server_.port());
       CoordCard card{.protocol = version::kHogdProtocol,
                      .address_for_sched = coord_address.c_str(),
                      .current_block_id = 0};
@@ -280,10 +283,13 @@ public:
     CHECK(db_.write_cost_model(cost_model.to_xdr()).has_value());
   }
 
-  uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
-  uint16_t db_executor_port() const { return db_executor_port_; }
-  uint16_t db_scheduler_port() const { return db_scheduler_port_; }
-  uint16_t event_sched_port() const { return event_sched_port_; }
+  uint16_t coordinator_sched_port() const
+  {
+    return coordinator_sched_server_.port();
+  }
+  uint16_t db_executor_port() const { return db_executor_server_->port(); }
+  uint16_t db_scheduler_port() const { return db_scheduler_server_->port(); }
+  uint16_t event_sched_port() const { return event_sched_server_->port(); }
 
   MempoolDbRpc &sched_db_rpc() { return sched_db_server_.get_impl(); }
   MempoolExecutorRpc &sched_exec_rpc() { return sched_exec_server_.get_impl(); }
