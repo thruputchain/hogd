@@ -45,10 +45,12 @@ MempoolExecutorClient::connect_to_coordinator()
 }
 
 IntroExecResult
-MempoolExecutorClient::register_with_coordinator(uint16_t executor_port)
+MempoolExecutorClient::register_with_coordinator(std::string hostname,
+                                                 uint16_t executor_port)
 {
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
+  if (hostname.empty()) {
+    CHECK_EQ(get_hostname(hostname), 0);
+  }
   auto client = connect_to_coordinator();
   const ExecCard card = {
       .protocol = version::kHogdProtocol,
