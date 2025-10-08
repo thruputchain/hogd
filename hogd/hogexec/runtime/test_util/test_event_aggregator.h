@@ -7,7 +7,6 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -84,7 +83,6 @@ struct TestEventAggregatorExecRpc {
 private:
   TestEventAggregator &event_aggregator_;
 };
-static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
 
 struct TestEventAggregatorSchedRpc {
   TestEventAggregatorSchedRpc(TestEventAggregator &event_aggregator)
@@ -122,6 +120,9 @@ struct TestEventAggregatorSchedRpc {
 private:
   TestEventAggregator &event_aggregator_;
 };
+
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
+
+static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
 
 } // namespace hogd
