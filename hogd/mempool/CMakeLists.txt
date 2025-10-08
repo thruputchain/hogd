@@ -15,6 +15,7 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  auth_claim
 )
 set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 

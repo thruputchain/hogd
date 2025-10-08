@@ -2,15 +2,21 @@
 
 #include "account.hh"
 #include "db_sched.hh"
+#include "hogd/auth_claim/verify.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/types.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 #include "x23/x23/serialize.h"
+#include <cassert>
+#include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace hogd {
 
@@ -44,8 +50,9 @@ public:
       const ContractAddress &account = accounts[i];
       // TODO(jhumphri): We only need to reauthenticate the txs for [account] if
       // the refreshed auth data differs from the auth data we already have.
-      if (res.account_auth_data_batch()[i] != accounts_[account]) {
-        accounts_[account] = res.account_auth_data_batch()[i];
+      assert(accounts_.contains(account));
+      if (res.account_auth_data_batch()[i] != *accounts_[account]) {
+        accounts_[account] = std::make_unique<AccountAuthData>(res.account_auth_data_batch()[i]);
         ret.push_back(account);
       }
     }
@@ -59,100 +66,35 @@ public:
     if (!auth_data) {
       return false;
     }
-    const AuthSignaturePreimage preimage{.signature_weight =
-                                             tx.signature_weight,
-                                         .message = x23::serialize(tx.tx)};
-    const x23::Buf msg = x23::serialize(preimage);
 
-    Weight total_weight = 0;
-    Weight nonce_weight = 0;
-    x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(MAX_GAS_CONFIGS, 0);
-    for (const DecoratedSignature &dec_sig : tx.signatures) {
-      Weight weight = 0;
-      Ed25519PublicKey public_key;
-      if (!get_public_key(*auth_data, dec_sig.public_key_id, weight,
-                          public_key)) {
-        return false;
-      }
-      if (!check_decorated_signature(dec_sig, public_key, msg)) {
-        return false;
-      }
-      if (dec_sig.public_key_id >= MAX_SIGNERS) {
-        return false;
-      }
-      total_weight += weight;
-      if ((1 << dec_sig.public_key_id) &
-          auth_data->nonce_config.accepted_keys) {
-        nonce_weight += weight;
-      }
-      for (size_t i = 0; i < auth_data->gas_permissions.size(); i++) {
-        const GasPermissionConfig &gas_config = auth_data->gas_permissions[i];
-        if ((1 << dec_sig.public_key_id) & gas_config.accepted_keys) {
-          gas_weights[i] += weight;
-        }
-      }
-    }
-    // We check [nonce_weight] here rather than below because only the account
-    // that submitted the tx can contribute its key weights to the nonce weight.
-    // Auxiliary accounts cannot do this.
-    if (nonce_weight < auth_data->nonce_config.required_weight) {
-      return false;
-    }
-    // Similarly, we check if we have enough gas available here rather than
-    // below because only the account that submitted the tx can contribute gas.
-    // TODO(jhumphri): Support donated gas from other accounts.
-    GasAmount gas_available = 0;
-    for (size_t i = 0; i < auth_data->gas_permissions.size(); i++) {
-      const GasPermissionConfig &gas_config = auth_data->gas_permissions[i];
-      if (gas_weights[i] >= gas_config.required_weight) {
-        gas_available += gas_config.limit;
-      }
-    }
-    if (gas_available < tx.tx.invocation.gas_limit) {
-      return false;
-    }
-
-    for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
-      AccountAuthData *aux_auth_data =
-          get_account(current_block_id_, aux.address);
+    std::unordered_set<ContractAddress> aux_contracts = get_aux_addresses(tx.tx);
+    std::unordered_map<ContractAddress, const AccountAuthData *> aux_auth_map;
+    for (auto const& aux_contract : aux_contracts) {
+      const auto *aux_auth_data =
+          get_account(current_block_id_, aux_contract);
       if (!aux_auth_data) {
         return false;
       }
-
-      for (const DecoratedSignature &dec_sig : aux.signatures) {
-        Weight weight = 0;
-        Ed25519PublicKey public_key;
-        if (!get_public_key(*aux_auth_data, dec_sig.public_key_id, weight,
-                            public_key)) {
-          return false;
-        }
-        if (!check_decorated_signature(dec_sig, public_key, msg)) {
-          return false;
-        }
-        total_weight += weight;
-      }
+      aux_auth_map[aux_contract] = aux_auth_data;
     }
-    // We check [total_weight] down here rather than above with the nonce weight
-    // because we need to include the weight of the auxiliary keys.
-    return total_weight >= tx.signature_weight;
+
+    return verify_auth(tx, *auth_data, aux_auth_map);
   }
 
   static SignedTransaction
-  sign(const Transaction &tx, Weight signature_weight,
+  sign(const Transaction &tx, Weight _unused,
        const std::unordered_map<uint32_t, Ed25519SecretKey>
            &account_private_keys,
        const std::unordered_map<ContractAddress,
                                 std::unordered_map<uint32_t, Ed25519SecretKey>>
            &auxiliary_private_keys)
   {
-    const AuthSignaturePreimage preimage{.signature_weight = signature_weight,
-                                         .message = x23::serialize(tx)};
-    const x23::Buf msg = x23::serialize(preimage);
+    const auto msg = sha256(tx);
     SignedTransaction signed_tx{.tx = tx,
-                                .signature_weight = signature_weight,
-                                .signatures = {},
-                                .aux_signatures = {}};
-    signed_tx.signatures.reserve(account_private_keys.size());
+                                .signatures = {}};
+
+    return signed_tx;
+    /*signed_tx.signatures.reserve(account_private_keys.size());
     for (const auto &[idx, private_key] : account_private_keys) {
       Signature sig(CryptographicScheme::Ed25519);
       sig.ed25519() = ed25519_sign(private_key, msg);
@@ -177,7 +119,7 @@ public:
                                                   .signatures = sigs};
       signed_tx.aux_signatures.push_back(aux_sigs);
     }
-    return signed_tx;
+    return signed_tx; */
   }
 
 private:
@@ -213,7 +155,7 @@ private:
   {
     auto it = accounts_.find(account);
     if (it != accounts_.end()) {
-      return &it->second;
+      return it->second.get();
     }
 
     DbAccountAuthDataBatchResult res =
@@ -222,13 +164,15 @@ private:
       return nullptr;
     }
     CHECK_EQ(res.account_auth_data_batch().size(), 1UL);
-    accounts_[account] = res.account_auth_data_batch()[0];
-    return &accounts_[account];
+    accounts_[account] =
+        std::make_unique<AccountAuthData>(res.account_auth_data_batch()[0]);
+    return accounts_[account].get();
   }
 
   BlockID current_block_id_;
   db_sched_client_t &db_sched_client_;
-  std::unordered_map<ContractAddress, AccountAuthData> accounts_;
+  std::unordered_map<ContractAddress, std::unique_ptr<AccountAuthData>>
+      accounts_;
 };
 
 } // namespace hogd

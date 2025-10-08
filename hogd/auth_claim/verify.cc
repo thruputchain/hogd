@@ -236,16 +236,16 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
   return total_weight >= nonce_config.required_weight;
 }
 
+// gas_config is the gas permissions for the account mentioned in gas_claim
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
 bool
-validate_gas_permission(
-    const SignedTransaction &stx, const GasClaim &gas_claim,
-    const AccountAuthData &auth_data,
-    const x23::Vec<GasPermissionConfig, MAX_GAS_CONFIGS> &gas_config)
+validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
+                        const AccountAuthData &auth_data)
 {
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
-  x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(gas_config.size(), 0);
+  x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(
+      auth_data.gas_permissions.size(), 0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
     const auto &sigs = stx.signatures[i];
@@ -266,8 +266,8 @@ validate_gas_permission(
       continue;
     }
     for (const auto &sig : sigs) {
-      for (size_t i = 0; i < gas_config.size(); i++) {
-        if (!bitmap_accepts_key(gas_config[i].accepted_keys,
+      for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
+        if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
                                 sig.public_key_id)) {
           continue;
         }
@@ -277,10 +277,10 @@ validate_gas_permission(
     }
   }
   GasAmount approved_amount = 0;
-  for (size_t i = 0; i < gas_config.size(); i++) {
-    if (gas_weights[i] >= gas_config[i].required_weight) {
-      approved_amount =
-          std::max<GasAmount>(approved_amount, gas_config[i].limit);
+  for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
+    if (gas_weights[i] >= auth_data.gas_permissions[i].required_weight) {
+      approved_amount = std::max<GasAmount>(approved_amount,
+                                            auth_data.gas_permissions[i].limit);
     }
   }
   return approved_amount >= gas_claim.amount;
@@ -337,16 +337,37 @@ verify_auth_claims_internal(
     }
   }
 
+  for (auto const &gas_claim : stx.tx.gas_claims) {
+    if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
+      return false;
+    }
+  }
+
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(source_auth_data);
     if (!validate_nonce<VerfType>(stx, *source_auth_data,
                                   source_auth_data->nonce_config)) {
       return false;
     }
+    GasAmount sponsored_gas = 0;
     for (const auto &gas_claim : stx.tx.gas_claims) {
+      sponsored_gas += gas_claim.amount;
+      assert(aux_auth_data.contains(gas_claim.sponsored_contract));
       if (!validate_gas_permission<VerfType>(
-              stx, gas_claim, *source_auth_data,
-              source_auth_data->gas_permissions)) {
+              stx, gas_claim,
+              *aux_auth_data.at(gas_claim.sponsored_contract))) {
+        return false;
+      }
+    }
+
+    if (sponsored_gas < stx.tx.invocation.gas_limit) {
+      GasAmount remaining = stx.tx.invocation.gas_limit - sponsored_gas;
+      assert(source_auth_data);
+      if (!validate_gas_permission<VerfType>(
+              stx,
+              GasClaim{.sponsored_contract = stx.tx.invocation.invoked_address,
+                       .amount = remaining},
+              *source_auth_data)) {
         return false;
       }
     }
