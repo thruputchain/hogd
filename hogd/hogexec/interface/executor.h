@@ -47,15 +47,13 @@ private:
 // coordinator.
 class Executor {
 public:
-  Executor(std::string coordinator_host, uint16_t coordinator_port)
-    : coordinator_host_(std::move(std::move(coordinator_host))),
-      coordinator_port_(coordinator_port)
-  {}
-
   ~Executor() { await_shutdown_request(); }
 
-  uint16_t start(uint16_t port_number, std::string hostname = "")
+  uint16_t start(uint16_t port_number, std::string coordinator_host,
+                 uint16_t coordinator_port, std::string hostname = "")
   {
+    coordinator_host_ = std::move(coordinator_host);
+    coordinator_port = coordinator_port;
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
     // actually start our server (especially because [port_number] could be 0,
@@ -83,8 +81,8 @@ public:
 private:
   RpcServer<ExecutorMempoolRpc> server_;
 
-  const std::string coordinator_host_;
-  const uint16_t coordinator_port_;
+  std::string coordinator_host_;
+  uint16_t coordinator_port_ = 0;
 };
 
 } // namespace hogd
