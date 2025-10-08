@@ -241,9 +241,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -322,10 +321,9 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
-  snapshot_server_.get_impl().setup_ban_item(
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.impl_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   SystemCallHandler handler = make_handler(
@@ -437,10 +435,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
-  snapshot_server_.get_impl().setup_ban_item(
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.impl_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   {
