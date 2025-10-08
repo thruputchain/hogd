@@ -84,7 +84,7 @@ public:
       sched_exec_port_(sched_exec_server_.start_server(/*port=*/0)),
       coordinator_sched_port_(
           coordinator_sched_server_.start_server(/*port=*/0)),
-      executor_ = std::make_unique<Executor>(kAddress, sched_exec_port_);
+      executor_(kAddress, sched_exec_port_)
   {
     // Multiple tests run within the same process, so we need to clear the
     // registration at the beginning of each test.
@@ -196,7 +196,7 @@ public:
 
     {
       // Now have the executor register itself with the mempool.
-      executor_->start(/*port_number=*/0, kAddress);
+      executor_.start(/*port_number=*/0, kAddress);
     }
 
     uint16_t sched_coord_port = mempool_coord_server_.start_server(/*port=*/0);
@@ -225,7 +225,7 @@ public:
   {
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
     // does not block.
-    executor_->shut_down();
+    executor_.shut_down();
   }
 
   static void wait_for_registration()
@@ -331,7 +331,7 @@ private:
   uint16_t coordinator_sched_port_;
 
   // The executor server.
-  std::unique_ptr<Executor> executor_;
+  Executor executor_;
 
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
