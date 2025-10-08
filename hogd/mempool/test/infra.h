@@ -69,7 +69,7 @@ namespace hogd {
 
 constexpr size_t kNumTxs = 100;
 
-class MempoolTestServer {
+class MempoolTestInfra {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
   static constexpr auto kAccountAddresses = [] {
@@ -77,7 +77,7 @@ public:
     return std::array{make(3), make(4), make(5), make(6)};
   }();
 
-  MempoolTestServer()
+  MempoolTestInfra()
   {
     // Multiple tests run within the same process, so we need to clear the
     // registration at the beginning of each test.
@@ -121,7 +121,7 @@ public:
     register_coordinator_with_mempool();
   }
 
-  ~MempoolTestServer()
+  ~MempoolTestInfra()
   {
     // TODO(jhumphri): Implement clean shutdown for all RPC servers.
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
@@ -186,7 +186,7 @@ public:
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
     x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
                                        sched_db_server_.port()}
                              .to_addr());
     SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
@@ -208,7 +208,7 @@ public:
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
     x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
                                        sched_event_server_.port()}
                              .to_addr());
     SchedEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
@@ -233,7 +233,7 @@ public:
     x23::ThreadPool pool;
     x23::CoroPoll cp(pool);
     x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{MempoolTestServer::kAddress.c_str(),
+        x23::tcpconnect(*x23::HostPort{MempoolTestInfra::kAddress.c_str(),
                                        mempool_coord_server_.port()}
                              .to_addr());
     SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef> client =
