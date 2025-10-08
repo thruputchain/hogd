@@ -17,7 +17,7 @@ class MempoolExecutorClient {
 public:
   MempoolExecutorClient(x23::CoroPoll &cp, std::string coordinator_host,
                         uint16_t coordinator_port)
-    : cp_(cp), coordinator_host_(std::move(coordinator_host)),
+    : cp_(cp), coordinator_host_(coordinator_host),
       coordinator_port_(coordinator_port)
   {}
 
@@ -52,7 +52,7 @@ public:
   uint16_t start(uint16_t port_number, std::string coordinator_host,
                  uint16_t coordinator_port, std::string hostname = "")
   {
-    coordinator_host_ = std::move(coordinator_host);
+    coordinator_host_ = coordinator_host;
     coordinator_port = coordinator_port;
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
@@ -67,7 +67,7 @@ public:
     MempoolExecutorClient client(server_.cp_, coordinator_host_,
                                  coordinator_port_);
     IntroExecResult exec_result =
-        client.register_with_coordinator(std::move(hostname), executor_port);
+        client.register_with_coordinator(hostname, executor_port);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
     server_.impl_.init(std::move(exec_result));
