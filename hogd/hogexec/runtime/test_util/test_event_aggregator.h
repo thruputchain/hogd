@@ -72,18 +72,19 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
+  uint16_t start_server(uint16_t port_number)
+  {
+    auto [port, fd] =
+        tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                       [this](auto c) { c->server(this); });
+    info("Starting event exec (test impl) RPC server on port {}", port);
+    return port;
+  }
+
 private:
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
-
-class TestEventAggregatorExecServer
-  : public RpcServer<TestEventAggregatorExecRpc> {
-public:
-  TestEventAggregatorExecServer(TestEventAggregator &event_aggregator)
-    : RpcServer(event_aggregator.get_coropoll(), event_aggregator)
-  {}
-};
 
 struct TestEventAggregatorSchedRpc {
   TestEventAggregatorSchedRpc(TestEventAggregator &event_aggregator)
@@ -109,17 +110,18 @@ struct TestEventAggregatorSchedRpc {
     event_aggregator_.close_block(block_id);
   }
 
+  uint16_t start_server(uint16_t port_number)
+  {
+    auto [port, fd] =
+        tcp_rpc_server(event_aggregator_.get_coropoll(), port_number,
+                       [this](auto c) { c->server(this); });
+    info("Starting event sched (test impl) RPC server on port {}", port);
+    return port;
+  }
+
 private:
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
-
-class TestEventAggregatorSchedServer
-  : public RpcServer<TestEventAggregatorSchedRpc> {
-public:
-  TestEventAggregatorSchedServer(TestEventAggregator &event_aggregator)
-    : RpcServer(event_aggregator.get_coropoll(), event_aggregator)
-  {}
-};
 
 } // namespace hogd
