@@ -117,19 +117,19 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 TEST_F(AuthClaimTests, GasAllSponsored)
 {
   AuthClaim claim = make_aux_individual_key_claim(0, ContractAddress{1});
+  auto aux_contract = ContractAddress{1};
 
   auto [pk, sk] = make_key_pair();
   auto [pk2, sk2] = make_key_pair();
   auto tx = make_transaction({claim});
+  tx.gas_claims.push_back(
+    GasClaim{.sponsored_contract = aux_contract, .amount = 100});
+  tx.invocation.gas_limit = 100;
+
   auto sig = make_signature(sk, tx, 0);
 
-  auto aux_contract = ContractAddress{1};
-
   SignedTransaction stx =
-      SignedTransaction{.tx = make_transaction({claim}), .signatures = {{sig}}};
-  stx.tx.gas_claims.push_back(
-      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
-  stx.tx.invocation.gas_limit = 100;
+      SignedTransaction{.tx = tx, .signatures = {{sig}}};
 
   EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
 
