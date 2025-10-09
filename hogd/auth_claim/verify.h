@@ -5,6 +5,7 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
+#include "hogd/auth_claim/status.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
@@ -15,12 +16,13 @@ namespace hogd {
 // Does not validate any signatures.  Checks that
 // each DecoratedSignature has a valid public key id, and that bitmaps are
 // valid. Does not check against any items in the database.
-bool lightweight_plausible_auth_claims(const SignedTransaction &stx);
+AuthVerifyStatus<void>
+lightweight_plausible_auth_claims(const SignedTransaction &stx);
 
 // Performs all of the checks of lightweight_plausible_auth_claims,
 // as well as checks that the signatures correspond to public keys that exist,
 // and that claims about signature weights are satisfied.
-bool lightweight_validate_auth_claims(
+AuthVerifyStatus<void> lightweight_validate_auth_claims(
     const SignedTransaction &stx, const AccountAuthData &source_auth_data,
     std::unordered_map<ContractAddress, const AccountAuthData *> const
         &aux_auth_data);
@@ -29,7 +31,7 @@ bool lightweight_validate_auth_claims(
 // transaction in the auth claims field.
 // Equivalent to lightweight_validate_auth_claims + the actual signature
 // verification.
-bool
+AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AccountAuthData &source_auth_data,
             std::unordered_map<ContractAddress, const AccountAuthData *> const

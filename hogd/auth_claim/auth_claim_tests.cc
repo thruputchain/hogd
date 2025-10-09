@@ -26,6 +26,15 @@ protected:
     return claim;
   }
 
+  static AuthClaim make_aux_individual_key_claim(uint32_t key_id,
+                                                 ContractAddress address)
+  {
+    AuthClaim claim(AuthClaimType::kOtherAddressSignature);
+    claim.other_address_signature_id().key_id = key_id;
+    claim.other_address_signature_id().address = address;
+    return claim;
+  }
+
   static AuthClaim make_weight_key_claim(uint32_t key_id, Weight weight)
   {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignedWeight);
@@ -100,6 +109,49 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   EXPECT_TRUE(verify_auth(stx, good_data, {}));
   EXPECT_FALSE(verify_auth(stx, bad_data, {}));
+}
+
+TEST_F(AuthClaimTests, GasAllSponsored)
+{
+  AuthClaim claim = make_aux_individual_key_claim(0, ContractAddress{1});
+
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+  auto tx = make_transaction({claim});
+  auto sig = make_signature(sk, tx, 0);
+
+  auto aux_contract = ContractAddress{1};
+
+  SignedTransaction stx =
+      SignedTransaction{.tx = make_transaction({claim}), .signatures = {{sig}}};
+  stx.tx.gas_claims.push_back(
+      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
+  stx.tx.invocation.gas_limit = 100;
+
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx));
+
+  AccountAuthData aux_data = AccountAuthData{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 100,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 1}},
+      .nonce_config = kAnyKeyNonceConfig,
+  };
+
+  AccountAuthData self_data = AccountAuthData{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 2,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 10}},
+      .nonce_config = kAnyKeyNonceConfig,
+  };
+
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx));
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, self_data,
+                                               {{aux_contract, &aux_data}}));
+  EXPECT_TRUE(verify_auth(stx, self_data, {{aux_contract, &aux_data}}));
 }
 
 } // namespace hogd

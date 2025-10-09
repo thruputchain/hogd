@@ -1,4 +1,5 @@
 add_library(auth_claim_objects OBJECT
+    status.cc
     verify.cc
 )
 

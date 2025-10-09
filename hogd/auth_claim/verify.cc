@@ -6,6 +6,7 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
+#include "hogd/auth_claim/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -56,7 +57,7 @@ has_public_key(const AccountAuthData &auth_data, size_t idx)
   return idx < auth_data.public_keys.size() && auth_data.public_keys[idx];
 }
 
-bool
+AuthVerifyStatus<void>
 verify_decorated_signature(const DecoratedSignature &dec_sig,
                            const AccountAuthData &auth_data,
                            SHA256Hash const &tx_hash)
@@ -71,11 +72,13 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
   {
     auto r =
         ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(), tx_hash);
-    return r;
+    return r ? AuthVerifyStatus<void>{}
+             : AuthVerifyError{
+                   AuthVerifyErrorCode::kSignatureVerificationFailed};
   }
   default:
     warn("Unsupported cryptographic scheme: {}", pk->key.scheme());
-    return false;
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 }
 
@@ -99,23 +102,23 @@ verify_signatures(VerificationType VerfType)
 }
 
 template<VerificationType VerfType>
-bool
+AuthVerifyStatus<void>
 verify_individual_key_claim_internal(uint32_t key_id,
                                      const AccountAuthData *auth_data,
                                      DecoratedSignatureList const &sigs,
                                      SHA256Hash const &tx_hash)
 {
   if (sigs.size() != 1) {
-    return false;
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
   if (sigs[0].public_key_id != key_id) {
-    return false;
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     if (!has_public_key(*auth_data, key_id)) {
-      return false;
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
   }
 
@@ -123,23 +126,23 @@ verify_individual_key_claim_internal(uint32_t key_id,
     assert(auth_data);
     return verify_decorated_signature(sigs[0], *auth_data, tx_hash);
   }
-  return true;
+  return {};
 }
 
 template<VerificationType VerfType>
-bool
+AuthVerifyStatus<void>
 verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
                                  const AccountAuthData *auth_data,
                                  DecoratedSignatureList const &sigs,
                                  SHA256Hash const &tx_hash)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
-    return false;
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
   for (const auto &sig : sigs) {
     if (!bitmap_accepts_key(accepted_keys, sig.public_key_id)) {
-      return false;
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
   }
 
@@ -148,26 +151,29 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
     size_t w = 0;
     for (const auto &sig : sigs) {
       if (!has_public_key(*auth_data, sig.public_key_id)) {
-        return false;
+        return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
       w += auth_data->public_keys[sig.public_key_id]->max_weight;
     }
     if (w < required_weight) {
-      return false;
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
   }
 
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
-    return std::ranges::all_of(sigs, [&](const auto &sig) {
-      return verify_decorated_signature(sig, *auth_data, tx_hash);
-    });
+
+    for (const auto &sig : sigs) {
+      if (auto r = verify_decorated_signature(sig, *auth_data, tx_hash); !r) {
+        return r;
+      }
+    }
   }
-  return true;
+  return {};
 }
 
 template<VerificationType VerfType>
-bool
+AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
                            DecoratedSignatureList const &sigs,
                            const AccountAuthData *auth_data,
@@ -207,7 +213,7 @@ verify_auth_claim_internal(AuthClaim const &claim,
 // passed for each auth claim.
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
-bool
+AuthVerifyStatus<void>
 validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
                const NonceConfig &nonce_config)
 {
@@ -223,7 +229,7 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
       for (const auto &sig : sigs) {
         if (!bitmap_accepts_key(nonce_config.accepted_keys,
                                 sig.public_key_id)) {
-          return false;
+          return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
         }
         total_weight += auth_data.public_keys[sig.public_key_id]->max_weight;
       }
@@ -236,13 +242,15 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
       panic("Unsupported auth claim type: {}", auth_claim.claim_type());
     }
   }
-  return total_weight >= nonce_config.required_weight;
+  return total_weight >= nonce_config.required_weight
+             ? AuthVerifyStatus<void>{}
+             : AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
 }
 
 // gas_config is the gas permissions for the account mentioned in gas_claim
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
-bool
+AuthVerifyStatus<void>
 validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
                         const AccountAuthData &auth_data)
 {
@@ -288,11 +296,13 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
                                             auth_data.gas_permissions[i].limit);
     }
   }
-  return approved_amount >= gas_claim.amount;
+  return approved_amount >= gas_claim.amount
+             ? AuthVerifyStatus<void>{}
+             : AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
 }
 
 template<VerificationType VerfType>
-bool
+AuthVerifyStatus<void>
 verify_auth_claims_internal(
     const SignedTransaction &stx, const AccountAuthData *source_auth_data,
     std::unordered_map<ContractAddress, const AccountAuthData *> const
@@ -308,7 +318,7 @@ verify_auth_claims_internal(
 
   SHA256Hash tx_hash = sha256(stx.tx);
   if (stx.tx.auth_claims.size() != stx.signatures.size()) {
-    return false;
+    return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
   }
 
   // Verify that each claimed auth has a corresponding set of valid signatures.
@@ -327,6 +337,7 @@ verify_auth_claims_internal(
             auth_claim.other_address_signature_id().address));
         auth_data =
             aux_auth_data.at(auth_claim.other_address_signature_id().address);
+        break;
       case AuthClaimType::kOtherAddressSignedWeight:
         assert(aux_auth_data.contains(
             auth_claim.other_address_signed_weight().address));
@@ -337,9 +348,10 @@ verify_auth_claims_internal(
         panic("Unsupported auth claim type: {}", auth_claim.claim_type());
       }
     }
-    if (!verify_auth_claim_internal<VerfType>(auth_claim, sigs, auth_data,
-                                              tx_hash)) {
-      return false;
+    if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs,
+                                                      auth_data, tx_hash);
+        !r) {
+      return r;
     }
   }
 
@@ -347,7 +359,7 @@ verify_auth_claims_internal(
   // from the source account should be implicit.
   for (auto const &gas_claim : stx.tx.gas_claims) {
     if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
-      return false;
+      return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
     }
   }
 
@@ -355,17 +367,18 @@ verify_auth_claims_internal(
     assert(source_auth_data);
     // Validate that the source account has enough weight to authorize the
     // nonce.
-    if (!validate_nonce<VerfType>(stx, *source_auth_data,
-                                  source_auth_data->nonce_config)) {
-      return false;
+    if (auto r = validate_nonce<VerfType>(stx, *source_auth_data,
+                                          source_auth_data->nonce_config);
+        !r) {
+      return r;
     }
     // Check all of the sponsored gas claims.
     for (const auto &gas_claim : stx.tx.gas_claims) {
       assert(aux_auth_data.contains(gas_claim.sponsored_contract));
-      if (!validate_gas_permission<VerfType>(
-              stx, gas_claim,
-              *aux_auth_data.at(gas_claim.sponsored_contract))) {
-        return false;
+      if (auto r = validate_gas_permission<VerfType>(
+              stx, gas_claim, *aux_auth_data.at(gas_claim.sponsored_contract));
+          !r) {
+        return r;
       }
     }
 
@@ -375,18 +388,19 @@ verify_auth_claims_internal(
     // Check the implicit gas sponsorship from the source account.
     if (implicit_gas_claim.amount > 0) {
       assert(source_auth_data);
-      if (!validate_gas_permission<VerfType>(stx, implicit_gas_claim,
-                                             *source_auth_data)) {
-        return false;
+      if (auto r = validate_gas_permission<VerfType>(stx, implicit_gas_claim,
+                                                     *source_auth_data);
+          !r) {
+        return r;
       }
     }
   }
-  return true;
+  return {};
 }
 
 } // namespace
 
-bool
+AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AccountAuthData &source_auth_data,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
@@ -396,7 +410,7 @@ verify_auth(const SignedTransaction &stx,
       stx, &source_auth_data, aux_auth_data);
 }
 
-bool
+AuthVerifyStatus<void>
 lightweight_validate_auth_claims(
     const SignedTransaction &stx, const AccountAuthData &source_auth_data,
     std::unordered_map<ContractAddress, const AccountAuthData *> const
@@ -406,7 +420,7 @@ lightweight_validate_auth_claims(
       stx, &source_auth_data, aux_auth_data);
 }
 
-bool
+AuthVerifyStatus<void>
 lightweight_plausible_auth_claims(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
