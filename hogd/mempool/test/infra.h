@@ -270,7 +270,8 @@ private:
   {
     const sockaddr_storage coordinator_sockaddr =
         host_port_to_sockaddr(kAddress, sched_exec_server_.port());
-    executor_.start(/*port_number=*/0, coordinator_sockaddr);
+    executor_.start(/*self_hostname=*/"localhost", /*self_port=*/0,
+                    coordinator_sockaddr);
   }
 
   void register_coordinator_with_mempool()
