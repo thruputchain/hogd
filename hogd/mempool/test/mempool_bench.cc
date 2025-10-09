@@ -6,6 +6,7 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
@@ -18,6 +19,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 
