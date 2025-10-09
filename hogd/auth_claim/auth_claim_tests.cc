@@ -4,6 +4,7 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
+#include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -85,7 +86,7 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
   SignedTransaction stx =
       SignedTransaction{.tx = make_transaction({claim}), .signatures = {{sig}}};
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx));
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
 
   auto [pk2, _] = make_key_pair();
 
@@ -98,8 +99,9 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
   AccountAuthData missing_key =
       AccountAuthData{.nonce_config = kAnyKeyNonceConfig};
 
-  EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}));
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key, {}));
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}).has_value());
+  EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key, {}).has_value());
+  EXPECT_EQ(lightweight_validate_auth_claims(stx, missing_key, {}).error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
   AccountAuthData bad_data =
       AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -107,8 +109,9 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
                                               .max_weight = Weight{1}})},
                       .nonce_config = kAnyKeyNonceConfig};
 
-  EXPECT_TRUE(verify_auth(stx, good_data, {}));
-  EXPECT_FALSE(verify_auth(stx, bad_data, {}));
+  EXPECT_TRUE(verify_auth(stx, good_data, {}).has_value());
+  EXPECT_FALSE(verify_auth(stx, bad_data, {}).has_value());
+  EXPECT_EQ(verify_auth(stx, bad_data, {}).error().code(), AuthVerifyErrorCode::kSignatureVerificationFailed);
 }
 
 TEST_F(AuthClaimTests, GasAllSponsored)
@@ -128,7 +131,7 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   stx.tx.invocation.gas_limit = 100;
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx));
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
 
   AccountAuthData aux_data = AccountAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -148,10 +151,10 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       .nonce_config = kAnyKeyNonceConfig,
   };
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx));
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, self_data,
-                                               {{aux_contract, &aux_data}}));
-  EXPECT_TRUE(verify_auth(stx, self_data, {{aux_contract, &aux_data}}));
+                                               {{aux_contract, &aux_data}}).has_value());
+  EXPECT_TRUE(verify_auth(stx, self_data, {{aux_contract, &aux_data}}).has_value());
 }
 
 } // namespace hogd
