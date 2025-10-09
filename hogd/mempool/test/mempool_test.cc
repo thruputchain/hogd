@@ -7,9 +7,11 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
+#include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -17,10 +19,16 @@
 
 namespace hogd {
 
+namespace {
+
+constexpr size_t kNumTxs = 100;
+
+} // namespace
+
 TEST(Mempool, SubmitUnvetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -46,7 +54,7 @@ TEST(Mempool, SubmitUnvetted)
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -58,7 +66,7 @@ TEST(Mempool, SubmitVetted)
 TEST(Mempool, Nominate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -74,7 +82,7 @@ TEST(Mempool, Nominate)
 TEST(Mempool, NominateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -101,7 +109,7 @@ TEST(Mempool, NominateEmpty)
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -126,7 +134,7 @@ TEST(Mempool, Validate)
 TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -163,7 +171,7 @@ TEST(Mempool, ValidateEmpty)
 TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 
@@ -191,7 +199,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 TEST(Mempool, ValidateBatchMissingTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, /*num_txs=*/5);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/5);
 
   SchedulerNominationResult res_nominate;
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
@@ -231,10 +239,12 @@ TEST(Mempool, ValidateBatchMissingTx)
 TEST(Mempool, AuthChanged)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_txs] should returned properly signed txs.
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -286,10 +296,12 @@ TEST(Mempool, AuthChanged)
 TEST(Mempool, AuthInvalidated)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_txs] should returned properly signed txs.
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -343,7 +355,7 @@ TEST(Mempool, AuthInvalidated)
 TEST(Mempool, Stress)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
 

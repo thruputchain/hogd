@@ -12,6 +12,7 @@
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
+#include "hogd/mempool/test/txs.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -19,13 +20,20 @@
 
 namespace hogd {
 
+namespace {
+
+constexpr size_t kNumTxs = 100;
+
+} // namespace
+
 TEST(Authentication, SignAndVerify)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -56,7 +64,8 @@ TEST(Authentication, SignAndVerifyNotEnoughSignatureWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -84,7 +93,8 @@ TEST(Authentication, SignAndVerifyNotEnoughNonceWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -113,7 +123,8 @@ TEST(Authentication, SignAndVerifyWrongNonceIndex)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -142,7 +153,8 @@ TEST(Authentication, SignAndVerifyNoGasIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -173,7 +185,8 @@ TEST(Authentication, SignAndVerifyNotEnoughGas)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -204,7 +217,8 @@ TEST(Authentication, SignAndVerifyGasWrongIndex)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -235,7 +249,8 @@ TEST(Authentication, SignAndVerifyNotEnoughGasWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -266,7 +281,8 @@ TEST(Authentication, SignAndVerifyGasMultipleConfigs)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -301,7 +317,8 @@ TEST(Authentication, SignAndVerifyMismatch)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -326,7 +343,8 @@ TEST(Authentication, SignAndVerifyWrongIndex)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -353,7 +371,8 @@ TEST(Authentication, SignAndVerifyMultiSig)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -390,7 +409,8 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigs)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -429,7 +449,8 @@ TEST(Authentication, SignAndVerifyMultiSigGasMultipleConfigsWrongIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -468,7 +489,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughGasWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -507,7 +529,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughSignatureWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -538,7 +561,8 @@ TEST(Authentication, SignAndVerifyMultiSigNotEnoughNonceWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -573,7 +597,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongNonceWeightIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -609,7 +634,8 @@ TEST(Authentication, SignAndVerifyMultiSigMismatch)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -639,7 +665,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndex)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -669,7 +696,8 @@ TEST(Authentication, SignAndVerifyMultiSigWrongIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -703,7 +731,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliary)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -744,7 +773,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughSignatureWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -778,7 +808,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughNonceWeight)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -816,7 +847,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongNonceWeightIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -854,7 +886,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryMismatch)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -889,7 +922,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndex)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -925,7 +959,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryWrongIndices)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -963,7 +998,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryNotEnoughGas)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -1004,7 +1040,8 @@ TEST(Authentication, SignAndVerifyAuthDataChanged)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
@@ -1042,7 +1079,8 @@ TEST(Authentication, SignAndVerifyMultiSigAuxiliaryAuthDataChanged)
   x23::Vec<Transaction> txs;
   txs.reserve(kNumTxs);
   {
-    const SignedTransactionBatch signed_txs = generate_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch signed_txs =
+        generate_unsigned_txs(fib_client, kNumTxs);
     for (const SignedTransaction &signed_tx : signed_txs) {
       txs.push_back(signed_tx.tx);
     }
