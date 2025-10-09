@@ -44,6 +44,8 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     let signature_bytes = unsafe { &*signature };
     let message_bytes = message.to_slice();
 
+    std::println!("pk: {:?}, sig: {:?}, msg: {:?}", public_key_bytes, signature_bytes, message_bytes);
+
     let vk_bytes: VerificationKeyBytes = (*public_key_bytes).into();
 
     // Parse public key

@@ -245,12 +245,14 @@ TEST(Mempool, AuthChanged)
   const SignedTransactionBatch txs =
       generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
+  std::println("first");
   MempoolTestServer server;
   server.set_hogs(MempoolTestServer::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
+  std::println("second");
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -262,7 +264,7 @@ TEST(Mempool, AuthChanged)
   // the output of nominations, etc.
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
-
+  std::println("third");
   SignedTransactionBatch signed_txs;
 
   for (const SignedTransaction &stx : txs) {
@@ -277,13 +279,14 @@ TEST(Mempool, AuthChanged)
         hogd::Authentication::sign_claims(tx, {{0, private_key}},
                                           /*auxiliary_private_keys=*/{}));
   }
+  std::println("fourth");
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 2;
   server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
                                auth_data);
-
+  std::println("fifth");
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);

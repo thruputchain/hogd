@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <unordered_map>
+#include <print>
 
 #include "account.hh"
 #include "auth_claim.hh"
@@ -66,11 +67,17 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
   auto const &pk = auth_data.public_keys[dec_sig.public_key_id];
   assert(pk);
 
+  std::println("tx hash {}", x23::show(tx_hash));
+
   switch (pk->key.scheme()) {
   case CryptographicScheme::Ed25519:
-    return ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(),
+	{
+    auto r = ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(),
                           tx_hash);
-  default:
+	std::println("verify sig result: {}", r);
+	return r;
+	}
+		default:
     warn("Unsupported cryptographic scheme: {}", pk->key.scheme());
     return false;
   }
@@ -103,21 +110,25 @@ verify_individual_key_claim_internal(uint32_t key_id,
                                      SHA256Hash const &tx_hash)
 {
   if (sigs.size() != 1) {
+	  std::println("wrong keys");
     return false;
   }
   if (sigs[0].public_key_id != key_id) {
+	  std::println("mismatch");
     return false;
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     if (!has_public_key(*auth_data, key_id)) {
+	    std::println("no pk");
       return false;
     }
   }
 
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
+    std::println("checking key");
     return verify_decorated_signature(sigs[0], *auth_data, tx_hash);
   }
   return true;
@@ -335,12 +346,14 @@ verify_auth_claims_internal(
     }
     if (!verify_auth_claim_internal<VerfType>(auth_claim, sigs, auth_data,
                                               tx_hash)) {
-      return false;
+	    std::println("failed to validate claim {} with sigs {} on auth_data {}", x23::show(auth_claim), x23::show(sigs), x23::show(*auth_data));
+	return false;
     }
   }
 
   for (auto const &gas_claim : stx.tx.gas_claims) {
     if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
+      std::println("source gas claim");
       return false;
     }
   }
@@ -349,7 +362,8 @@ verify_auth_claims_internal(
     assert(source_auth_data);
     if (!validate_nonce<VerfType>(stx, *source_auth_data,
                                   source_auth_data->nonce_config)) {
-      return false;
+	    std::println("bad nonce");
+	   return false;
     }
     GasAmount sponsored_gas = 0;
     for (const auto &gas_claim : stx.tx.gas_claims) {
@@ -358,7 +372,8 @@ verify_auth_claims_internal(
       if (!validate_gas_permission<VerfType>(
               stx, gas_claim,
               *aux_auth_data.at(gas_claim.sponsored_contract))) {
-        return false;
+	      std::println("bad gas nonce");
+	return false;
       }
     }
 
@@ -385,6 +400,7 @@ verify_auth(const SignedTransaction &stx,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
                 &aux_auth_data)
 {
+	std::println("verifying {} against {}", x23::show(stx), x23::show(source_auth_data));
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
       stx, &source_auth_data, aux_auth_data);
 }

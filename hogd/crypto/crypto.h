@@ -206,7 +206,7 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
 {
   return ed25519_dalek_verify(detail::span_to_pointer(public_key),
                               detail::span_to_pointer(signature),
-                              detail::span_to_message_span(std::move(msg))) ==
+                              detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
 
@@ -218,7 +218,7 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
 {
   return ed25519_dalek_verify(detail::span_to_pointer(publickey),
                               detail::span_to_pointer(sig),
-                              detail::span_to_message_span(std::move(msg))) ==
+                              detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
 
