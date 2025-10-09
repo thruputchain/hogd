@@ -105,7 +105,7 @@ nominate(benchmark::State &state)
              SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
-BENCHMARK(nominate)->Unit(benchmark::kMillisecond);
+BENCHMARK(nominate)->Unit(benchmark::kMillisecond)->Iterations(3);
 
 void
 validate(benchmark::State &state)
@@ -135,7 +135,7 @@ validate(benchmark::State &state)
              SchedulerValidationResult::SchedulerValidationOK);
   }
 }
-BENCHMARK(validate)->Unit(benchmark::kMillisecond);
+BENCHMARK(validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 
 struct Init {
   Init()
