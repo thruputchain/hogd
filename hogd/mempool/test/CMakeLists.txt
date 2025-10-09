@@ -23,7 +23,6 @@ target_include_directories(
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
-set_property(TARGET auth_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(auth_test)
 
 add_executable(
@@ -51,7 +50,6 @@ target_include_directories(
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
-set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)
 
 add_executable(
@@ -106,5 +104,4 @@ target_include_directories(
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
-set_property(TARGET scheduler_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(scheduler_test)
