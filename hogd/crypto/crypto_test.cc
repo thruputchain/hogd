@@ -78,24 +78,6 @@ TEST(Ed25519, BasicUsage)
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }
 
-<<<<<<< HEAD
-namespace {
-
-bool check_sig(Ed25519PublicKey const& pk, Ed25519Signature const& sk, SHA256Hash const& nonce)
-{
-	return ed25519_verify(pk, sk, nonce);
-}
-
-}
-
-TEST(Ed25519, Bug)
-{
-	auto [pk, sk] = ed25519_keygen();
-	uint64_t v = 0;
-	auto msg = sha256(v);
-	auto sig = ed25519_sign(sk, msg);
-	EXPECT_TRUE(check_sig(pk, sig, msg));
-=======
 // Catch an FFI UAF bug.
 TEST(Ed25519, FFIBug)
 {
@@ -104,7 +86,6 @@ TEST(Ed25519, FFIBug)
   auto msg = sha256(v);
   auto sig = ed25519_sign(sk, msg);
   EXPECT_TRUE(ed25519_verify(pk, sig, msg));
->>>>>>> main
 }
 
 TEST(Ed25519, BatchUsage)
