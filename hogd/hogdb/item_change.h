@@ -55,12 +55,17 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
                            const StorageCostModel *cost_model) {
   // applies the change to the ramdb.
   { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
-  // makes the change's reservation at least as restrictive as arg. However,
-  // does not merge the value change in arg. Returns true if narrowing was
-  // successful.
+  // narrow() is called when a transaction wants to modify its pending change to
+  // an item.  Makes the change's reservation at least as restrictive as arg.
+  // However, does not merge the value change in arg. Instead, the narrowed
+  // change replaces the prior change for the item (InvokeTX::request_change).
+  // Returns true if narrowing was successful. If narrowing is unsuccessful,
+  // then the change becomes exclusive and all future changes (merges)
+  // attempted by other transactions for this item will fail.
   { t.narrow(arg) } -> std::same_as<bool>;
   // merges the change and reservation in arg (will fail if there is a
-  // conflict).
+  // conflict). This combines a change from one transaction with a change from
+  // another transaction.
   // Returns an upper bound of the TOTAL amount of storage tokens
   // that must be locked to support the item, after the merge.
   // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
@@ -473,9 +478,7 @@ public:
     std::unordered_set<ReplayNonce> nonces{};
     nonces.insert_range(base_replay_cache_.uniquifiers |
                         std::views::transform(&Uniquifier::nonce));
-    nonces.insert_range(additions_ |
-                        std::views::transform(&UniquifierAddition::u_) |
-                        std::views::transform(&Uniquifier::nonce));
+    nonces.insert_range(additions_ | std::views::transform(&Uniquifier::nonce));
     assert(nonces.size() == base_reply_cache_.uniquifiers + additions_.size());
 
     // no expired uniquifiers - can't check this without acccess to dbtip
@@ -488,7 +491,6 @@ public:
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
 
-  void commit_change(ReplayCacheIt const &ReplayCacheIt);
   bool narrow(const ReplayCacheIt &replay_cache_item);
 
   HogDBStatus<int128_t> merge(const ReplayCacheIt &replay_cache_item,
@@ -504,13 +506,7 @@ public:
 
   ReplayCacheData build_result() const;
 
-  struct UniquifierAddition {
-    UniquifierAddition(Uniquifier u) : u_(std::move(u)) {}
-    bool committed_{false};
-    Uniquifier u_{};
-  };
-
-  std::vector<UniquifierAddition> additions_;
+  std::vector<Uniquifier> additions_;
   ReplayCacheData base_replay_cache_;
 
   friend struct std::formatter<ReplayCacheIt>;
@@ -528,8 +524,7 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
               x23::show(replay_cache_item.base_replay_cache_));
     format_to(ctx.out(), "additions_:");
     for (auto const &addition : replay_cache_item.additions_)
-      format_to(ctx.out(), "{{u_: {}, committed_: {}}}", x23::show(addition.u_),
-                addition.committed_);
+      format_to(ctx.out(), "{{{}}}", x23::show(addition));
     format_to(ctx.out(), "}}");
     return ctx.out();
   }
@@ -537,7 +532,7 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
 
 namespace hogd {
 
-static_assert(hogd::is_item_commit_required<hogd::ReplayCacheIt>);
+static_assert(hogd::is_item<hogd::ReplayCacheIt>);
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {

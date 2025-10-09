@@ -353,11 +353,10 @@ HogDBStatus<void>
 ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
 {
   {
-    auto it =
-        std::ranges::find_if(additions_,
-                             [&uniquifier](UniquifierAddition const &addition) {
-                               return uniquifier.nonce == addition.u_.nonce;
-                             });
+    auto it = std::ranges::find_if(additions_,
+                                   [&uniquifier](Uniquifier const &addition) {
+                                     return uniquifier.nonce == addition.nonce;
+                                   });
     // nonce was in list of recent additions
     if (it != additions_.end())
       return HogDBError(HogDBCode::kConflict);
@@ -415,51 +414,32 @@ ReplayCacheData
 ReplayCacheIt::build_result() const
 {
   ReplayCacheData result = base_replay_cache_;
-  for (auto const &addition : additions_) {
-    if (addition.committed_)
-      result.uniquifiers.push_back(addition.u_);
-  }
+  result.uniquifiers.append_range(additions_);
   return result;
-}
-
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX What is the arg here?
-void
-ReplayCacheIt::commit_change(ReplayCacheIt const &replay_cache)
-{
-  for (auto &addition : additions_) {
-    assert(!addition.committed_);
-    addition.committed_ = true;
-  }
 }
 
 int128_t
 ReplayCacheIt::committed_storage_cost(const StorageCostModel *cost_model) const
 {
-  size_t active = base_replay_cache_.uniquifiers.size();
-  for (auto const &addition : additions_) {
-    if (addition.committed_) {
-      active++;
-    }
-  }
-  return cost_model->get_replay_cache_cost(active);
+  size_t entries = base_replay_cache_.uniquifiers.size() + additions_.size();
+  return cost_model->get_replay_cache_cost(entries);
 }
 
 int128_t
 ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
-  size_t committed_additions = 0;
-  for (auto const &addition : additions_) {
-    if (addition.committed_) {
-      committed_additions++;
-    }
-  }
-  return cost_model->get_replay_cache_cost(committed_additions);
+  return cost_model->get_replay_cache_cost(additions_.size());
 }
 
+// Currently, the executor only modifies a replay cache based on the uniquifier
+// assigned to a transaction right at its start and only once. Since a single
+// transaction should never be able to modify a replay cache twice, narrow()
+// shouldn't be possible on it. Later, if we allow transactions to interact
+// with replay caches then this will need to be implemented.
 bool
 ReplayCacheIt::narrow(const ReplayCacheIt &replay_cache)
 {
-  // Disallow a tx from modifying a replay cache twice.
+  assert(false);
   return false;
 }
 
@@ -472,7 +452,7 @@ ReplayCacheIt::merge(const ReplayCacheIt &replay_cache_item,
 
   // Check that incoming uniquifiers aren't in this cache or additions.
   for (auto const &other_addition : replay_cache_item.additions_) {
-    HogDBStatus<void> ret = check_conflict(other_addition.u_);
+    HogDBStatus<void> ret = check_conflict(other_addition);
     if (!ret)
       return ret.error();
   }
@@ -486,13 +466,12 @@ ReplayCacheIt::merge(const ReplayCacheIt &replay_cache_item,
 void
 ReplayCacheIt::undo_merge(const ReplayCacheIt &replay_cache)
 {
-  auto removal_nonces = replay_cache.additions_ |
-                        std::views::transform(&UniquifierAddition::u_) |
-                        std::views::transform(&Uniquifier::nonce);
+  auto removal_nonces =
+      replay_cache.additions_ | std::views::transform(&Uniquifier::nonce);
   std::unordered_set<ReplayNonce> removals(removal_nonces.begin(),
                                            removal_nonces.end());
-  std::erase_if(additions_, [&removals](UniquifierAddition const &addition) {
-    return removals.contains(addition.u_.nonce);
+  std::erase_if(additions_, [&removals](Uniquifier const &addition) {
+    return removals.contains(addition.nonce);
   });
 }
 
