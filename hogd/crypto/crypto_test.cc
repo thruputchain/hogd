@@ -73,7 +73,7 @@ TEST(Ed25519, BasicUsage)
 
   std::string_view msg = "test message";
   std::string_view msg_wrong = "wrong message";
-  auto sig = ed25519_sign(sk, msg);
+  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg)));
   EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }

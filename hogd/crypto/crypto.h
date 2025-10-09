@@ -45,7 +45,7 @@ read_random(std::span<std::byte> buf)
 
 // sha256 returns the SHA256 hash of buf.
 inline SHA256Hash
-sha256(x23::is_bytespan auto buf)
+sha256(x23::BufView buf)
 {
   // We need to directly use lower-level functions in OpenSSL even though they
   // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
@@ -70,7 +70,7 @@ sha256(const T &value)
 using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
 
 inline Blake3Hash
-blake3(x23::is_bytespan auto buf)
+blake3(x23::BufView buf)
 {
   Blake3Hash out;
   blake3_hasher hasher;
@@ -118,6 +118,14 @@ span_to_message_span(std::span<const std::byte> msg)
                      .message_len = msg.size()};
 }
 
+inline MessageSpan
+span_to_message_span(x23::BufView msg)
+{
+  return MessageSpan{.message_ptr =
+                         reinterpret_cast<const uint8_t *>(msg.data()),
+                     .message_len = msg.size()};
+}
+
 } // namespace detail
 
 // SipHash24Key is the secret key used by SipHash24.
@@ -143,7 +151,7 @@ public:
   ~SipHash24() = default;
 
   // Returns the hash of the input bytes.
-  uint64_t operator()(x23::is_bytespan auto buf);
+  uint64_t operator()(x23::BufView buf);
 
   SipHash24Key get_key() const { return key_; }
 
@@ -152,11 +160,10 @@ private:
   SipHash24Key key_;
 };
 
-uint64_t
-SipHash24::operator()(x23::is_bytespan auto buf)
+inline uint64_t
+SipHash24::operator()(x23::BufView buf)
 {
-  return siphash24_hash(key_[0], key_[1],
-                        detail::span_to_message_span(std::move(buf)));
+  return siphash24_hash(key_[0], key_[1], detail::span_to_message_span(buf));
 }
 
 // ed25519_keygen generates a new ed25519 keypair.
@@ -217,21 +224,22 @@ ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
 // implementation.
 inline bool
 ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
-               x23::is_bytespan auto msg)
+               x23::BufView msg)
 {
   return ed25519_dalek_verify(detail::span_to_pointer(publickey),
                               detail::span_to_pointer(sig),
-                              detail::span_to_message_span(msg)) ==
+                              detail::span_to_message_span(std::as_bytes(
+                                  std::span(msg.data(), msg.size())))) ==
          Ed25519Result::Success;
 }
 
 inline Ed25519Signature
-ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
+ed25519_sign(const Ed25519SecretKey &sk, x23::BufView msg)
 {
   Ed25519Signature sig;
   [[maybe_unused]] uint8_t ret =
       ed25519_dalek_sign(detail::span_to_pointer(sk),
-                         detail::span_to_message_span(std::move(msg)),
+                         detail::span_to_message_span(msg),
                          detail::span_to_writable_pointer(sig));
   assert(ret == 0);
   return sig;
@@ -239,7 +247,7 @@ ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
 
 // crc32c calculates the CRC32C of buf.
 inline uint32_t
-crc32c(x23::is_bytespan auto buf)
+crc32c(x23::BufView buf)
 {
   return crc32c::Crc32c(reinterpret_cast<const uint8_t *>(buf.data()),
                         buf.size());
@@ -247,7 +255,7 @@ crc32c(x23::is_bytespan auto buf)
 
 // crc32c_append extends a previous CRC32C to include buf.
 inline uint32_t
-crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
+crc32c_append(uint32_t crc, x23::BufView buf)
 {
   return crc32c::Extend(crc, reinterpret_cast<const uint8_t *>(buf.data()),
                         buf.size());
