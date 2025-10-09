@@ -65,6 +65,7 @@ target_link_libraries(
   db_interface
   exec_interface
   hogd
+  loadgen
   mempool
   merkle
   protocol
