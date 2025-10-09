@@ -69,7 +69,9 @@ public:
                  result.success().genesis_block)(),
              DbSchedResult::DbSchedResultOK);
 
-    // Nominate and commit the initialization transactions.
+    // We need to nominate and commit the initialization transactions. So first,
+    // we start by adding them to the mempool with
+    // [schedulercoord_submit_vetted()].
     const x23::Vec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID validator_id{};
@@ -80,6 +82,8 @@ public:
                                                              init_tx)();
     }
 
+    // Now nominate and commit the initialization transactions with
+    // [schedulercoord_nominate()].
     size_t num_nominated_txs = 0;
     // TODO(jhumphri): Is this right?
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
