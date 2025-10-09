@@ -177,11 +177,12 @@ validate(benchmark::State &state)
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
-    state.ResumeTiming();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
+    state.ResumeTiming();
+
     auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
         db_tip, res_nominate.scheduler_nomination().nomination)();
     CHECK_EQ(res_validate.outcome(),
@@ -194,10 +195,10 @@ BENCHMARK(validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 void
 submit_unvetted_loadgen(benchmark::State &state)
 {
+  MempoolTestInfra server;
   LoadgenHelper loadgen;
   for (auto _ : state) {
     state.PauseTiming();
-    MempoolTestInfra server;
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
     state.ResumeTiming();
 
@@ -209,10 +210,10 @@ BENCHMARK(submit_unvetted_loadgen)->Unit(benchmark::kMillisecond);
 void
 submit_vetted_loadgen(benchmark::State &state)
 {
+  MempoolTestInfra server;
   LoadgenHelper loadgen;
   for (auto _ : state) {
     state.PauseTiming();
-    MempoolTestInfra server;
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
     state.ResumeTiming();
 
@@ -226,10 +227,10 @@ BENCHMARK(submit_vetted_loadgen)->Unit(benchmark::kMicrosecond);
 void
 nominate_loadgen(benchmark::State &state)
 {
+  MempoolTestInfra server;
   LoadgenHelper loadgen;
   for (auto _ : state) {
     state.PauseTiming();
-    MempoolTestInfra server;
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
     // Submit unvetted transactions so there's something to nominate
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -247,10 +248,10 @@ BENCHMARK(nominate_loadgen)->Unit(benchmark::kMillisecond)->Iterations(3);
 void
 validate_loadgen(benchmark::State &state)
 {
+  MempoolTestInfra server;
   LoadgenHelper loadgen;
   for (auto _ : state) {
     state.PauseTiming();
-    MempoolTestInfra server;
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -260,11 +261,12 @@ validate_loadgen(benchmark::State &state)
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
-    state.ResumeTiming();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
+    state.ResumeTiming();
+
     auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
         db_tip, res_nominate.scheduler_nomination().nomination)();
     CHECK_EQ(res_validate.outcome(),
