@@ -68,8 +68,6 @@
 
 namespace hogd {
 
-constexpr size_t kNumTxs = 100;
-
 class MempoolTestInfra {
 public:
   static constexpr std::string kAddress = "127.0.0.1";

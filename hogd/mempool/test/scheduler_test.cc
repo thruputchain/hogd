@@ -22,6 +22,7 @@ namespace hogd {
 namespace {
 
 constexpr size_t kBlockSize = 100;
+constexpr size_t kNumTxs = 100;
 
 } // namespace
 

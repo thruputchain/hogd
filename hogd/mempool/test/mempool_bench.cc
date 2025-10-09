@@ -19,18 +19,45 @@ namespace hogd {
 
 namespace {
 
+constexpr size_t kNumTxs = 100;
+
 void
-stress(benchmark::State &state)
+submit_unvetted(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  MempoolTestInfra server;
 
+  for (auto _ : state) {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+  }
+}
+BENCHMARK(submit_unvetted)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+submit_vetted(benchmark::State &state)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
   MempoolTestInfra server;
 
   for (auto _ : state) {
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
+  }
+}
+BENCHMARK(submit_vetted)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+stress(benchmark::State &state)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  MempoolTestInfra server;
+
+  for (auto _ : state) {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
@@ -38,6 +65,7 @@ stress(benchmark::State &state)
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
 
+    ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
     auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(

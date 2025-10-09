@@ -17,6 +17,12 @@
 
 namespace hogd {
 
+namespace {
+
+constexpr size_t kNumTxs = 100;
+
+} // namespace
+
 TEST(Mempool, SubmitUnvetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
