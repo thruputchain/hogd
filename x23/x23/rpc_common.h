@@ -261,14 +261,15 @@ struct RpcLogger {
     write(logfd_, logmsg.data(), logmsg.size());
   }
 
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd)
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
   {
     if (logfd_ < 0)
       return;
-    auto logmsg = std::format("Advertising program {}::{} on {} (fd {})\n",
-                              VersMeta::program_name, VersMeta::version_name,
-                              show_addr(remote_addr(fd)), fd.get());
-    write(logfd_, logmsg.data(), logmsg.size());
+    std::string msg = peername_ + ' ';
+    uvformat_to(&msg, fmt.get(), std::make_format_args(args...));
+    msg += '\n';
+    write(logfd_, msg.data(), msg.size());
   }
 };
 
@@ -320,7 +321,10 @@ struct RpcCsvLogger {
   {
     do_log<Meta>(true, msg, pl...);
   }
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
+
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
+  {}
 };
 
 struct RpcNoLogger {
@@ -337,7 +341,9 @@ struct RpcNoLogger {
   void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
+  {}
 };
 
 extern size_t default_max_message_size;

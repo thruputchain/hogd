@@ -386,12 +386,11 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
   RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
   {
-    logger_.template log_server_advertise<VersMeta>(fd_);
-    assert(!reader_running_);
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
             std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
     srvmap_.emplace(dispatch->getpv(), dispatch);
+    logger_.log_message("serving {}", VersMeta::version_name);
     return this;
   }
   template<typename VersMeta, typename Server, typename... ExtraArgs>
@@ -407,7 +406,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     if (!reader_running_) {
       reader_running_ = true;
+      logger_.log_message("launching reader");
       reader();
+      logger_.log_message("reader launched");
     }
   }
 
