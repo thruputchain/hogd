@@ -10,6 +10,7 @@
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
+#include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -21,12 +22,41 @@ namespace {
 
 constexpr size_t kNumTxs = 100;
 
+SignedTransactionBatch
+generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
+                    size_t num_txs)
+{
+  SignedTransactionBatch unsigned_txs =
+      generate_unsigned_txs(fib_client, num_txs);
+  AccountAuthData auth_data = get_default_account();
+  auth_data.nonce_config.required_weight = 1;
+  set_nonce_key(auth_data, /*idx=*/0);
+  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
+                 /*required_weight=*/1);
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  // TODO(jhumphri): Add this to each of the tests and more extensively verify
+  // the output of nominations, etc.
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SignedTransactionBatch txs;
+  for (const SignedTransaction &unsigned_tx : unsigned_txs) {
+    txs.push_back(hogd::Authentication::sign(unsigned_tx.tx,
+                                             /*signature_weight=*/1,
+                                             {{0, private_key}},
+                                             /*auxiliary_private_keys=*/{}));
+  }
+  return txs;
+}
+
 void
 submit_unvetted(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
   MempoolTestInfra server;
+  const SignedTransactionBatch txs =
+      generate_signed_txs(fib_client, server, kNumTxs);
 
   for (auto _ : state) {
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -38,8 +68,9 @@ void
 submit_vetted(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
   MempoolTestInfra server;
+  const SignedTransactionBatch txs =
+      generate_signed_txs(fib_client, server, kNumTxs);
 
   for (auto _ : state) {
     ValidatorID validator_id{};
@@ -47,14 +78,15 @@ submit_vetted(benchmark::State &state)
                                                             txs)();
   }
 }
-BENCHMARK(submit_vetted)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(submit_vetted)->Iterations(1)->Unit(benchmark::kMicrosecond);
 
 void
 stress(benchmark::State &state)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
   MempoolTestInfra server;
+  const SignedTransactionBatch txs =
+      generate_signed_txs(fib_client, server, kNumTxs);
 
   for (auto _ : state) {
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();

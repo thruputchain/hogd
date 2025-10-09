@@ -13,6 +13,7 @@
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
+#include "hogd/mempool/test/txs.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -29,7 +30,7 @@ constexpr size_t kNumTxs = 100;
 TEST(Scheduler, ReadAge)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -48,7 +49,7 @@ TEST(Scheduler, ReadAge)
 TEST(Scheduler, WriteAge)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -81,7 +82,7 @@ TEST(Scheduler, WriteAge)
 TEST(Scheduler, AddVettedTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -92,7 +93,7 @@ TEST(Scheduler, AddVettedTx)
 TEST(Scheduler, AddVettedTxDuplicate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -105,7 +106,7 @@ TEST(Scheduler, AddVettedTxDuplicate)
 TEST(Scheduler, Single)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -138,7 +139,7 @@ TEST(Scheduler, Single)
 TEST(Scheduler, TxFailed)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -184,7 +185,7 @@ TEST(Scheduler, TxFailed)
 TEST(Scheduler, TxFailedStrandedEnqueued)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -237,7 +238,7 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
 TEST(Scheduler, Empty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -250,7 +251,7 @@ TEST(Scheduler, Empty)
 TEST(Scheduler, MultipleOneBlock)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kBlockSize);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kBlockSize);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -274,7 +275,7 @@ TEST(Scheduler, MultipleMultipleBlocks)
 
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, kBlockSize * kNumBlocks);
+      generate_unsigned_txs(fib_client, kBlockSize * kNumBlocks);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -308,7 +309,7 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
 
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, (kBlockSize * kNumBlocks) + kRemainder);
+      generate_unsigned_txs(fib_client, (kBlockSize * kNumBlocks) + kRemainder);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -350,7 +351,7 @@ TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
 TEST(Scheduler, NotEnoughHogs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -376,10 +377,10 @@ TEST(Scheduler, NotEnoughHogs)
 TEST(Scheduler, TwoAccounts)
 {
   fib_client_t fib_client_a(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs_a = generate_txs(fib_client_a, kNumTxs);
+  const SignedTransactionBatch txs_a = generate_unsigned_txs(fib_client_a, kNumTxs);
 
   fib_client_t fib_client_b(MempoolTestInfra::kAccountAddresses[1]);
-  const SignedTransactionBatch txs_b = generate_txs(fib_client_b, kNumTxs);
+  const SignedTransactionBatch txs_b = generate_unsigned_txs(fib_client_b, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -398,7 +399,7 @@ TEST(Scheduler, MultipleAccounts)
   std::vector<SignedTransactionBatch> txs;
   for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
     fib_clients.emplace_back(address);
-    txs.push_back(generate_txs(fib_clients.back(), kNumTxs));
+    txs.push_back(generate_unsigned_txs(fib_clients.back(), kNumTxs));
   }
 
   MempoolTestInfra server;
@@ -415,7 +416,7 @@ TEST(Scheduler, MultipleAccounts)
 TEST(Scheduler, UpdateGroupsBasic)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -453,7 +454,7 @@ TEST(Scheduler, UpdateGroupsBasic)
 TEST(Scheduler, ProcessReceivedHogs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -479,7 +480,7 @@ TEST(Scheduler, ProcessReceivedHogs)
 TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -533,7 +534,7 @@ TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
 TEST(Scheduler, ProcessReceivedHogsSchedule)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -596,7 +597,7 @@ TEST(Scheduler, Fairness)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_txs(fib_clients.back(), kBlockSize * kNumRounds));
+    txs.push_back(generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds));
   }
 
   MempoolTestInfra server;
@@ -650,7 +651,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs[address] = generate_txs(fib_clients.back(), kBlockSize * kNumRounds);
+    txs[address] = generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
   }
 
   MempoolTestInfra server;
@@ -708,7 +709,7 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs[address] = generate_txs(fib_clients.back(), kBlockSize * kNumRounds);
+    txs[address] = generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
   }
 
   MempoolTestInfra server;
@@ -765,7 +766,7 @@ TEST(Scheduler, YoungHogStarvation)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_txs(fib_clients.back(), kNumRounds * 2));
+    txs.push_back(generate_unsigned_txs(fib_clients.back(), kNumRounds * 2));
   }
 
   MempoolTestInfra server;
@@ -826,7 +827,7 @@ TEST(Scheduler, YoungHogStarvation)
 TEST(Scheduler, CycleFromAlreadyScheduled)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -867,7 +868,7 @@ TEST(Scheduler, CycleFromAlreadyScheduled)
 TEST(Scheduler, CycleFromReceived)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -907,7 +908,7 @@ TEST(Scheduler, CycleFromReceived)
 TEST(Scheduler, CycleFromAlreadyScheduledNotEnough)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -947,7 +948,7 @@ TEST(Scheduler, CycleFromAlreadyScheduledNotEnough)
 TEST(Scheduler, CycleFromReceivedNotEnough)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -986,7 +987,7 @@ TEST(Scheduler, CycleFromReceivedNotEnough)
 TEST(Scheduler, CycleTotalIsEnough)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1026,7 +1027,7 @@ TEST(Scheduler, CycleTotalIsEnough)
 TEST(Scheduler, CycleTotalIsNotEnough)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1065,7 +1066,7 @@ TEST(Scheduler, CycleTotalIsNotEnough)
 TEST(Scheduler, CycleOlderAgeInAlreadyScheduled)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1111,7 +1112,7 @@ TEST(Scheduler, CycleOlderAgeInAlreadyScheduled)
 TEST(Scheduler, CycleOlderAgeInReceived)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1157,7 +1158,7 @@ TEST(Scheduler, CycleOlderAgeInReceived)
 TEST(Scheduler, CycleCombineAges)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1203,7 +1204,7 @@ TEST(Scheduler, CycleCombineAges)
 TEST(Scheduler, CycleCombineAgesAllGroups)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1249,7 +1250,7 @@ TEST(Scheduler, CycleCombineAgesAllGroups)
 TEST(Scheduler, CycleCombineAgesRoundUp)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1295,7 +1296,7 @@ TEST(Scheduler, CycleCombineAgesRoundUp)
 TEST(Scheduler, CycleCombineAgesRoundUpAllGroups)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1341,7 +1342,7 @@ TEST(Scheduler, CycleCombineAgesRoundUpAllGroups)
 TEST(Scheduler, ProcessReceivedHogsRoundUp)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1378,7 +1379,7 @@ TEST(Scheduler, ProcessReceivedHogsRoundUp)
 TEST(Scheduler, AlreadyScheduledRoundUp)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1447,7 +1448,7 @@ TEST(Scheduler, AlreadyScheduledRoundUp)
 TEST(Scheduler, Expired)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1472,7 +1473,7 @@ TEST(Scheduler, Expired)
 TEST(Scheduler, ExpiredStranded)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1514,7 +1515,7 @@ TEST(Scheduler, ExpiredStranded)
 TEST(Scheduler, Filter)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -1559,7 +1560,7 @@ TEST(Scheduler, Filter)
 TEST(Scheduler, FilterStranded)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
