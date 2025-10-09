@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include <cstdio>
+#include <cstdlib>
 extern "C" {
 #include "blake3.h"
 }
@@ -10,17 +10,20 @@ extern "C" {
 #include <openssl/rand.h> // NOLINT(misc-include-cleaner)
 #include <openssl/sha.h>  // NOLINT(misc-include-cleaner)
 
+#include <crc32c/crc32c.h>
+
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <span>
+#include <utility>
+#include <vector>
 #include <version>
 
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
-#include <crc32c/crc32c.h>
-#include <utility>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -108,7 +111,7 @@ span_to_writable_pointer(std::array<uint8_t, N> &data)
 }
 
 inline MessageSpan
-span_to_message_span(x23::is_bytespan auto msg)
+span_to_message_span(std::span<const std::byte> msg)
 {
   return MessageSpan{.message_ptr =
                          reinterpret_cast<const uint8_t *>(msg.data()),
@@ -202,11 +205,11 @@ ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
 inline bool
 ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
                std::span<const std::byte, sizeof(Ed25519Signature)> signature,
-               x23::is_bytespan auto msg)
+               std::span<const std::byte> msg)
 {
   return ed25519_dalek_verify(detail::span_to_pointer(public_key),
                               detail::span_to_pointer(signature),
-                              detail::span_to_message_span(std::move(msg))) ==
+                              detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
 
@@ -218,7 +221,7 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
 {
   return ed25519_dalek_verify(detail::span_to_pointer(publickey),
                               detail::span_to_pointer(sig),
-                              detail::span_to_message_span(std::move(msg))) ==
+                              detail::span_to_message_span(msg)) ==
          Ed25519Result::Success;
 }
 
