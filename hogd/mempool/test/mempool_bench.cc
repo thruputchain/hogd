@@ -50,15 +50,49 @@ public:
     auto stream = x23::rpc_stream_logged(default_coropoll(), fd.release());
     client_ = std::make_unique<loadgen_client_t>(
         stream->client(LoadgenInterfaceV1{}));
+  }
 
-    // Initialize the experiment
+  // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
+  // do not want that setup when using loadgen.
+  void init_experiment(MempoolTestInfra &infra)
+  {
+    // Initialize the experiment.
     ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
     config.erc20_payments().num_accounts = kNumAccounts;
 
     LoadgenResult result = client_->generate_experiment(config)();
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
-
     context_id_ = result.success().context_id;
+
+    // Pass the genesis block to the db.
+    CHECK_EQ(infra.mempool_coord_rpc().schedcoord_load_genesis_block(
+                 result.success().genesis_block)(),
+             DbSchedResult::DbSchedResultOK);
+
+    // Nominate and commit the initialization transactions.
+    const x23::Vec<InitializationBlock> &init_txs =
+        result.success().initialization_txs;
+    constexpr ValidatorID validator_id{};
+    size_t num_init_txs = 0;
+    for (const InitializationBlock &init_tx : init_txs) {
+      num_init_txs += init_tx.size();
+      infra.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                             init_tx)();
+    }
+
+    size_t num_nominated_txs = 0;
+    // TODO(jhumphri): Is this right?
+    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+    while (num_nominated_txs < num_init_txs) {
+      auto res_nominate =
+          infra.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+      CHECK_EQ(res_nominate.outcome(),
+               SchedulerNominationOutcome::SchedulerNominationOK);
+      num_nominated_txs += res_nominate.scheduler_nomination()
+                               .nomination.transaction_hashes.size();
+    }
+    CHECK_EQ(num_nominated_txs, num_init_txs);
+
     info("Initialized loadgen experiment with context_id {}", context_id_);
   }
 
@@ -200,6 +234,8 @@ submit_unvetted_loadgen(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
@@ -215,6 +251,8 @@ submit_vetted_loadgen(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
@@ -232,6 +270,8 @@ nominate_loadgen(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
@@ -253,6 +293,8 @@ validate_loadgen(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
