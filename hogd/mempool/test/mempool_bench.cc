@@ -27,22 +27,26 @@ stress(benchmark::State &state)
 
   MempoolTestInfra server;
 
-  ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+  for (auto _ : state) {
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
 
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  CHECK_EQ(res_nominate.outcome(),
-           SchedulerNominationOutcome::SchedulerNominationOK);
+    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, res_nominate.scheduler_nomination().nomination)();
-  CHECK_EQ(res_validate.outcome(),
-           SchedulerValidationResult::SchedulerValidationOK);
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
+    auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
+        db_tip, res_nominate.scheduler_nomination().nomination)();
+    CHECK_EQ(res_validate.outcome(),
+             SchedulerValidationResult::SchedulerValidationOK);
+  }
 }
-BENCHMARK(stress);
+BENCHMARK(stress)->Iterations(1)->Unit(benchmark::kMillisecond);
 
 struct Init {
   Init()
