@@ -257,7 +257,6 @@ private:
     std::string sched_address = address(kAddress, db_scheduler_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
                                 .block_height = 0,
-                                .address_for_coord = "fail",
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str()})();
   }

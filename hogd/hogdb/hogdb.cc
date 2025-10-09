@@ -44,9 +44,8 @@ namespace hogd {
 namespace {
 
 // port numbers used by servers hosted inside hogdb.
-constexpr uint16_t kCoordServerPort = 8080;
-constexpr uint16_t kExecServerPort = 8081;
-constexpr uint16_t kSchedServerPort = 8082;
+constexpr uint16_t kExecServerPort = 8080;
+constexpr uint16_t kSchedServerPort = 8081;
 
 std::string
 create_address(uint16_t port)
@@ -106,11 +105,6 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
 
-  // start the coordinator server.
-  info("starting coordinator server.");
-  HogDBSchedServer coord_server(ctx);
-  coord_server.start_server(kCoordServerPort);
-
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
@@ -155,13 +149,11 @@ hogdb_init(std::string_view path, size_t ram_bytes,
         continue;
       }
 
-      const std::string coord_address = create_address(kCoordServerPort);
       const std::string exec_address = create_address(kExecServerPort);
       const std::string sched_address = create_address(kSchedServerPort);
       ShardCard card{.protocol = version::kHogdProtocol,
                      .upid = {},
                      .block_height = 0,
-                     .address_for_coord = coord_address.c_str(),
                      .address_for_exec = exec_address.c_str(),
                      .address_for_sched = sched_address.c_str()};
       client->scheddb_intro_shard(card)();
