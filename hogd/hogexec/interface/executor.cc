@@ -19,13 +19,6 @@
 
 namespace hogd {
 
-std::string
-MempoolExecutorClient::get_executor_address(std::string_view hostname,
-                                            uint16_t executor_port)
-{
-  return std::format("{}:{}", hostname, executor_port);
-}
-
 SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
 MempoolExecutorClient::connect_to_coordinator(
     const sockaddr_storage &coordinator_sockaddr)
@@ -43,15 +36,13 @@ MempoolExecutorClient::connect_to_coordinator(
 
 IntroExecResult
 MempoolExecutorClient::register_with_coordinator(
-    uint16_t executor_port, const sockaddr_storage &coordinator_sockaddr)
+    x23::HostPort const &self_hostport,
+    const sockaddr_storage &coordinator_sockaddr)
 {
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
   auto client = connect_to_coordinator(coordinator_sockaddr);
-  const ExecCard card = {
-      .protocol = version::kHogdProtocol,
-      .upid = {},
-      .address = get_executor_address(hostname, executor_port).c_str()};
+  const ExecCard card = {.protocol = version::kHogdProtocol,
+                         .upid = {},
+                         .address = self_hostport.show()};
   auto ret = client.schedexec_intro_exec(card)();
   return ret;
 }
