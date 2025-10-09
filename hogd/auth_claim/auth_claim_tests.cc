@@ -100,8 +100,11 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
       AccountAuthData{.nonce_config = kAnyKeyNonceConfig};
 
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, good_data, {}).has_value());
-  EXPECT_FALSE(lightweight_validate_auth_claims(stx, missing_key, {}).has_value());
-  EXPECT_EQ(lightweight_validate_auth_claims(stx, missing_key, {}).error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+  EXPECT_FALSE(
+      lightweight_validate_auth_claims(stx, missing_key, {}).has_value());
+  EXPECT_EQ(
+      lightweight_validate_auth_claims(stx, missing_key, {}).error().code(),
+      AuthVerifyErrorCode::kAuthDataMismatch);
 
   AccountAuthData bad_data =
       AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -111,7 +114,8 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   EXPECT_TRUE(verify_auth(stx, good_data, {}).has_value());
   EXPECT_FALSE(verify_auth(stx, bad_data, {}).has_value());
-  EXPECT_EQ(verify_auth(stx, bad_data, {}).error().code(), AuthVerifyErrorCode::kSignatureVerificationFailed);
+  EXPECT_EQ(verify_auth(stx, bad_data, {}).error().code(),
+            AuthVerifyErrorCode::kSignatureVerificationFailed);
 }
 
 TEST_F(AuthClaimTests, GasAllSponsored)
@@ -123,13 +127,12 @@ TEST_F(AuthClaimTests, GasAllSponsored)
   auto [pk2, sk2] = make_key_pair();
   auto tx = make_transaction({claim});
   tx.gas_claims.push_back(
-    GasClaim{.sponsored_contract = aux_contract, .amount = 100});
+      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   tx.invocation.gas_limit = 100;
 
   auto sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = tx, .signatures = {{sig}}};
+  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
 
   EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
 
@@ -153,8 +156,59 @@ TEST_F(AuthClaimTests, GasAllSponsored)
 
   EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, self_data,
-                                               {{aux_contract, &aux_data}}).has_value());
-  EXPECT_TRUE(verify_auth(stx, self_data, {{aux_contract, &aux_data}}).has_value());
+                                               {{aux_contract, &aux_data}})
+                  .has_value());
+  EXPECT_TRUE(
+      verify_auth(stx, self_data, {{aux_contract, &aux_data}}).has_value());
+}
+
+TEST_F(AuthClaimTests, GasSponsorInsufficient)
+{
+  AuthClaim claim = make_aux_individual_key_claim(0, ContractAddress{1});
+  auto aux_contract = ContractAddress{1};
+
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+  auto tx = make_transaction({claim});
+  tx.gas_claims.push_back(
+      GasClaim{.sponsored_contract = aux_contract, .amount = 100});
+  tx.invocation.gas_limit = 200;
+
+  auto sig = make_signature(sk, tx, 0);
+
+  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
+
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+
+  AccountAuthData aux_data = AccountAuthData{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 100,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 1}},
+      .nonce_config = kAnyKeyNonceConfig,
+  };
+
+  AccountAuthData self_data = AccountAuthData{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk2, .max_weight = Weight{1}})},
+      .gas_permissions = {GasPermissionConfig{.limit = 2,
+                                              .accepted_keys = 1 << 0,
+                                              .required_weight = 10}},
+      .nonce_config = kAnyKeyNonceConfig,
+  };
+
+  // Gas claims can have 0 weight required, and the sponsored claim is implicit,
+  // so this auth data is plausible.
+  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  ASSERT_FALSE(lightweight_validate_auth_claims(stx, self_data,
+                                                {{aux_contract, &aux_data}})
+                   .has_value());
+  ASSERT_EQ(lightweight_validate_auth_claims(stx, self_data,
+                                             {{aux_contract, &aux_data}})
+                .error()
+                .code(),
+            AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
 } // namespace hogd

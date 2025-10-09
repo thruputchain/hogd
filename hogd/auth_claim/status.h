@@ -23,24 +23,24 @@ enum class AuthVerifyErrorCode {
   kAuthDataMismatch,
 };
 
-
 class AuthVerifyErrorCategory : public std::error_category {
 public:
-    const char *name() const noexcept override { return "auth_verify"; }
-    std::string message(int code) const override;
+  const char *name() const noexcept override { return "auth_verify"; }
+  std::string message(int code) const override;
 };
 
-struct AuthVerifyError : public EnumError<AuthVerifyErrorCode, AuthVerifyErrorCategory> {
-    explicit AuthVerifyError(AuthVerifyErrorCode err) : EnumError(err) {}
+struct AuthVerifyError
+  : public EnumError<AuthVerifyErrorCode, AuthVerifyErrorCategory> {
+  explicit AuthVerifyError(AuthVerifyErrorCode err) : EnumError(err) {}
 };
 
 // Enable comparisons between HostFnErrorCode and std::error_code.
 inline bool
 operator==(const AuthVerifyErrorCode &lhs, const std::error_code &rhs)
 {
-    return AuthVerifyError{lhs} == rhs;
+  return AuthVerifyError{lhs} == rhs;
 }
 
 template<typename T> using AuthVerifyStatus = std::expected<T, AuthVerifyError>;
 
-}
+} // namespace hogd
