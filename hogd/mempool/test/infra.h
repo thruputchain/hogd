@@ -179,7 +179,7 @@ private:
   }
 
   template<typename T>
-  static auto create_client(const std::string& host, uint16_t port)
+  static auto create_client(const std::string &host, uint16_t port)
   {
     x23::UniqueFd fd =
         x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
