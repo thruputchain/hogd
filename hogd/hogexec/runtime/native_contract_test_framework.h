@@ -490,8 +490,9 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
-    uint16_t event_server_exec_port = event_server_exec_rpc_.start_server(0);
-    uint16_t event_server_sched_port = event_server_sched_rpc_.start_server(0);
+    uint16_t event_server_exec_port = event_server_exec_server_.start_server(0);
+    uint16_t event_server_sched_port =
+        event_server_sched_server_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
@@ -540,10 +541,10 @@ private:
 
   // TODO(geoff): replace with proper event server connection
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ =
-      TestEventAggregatorExecRpc(event_server_);
-  TestEventAggregatorSchedRpc event_server_sched_rpc_ =
-      TestEventAggregatorSchedRpc(event_server_);
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+  TestEventAggregatorSchedServer event_server_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
