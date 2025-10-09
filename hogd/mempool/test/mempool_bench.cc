@@ -21,7 +21,7 @@ namespace hogd {
 
 namespace {
 
-constexpr size_t kNumTxs = 100;
+constexpr size_t kNumTxs = 1000;
 
 SignedTransactionBatch
 generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
@@ -54,42 +54,69 @@ generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
 void
 submit_unvetted(benchmark::State &state)
 {
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  MempoolTestInfra server;
-  const SignedTransactionBatch txs =
-      generate_signed_txs(fib_client, server, kNumTxs);
-
   for (auto _ : state) {
+    state.PauseTiming();
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    MempoolTestInfra server;
+    const SignedTransactionBatch txs =
+        generate_signed_txs(fib_client, server, kNumTxs);
+    state.ResumeTiming();
+
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
   }
 }
-BENCHMARK(submit_unvetted)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(submit_unvetted)->Unit(benchmark::kMillisecond);
 
 void
 submit_vetted(benchmark::State &state)
 {
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  MempoolTestInfra server;
-  const SignedTransactionBatch txs =
-      generate_signed_txs(fib_client, server, kNumTxs);
-
   for (auto _ : state) {
+    state.PauseTiming();
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    MempoolTestInfra server;
+    const SignedTransactionBatch txs =
+        generate_signed_txs(fib_client, server, kNumTxs);
+    state.ResumeTiming();
+
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
   }
 }
-BENCHMARK(submit_vetted)->Iterations(1)->Unit(benchmark::kMicrosecond);
+BENCHMARK(submit_vetted)->Unit(benchmark::kMicrosecond);
 
 void
-stress(benchmark::State &state)
+nominate(benchmark::State &state)
 {
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  MempoolTestInfra server;
-  const SignedTransactionBatch txs =
-      generate_signed_txs(fib_client, server, kNumTxs);
-
   for (auto _ : state) {
+    state.PauseTiming();
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    MempoolTestInfra server;
+    const SignedTransactionBatch txs =
+        generate_signed_txs(fib_client, server, kNumTxs);
+    // Submit unvetted transactions so there's something to nominate
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+    state.ResumeTiming();
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
+  }
+}
+BENCHMARK(nominate)->Unit(benchmark::kMillisecond);
+
+void
+validate(benchmark::State &state)
+{
+  for (auto _ : state) {
+    state.PauseTiming();
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    MempoolTestInfra server;
+    const SignedTransactionBatch txs =
+        generate_signed_txs(fib_client, server, kNumTxs);
+
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
@@ -97,6 +124,7 @@ stress(benchmark::State &state)
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
+    state.ResumeTiming();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -107,7 +135,7 @@ stress(benchmark::State &state)
              SchedulerValidationResult::SchedulerValidationOK);
   }
 }
-BENCHMARK(stress)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(validate)->Unit(benchmark::kMillisecond);
 
 struct Init {
   Init()
