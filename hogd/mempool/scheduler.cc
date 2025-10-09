@@ -484,7 +484,7 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
                  info.tx.tx.invocation.gas_limit);
     }
 
-    CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
+    CHECK(find_and_remove_from_runqueue({tx_hash}, /*ret=*/nullptr));
     {
       const BlockHeight expiry_height =
           info.tx.tx.uniquifier.block_expiry_height;
