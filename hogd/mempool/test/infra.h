@@ -280,8 +280,7 @@ private:
     std::string coord_address =
         address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol,
-                   .address_for_sched = coord_address.c_str(),
-                   .current_block_id = 0};
+                   .address_for_sched = coord_address.c_str()};
     CHECK_EQ(client.schedulercoord_intro_coord(card)(),
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
