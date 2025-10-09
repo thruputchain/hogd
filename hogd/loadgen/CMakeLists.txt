@@ -1,4 +1,5 @@
-add_library(loadgen
+add_library(
+  loadgen
   erc20_experiment.cc
   loadgen_server.cc
   status.cc

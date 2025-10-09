@@ -79,8 +79,8 @@ private:
   BlockManager block_manager_;
   DbExecutorServer executor_server_;
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ =
-      TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorExecServer event_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;

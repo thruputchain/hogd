@@ -1,18 +1,16 @@
 #include <gtest/gtest.h>
 
-#include <memory>
-
 #include "account.hh"
 #include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/test/mempool_test_server.h"
+#include "hogd/mempool/test/infra.h"
+#include "hogd/mempool/test/txs.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -20,12 +18,18 @@
 
 namespace hogd {
 
+namespace {
+
+constexpr size_t kNumTxs = 100;
+
+} // namespace
+
 TEST(Mempool, SubmitUnvetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
@@ -36,7 +40,7 @@ TEST(Mempool, SubmitUnvetted)
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   Transaction tx = txs[0].tx;
   auto make_sign_claim = [&](uint32_t idx) {
@@ -54,10 +58,10 @@ TEST(Mempool, SubmitUnvetted)
 
 TEST(Mempool, SubmitVetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -66,10 +70,10 @@ TEST(Mempool, SubmitVetted)
 
 TEST(Mempool, Nominate)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -82,10 +86,10 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, NominateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
@@ -97,9 +101,9 @@ TEST(Mempool, NominateBatch)
 
 TEST(Mempool, NominateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -109,10 +113,10 @@ TEST(Mempool, NominateEmpty)
 
 TEST(Mempool, Validate)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -134,10 +138,10 @@ TEST(Mempool, Validate)
 
 TEST(Mempool, ValidateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
@@ -157,9 +161,9 @@ TEST(Mempool, ValidateBatch)
 
 TEST(Mempool, ValidateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_validate =
@@ -171,10 +175,10 @@ TEST(Mempool, ValidateEmpty)
 
 TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
@@ -199,13 +203,13 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
 TEST(Mempool, ValidateBatchMissingTx)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_txs(fib_client, /*num_txs=*/5);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/5);
 
   SchedulerNominationResult res_nominate;
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   {
-    MempoolTestServer server;
+    MempoolTestInfra server;
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -221,7 +225,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     // we gave it above. If we did not reconstruct [server], then removing a
     // transaction below from [txs] will have no effect because [server] will
     // still have the removed transaction as a vetted transaction.
-    MempoolTestServer server;
+    MempoolTestInfra server;
 
     // Remove a transaction.
     txs.pop_back();
@@ -239,20 +243,20 @@ TEST(Mempool, ValidateBatchMissingTx)
 
 TEST(Mempool, AuthChanged)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_txs] should returned properly signed txs.
-  // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
+  // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
-  std::println("first");
-  MempoolTestServer server;
-  server.set_hogs(MempoolTestServer::kAccountAddresses[0],
+  MempoolTestInfra server;
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
-  std::println("second");
   AccountAuthData auth_data = get_default_account();
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -262,9 +266,8 @@ TEST(Mempool, AuthChanged)
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  std::println("third");
   SignedTransactionBatch signed_txs;
 
   for (const SignedTransaction &stx : txs) {
@@ -279,14 +282,12 @@ TEST(Mempool, AuthChanged)
         hogd::Authentication::sign_claims(tx, {{0, private_key}},
                                           /*auxiliary_private_keys=*/{}));
   }
-  std::println("fourth");
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 2;
-  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  std::println("fifth");
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
@@ -304,14 +305,16 @@ TEST(Mempool, AuthChanged)
 
 TEST(Mempool, AuthInvalidated)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_txs] should returned properly signed txs.
-  // TODO(jhumphri): Move all of the configuration below to [MempoolTestServer].
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
+  // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
-  MempoolTestServer server;
-  server.set_hogs(MempoolTestServer::kAccountAddresses[0],
+  MempoolTestInfra server;
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
                   /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
                   /*num_hogs=*/5'000'000'000 *
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
@@ -325,7 +328,7 @@ TEST(Mempool, AuthInvalidated)
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
 
   SignedTransactionBatch signed_txs;
@@ -345,7 +348,7 @@ TEST(Mempool, AuthInvalidated)
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 10;
-  server.set_account_auth_data(MempoolTestServer::kAccountAddresses[0],
+  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
@@ -367,10 +370,10 @@ TEST(Mempool, AuthInvalidated)
 
 TEST(Mempool, Stress)
 {
-  fib_client_t fib_client(MempoolTestServer::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
-  MempoolTestServer server;
+  MempoolTestInfra server;
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
