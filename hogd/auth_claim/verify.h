@@ -35,6 +35,26 @@ verify_auth(const SignedTransaction &stx,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
                 &aux_auth_data);
 
+// Returns the implicit gas claim for the source address.
+// This is calculated as the amount of gas that is not covered by sponsored
+// gas claims attached to the transaction.
+constexpr GasClaim
+calculate_source_address_implicit_gas_claim(const Transaction &tx)
+{
+  GasAmount remaining = tx.invocation.gas_limit;
+  for (auto const &gas_claim : tx.gas_claims) {
+    if (remaining > gas_claim.amount) {
+      remaining -= gas_claim.amount;
+    }
+    else {
+      remaining = 0;
+      break;
+    }
+  }
+  return GasClaim{.sponsored_contract = tx.invocation.invoked_address,
+                  .amount = remaining};
+}
+
 inline std::unordered_set<ContractAddress>
 get_aux_addresses(const Transaction &tx)
 {

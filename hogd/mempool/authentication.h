@@ -68,8 +68,8 @@ public:
         co_await get_account(current_block_id_,
                              tx.tx.invocation.invoked_address);
     if (!auth_data) {
-	    std::println("failed to get block data for blk id {}", current_block_id_);
-	co_return false;
+      std::println("failed to get block data for blk id {}", current_block_id_);
+      co_return false;
     }
 
     std::unordered_set<ContractAddress> aux_contracts =
@@ -79,12 +79,13 @@ public:
       const auto *aux_auth_data =
           co_await get_account(current_block_id_, aux_contract);
       if (!aux_auth_data) {
-	std::println("failed to get aux data at block id {}", current_block_id_);
+        std::println("failed to get aux data at block id {}",
+                     current_block_id_);
         co_return false;
       }
       aux_auth_map[aux_contract] = aux_auth_data;
     }
-    
+
     auto r = verify_auth(tx, *auth_data, aux_auth_map);
     std::println("verify result {}", r);
     co_return r;
