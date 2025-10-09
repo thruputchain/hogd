@@ -65,7 +65,7 @@ public:
     context_id_ = result.success().context_id;
 
     // Pass the genesis block to the db.
-    CHECK_EQ(infra.mempool_coord_rpc().schedcoord_load_genesis_block(
+    CHECK_EQ(infra.mempool_coord_rpc().send_genesis_block(
                  result.success().genesis_block)(),
              DbSchedResult::DbSchedResultOK);
 
@@ -75,27 +75,28 @@ public:
     const x23::Vec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID validator_id{};
-    size_t num_init_txs = 0;
     for (const InitializationBlock &init_tx : init_txs) {
-      num_init_txs += init_tx.size();
       infra.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                              init_tx)();
-    }
 
-    // Now nominate and commit the initialization transactions with
-    // [schedulercoord_nominate()].
-    size_t num_nominated_txs = 0;
-    // TODO(jhumphri): Is this right?
-    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-    while (num_nominated_txs < num_init_txs) {
-      auto res_nominate =
-          infra.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-      CHECK_EQ(res_nominate.outcome(),
-               SchedulerNominationOutcome::SchedulerNominationOK);
-      num_nominated_txs += res_nominate.scheduler_nomination()
-                               .nomination.transaction_hashes.size();
+      // Now nominate and commit the initialization transactions with
+      // [schedulercoord_nominate()].
+      size_t num_nominated_txs = 0;
+      SchedulerNomination nomination{};
+      while (num_nominated_txs < init_tx.size()) {
+        DbTip db_tip{.height = nomination.nomination.block_height,
+                     .hash = nomination.nomination.block_hash,
+                     .id = nomination.block_id};
+        auto res_nominate =
+            infra.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+        CHECK_EQ(res_nominate.outcome(),
+                 SchedulerNominationOutcome::SchedulerNominationOK);
+        nomination = res_nominate.scheduler_nomination();
+
+        num_nominated_txs += nomination.nomination.transaction_hashes.size();
+      }
+      CHECK_EQ(num_nominated_txs, init_tx.size());
     }
-    CHECK_EQ(num_nominated_txs, num_init_txs);
 
     info("Initialized loadgen experiment with context_id {}", context_id_);
   }
