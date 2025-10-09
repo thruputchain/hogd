@@ -32,7 +32,7 @@ public:
   // provides automatic conversion to std::unexpected
   template<typename Self, typename T, typename E>
   requires std::convertible_to<Self, E>
-  [[nodiscard]] operator std::expected<T, E>(this const Self & self) noexcept
+  [[nodiscard]] operator std::expected<T, E>(this const Self &self) noexcept
   {
     return std::unexpected(self);
   }

@@ -1,3 +1,17 @@
+add_library(mempool_test_infra
+  infra.cc
+)
+target_link_libraries(mempool_test_infra
+  hogd
+  mempool
+  exec_interface
+  runtime
+)
+target_include_directories(mempool_test_infra
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 add_executable(
   auth_test
   auth_test.cc
@@ -15,6 +29,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   contract_loader
+  mempool_test_infra
   GTest::gtest_main
 )
 # for the generated contract headers
@@ -42,6 +57,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   contract_loader
+  mempool_test_infra
   GTest::gtest_main
 )
 # for the generated contract headers
@@ -70,6 +86,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   contract_loader
+  mempool_test_infra
   benchmark::benchmark
 )
 # for the generated contract headers
@@ -96,6 +113,7 @@ target_link_libraries(
   protocol
   runtime
   runtime_test_util
+  mempool_test_infra
   GTest::gtest_main
 )
 # for the generated contract headers

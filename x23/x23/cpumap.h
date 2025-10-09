@@ -98,7 +98,7 @@ public:
   int count() const noexcept { return CPU_COUNT_S(kSize, set()); }
 
 #define MAKE_BITOP(op, text)                                                   \
-  CpuSet &operator op##=(const CpuSet & o) noexcept                            \
+  CpuSet &operator op## = (const CpuSet &o) noexcept                           \
   {                                                                            \
     CPU_##text##_S(kSize, set(), set(), o.set());                              \
     return *this;                                                              \

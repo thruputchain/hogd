@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -169,7 +169,7 @@ private:
 
   HogDBDAO db_;
   MerkleTriePrefix trie_;
-  RPCContext ctx_ = RPCContext(db_, trie_);
+  RPCContext ctx_ = RPCContext(db_, trie_, nullptr);
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
   HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
@@ -407,7 +407,7 @@ public:
   PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);
-    if (tx_id == UINT64_MAX) {
+    if (tx_id == std::numeric_limits<TransactionID>::max()) {
       tx_id = allocate_txid();
     }
     return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);

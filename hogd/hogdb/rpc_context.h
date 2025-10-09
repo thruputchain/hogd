@@ -10,14 +10,13 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <utility>
 
-// xdr types
-#include "sched_coord.hh"
-
+#include "db_sched.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
@@ -27,6 +26,8 @@
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "sched_db.hh"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -34,7 +35,13 @@ namespace hogd {
 // by the database.
 class RPCContext {
 public:
-  RPCContext(HogDBDAO &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
+  using sched_db_client_t =
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  RPCContext(HogDBDAO &db, MerkleTriePrefix &trie,
+             std::unique_ptr<sched_db_client_t> sched_db_client)
+    : db_(db), trie_(trie), sched_db_client_(std::move(sched_db_client))
+  {}
 
   // getters.
   HogDBDAO &get_db() const { return db_; }
@@ -66,6 +73,8 @@ public:
 
   HogDBStatus<void> update_dbtip(BlockTXID bid);
 
+  const auto &get_sched_db_client() { return sched_db_client_; }
+
 private:
   struct BlockCache {
     std::mutex lock;
@@ -92,6 +101,8 @@ private:
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
+
+  std::unique_ptr<sched_db_client_t> sched_db_client_;
 
   // slow path for get_block_tx().
   BlockTX *get_block_tx_slow(BlockTXID bid);
