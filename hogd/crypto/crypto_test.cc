@@ -73,11 +73,12 @@ TEST(Ed25519, BasicUsage)
 
   std::string_view msg = "test message";
   std::string_view msg_wrong = "wrong message";
-  auto sig = ed25519_sign(sk, msg);
+  auto sig = ed25519_sign(sk, std::as_bytes(std::span(msg)));
   EXPECT_EQ(ed25519_verify(pk, sig, msg), true);
   EXPECT_EQ(ed25519_verify(pk, sig, msg_wrong), false);
 }
 
+<<<<<<< HEAD
 namespace {
 
 bool check_sig(Ed25519PublicKey const& pk, Ed25519Signature const& sk, SHA256Hash const& nonce)
@@ -94,6 +95,16 @@ TEST(Ed25519, Bug)
 	auto msg = sha256(v);
 	auto sig = ed25519_sign(sk, msg);
 	EXPECT_TRUE(check_sig(pk, sig, msg));
+=======
+// Catch an FFI UAF bug.
+TEST(Ed25519, FFIBug)
+{
+  auto [pk, sk] = ed25519_keygen();
+  uint64_t v = 0;
+  auto msg = sha256(v);
+  auto sig = ed25519_sign(sk, msg);
+  EXPECT_TRUE(ed25519_verify(pk, sig, msg));
+>>>>>>> main
 }
 
 TEST(Ed25519, BatchUsage)
