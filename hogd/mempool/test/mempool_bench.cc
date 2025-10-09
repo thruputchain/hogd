@@ -232,7 +232,6 @@ validate(benchmark::State &state)
 BENCHMARK(validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 
 // Loadgen-based benchmarks.
-
 void
 submit_unvetted_loadgen(benchmark::State &state)
 {

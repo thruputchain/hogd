@@ -318,6 +318,21 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
 
   itx->commit();
   ctx_.close_invoke_tx(kGenesisBlockID, 0);
+
+  uint128_t initial_hog_token_supply =
+      GenesisBlockLoader::initial_hog_token_supply();
+
+  // Initialize the genesis address with scheduler state
+  CHECK(
+      ctx_.get_db()
+          .write_address_average_hog_age(HogAge{
+              .address = GenesisBlockLoader::kDeployContractAddress,
+              .num_hogs = {to_xdr(initial_hog_token_supply),
+                           to_xdr(uint128_t{0}), to_xdr(uint128_t{0})},
+              .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+          })
+          .has_value());
+
   co_return to_db_result(commit_block(kGenesisBlockID));
 }
 

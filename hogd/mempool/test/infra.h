@@ -3,23 +3,15 @@
 #include <array>
 #include <cstring>
 #include <format>
-#include <gtest/gtest.h>
-
-#include <limits>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
 #include "account.hh"
-#include "built_contracts/fibonacci.h"
 #include "contract.hh"
 #include "contract_loader.h"
-#include "coord_sched.hh"
 #include "db_sched.hh"
-#include "event_rpc.hh"
-#include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
@@ -35,17 +27,14 @@
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/interface/executor.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/test/coordinator.h"
-#include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -55,26 +44,30 @@
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "storage_cost.hh"
-#include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
-#include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
+
+constexpr static ContractAddress
+make_account_address(uint8_t i)
+{
+  ContractAddress
+      addr{}; // Value initialization - zero-initializes all elements
+  addr[0] = i;
+  return addr;
+}
 
 class MempoolTestInfra {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
-  static constexpr auto kAccountAddresses = [] {
-    constexpr auto kMake = NativeContractTestFramework::make_contract_address;
-    return std::array{kMake(3), kMake(4), kMake(5), kMake(6)};
-  }();
+  static constexpr std::array<ContractAddress, 4> kAccountAddresses =
+      std::array{make_account_address(3), make_account_address(4),
+                 make_account_address(5), make_account_address(6)};
 
   MempoolTestInfra()
   {
@@ -287,8 +280,7 @@ private:
     std::string coord_address =
         address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol,
-                   .address_for_sched = coord_address.c_str(),
-                   .current_block_id = 0};
+                   .address_for_sched = coord_address.c_str()};
     CHECK_EQ(client.schedulercoord_intro_coord(card)(),
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }

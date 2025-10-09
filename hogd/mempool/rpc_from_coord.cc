@@ -400,13 +400,6 @@ MempoolCoordinatorRpc::schedcoord_get_tip()
   return db_sched_client_->dbsched_get_tip();
 }
 
-x23::Async<DbSchedResult>
-MempoolCoordinatorRpc::schedcoord_load_genesis_block(
-    const GenesisBlock &genesis_block)
-{
-  return db_sched_client_->dbsched_load_genesis_block(genesis_block);
-}
-
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_shutdown()
 {

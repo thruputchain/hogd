@@ -10,15 +10,18 @@
 #include <variant>
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -172,6 +175,18 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                                   std::as_bytes(std::span(buf)))
             .has_value());
   }
+
+  // Create an empty data record for this address for scheduler state;
+  // the scheduler is responsible for populating this with nonzero data.
+  auto r = db.write_address_average_hog_age(HogAge{
+      .address = key.get_address().get_raw(),
+      .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
+                   to_xdr(uint128_t{0})},
+      .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
+  });
+
+  CHECK(r.has_value());
+
   return ret;
 }
 
