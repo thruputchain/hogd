@@ -175,6 +175,7 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
+  // TODO(jhumphri): Replace with global pool and cp.
   x23::ThreadPool client_pool_;
   x23::CoroPoll client_cp_ = x23::CoroPoll(client_pool_);
   std::unique_ptr<coord_sched_client_t> coord_client_;
