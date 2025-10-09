@@ -251,7 +251,8 @@ TEST(Scheduler, Empty)
 TEST(Scheduler, MultipleOneBlock)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kBlockSize);
+  const SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client, kBlockSize);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -377,10 +378,12 @@ TEST(Scheduler, NotEnoughHogs)
 TEST(Scheduler, TwoAccounts)
 {
   fib_client_t fib_client_a(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs_a = generate_unsigned_txs(fib_client_a, kNumTxs);
+  const SignedTransactionBatch txs_a =
+      generate_unsigned_txs(fib_client_a, kNumTxs);
 
   fib_client_t fib_client_b(MempoolTestInfra::kAccountAddresses[1]);
-  const SignedTransactionBatch txs_b = generate_unsigned_txs(fib_client_b, kNumTxs);
+  const SignedTransactionBatch txs_b =
+      generate_unsigned_txs(fib_client_b, kNumTxs);
 
   MempoolTestInfra server;
   Scheduler &scheduler = server.mempool_coord_rpc().scheduler();
@@ -597,7 +600,8 @@ TEST(Scheduler, Fairness)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds));
+    txs.push_back(
+        generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds));
   }
 
   MempoolTestInfra server;
@@ -651,7 +655,8 @@ TEST(Scheduler, FairnessAcrossBlocks)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs[address] = generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
+    txs[address] =
+        generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
   }
 
   MempoolTestInfra server;
@@ -709,7 +714,8 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
     // schedule. This is important for ensuring that when we see a certain
     // throughput of txs for a given account, this throughput resulted solely
     // from the scheduling policy rather than a lack of txs to schedule.
-    txs[address] = generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
+    txs[address] =
+        generate_unsigned_txs(fib_clients.back(), kBlockSize * kNumRounds);
   }
 
   MempoolTestInfra server;

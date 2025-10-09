@@ -239,10 +239,12 @@ TEST(Mempool, ValidateBatchMissingTx)
 TEST(Mempool, AuthChanged)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed txs.
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -294,10 +296,12 @@ TEST(Mempool, AuthChanged)
 TEST(Mempool, AuthInvalidated)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed txs.
+  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
+  // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize + 1);
+      generate_unsigned_txs(fib_client,
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
