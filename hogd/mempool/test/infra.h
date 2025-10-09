@@ -148,7 +148,7 @@ public:
     average.address = account;
     average.average_ages[group] = age;
     average.num_hogs[group] = to_xdr(num_hogs);
-    EXPECT_TRUE(db_.write_address_average_hog_age({average}));
+    CHECK(db_.write_address_average_hog_age({average}).has_value());
   }
 
   void set_account_auth_data(const ContractAddress &account,

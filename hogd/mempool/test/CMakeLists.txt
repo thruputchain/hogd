@@ -17,7 +17,6 @@ target_link_libraries(
   contract_loader
   GTest::gtest_main
 )
-
 # for the generated contract headers
 target_include_directories(
   auth_test
@@ -46,7 +45,6 @@ target_link_libraries(
   contract_loader
   GTest::gtest_main
 )
-
 # for the generated contract headers
 target_include_directories(
   mempool_test
@@ -55,6 +53,33 @@ target_include_directories(
 )
 set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)
+
+add_executable(
+  mempool_bench
+  mempool_bench.cc
+)
+target_link_libraries(
+  mempool_bench
+  base
+  crypto
+  db_interface
+  exec_interface
+  hogd
+  mempool
+  merkle
+  protocol
+  runtime
+  runtime_test_util
+  contract_loader
+  benchmark::benchmark
+)
+# for the generated contract headers
+target_include_directories(
+  mempool_bench
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+set_property(TARGET mempool_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
   scheduler_test
@@ -74,7 +99,6 @@ target_link_libraries(
   runtime_test_util
   GTest::gtest_main
 )
-
 # for the generated contract headers
 target_include_directories(
   scheduler_test
