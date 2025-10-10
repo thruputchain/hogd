@@ -28,7 +28,6 @@
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -212,7 +211,7 @@ async_dispatch_balance_deltas(
 } // namespace
 
 HogDBStatus<void>
-BlockTX::commit(BlockHeight block_height, WorkerPool &pool)
+BlockTX::commit(WorkerPool &pool)
 {
   std::mutex lock;
   HogDBStatus<void> ret;
@@ -264,7 +263,7 @@ BlockTX::commit(BlockHeight block_height, WorkerPool &pool)
       });
 
   if (sched_db_client_) {
-    async_dispatch_balance_deltas(block_height, std::move(balance_deltas),
+    async_dispatch_balance_deltas(block_height_, std::move(balance_deltas),
                                   sched_db_client_);
   }
 
