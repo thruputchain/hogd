@@ -92,6 +92,10 @@ ERC20ExperimentState::generate_experiment()
                                1'000'000'000);
   }
 
+  // make unfurl txs
+  x23::Vec<SignedTransaction> unfurl_txs;
+  unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
+
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
   mint_txs.reserve(config_.num_accounts);
@@ -118,14 +122,11 @@ ERC20ExperimentState::generate_experiment()
                     },
                 .uniquifier = {.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
-                               .nonce = i},
+                               .nonce = unfurl_txs.size() + i},
             },
     };
     mint_txs.push_back(tx);
   }
-
-  x23::Vec<SignedTransaction> unfurl_txs;
-  unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
 
   return {LoadgenSuccessResult{
       .genesis_block = builder.build(),
