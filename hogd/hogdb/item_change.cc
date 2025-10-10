@@ -598,20 +598,6 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<int128_t>
-ItemChange::marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
-                                  const StorageCostModel *cost_model)
-{
-
-  if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key, cost_model);
-    if (!ret)
-      return ret.error();
-  }
-
-  return marginal_storage_cost(cost_model);
-}
-
-HogDBStatus<int128_t>
 ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
   assert(snapshot_cost_.has_value());
@@ -646,18 +632,6 @@ ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
         return std::numeric_limits<int128_t>::max();
       },
       type_);
-}
-
-HogDBStatus<int128_t>
-ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key,
-                                   const StorageCostModel *cost_model)
-{
-  if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key, cost_model);
-    if (!ret)
-      return ret.error();
-  }
-  return committed_storage_cost(cost_model);
 }
 
 HogDBStatus<void>
