@@ -47,7 +47,7 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  Scheduler &scheduler() { return *scheduler_; }
+  std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client(x23::CoroPoll &cp)
@@ -162,7 +162,7 @@ private:
     // [current_block_id_] with it.
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, *db_sched_client_);
-    scheduler_ = std::make_unique<Scheduler>(*db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(*db_sched_client_);
   }
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
@@ -198,7 +198,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_;
-  std::unique_ptr<Scheduler> scheduler_;
+  std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
   std::atomic<bool> shutdown_flag_ = false;

@@ -9,6 +9,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/scheduler.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -45,15 +46,23 @@ public:
     co_return;
   }
 
-  static x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
+  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
   {
+    CHECK_PTR(scheduler_.get());
+
     for (const Delta &d : transfers.deltas) {
       std::println("scheddb_hogs_transferred, block height {}, account {}, num "
                    "hogs transferred {}",
                    transfers.block, d.address, from_xdr(d.hog_delta));
+      scheduler_->process_received_hogs(d.address, d.hog_delta,
+                                        transfers.block);
     }
-    // TODO(jhumphri): Implement.
     co_return;
+  }
+
+  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
+  {
+    scheduler_ = scheduler;
   }
 
   static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
@@ -83,6 +92,8 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
+
+  std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 
