@@ -29,7 +29,6 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
-#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -69,51 +68,7 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra()
-  {
-    // Multiple tests run within the same process, so we need to clear the
-    // registration at the beginning of each test.
-    Registration::registration().clear();
-
-    // Start the mempool RPC servers. All of the subsystems register with the
-    // mempool, so the mempool RPC servers need to start first.
-    sched_db_server_.start_server(/*port=*/0);
-    sched_event_server_.start_server(/*port=*/0);
-    sched_exec_server_.start_server(/*port=*/0);
-    mempool_coord_server_.start_server(/*port=*/0);
-
-    // Initialize backend and blockchain state for tests.
-    init_db_backend();
-    init_contracts();
-
-    // Start the database RPC servers.
-    // [db_executor_server_] handles RPCs from the executor.
-    db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-    db_executor_server_->start_server(/*port=*/0);
-    // [db_scheduler_server_] handles RPCs from the mempool.
-    db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-    db_scheduler_server_->start_server(/*port=*/0);
-
-    // Start the event RPC servers.
-    event_sched_server_.start_server(/*port=*/0);
-    event_exec_server_.start_server(/*port=*/0);
-
-    // We start the executor server in [register_executor_with_mempool()].
-
-    // Start the fake coordinator. We need a coordinator to register itself with
-    // the mempool. The real coordinator implementation is in the chuckd repo
-    // and is written in go. So to ease test implementation, we use a fake
-    // coordinator.
-    coordinator_sched_server_.start_server(/*port=*/0);
-
-    // Now have all of the subsystems register themselves with the mempool.
-    register_db_with_mempool();
-    register_event_with_mempool();
-    // The executor must register itself *after* the database and event servers
-    // have registered!
-    register_executor_with_mempool();
-    register_coordinator_with_mempool();
-  }
+  MempoolTestInfra();
 
   ~MempoolTestInfra()
   {
@@ -164,6 +119,9 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 20UL * 1024 * 1024 * 1024; // 20 GiB.
 
+  using sched_db_client_t =
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
   static std::string address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
@@ -178,7 +136,7 @@ private:
         ->client(T{});
   }
 
-  void init_db_backend()
+  void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
   {
     // check the database's integrity and find the highest valid LSN.
     DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
@@ -194,7 +152,7 @@ private:
     CHECK(ramdb.has_value());
 
     db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(db_, trie_);
+    ctx_ = std::make_unique<RPCContext>(db_, trie_, std::move(sched_db_client));
     set_dbtip({.height = 0, .hash = {}, .id = 0});
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
