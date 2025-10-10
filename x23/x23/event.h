@@ -92,8 +92,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
       std::conditional_t<kStructSize <= 0xffff, std::uint16_t,
                          std::conditional_t<kStructSize <= 0xffffffff,
                                             std::uint32_t, size_t>>>;
-  using Super = std::enable_shared_from_this<GenReadBuffer>;
-  static constexpr size_t kTrimSize = sizeof(Super) + (2 * sizeof(PosType));
+  static constexpr size_t kTrimSize = sizeof(RefCount) + (2 * sizeof(PosType));
   static_assert(kStructSize > kTrimSize);
   using Mem = std::array<char, kStructSize - kTrimSize>;
 
@@ -102,7 +101,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
   Mem m_;
 
   GenReadBuffer() noexcept = default;
-  GenReadBuffer(GenReadBuffer &&) noexcept = delete;
+  GenReadBuffer(const GenReadBuffer &) = delete;
 
   size_t nbuffered() const noexcept { return stop_ - start_; }
 

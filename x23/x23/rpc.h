@@ -321,6 +321,7 @@ protected:
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
   Detached reader(SLOC_PARM0);
+  virtual void log_message(std::string msg) = 0;
 
 private:
   struct ClientState {
@@ -469,6 +470,11 @@ struct RpcStream : public detail::RpcStreamImpl {
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
+  }
+
+  void log_message(std::string msg) override
+  {
+    logger_.log_message("{}", msg);
   }
 };
 

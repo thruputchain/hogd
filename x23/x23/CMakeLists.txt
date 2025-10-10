@@ -8,6 +8,8 @@ add_library(x23
   corotrace.h
   cpumap.cc
   cpumap.h
+  debug.h
+  debug.cc
   err.h
   event.cc
   event.h

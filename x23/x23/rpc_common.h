@@ -17,6 +17,7 @@
 #include <utility>
 
 #include <x23/cleanup.h>
+#include <x23/debug.h>
 #include <x23/format.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
@@ -394,9 +395,18 @@ struct RpcTraceMode {
   //
   // For settings where environment variables could be untrusted, set
   // disable_env = true to disable this behavior globally.
-  static RpcTraceMode getenv(const char *env_var);
-
-  static bool disable_env;
+  template<FixedStr EnvVar> static RpcTraceMode getenv()
+  {
+    RpcTraceMode ret;
+    ret.fd = DebugFd<EnvVar>::fd();
+    if (ret.fd >= 0) {
+      if (*DebugFd<EnvVar>::env_val.c_str() == ',')
+	ret.mode = kCsv;
+      else
+	ret.mode = kTrace;
+    }
+    return ret;
+  }
 };
 
 RpcTraceMode &server_trace();
