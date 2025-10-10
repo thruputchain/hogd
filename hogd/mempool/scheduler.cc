@@ -358,23 +358,50 @@ Scheduler::process_deducted_hogs(const ContractAddress &account,
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages = averages;
 
-  {
-    const uint128_t received_hogs =
-        from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
-    const uint128_t already_scheduled_hogs =
-        from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
-    const uint128_t to_schedule_hogs =
-        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+  const uint128_t received_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+  const uint128_t already_scheduled_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const uint128_t to_schedule_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
 
-    CHECK_LE(num_deducted,
-             to_schedule_hogs + already_scheduled_hogs + received_hogs);
-  }
+  CHECK_LE(num_deducted,
+           to_schedule_hogs + already_scheduled_hogs + received_hogs);
 
-  // TODO(jhumphri): Txs on the runqueue have reserved hogs. We may need to
-  // remove those txs from the runqueue if the hogs are being deducted.
-  std::array<bool, kHogAgeNumGroups> changed_groups = {};
+  bool removed_txs_from_runqueue = false;
   for (ssize_t i = kHogAgeGroupReceived; i >= kHogAgeGroupToSchedule; i--) {
-    changed_groups[i] = true;
+    if (i == kHogAgeGroupToSchedule && num_deducted > to_schedule_hogs) {
+      removed_txs_from_runqueue = true;
+
+      // TODO(jhumphri): Optimize this. It would be nice if we could just remove
+      // the account's lower priority txs until we recover enough hogs rather
+      // than removing all txs.
+      for (TxInfo *info : account_to_tx_[account]) {
+        CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
+        if (age_to_tx_[info->age].empty()) {
+          CHECK_EQ(age_to_tx_.erase(info->age), 1UL);
+        }
+
+        const BlockHeight expiry_height =
+            info->tx.tx.uniquifier.block_expiry_height;
+        CHECK_EQ(expiry_to_tx_[expiry_height].erase(info), 1UL);
+        if (expiry_to_tx_[expiry_height].empty()) {
+          CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
+        }
+      }
+
+      for (TxInfo *info : account_to_tx_[account]) {
+        // We have recovered the hogs from this tx, so add the hogs back to the
+        // [kHogAgeGroupToSchedule] group.
+        new_averages.num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(from_xdr(new_averages.num_hogs[kHogAgeGroupToSchedule]) +
+                   info->tx.tx.invocation.gas_limit);
+        CHECK(stranded_[account][info->tx.tx.invocation.gas_limit]
+                  .insert(info)
+                  .second);
+      }
+      CHECK_EQ(account_to_tx_.erase(account), 1UL);
+    }
 
     const uint128_t current = from_xdr(averages.num_hogs[i]);
     uint128_t to_deduct = std::min(num_deducted, current);
@@ -387,10 +414,10 @@ Scheduler::process_deducted_hogs(const ContractAddress &account,
   cached_hogs_[account] = new_averages;
 
   // TODO(jhumphri): Add a test for this.
-  // If the [kHogAgeGroupToSchedule] was not changed, then deducting hogs does
-  // not impact how we schedule transactions for the wallet.
-  if (changed_groups[kHogAgeGroupToSchedule]) {
-    // TODO(jhumphri): Implement.
+  // If we removed all of the account's txs from the runqueue to recover their
+  // hogs, we need to add back as many txs to the runqueue as we can.
+  if (removed_txs_from_runqueue) {
+    update_accounts({account});
   }
 }
 
