@@ -6,6 +6,9 @@ target_link_libraries(mempool_test_infra
   mempool
   exec_interface
   runtime
+  event
+  exec_interface
+  runtime_test_util
 )
 target_include_directories(mempool_test_infra
   PRIVATE
