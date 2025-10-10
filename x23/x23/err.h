@@ -30,12 +30,15 @@ namespace x23 {
 class ErrorBase {
 public:
   // provides automatic conversion to std::unexpected
+  // clang-format off
+  // clang21 formats this as &self, instead of & self in clang20
   template<typename Self, typename T, typename E>
   requires std::convertible_to<Self, E>
   [[nodiscard]] operator std::expected<T, E>(this const Self &self) noexcept
   {
     return std::unexpected(self);
   }
+  // clang-format on
 
   // error_code converts the derived error into a std::error_code.
   std::error_code error_code(this const auto &self)
