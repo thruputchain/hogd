@@ -162,7 +162,7 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr size_t kRamDbBytes = 1024 * 1024 * 1024; // 1 GiB.
+  static constexpr size_t kRamDbBytes = 20UL * 1024 * 1024 * 1024; // 20 GiB.
 
   static std::string address(const std::string &host, uint16_t port)
   {

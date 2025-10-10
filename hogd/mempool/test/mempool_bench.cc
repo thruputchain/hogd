@@ -76,6 +76,7 @@ public:
         result.success().initialization_txs;
     constexpr ValidatorID validator_id{};
     for (const InitializationBlock &init_tx : init_txs) {
+      std::println("next block");
       infra.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                              init_tx)();
 
@@ -84,17 +85,22 @@ public:
       size_t num_nominated_txs = 0;
       SchedulerNomination nomination{};
       while (num_nominated_txs < init_tx.size()) {
+        std::println(
+            "nominate now, num_nominated_txs so far {}, init_tx.size() {}",
+            num_nominated_txs, init_tx.size());
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
-        std::println("nominate now");
         auto res_nominate =
             infra.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+        infra.mempool_coord_rpc().dump_stats();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
         nomination = res_nominate.scheduler_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
+        std::println("nominated {} txs",
+                     nomination.nomination.transaction_hashes.size());
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
     }

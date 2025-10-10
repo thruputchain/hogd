@@ -47,6 +47,11 @@ public:
 
   static x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
   {
+    for (const Delta &d : transfers.deltas) {
+      std::println("scheddb_hogs_transferred, block height {}, account {}, num "
+                   "hogs transferred {}",
+                   transfers.block, d.address, from_xdr(d.hog_delta));
+    }
     // TODO(jhumphri): Implement.
     co_return;
   }
