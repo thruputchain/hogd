@@ -4,10 +4,18 @@
 
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
+#include <memory>
+#include <string>
 #include <string_view>
+#include <thread>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <x23/config.h>
@@ -97,8 +105,10 @@ public:
   // Count the number of CPUs in the set.
   int count() const noexcept { return CPU_COUNT_S(kSize, set()); }
 
+  // clang-format off
+// clang21 changes op##=( to op## = (
 #define MAKE_BITOP(op, text)                                                   \
-  CpuSet &operator op##=(const CpuSet & o) noexcept                            \
+  CpuSet &operator op##=(const CpuSet &o) noexcept                             \
   {                                                                            \
     CPU_##text##_S(kSize, set(), set(), o.set());                              \
     return *this;                                                              \
@@ -113,6 +123,7 @@ public:
   MAKE_BITOP(|, OR)
   MAKE_BITOP(^, XOR)
 #undef MAKE_BITOP
+  // clang-format on
 
   friend bool operator==(const CpuSet &a, const CpuSet &b) noexcept
   {
