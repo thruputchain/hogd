@@ -23,6 +23,7 @@
 #include <x23/corosync.h>
 #include <x23/corotrace.h>
 #include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
@@ -126,6 +127,14 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
     iov[1].iov_base = m_.data();
     iov[1].iov_len = m_.size();
     auto n = ::readv(fd, iov, 2);
+
+    /*
+    int saved_errno = errno;
+    if (n < 0)
+      debug("::readv({}): {}", fd, Errno{saved_errno});
+    errno = saved_errno;
+    */
+
     if (n <= ptrdiff_t(len))
       return n;
     stop_ = n - len;
@@ -349,6 +358,8 @@ private:
     FdState *operator->() const { return p_; }
   };
   FdPtr getfd(BorrowedFd fd);
+
+  std::string showfd(const FdPtr &fdp);
 
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)

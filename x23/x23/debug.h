@@ -58,6 +58,8 @@ template<FixedStr EnvVar> struct DebugFd {
     return the_fd;
   }
 
+  operator bool() const { return fd() >= 0; }
+
   static void vfmt(std::string_view fmt, std::format_args args)
   {
     if (fd() >= 0)
@@ -91,9 +93,12 @@ struct NullDebugFd {
   static inline const std::string env_val{};
 
   static constexpr int fd() noexcept { return -1; }
+  constexpr operator bool() const { return false; }
   static void vfmt(std::string_view fmt, std::format_args args) {}
   static void fmt(auto &&...) {}
   static void operator()(auto &&...) {}
 };
+
+// inline DebugFd<"X23SERVER_TRACE"> debug;
 
 } // namespace x23

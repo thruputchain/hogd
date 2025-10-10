@@ -5,6 +5,7 @@
 
 #include "x23/fastclock.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace x23 {
 
@@ -148,6 +149,25 @@ ThreadPool::drain() noexcept
   // Now also wait for all running threads to yield, since some of
   // those might still have been enqueued before drain was called.
   quiesce();
+}
+
+std::string
+ThreadPool::show()
+{
+  std::string ret = std::format("ThreadPool {}: {} threads, {} run queues\n",
+                                (void *)this, nthreads_, nqueues_);
+  uint64_t now = fastclock::get_ns();
+  for (uint i = 0; i < nqueues_; ++i) {
+    uformat_to(&ret, "  queue {}: {} threads", i, queue_nthreads(i));
+    uint64_t oldest = runqueues_[i].qtime();
+    if (oldest == kEmpty)
+      ret += ", EMPTY";
+    else
+      uformat_to(&ret, ", oldest job {}",
+                 std::chrono::nanoseconds(now - oldest));
+    ret += '\n';
+  }
+  return ret;
 }
 
 ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept

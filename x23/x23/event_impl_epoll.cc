@@ -29,7 +29,7 @@ CoroPollImpl::~CoroPollImpl()
 void
 CoroPollImpl::clear(BorrowedFd fd, bool write)
 {
-  // std::println("{}_clear({})", write ? "write" : "read", fd.get());
+  // debug("{}_clear(fd {})", write ? "write" : "read", fd.get());
 
   auto fdp = getfd(fd);
   assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
@@ -40,12 +40,11 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
 void
 CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 {
-  // std::println("setcb({}, {})", fd.get(), write ? "write" : "read");
+  // debug("setcb({}, {})", fd.get(), write ? "write" : "read");
 
   using enum FdState::Mode;
   FdPtr fdp = getfd(fd);
   FdState::Mode mode = fdp->mode();
-
   if (stop_requested() || mode == kPoisoned) {
     wi(EBADF);
     return;
@@ -69,6 +68,19 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   setmode(fdp, kActive);
   // have to re-check in case write edge occured before we published wi
   docb(fdp, write);
+}
+
+std::string
+CoroPollImpl::showfd(const FdPtr &fdp)
+{
+  int fd = fdp.get() - state_;
+  auto ret = std::format("fd {}, mode {}, ready {}", fd, int(fdp->mode_.load()),
+                         fdp->ready_.load());
+  if (fdp->callbacks_[0].value.load())
+    ret += ", reader";
+  if (fdp->callbacks_[1].value.load())
+    ret += ", writer";
+  return ret;
 }
 
 void
@@ -98,6 +110,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 
   int fd = fdp.get() - state_;
 
+  // debug("setmode fd {}: {} -> {}", fd, int(old_mode), int(mode));
+
   if (mode == kActive) {
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
@@ -105,10 +119,6 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     [[maybe_unused]] int err =
         epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
     assert(err != -1);
-    // Since we are using edge-triggered events, we must
-    // conservatively assume the fd was already readable and writable
-    // when we called EPOLL_CTL_ADD.
-    fdp->ready_ = EPOLLIN|EPOLLOUT;
   }
   else {
     fdp->ready_ = 0; // because EPOLLERR is sticky
@@ -137,16 +147,15 @@ CoroPollImpl::get_max_fd()
   return state_size_;
 }
 
-// To wake CoroPoll::check from another thread, we just add a
-// level-triggered, one-shot check for a readable file descriptor
-// (always true).  Because we don't update the active flags in state,
-// check won't incur an epoll_ctl system call to remove the event.
+// To wake CoroPoll::check from another thread, we write to an eventfd
+// that we always monitor.
 void
 CoroPollImpl::wake()
 {
   uint64_t one{1};
-  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
-    Errno{}.raise("write(eventfd)");
+  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]] {
+    assert(!"write(eventfd)");
+  }
 }
 
 CoroPollImpl::FdPtr
