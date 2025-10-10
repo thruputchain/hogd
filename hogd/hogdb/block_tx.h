@@ -49,8 +49,9 @@ public:
   // lock(). It could still fail if new_change has a conflict.
   // It returns an amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> modify_lock(const ItemKey &key, ItemChange &old_change,
-                                    ItemChange &new_change);
+  HogDBStatus<int128_t> modify_lock(const ItemKey &key,
+                                    const ItemChange &old_change,
+                                    const ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemKey &key, ItemChange &change);
   // commit_change marks a change as committed.

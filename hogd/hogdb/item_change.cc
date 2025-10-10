@@ -470,19 +470,20 @@ ItemChange::storage_size() const
       type_);
 }
 
+/*
 HogDBStatus<int128_t>
 ItemChange::marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
                                   const StorageCostModel *cost_model)
 {
 
-  if (!snapshot_cost_) {
+  if (!has_snapshot_cost_) {
     auto ret = load_snapshot_cost(db, key, cost_model);
     if (!ret)
       return ret.error();
   }
 
   return marginal_storage_cost(cost_model);
-}
+} */
 
 HogDBStatus<int128_t>
 ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
@@ -521,17 +522,18 @@ ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
       type_);
 }
 
+/*
 HogDBStatus<int128_t>
 ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key,
                                    const StorageCostModel *cost_model)
 {
-  if (!snapshot_cost_) {
+  if (!has_snapshot_cost_) {
     auto ret = load_snapshot_cost(db, key, cost_model);
     if (!ret)
       return ret.error();
   }
   return committed_storage_cost(cost_model);
-}
+} */
 
 HogDBStatus<void>
 ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
@@ -550,6 +552,7 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
   }();
   if (!snapshot_cost)
     return snapshot_cost.error();
+  assert(*snapshot_cost >= 0);
   snapshot_cost_ = *snapshot_cost;
   return {};
 }
