@@ -97,7 +97,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     cleanup.release();
 
     itx->commit();
-    ASSERT_TRUE((*btx)->commit().has_value());
+    ASSERT_TRUE((*btx)->commit(1).has_value());
     ctx.close_block_tx(1);
 
     ASSERT_TRUE(ctx.update_dbtip(1).has_value());

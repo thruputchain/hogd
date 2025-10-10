@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -14,6 +16,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
+#include "types.hh"
 #include "x23/rpc.h"
 
 namespace hogd {
@@ -28,9 +31,9 @@ public:
 
   BlockTX(HogDBDAO &db, MerkleTriePrefix &trie,
           const StorageCostModel &cost_model,
-          sched_db_client_t *sched_db_client)
+          std::shared_ptr<sched_db_client_t> sched_db_client)
     : db_(db), trie_(trie), cost_model_(cost_model),
-      sched_db_client_(sched_db_client)
+      sched_db_client_(std::move(sched_db_client))
   {}
   ~BlockTX() = default;
 
@@ -40,7 +43,8 @@ public:
 
   // commit applies all changes to the database. If this fails, nothing will be
   // written to disk, but the database may be left in an inconsistent state.
-  HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
+  HogDBStatus<void> commit(BlockHeight block_height,
+                           WorkerPool &pool = WorkerPool::get_default_pool());
   // abort drops all changes.
   void abort()
   {
@@ -77,7 +81,7 @@ private:
   StorageCostModel cost_model_;
   SynchronizedMap<Address, ItemLock> addr_balance_locks_;
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
-  sched_db_client_t *sched_db_client_;
+  std::shared_ptr<sched_db_client_t> sched_db_client_;
 
   // raw locking operations.
   static inline HogDBStatus<int128_t>

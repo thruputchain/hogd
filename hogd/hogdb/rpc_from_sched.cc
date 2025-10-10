@@ -127,7 +127,7 @@ HogDBSchedRpc::commit_block(BlockID id)
 
   // write all the changes in the block TX.
   BlockTX *btx = ctx_.get_block_tx(id);
-  HogDBStatus<void> ret = btx->commit();
+  HogDBStatus<void> ret = btx->commit(ctx_.get_tip().height);
   if (!ret)
     return ret.error();
 

@@ -102,7 +102,7 @@ private:
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
 
-  std::unique_ptr<sched_db_client_t> sched_db_client_;
+  std::shared_ptr<sched_db_client_t> sched_db_client_;
 
   // slow path for get_block_tx().
   BlockTX *get_block_tx_slow(BlockTXID bid);

@@ -1,15 +1,19 @@
 #include "hogd/hogdb/block_tx.h"
 
 #include <cassert>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -22,6 +26,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/mvar.h"
 
@@ -183,8 +188,31 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   return cost_after - cost_before;
 }
 
+namespace {
+x23::Detached
+async_dispatch_balance_deltas(
+    BlockHeight block_height,
+    std::unique_ptr<PerThread<std::vector<Delta>>> balance_deltas,
+    auto sched_db_client)
+{
+  assert(balance_deltas);
+
+  // TODO(geoff): ask DM if this is ok, if default_threadpool() is a different
+  // pool from that of sched_db_client
+  co_await default_threadpool().bg();
+
+  HogsTransferred transferred{.block = block_height, .deltas = {}};
+  auto lk = balance_deltas->lock_threads();
+  balance_deltas->for_each(lk, [&](const std::vector<Delta> &deltas) {
+    transferred.deltas.append_range(deltas);
+  });
+  sched_db_client->scheddb_hogs_transferred(std::move(transferred))([]() {});
+  co_return;
+}
+} // namespace
+
 HogDBStatus<void>
-BlockTX::commit(WorkerPool &pool)
+BlockTX::commit(BlockHeight block_height, WorkerPool &pool)
 {
   std::mutex lock;
   HogDBStatus<void> ret;
@@ -200,13 +228,13 @@ BlockTX::commit(WorkerPool &pool)
       },
       kDefaultParallelRangeWidth, pool);
 
-  // TODO(geoff): This is going to be extremely slow
-  x23::MVar<HogsTransferred> addr_balance_changes;
+  std::unique_ptr<PerThread<std::vector<Delta>>> balance_deltas =
+      std::make_unique<PerThread<std::vector<Delta>>>();
 
   // write address balances.
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret,
-       &addr_balance_changes](std::pair<const Address, const ItemLock &> v) {
+       &balance_deltas](std::pair<const Address, const ItemLock &> v) {
         assert(v.second.change.get_raw_nnint128().has_value());
         auto raw_nnint128 = v.second.change.get_raw_nnint128().value();
         int128_t prev_val = raw_nnint128.base();
@@ -219,10 +247,9 @@ BlockTX::commit(WorkerPool &pool)
 
         auto [delta, of] = overflowing_sub(new_val, prev_val);
         assert(!of);
-        addr_balance_changes.with([&](auto &vec) {
-          vec.deltas.push_back(
-              Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
-        });
+        (*balance_deltas)
+            ->push_back(Delta{.address = v.first.get_raw(),
+                              .hog_delta = to_xdr(delta)});
 
         // write the address balance to the trie
         // TODO(geoff,jhumphri): should the value type here be byte_view(little
@@ -237,8 +264,8 @@ BlockTX::commit(WorkerPool &pool)
       });
 
   if (sched_db_client_) {
-    sched_db_client_->scheddb_hogs_transferred(
-        std::move(*addr_balance_changes.take()))([]() {});
+    async_dispatch_balance_deltas(block_height, std::move(balance_deltas),
+                                  sched_db_client_);
   }
 
   return ret;
