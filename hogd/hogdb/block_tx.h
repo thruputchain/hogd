@@ -13,6 +13,8 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "sched_db.hh"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -21,9 +23,14 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
+  using sched_db_client_t =
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
   BlockTX(HogDBDAO &db, MerkleTriePrefix &trie,
-          const StorageCostModel &cost_model)
-    : db_(db), trie_(trie), cost_model_(cost_model)
+          const StorageCostModel &cost_model,
+          sched_db_client_t *sched_db_client)
+    : db_(db), trie_(trie), cost_model_(cost_model),
+      sched_db_client_(sched_db_client)
   {}
   ~BlockTX() = default;
 
@@ -70,6 +77,7 @@ private:
   StorageCostModel cost_model_;
   SynchronizedMap<Address, ItemLock> addr_balance_locks_;
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
+  sched_db_client_t *sched_db_client_;
 
   // raw locking operations.
   static inline HogDBStatus<int128_t>

@@ -260,7 +260,7 @@ Benchmark::run()
       .base_contract_deployment_cost = to_xdr(int128_t{12000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
   });
-  BlockTX block(db_, *trie_, cost_model);
+  BlockTX block(db_, *trie_, cost_model, nullptr);
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block](const Payment &p) {

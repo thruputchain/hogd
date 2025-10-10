@@ -13,6 +13,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -20,6 +21,9 @@
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "sched_db.hh"
+#include "x23/async.h"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -196,15 +200,29 @@ BlockTX::commit(WorkerPool &pool)
       },
       kDefaultParallelRangeWidth, pool);
 
+  // TODO(geoff): This is going to be extremely slow
+  x23::MVar<HogsTransferred> addr_balance_changes;
+
   // write address balances.
   addr_balance_locks_.for_each_parallel(
-      [this, &lock, &ret](std::pair<const Address, const ItemLock &> v) {
-        int128_t val = v.second.change.to_nnint128().value();
-        HogDBStatus<void> tmp = db_.write_address_balance(v.first, val);
+      [this, &lock, &ret,
+       &addr_balance_changes](std::pair<const Address, const ItemLock &> v) {
+        assert(v.second.change.get_raw_nnint128().has_value());
+        auto raw_nnint128 = v.second.change.get_raw_nnint128().value();
+        int128_t prev_val = raw_nnint128.base();
+        int128_t new_val = v.second.change.to_nnint128().value();
+        HogDBStatus<void> tmp = db_.write_address_balance(v.first, new_val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
         }
+
+        auto [delta, of] = overflowing_sub(new_val, prev_val);
+        assert(!of);
+        addr_balance_changes.with([&](auto &vec) {
+          vec.deltas.push_back(
+              Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
+        });
 
         // write the address balance to the trie
         // TODO(geoff,jhumphri): should the value type here be byte_view(little
@@ -214,9 +232,14 @@ BlockTX::commit(WorkerPool &pool)
         // instead of requiring duplication of this logic.
         CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(
                   get_trie(), make_address_balance_item_key(v.first), kNNInt128,
-                  byte_view(cpu_to_le(val)))
+                  byte_view(cpu_to_le(new_val)))
                   .has_value());
       });
+
+  if (sched_db_client_) {
+    sched_db_client_->scheddb_hogs_transferred(
+        std::move(*addr_balance_changes.take()))([]() {});
+  }
 
   return ret;
 }
