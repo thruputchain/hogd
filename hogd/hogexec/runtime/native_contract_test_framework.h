@@ -47,11 +47,13 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
@@ -127,6 +129,14 @@ private:
 
   DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
 };
+
+class TestSchedDBServer {
+public:
+ 
+private:
+};
+
+static_assert(is_SchedDb1<TestSchedDBServer*, std::type_identify>);
 
 class HogdbWrapper {
 public:
