@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <type_traits>
 
 #include "tests/xdrtest.hh"
 #include "x23/async.h"
@@ -41,6 +42,22 @@ struct Connection {
   x23::Async<Data> echo(Data arg) { co_return arg; }
 };
 static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
+
+// Bugreport:  The following code should not compile
+class BadBlankRPCServer {
+public:
+  // note the missing method
+  // void null() {}
+  static Data echo(Data arg) { return arg; }
+
+private:
+};
+
+// This static assertion should fail
+static_assert(is_blank_rpc_v1<BadBlankRPCServer *, x23::MaybeAsync>);
+// Note that Async and std::type_identity_t work correctly;
+static_assert(!is_blank_rpc_v1<BadBlankRPCServer *, std::type_identity_t>);
+static_assert(!is_blank_rpc_v1<BadBlankRPCServer *, x23::Async>);
 
 } // namespace
 
