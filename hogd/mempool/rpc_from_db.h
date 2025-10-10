@@ -54,10 +54,19 @@ public:
       std::println("scheddb_hogs_transferred, block height {}, account {}, num "
                    "hogs transferred {}",
                    transfers.block, d.address, from_xdr(d.hog_delta));
-      scheduler_->process_received_hogs(d.address, d.hog_delta,
-                                        transfers.block);
+      int128_t hog_delta = from_xdr(d.hog_delta);
+      CHECK_NE(hog_delta, 0L);
+
+      uint128_t hog_delta_abs = static_cast<uint128_t>(std::abs(hog_delta));
+
+      if (hog_delta >= 0L) {
+        co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
+                                                   transfers.block);
+      }
+      else {
+        co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
+      }
     }
-    co_return;
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)

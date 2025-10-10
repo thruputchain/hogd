@@ -56,7 +56,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   }
 
   RpcServer<MempoolCoordinatorRpc> coord;
-  db.impl_.register_scheduler(coord.scheduler());
+  db.impl_.register_scheduler(coord.impl_.scheduler());
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
 
   // The mempool is initialized. Now block forever.

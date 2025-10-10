@@ -64,8 +64,11 @@ public:
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
   x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                         uint128_xdr num_received,
+                                         uint128_t num_received,
                                          BlockHeight current_block);
+
+  x23::Async<void> process_deducted_hogs(const ContractAddress &account,
+                                         uint128_t num_deducted);
 
   // Reorders txs in the runqueue and adds/removes txs from the runqueue based
   // on the number of hogs and hog ages for an account. Note that this function

@@ -302,10 +302,10 @@ Scheduler::dump_runqueue() const
 
 x23::Async<void>
 Scheduler::process_received_hogs(const ContractAddress &account,
-                                 uint128_xdr num_received,
+                                 uint128_t num_received,
                                  BlockHeight current_block)
 {
-  if (!from_xdr(num_received)) {
+  if (!num_received) {
     co_return;
   }
 
@@ -317,15 +317,15 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
 
   new_averages.num_hogs[kHogAgeGroupReceived] =
-      to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
+      to_xdr(from_xdr(received_hogs) + num_received);
   {
     // See comment above for [compute_average_age()].
     //
     // Note that [compute_average_age()] will never divide by 0 because we
     // check at the top of this function that [num_received] is not 0.
     new_averages.average_ages[kHogAgeGroupReceived] =
-        compute_average_age(from_xdr(received_hogs), received_age,
-                            from_xdr(num_received), current_block);
+        compute_average_age(from_xdr(received_hogs), received_age, num_received,
+                            current_block);
   }
   cached_hogs_[account] = new_averages;
 
@@ -343,6 +343,54 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
     co_await cycle_groups(account);
     co_await cycle_groups(account);
+  }
+}
+
+x23::Async<void>
+Scheduler::process_deducted_hogs(const ContractAddress &account,
+                                 uint128_t num_deducted)
+{
+  if (!num_deducted) {
+    co_return;
+  }
+
+  CHECK(co_await read_average_hog_age({account}, /*force=*/false));
+  const HogAge &averages = cached_hogs_[account];
+  HogAge new_averages = averages;
+
+  {
+    const uint128_t received_hogs =
+        from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+    const uint128_t already_scheduled_hogs =
+        from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+    const uint128_t to_schedule_hogs =
+        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+
+    CHECK_LE(num_deducted,
+             to_schedule_hogs + already_scheduled_hogs + received_hogs);
+  }
+
+  // TODO(jhumphri): Txs on the runqueue have reserved hogs. We may need to
+  // remove those txs from the runqueue if the hogs are being deducted.
+  std::array<bool, kHogAgeNumGroups> changed_groups = {};
+  for (ssize_t i = kHogAgeGroupReceived; i >= kHogAgeGroupToSchedule; i--) {
+    changed_groups[i] = true;
+
+    const uint128_t current = from_xdr(averages.num_hogs[i]);
+    uint128_t to_deduct = std::min(num_deducted, current);
+    new_averages.num_hogs[i] = to_xdr(current - to_deduct);
+    num_deducted -= to_deduct;
+    if (!num_deducted) {
+      break;
+    }
+  }
+  cached_hogs_[account] = new_averages;
+
+  // TODO(jhumphri): Add a test for this.
+  // If the [kHogAgeGroupToSchedule] was not changed, then deducting hogs does
+  // not impact how we schedule transactions for the wallet.
+  if (changed_groups[kHogAgeGroupToSchedule]) {
+    // TODO(jhumphri): Implement.
   }
 }
 
