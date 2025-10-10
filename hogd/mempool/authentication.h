@@ -13,7 +13,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
-#include "x23/x23/serialize.h"
 #include <cassert>
 #include <memory>
 #include <stdexcept>
@@ -128,44 +127,9 @@ public:
       signed_tx.signatures.push_back(sigs);
     }
     return signed_tx;
-    /*signed_tx.signatures.reserve(account_private_keys.size());
-    for (const auto &[idx, private_key] : account_private_keys) {
-      Signature sig(CryptographicScheme::Ed25519);
-      sig.ed25519() = ed25519_sign(private_key, msg);
-      const DecoratedSignature dec_sig = {.public_key_id = idx,
-                                          .signature = sig};
-      signed_tx.signatures.push_back(dec_sig);
-    }
-
-    std::unordered_map<ContractAddress, x23::Vec<DecoratedSignature>> aux_map;
-    for (const auto &[account, private_keys] : auxiliary_private_keys) {
-      for (const auto &[idx, private_key] : private_keys) {
-        Signature sig(CryptographicScheme::Ed25519);
-        sig.ed25519() = ed25519_sign(private_key, msg);
-        const DecoratedSignature dec_sig = {.public_key_id = idx,
-                                            .signature = sig};
-        aux_map[account].push_back(dec_sig);
-      }
-    }
-    signed_tx.aux_signatures.reserve(auxiliary_private_keys.size());
-    for (const auto &[account, sigs] : aux_map) {
-      const AuxiliaryDecoratedSignatures aux_sigs{.address = account,
-                                                  .signatures = sigs};
-      signed_tx.aux_signatures.push_back(aux_sigs);
-    }
-    return signed_tx; */
   }
 
 private:
-  static bool check_decorated_signature(const DecoratedSignature &dec_sig,
-                                        const Ed25519PublicKey &public_key,
-                                        const x23::Buf &msg)
-  {
-    CHECK_EQ(dec_sig.signature.scheme(), CryptographicScheme::Ed25519);
-    const Ed25519Signature sig = dec_sig.signature.ed25519();
-    return ed25519_verify(public_key, sig, msg);
-  }
-
   // TODO(jhumphri): Populate [public_key] properly.
   static bool get_public_key(const AccountAuthData &auth_data, size_t idx,
                              Weight &max_weight, Ed25519PublicKey &public_key)
