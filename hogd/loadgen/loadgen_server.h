@@ -2,8 +2,6 @@
 
 #include <atomic>
 #include <memory>
-#include <sys/socket.h>
-#include <thread>
 #include <type_traits>
 #include <unordered_map>
 
@@ -12,7 +10,6 @@
 #include "hogd/loadgen/experiment_state.h"
 #include "loadgen.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
 #include "x23/mvar.h"
 
 namespace hogd {
