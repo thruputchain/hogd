@@ -606,17 +606,12 @@ public:
 
   HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
                                        const StorageCostModel *cost_model);
-  // HogDBStatus<int128_t>
-  // marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
-  //                     const StorageCostModel *cost_model);
 
   HogDBStatus<int128_t>
   marginal_storage_cost(const StorageCostModel *cost_model) const;
 
   int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
-  // HogDBStatus<int128_t>
-  // committed_storage_cost(HogDBDAO &db, const ItemKey &key,
-  //                      const StorageCostModel *cost_model);
+
   auto get_type() const { return type_.index(); }
 
   bool no_storage_cost() const
