@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <future>
+#include <limits>
 #include <random>
 #include <utility>
 #include <vector>
@@ -115,6 +116,8 @@ ERC20ExperimentState::generate_experiment()
                                          internal_calldata),
                             internal_calldata),
                     },
+                  .uniquifier = {.block_expiry_height = 2,
+                                 .nonce = i},
             },
     };
     mint_txs.push_back(tx);
@@ -130,7 +133,7 @@ ERC20ExperimentState::generate_experiment()
 }
 
 LoadgenStatus<LoadgenExtension>
-ERC20ExperimentState::extend_experiment(uint64_t num_txs)
+ERC20ExperimentState::extend_experiment(uint64_t num_txs, BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
     return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
@@ -156,11 +159,13 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
     }
 
     futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs,
-                                                                start, end]() {
+                                                                start, end, expiry_height]() {
       std::random_device rd;
       std::mt19937 gen(rd());
 
       std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+
+      uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(0, std::numeric_limits<uint64_t>::max())(gen);
 
       auto make_account_pair = [&]() {
         auto sender = dist(gen);
@@ -199,6 +204,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
                                              internal_calldata),
                                 internal_calldata),
                         },
+                  .uniquifier = {.block_expiry_height = expiry_height,
+                                 .nonce = base_nonce + j},
                 },
         };
       }

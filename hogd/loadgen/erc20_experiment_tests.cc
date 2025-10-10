@@ -70,7 +70,7 @@ TEST_P(ERC20ExperimentTest, Basic)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(100);
+  auto work_txs = state->extend_experiment(100, 10);
   ASSERT_TRUE(work_txs.has_value());
   ASSERT_EQ(work_txs.value().work_txs.size(), 100);
 
@@ -114,7 +114,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(10000);
+  auto work_txs = state->extend_experiment(10000, 10);
   ASSERT_TRUE(work_txs.has_value());
 
   for (auto &tx : work_txs.value().work_txs) {

@@ -8,10 +8,10 @@
 #include <unordered_map>
 
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/experiment_state.h"
 #include "loadgen.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/mvar.h"
 
@@ -23,14 +23,9 @@ public:
 
   LoadgenResult generate_experiment(ExperimentConfig config);
   LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
-                                           uint64_t num_txs);
+                                           uint64_t num_txs, BlockHeight expiry_height);
 
   void shut_down()
-  {
-    // TODO(jhumphri): Implement.
-  }
-
-  void await_shutdown_request()
   {
     // TODO(jhumphri): Implement.
   }

@@ -18,7 +18,7 @@ public:
   LoadgenStatus<LoadgenSuccessResult> generate_experiment();
   ;
 
-  LoadgenStatus<LoadgenExtension> extend_experiment(uint64_t num_txs) override;
+  LoadgenStatus<LoadgenExtension> extend_experiment(uint64_t num_txs, BlockHeight expiry_height) override;
 
   ~ERC20ExperimentState() override = default;
 
