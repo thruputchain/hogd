@@ -425,11 +425,10 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
   HogDBStatus<DbTip> tip = block_.get_db().read_dbtip();
   if (!tip)
     return tip.error();
-  BlockHeight block_height = tip->height;
 
-  ReplayCacheIt replay_cache_item(std::move(base_replay_cache.value()));
-  HogDBStatus<void> ret =
-      replay_cache_item.try_consume_uniquifier(block_height, uniquifier);
+  ReplayCacheIt replay_cache_item(tip->height,
+                                  std::move(base_replay_cache.value()));
+  HogDBStatus<void> ret = replay_cache_item.try_consume_uniquifier(uniquifier);
   if (!ret)
     return ret;
 

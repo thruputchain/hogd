@@ -470,7 +470,7 @@ namespace hogd {
 
 class ReplayCacheIt {
 public:
-  ReplayCacheIt(ReplayCacheData cache) : base_replay_cache_(std::move(cache)) {}
+  ReplayCacheIt(BlockHeight expired_height, ReplayCacheData cache);
 
   void assert_is_valid() const
   {
@@ -479,14 +479,13 @@ public:
     nonces.insert_range(base_replay_cache_.uniquifiers |
                         std::views::transform(&Uniquifier::nonce));
     nonces.insert_range(additions_ | std::views::transform(&Uniquifier::nonce));
-    assert(nonces.size() == base_reply_cache_.uniquifiers + additions_.size());
+    assert(nonces.size() == base_replay_cache_.uniquifiers + additions_.size());
 
     // no expired uniquifiers - can't check this without acccess to dbtip
   }
 
   HogDBStatus<void> check_conflict(Uniquifier const &uniquifier);
-  HogDBStatus<void> try_consume_uniquifier(BlockHeight block_height,
-                                           Uniquifier const &uniquifier);
+  HogDBStatus<void> try_consume_uniquifier(Uniquifier const &uniquifier);
 
   HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
                            const ItemKey &key) const;
@@ -506,8 +505,9 @@ public:
 
   ReplayCacheData build_result() const;
 
-  std::vector<Uniquifier> additions_;
+  BlockHeight expired_height_;
   ReplayCacheData base_replay_cache_;
+  std::vector<Uniquifier> additions_;
 
   friend struct std::formatter<ReplayCacheIt>;
 };
@@ -522,10 +522,10 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
     format_to(ctx.out(), "ReplayCacheIt{{");
     format_to(ctx.out(), "base_replay_cache_: {}, ",
               x23::show(replay_cache_item.base_replay_cache_));
-    format_to(ctx.out(), "additions_:");
+    format_to(ctx.out(), "additions_: [");
     for (auto const &addition : replay_cache_item.additions_)
-      format_to(ctx.out(), "{{{}}}", x23::show(addition));
-    format_to(ctx.out(), "}}");
+      format_to(ctx.out(), "{},", x23::show(addition));
+    format_to(ctx.out(), "]");
     return ctx.out();
   }
 };

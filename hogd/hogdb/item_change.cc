@@ -349,6 +349,20 @@ AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
   }
 }
 
+ReplayCacheIt::ReplayCacheIt(BlockHeight expired_height, ReplayCacheData cache)
+  : expired_height_{expired_height}, base_replay_cache_{}
+{
+  // prune expired entries right on construction so only live entries get
+  // factored x23's append_range size check for reserve makes it hard to use
+  // std::views, do things manually.
+  base_replay_cache_.uniquifiers.reserve(cache.uniquifiers.size());
+  for (Uniquifier const &uniquifier : cache.uniquifiers) {
+    if (uniquifier.block_expiry_height <= expired_height)
+      continue;
+    base_replay_cache_.uniquifiers.push_back(std::move(uniquifier));
+  }
+}
+
 HogDBStatus<void>
 ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
 {
@@ -374,11 +388,10 @@ ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
 }
 
 HogDBStatus<void>
-ReplayCacheIt::try_consume_uniquifier(BlockHeight block_height,
-                                      Uniquifier const &uniquifier)
+ReplayCacheIt::try_consume_uniquifier(Uniquifier const &uniquifier)
 {
   // reject uniquifiers that are used too late
-  if (uniquifier.block_expiry_height <= block_height)
+  if (uniquifier.block_expiry_height <= expired_height_)
     return HogDBError(HogDBCode::kConflict);
 
   // reject uniquifiers that are already used
@@ -395,8 +408,6 @@ ReplayCacheIt::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                       const ItemKey &key) const
 {
   assert_is_valid();
-
-  // TODO(stutsman) fetch tip here and prune expired
 
   auto res = build_result();
   auto ret = db.write_address_replay_cache(key.get_address(), res);
@@ -421,24 +432,28 @@ ReplayCacheIt::build_result() const
 int128_t
 ReplayCacheIt::committed_storage_cost(const StorageCostModel *cost_model) const
 {
-  size_t entries = base_replay_cache_.uniquifiers.size() + additions_.size();
-  return cost_model->get_replay_cache_cost(entries);
+  // try_consume_uniqufier never allows the addition of conflicting entries and
+  // neither does merge. Hence, all uniquifiers in the change will be part
+  // of its commit.
+  return marginal_storage_cost(cost_model);
 }
 
 int128_t
 ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
-  return cost_model->get_replay_cache_cost(additions_.size());
+  size_t entries = base_replay_cache_.uniquifiers.size() + additions_.size();
+  return cost_model->get_replay_cache_cost(entries);
 }
 
-// Currently, the executor only modifies a replay cache based on the uniquifier
-// assigned to a transaction right at its start and only once. Since a single
-// transaction should never be able to modify a replay cache twice, narrow()
-// shouldn't be possible on it. Later, if we allow transactions to interact
-// with replay caches then this will need to be implemented.
 bool
 ReplayCacheIt::narrow(const ReplayCacheIt &replay_cache)
 {
+  // Currently, the executor only modifies a replay cache based on the
+  // uniquifier assigned to a transaction right at its start and only once.
+  // Since a single transaction should never be able to modify a replay cache
+  // twice, narrow() shouldn't be possible on it. Later, if we allow
+  // transactions to interact with replay caches then this will need to be
+  // implemented.
   assert(false);
   return false;
 }
@@ -460,7 +475,7 @@ ReplayCacheIt::merge(const ReplayCacheIt &replay_cache_item,
   // Conflicts checked; now do merge
   additions_.append_range(replay_cache_item.additions_);
 
-  return cost_model->get_replay_cache_cost(replay_cache_item.additions_.size());
+  return marginal_storage_cost(cost_model);
 }
 
 void

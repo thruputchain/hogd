@@ -34,60 +34,196 @@ protected:
       .bytestring_cost_per_byte = 10,
       .base_contract_deployment_cost = to_xdr(int128_t{1000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
 };
 
 TEST_F(ItemChangeReplayCacheTest, DisallowDuplicateConsume)
 {
-  ReplayCacheIt cache1(base_data_);
+  ReplayCacheIt cache1(9, base_data_);
   // conflicts with a nonce in base_data_
-  auto r = cache1.try_consume_uniquifier(10, {11, 100});
+  auto r = cache1.try_consume_uniquifier({11, 100});
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
 
   // doesn't conflict, added as an addition
-  r = cache1.try_consume_uniquifier(10, {11, 101});
+  r = cache1.try_consume_uniquifier({11, 101});
   ASSERT_TRUE(r.has_value());
 
   // conflicts with the previous addition
-  r = cache1.try_consume_uniquifier(10, {11, 101});
+  r = cache1.try_consume_uniquifier({11, 101});
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
 }
 
 TEST_F(ItemChangeReplayCacheTest, DisallowConsumeInThePast)
 {
-  ReplayCacheIt cache1(base_data_);
-  auto r = cache1.try_consume_uniquifier(10, {10, 100});
+  ReplayCacheIt cache1(9, base_data_);
+  auto r = cache1.try_consume_uniquifier({10, 100});
   ASSERT_FALSE(r.has_value());
   EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
 }
 
 TEST_F(ItemChangeReplayCacheTest, MergeConflict)
 {
-  ReplayCacheIt cache1(base_data_);
-  ReplayCacheIt cache2(ReplayCacheData{.uniquifiers = {{11, 100}}});
+  BlockHeight const height = 10;
+
+  ReplayCacheIt cache1(height, base_data_);
+  ReplayCacheIt cache2(height,
+                       ReplayCacheData{.uniquifiers = {{height + 1, 101}}});
 
   // this shouldn't happen in practice since merging replay caches
   // build on the same item snapshot, but we conservatively fail
   // the merge if they don't have identical base caches.
-  auto r = cache1.merge(cache2, &cost_model_);
-  ASSERT_FALSE(r.has_value());
-  EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
+  auto before = cache1;
+  auto rm = cache1.merge(cache2, &cost_model_);
+  ASSERT_FALSE(rm.has_value());
+  EXPECT_EQ(rm.error(), HogDBError(HogDBCode::kConflict));
+  EXPECT_EQ(before.additions_, cache1.additions_); // no change to cache1
 
-  cache1.try_consume_uniquifier(11, {11, 100});
-  ReplayCacheIt cache3(base_data_);
-
-  // cache1 contains nonce 100, cache3 only has the base 99 nonce
-  // so merge is okay.
+  // consume 101 in cache1, merge a new cache -> ok
+  auto r = cache1.try_consume_uniquifier({height + 1, 101});
+  ASSERT_TRUE(r.has_value());
+  ReplayCacheIt cache3(height, base_data_);
   EXPECT_TRUE(cache1.merge(cache3, &cost_model_).has_value());
 
-  // now cache3 shouldn't merge since they both
-  cache3.try_consume_uniquifier(11, {12, 100});
+  // add 101 to cache3, merge -> fail, both contain 101 as additions
+  r = cache3.try_consume_uniquifier({height + 2, 101});
+  ASSERT_TRUE(r.has_value());
+  EXPECT_FALSE(cache1.merge(cache3, &cost_model_).has_value());
+}
 
-  r = cache1.merge(cache3, &cost_model_);
-  ASSERT_FALSE(r.has_value());
-  EXPECT_EQ(r.error(), HogDBError(HogDBCode::kConflict));
+TEST_F(ItemChangeReplayCacheTest, UndoMerge)
+{
+  BlockHeight const height = 9;
+  ReplayCacheIt c1(height, base_data_);
+  ReplayCacheIt c2(height, base_data_);
+
+  ASSERT_TRUE(c2.try_consume_uniquifier({height + 1, 101}));
+
+  ASSERT_TRUE(c1.merge(c2, &cost_model_));
+  // c2 merge put 101 in cache, so c1 fails to add 101
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 101}));
+
+  // unmerging c2 means 101 shouldn't be in the cache anymore
+  c1.undo_merge(c2);
+  ASSERT_TRUE(c1.try_consume_uniquifier({height + 1, 101}));
+
+  // a more complicated case where three nonces are merged,
+  // one is reverted, but ensure not all are reverted
+  ReplayCacheIt c3(height, base_data_);
+  ASSERT_TRUE(c3.try_consume_uniquifier({height + 1, 103}));
+  ReplayCacheIt c4(height, base_data_);
+  ASSERT_TRUE(c4.try_consume_uniquifier({height + 1, 104}));
+
+  ASSERT_TRUE(c1.merge(c3, &cost_model_));
+  ASSERT_TRUE(c1.merge(c4, &cost_model_));
+
+  // fails - 100, 101 in cache due to c1
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 100}));
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 101}));
+  // fails - 103 in cache due to c3
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 103}));
+  // fails - 104 in cache due to c4
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 104}));
+
+  c1.undo_merge(c3);
+  // fails - 100, 101 in cache due to c1
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 100}));
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 101}));
+  // success - 103 not in cache due to c3 undo
+  ASSERT_TRUE(c1.try_consume_uniquifier({height + 1, 103}));
+  // fails - 104 in cache due to c3
+  ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 104}));
+}
+
+TEST_F(ItemChangeReplayCacheTest, Expiry)
+{
+  BlockHeight height = 9;
+  {
+    ReplayCacheIt c1(height, base_data_);
+    ASSERT_FALSE(c1.try_consume_uniquifier({height, 101}));
+    ASSERT_FALSE(c1.try_consume_uniquifier({height + 1, 100}));
+    ASSERT_TRUE(c1.try_consume_uniquifier({height + 1, 101}));
+  }
+
+  height++;
+
+  {
+    ReplayCacheIt c1(height, base_data_);
+    ASSERT_FALSE(c1.try_consume_uniquifier({height, 101}));
+    ASSERT_FALSE(c1.try_consume_uniquifier({height, 100}));
+    ASSERT_TRUE(c1.try_consume_uniquifier({height + 1, 100}));
+    ASSERT_TRUE(c1.try_consume_uniquifier({height + 1, 101}));
+
+    ReplayCacheData out = c1.build_result();
+    ASSERT_EQ(2, out.uniquifiers.size());
+    EXPECT_EQ(100, out.uniquifiers[0].nonce);
+    EXPECT_EQ(101, out.uniquifiers[1].nonce);
+
+    ReplayCacheIt remade(height, out);
+    EXPECT_FALSE(remade.try_consume_uniquifier({height + 1, 100}));
+    EXPECT_FALSE(remade.try_consume_uniquifier({height + 1, 101}));
+    EXPECT_TRUE(remade.try_consume_uniquifier({height + 1, 102}));
+  }
+}
+
+TEST_F(ItemChangeReplayCacheTest, Build)
+{
+  BlockHeight const height = 9;
+  ReplayCacheIt c(height, base_data_);
+
+  ASSERT_TRUE(c.try_consume_uniquifier({height + 1, 101}));
+  ASSERT_TRUE(c.try_consume_uniquifier({height + 1, 102}));
+  ASSERT_TRUE(c.try_consume_uniquifier({height + 1, 104}));
+
+  ReplayCacheData out = c.build_result();
+  ASSERT_EQ(4, out.uniquifiers.size());
+  EXPECT_EQ(100, out.uniquifiers[0].nonce);
+  EXPECT_EQ(101, out.uniquifiers[1].nonce);
+  EXPECT_EQ(102, out.uniquifiers[2].nonce);
+  EXPECT_EQ(104, out.uniquifiers[3].nonce);
+
+  ReplayCacheIt remade(height, out);
+  EXPECT_FALSE(remade.try_consume_uniquifier({height + 1, 101}));
+  EXPECT_TRUE(remade.try_consume_uniquifier({height + 1, 103}));
+}
+
+TEST_F(ItemChangeReplayCacheTest, MergeCost)
+{
+  BlockHeight const height = 9;
+
+  ItemChange c1{ReplayCacheIt{height, base_data_}};
+  ItemChange c2{ReplayCacheIt{height, base_data_}};
+  int128_t entry_cost = c1.marginal_storage_cost(&cost_model_).value();
+
+  { // merging changes with same single base entry results in one entry cost
+    auto r = c1.merge(c2, &cost_model_);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(entry_cost, *r);
+    EXPECT_EQ(*r, c1.marginal_storage_cost(&cost_model_).value());
+  }
+
+  { // merging multiple non-conflicting entries results in combined cost
+    ASSERT_TRUE(
+        c2.to_replay_cache()->try_consume_uniquifier({height + 1, 101}));
+    auto r = c1.merge(c2, &cost_model_);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(2 * entry_cost, *r);
+    EXPECT_EQ(*r, c1.marginal_storage_cost(&cost_model_).value());
+  }
+
+  { // check that expiry is accounted for correctly in cost
+    ItemChange c3{ReplayCacheIt{height + 1, base_data_}};
+    ItemChange c4{ReplayCacheIt{height + 1, base_data_}};
+    EXPECT_EQ(0, c3.marginal_storage_cost(&cost_model_).value());
+    EXPECT_EQ(0, c4.marginal_storage_cost(&cost_model_).value());
+    ASSERT_TRUE(
+        c4.to_replay_cache()->try_consume_uniquifier({height + 2, 101}));
+    auto r = c3.merge(c4, &cost_model_);
+    EXPECT_EQ(entry_cost, *r);
+    EXPECT_EQ(*r, c3.marginal_storage_cost(&cost_model_).value());
+  }
 }
 
 } // namespace hogd
