@@ -58,7 +58,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
     // some items that are in the trie
 
-    RPCContext ctx(dao, trie);
+    RPCContext ctx(dao, trie, nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
