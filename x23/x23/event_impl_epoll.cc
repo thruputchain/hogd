@@ -32,9 +32,9 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   // std::println("{}_clear({})", write ? "write" : "read", fd.get());
 
   auto fdp = getfd(fd);
-  assert(!fdp->callbacks[write].value.load(std::memory_order_relaxed));
+  assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready &= ~epflags[write] | epflags[!write];
+  fdp->ready_ &= ~epflags[write] | epflags[!write];
 }
 
 void
@@ -55,13 +55,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   // calling {read,write}_wait.
   assert(mode != kFree);
 
-  if ((fdp->ready & epflags[write]) && mode == kActive) {
+  if ((fdp->ready_ & epflags[write]) && mode == kActive) {
     wi(0);
     return;
   }
 
   ++numcoro_;
-  [[maybe_unused]] auto oldwi = fdp->callbacks[write].exchange(wi);
+  [[maybe_unused]] auto oldwi = fdp->callbacks_[write].exchange(wi);
   // If this assertion fails, you attempted to register two read or
   // two write callbacks on the same file descriptor.
   assert(!*oldwi);
@@ -105,9 +105,13 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     [[maybe_unused]] int err =
         epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
     assert(err != -1);
+    // Since we are using edge-triggered events, we must
+    // conservatively assume the fd was already readable and writable
+    // when we called EPOLL_CTL_ADD.
+    fdp->ready_ = EPOLLIN|EPOLLOUT;
   }
   else {
-    fdp->ready = 0; // because EPOLLERR is sticky
+    fdp->ready_ = 0; // because EPOLLERR is sticky
     if (old_mode == kActive) {
       [[maybe_unused]] int err =
           epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
@@ -218,10 +222,10 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
-    state_[fd].ready |= evs[i].events;
+    state_[fd].ready_ |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
-        if (WorkItem wi = state_[fd].callbacks[write].exchange({})) {
+        if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
           --numcoro_;
           if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
             coroqueue.emplace_back(h, wi.cpuhint);
@@ -250,7 +254,7 @@ CoroPollImpl::poison(BorrowedFd fd)
 void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
-  if (WorkItem wi = getfd(fd.get())->callbacks[write].exchange({}))
+  if (WorkItem wi = getfd(fd.get())->callbacks_[write].exchange({}))
     if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
       pool_.go({h, wi.cpuhint});
 }

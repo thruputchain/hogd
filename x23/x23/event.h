@@ -299,9 +299,9 @@ private:
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
-    std::atomic<std::uint32_t> ready{0};
+    std::atomic<std::uint32_t> ready_{0};
     // callbacks: [0] = reader, [1] = writer
-    std::array<AtomicWorkItem, 2> callbacks{};
+    std::array<AtomicWorkItem, 2> callbacks_{};
 
     FdState() noexcept = default;
     FdState(FdState &&other) noexcept : BufHolder(std::move(other))
@@ -326,10 +326,10 @@ private:
     void copy_fields(const FdState &other)
     {
       mode_ = other.mode_.load();
-      ready = other.ready.load();
-      for (size_t i = 0; i < callbacks.size(); ++i) {
-        callbacks[i].value = other.callbacks[i].value.load();
-        callbacks[i].cpuhint = other.callbacks[i].cpuhint.load();
+      ready_ = other.ready_.load();
+      for (size_t i = 0; i < callbacks_.size(); ++i) {
+        callbacks_[i].value = other.callbacks_[i].value.load();
+        callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
       }
     }
   };
@@ -355,8 +355,8 @@ private:
   {
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode();
-    if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange({})) {
+    if ((fdp->ready_ & epflags[write]) || mode != kActive)
+      if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
         wi(mode == kActive ? 0 : EBADF);
       }
