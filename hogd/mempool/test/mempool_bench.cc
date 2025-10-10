@@ -87,6 +87,7 @@ public:
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
+        std::println("nominate now");
         auto res_nominate =
             infra.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
