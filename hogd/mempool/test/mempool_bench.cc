@@ -79,7 +79,8 @@ private:
   LoadgenContextID context_id_;
 };
 
-constexpr AuthClaim make_self_sign_claim(uint32_t key_id)
+constexpr AuthClaim
+make_self_sign_claim(uint32_t key_id)
 {
   AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
   claim.invoked_address_signature_id() = key_id;
@@ -107,9 +108,9 @@ generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
   SignedTransactionBatch txs;
   for (SignedTransaction &unsigned_tx : unsigned_txs) {
     unsigned_tx.tx.auth_claims.push_back(make_self_sign_claim(0));
-    txs.push_back(hogd::Authentication::sign_claims(unsigned_tx.tx,
-                                             {{0, private_key}},
-                                             /*auxiliary_private_keys=*/{}));
+    txs.push_back(
+        hogd::Authentication::sign_claims(unsigned_tx.tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
   }
   return txs;
 }
