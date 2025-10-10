@@ -78,7 +78,6 @@ public:
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
-    current_block_id_ = card.current_block_id;
     Registration::registration().register_coordinator(card);
     finish_init();
 
@@ -101,11 +100,15 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
+  x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  {
+    // TODO(jhumphri): Implement.
+    co_return;
+  }
+
   // These are just stubs that pass through the calls from the coordinator to
   // hogdb.
   x23::Async<DbTipResult> schedcoord_get_tip();
-  x23::Async<DbSchedResult>
-  schedcoord_load_genesis_block(const GenesisBlock &genesis_block);
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -156,6 +159,8 @@ private:
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         MempoolEventRpc::get_client(client_cp_));
 
+    // TODO(jhumphri): Ask the db for the current block ID and fill in
+    // [current_block_id_] with it.
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, *db_sched_client_);
     scheduler_ = std::make_unique<Scheduler>(*db_sched_client_);

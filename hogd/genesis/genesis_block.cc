@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -121,16 +122,22 @@ GenesisBlockBuilder::make_unfurl_genesis_transactions() const
   token_claim_client_t client(GenesisBlockLoader::kDeployContractAddress);
   constexpr static GasAmount kClaimGas = 1'000'000'000;
 
+  // This nonce is not checked or read during the unfurl transaction.
+  uint64_t uniquifier_nonce = 0;
   for (auto const &entry : entries_) {
     auto const &config = entry.config;
 
     SignedTransaction tx{
-        .tx = Transaction{.invocation =
-                              client.make_invocation<"claim_initial_tokens">(
-                                  kClaimGas, config.contract_hash,
-                                  config.initial_nonce, config.entrypoint,
-                                  config.calldata),
-                          .contracts_to_deploy = {*entry.deployed_contract}}};
+        .tx = Transaction{
+            .invocation = client.make_invocation<"claim_initial_tokens">(
+                kClaimGas, config.contract_hash, config.initial_nonce,
+                config.entrypoint, config.calldata),
+            .uniquifier = {.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = uniquifier_nonce++},
+            .contracts_to_deploy = {*entry.deployed_contract},
+
+        }};
     unfurl_transactions.push_back(tx);
   }
 

@@ -20,6 +20,7 @@ add_xdr(
   ../../protocol/nomination.x
   ../../protocol/precompiles.x
   ../../protocol/rpc_types.x
+  ../../protocol/scp.x
   ../../protocol/sc_types.x
   ../../protocol/sc_val.x
   ../../protocol/sched_coord.x

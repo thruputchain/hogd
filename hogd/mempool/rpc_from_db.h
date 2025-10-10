@@ -44,6 +44,12 @@ public:
     co_return;
   }
 
+  static x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
+  {
+    // TODO(jhumphri): Implement.
+    co_return;
+  }
+
   static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
   {
     x23::Vec<ShardCard> cards;
