@@ -22,7 +22,6 @@
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "transaction.hh"
-
 #include "x23/vec.h"
 
 namespace hogd {
@@ -38,6 +37,12 @@ struct BenchmarkState : public CommonBenchState {
   {}
 
   const uint32_t num_accounts_;
+
+  // TODO(geoff): This benchmark will break down when we start tracking
+  // uniquifiers within hogdb.  We need to somehow clean up the benchmark state
+  // so that uniquifiers don't grow without bound. The best path forward might
+  // be to call exp.extend_experiment() once per bench iteration or per
+  // benchmark, and set the expiry time to be that reps top block height.
 
   // returns the work transactions
   x23::Vec<SignedTransaction> initialize(uint32_t num_txs)
@@ -55,7 +60,7 @@ struct BenchmarkState : public CommonBenchState {
     auto genesis_block = result.value().genesis_block;
     run_genesis_block(genesis_block, result.value().initialization_txs);
 
-    auto work_txs = exp.extend_experiment(num_txs);
+    auto work_txs = exp.extend_experiment(num_txs, 1'000'000);
     if (!work_txs.has_value()) {
       throw std::runtime_error("Failed to extend experiment");
     }

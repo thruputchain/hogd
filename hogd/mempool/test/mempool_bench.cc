@@ -105,7 +105,7 @@ public:
   SignedTransactionBatch get_transactions(size_t num_txs)
   {
     LoadgenExtensionResult result =
-        client_->extend_experiment(context_id_, num_txs)();
+        client_->extend_experiment(context_id_, num_txs, 1'000'000'000)();
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
     return result.success().work_txs;
   }

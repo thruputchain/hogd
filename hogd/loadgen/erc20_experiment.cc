@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <future>
+#include <limits>
 #include <random>
 #include <utility>
 #include <vector>
@@ -115,6 +116,9 @@ ERC20ExperimentState::generate_experiment()
                                          internal_calldata),
                             internal_calldata),
                     },
+                .uniquifier = {.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = i},
             },
     };
     mint_txs.push_back(tx);
@@ -130,7 +134,8 @@ ERC20ExperimentState::generate_experiment()
 }
 
 LoadgenStatus<LoadgenExtension>
-ERC20ExperimentState::extend_experiment(uint64_t num_txs)
+ERC20ExperimentState::extend_experiment(uint64_t num_txs,
+                                        BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
     return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
@@ -155,54 +160,62 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs)
       assert(end == num_txs);
     }
 
-    futures.emplace_back(WorkerPool::get_default_pool().submit([this, &work_txs,
-                                                                start, end]() {
-      std::random_device rd;
-      std::mt19937 gen(rd());
+    futures.emplace_back(WorkerPool::get_default_pool().submit(
+        [this, &work_txs, start, end, expiry_height]() {
+          std::random_device rd;
+          std::mt19937 gen(rd());
 
-      std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+          std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
 
-      auto make_account_pair = [&]() {
-        auto sender = dist(gen);
-        auto receiver = sender;
-        while (receiver == sender) {
-          receiver = dist(gen);
-        }
-        return std::make_pair(sender, receiver);
-      };
+          uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
+              0, std::numeric_limits<uint64_t>::max())(gen);
 
-      using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-      using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
+          auto make_account_pair = [&]() {
+            auto sender = dist(gen);
+            auto receiver = sender;
+            while (receiver == sender) {
+              receiver = dist(gen);
+            }
+            return std::make_pair(sender, receiver);
+          };
 
-      for (size_t j = start; j < end; ++j) {
-        auto [sender, receiver] = make_account_pair();
-        uint128_t amount = 10;
+          using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+          using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
 
-        // has to match the deserialized objects in simple_wallet::do_action
-        Calldata internal_calldata =
-            x23::serialize(erc20_address_, erc20_meta::entrypoint<"transfer">(),
-                           GasAmount{1'000'000},
-                           erc20_meta::make_calldata<"transfer">(
-                               wallets_[receiver].address, to_xdr(amount)));
+          for (size_t j = start; j < end; ++j) {
+            auto [sender, receiver] = make_account_pair();
+            uint128_t amount = 10;
 
-        work_txs[j] = SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        {
-                            .invoked_address = wallets_[sender].address,
-                            .entrypoint =
-                                wallet_meta::entrypoint<"do_action">(),
-                            .gas_limit = GasAmount{1'000'000},
-                            .calldata = wallet_meta::make_calldata<"do_action">(
-                                ed25519_sign(wallets_[sender].secret_key,
-                                             internal_calldata),
-                                internal_calldata),
-                        },
-                },
-        };
-      }
-    }));
+            // has to match the deserialized objects in simple_wallet::do_action
+            Calldata internal_calldata =
+                x23::serialize(erc20_address_,
+                               erc20_meta::entrypoint<"transfer">(),
+                               GasAmount{1'000'000},
+                               erc20_meta::make_calldata<"transfer">(
+                                   wallets_[receiver].address, to_xdr(amount)));
+
+            work_txs[j] = SignedTransaction{
+                .tx =
+                    Transaction{
+                        .invocation =
+                            {
+                                .invoked_address = wallets_[sender].address,
+                                .entrypoint =
+                                    wallet_meta::entrypoint<"do_action">(),
+                                .gas_limit = GasAmount{1'000'000},
+                                .calldata =
+                                    wallet_meta::make_calldata<"do_action">(
+                                        ed25519_sign(
+                                            wallets_[sender].secret_key,
+                                            internal_calldata),
+                                        internal_calldata),
+                            },
+                        .uniquifier = {.block_expiry_height = expiry_height,
+                                       .nonce = base_nonce + j},
+                    },
+            };
+          }
+        }));
   }
 
   for (auto &future : futures) {

@@ -65,7 +65,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
   }
 
   for (auto _ : state) {
-    auto result = exp.extend_experiment(num_txs);
+    auto result = exp.extend_experiment(num_txs, 100);
     if (!result.has_value()) {
       throw std::runtime_error("Failed to extend ERC20 experiment");
     }

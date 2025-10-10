@@ -6,6 +6,7 @@
 #include "hogd/base/types.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -34,7 +35,8 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
 }
 
 LoadgenExtensionResult
-LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs)
+LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
+                              BlockHeight expiry_height)
 {
   auto st = experiment_states_.take();
   auto state = st->find(context_id);
@@ -43,7 +45,7 @@ LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs)
         LoadgenRPCError::kLoadgenRPCErrorInvalidContext);
   }
   LoadgenExtensionResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
-  auto r = state->second->extend_experiment(num_txs);
+  auto r = state->second->extend_experiment(num_txs, expiry_height);
   if (!r) {
     return LoadgenExtensionResult(r.error().code());
   }
