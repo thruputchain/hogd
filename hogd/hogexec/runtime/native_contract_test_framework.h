@@ -1,16 +1,20 @@
 #pragma once
 
+#include <condition_variable>
 #include <gtest/gtest.h>
 
 #include <cassert>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -20,8 +24,8 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
-#include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
@@ -43,12 +47,10 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
-#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -116,6 +118,14 @@ public:
                             amount, get_default_cost_model()));
   }
 
+  static std::map<ContractAddress, int128_t>
+  get_hogs_transferred(BlockHeight /*unused*/)
+  {
+    // unimplemented
+    error("get_hogs_transferred in MockDB: unimplemented");
+    return std::map<ContractAddress, int128_t>();
+  }
+
   const StorageCostModel *get_default_cost_model() const
   {
     return &block_manager_.cost_model_;
@@ -132,15 +142,53 @@ private:
 
 class TestSchedDBServer {
 public:
- 
+  using rpc_service = SchedDb1;
+
+  void scheddb_intro_shard(ShardCard const & /*unused*/) {};
+  void scheddb_hogs_transferred(HogsTransferred const &hogs)
+  {
+    std::map<ContractAddress, int128_t> hogs_transferred;
+    for (const auto &delta : hogs.deltas) {
+      hogs_transferred[delta.address] = from_xdr(delta.hog_delta);
+    }
+    register_height(hogs.block, hogs_transferred);
+  };
+
+  // access methods
+
+  void wait_for_height(BlockHeight height)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    cv_.wait(lock,
+             [this, height] { return hogs_transferred_.contains(height); });
+  }
+
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    return hogs_transferred_.at(height);
+  }
+
 private:
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
+
+  void register_height(BlockHeight height,
+                       std::map<ContractAddress, int128_t> hogs_transferred)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    assert(!hogs_transferred_.contains(height));
+    hogs_transferred_[height] = std::move(hogs_transferred);
+    cv_.notify_all();
+  }
 };
 
-static_assert(is_SchedDb1<TestSchedDBServer*, std::type_identify>);
+static_assert(is_SchedDb1<TestSchedDBServer *, std::type_identity_t>);
 
 class HogdbWrapper {
 public:
-  HogdbWrapper() : db_(open_db())
+  HogdbWrapper() : db_(open_db()), ctx_(db_, trie_, make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);
@@ -160,6 +208,12 @@ public:
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model);
 
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    test_sched_db_server_.impl_.wait_for_height(height);
+    return test_sched_db_server_.impl_.get_hogs_transferred(height);
+  }
+
   // different storage cost models unimplemented currently
   const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
 
@@ -169,17 +223,14 @@ public:
   }
 
 private:
-  static HogDBDAO open_db()
-  {
-    Directory dir = Directory::open_temporary().value();
-    constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-    auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
-    return HogDBDAO(RAMDB(std::move(db)));
-  }
+  static HogDBDAO open_db();
+  std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+  make_sched_db_client();
 
   HogDBDAO db_;
   MerkleTriePrefix trie_;
-  RPCContext ctx_ = RPCContext(db_, trie_, nullptr);
+  RpcServer<TestSchedDBServer> test_sched_db_server_;
+  RPCContext ctx_;
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
   HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
@@ -466,6 +517,15 @@ public:
   std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
   {
     return event_server_.get_events(tx_id.block_id, tx_id.tx_id);
+  }
+
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    return std::visit(
+        [&](auto &db_wrapper) {
+          return db_wrapper.get_hogs_transferred(height);
+        },
+        db_wrapper_);
   }
 
 private:
