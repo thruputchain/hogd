@@ -35,7 +35,8 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
 }
 
 LoadgenExtensionResult
-LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs, BlockHeight expiry_height)
+LoadgenRpc::extend_experiment(LoadgenContextID context_id, uint64_t num_txs,
+                              BlockHeight expiry_height)
 {
   auto st = experiment_states_.take();
   auto state = st->find(context_id);

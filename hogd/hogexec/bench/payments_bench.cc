@@ -38,10 +38,11 @@ struct BenchmarkState : public CommonBenchState {
 
   const uint32_t num_accounts_;
 
-  // TODO(geoff): This benchmark will break down when we start tracking uniquifiers
-  // within hogdb.  We need to somehow clean up the benchmark state so that uniquifiers don't grow without bound.
-  // The best path forward might be to call exp.extend_experiment() once per bench iteration or per benchmark,
-  // and set the expiry time to be that reps top block height.
+  // TODO(geoff): This benchmark will break down when we start tracking
+  // uniquifiers within hogdb.  We need to somehow clean up the benchmark state
+  // so that uniquifiers don't grow without bound. The best path forward might
+  // be to call exp.extend_experiment() once per bench iteration or per
+  // benchmark, and set the expiry time to be that reps top block height.
 
   // returns the work transactions
   x23::Vec<SignedTransaction> initialize(uint32_t num_txs)

@@ -23,7 +23,8 @@ public:
 
   LoadgenResult generate_experiment(ExperimentConfig config);
   LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
-                                           uint64_t num_txs, BlockHeight expiry_height);
+                                           uint64_t num_txs,
+                                           BlockHeight expiry_height);
 
   void shut_down()
   {
