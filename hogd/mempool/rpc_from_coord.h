@@ -91,7 +91,7 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
   {
     // TODO(jhumphri): Implement.
     co_return;

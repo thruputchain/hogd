@@ -1,6 +1,7 @@
 #include <benchmark/benchmark.h>
 
 #include <memory>
+#include <print>
 
 #include "account.hh"
 #include "db_sched.hh"
@@ -22,6 +23,7 @@
 #include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -74,10 +76,10 @@ public:
     // [schedulercoord_submit_vetted()].
     const x23::Vec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
-    constexpr ValidatorID validator_id{};
+    constexpr ValidatorID kValidatorId{};
     for (const InitializationBlock &init_tx : init_txs) {
       std::println("next block");
-      infra.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+      infra.mempool_coord_rpc().schedulercoord_submit_vetted(kValidatorId,
                                                              init_tx)();
 
       // Now nominate and commit the initialization transactions with

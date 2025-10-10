@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <utility>
 
 #include "discovery.hh"
 #include "hogd/base/rpc_server.h"
@@ -57,7 +58,7 @@ public:
       int128_t hog_delta = from_xdr(d.hog_delta);
       CHECK_NE(hog_delta, 0L);
 
-      uint128_t hog_delta_abs = static_cast<uint128_t>(std::abs(hog_delta));
+      auto hog_delta_abs = static_cast<uint128_t>(std::abs(hog_delta));
 
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
@@ -71,7 +72,7 @@ public:
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
-    scheduler_ = scheduler;
+    scheduler_ = std::move(scheduler);
   }
 
   static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
