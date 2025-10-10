@@ -116,7 +116,9 @@ ERC20ExperimentState::generate_experiment()
                                          internal_calldata),
                             internal_calldata),
                     },
-                .uniquifier = {.block_expiry_height = 2, .nonce = i},
+                .uniquifier = {.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = i},
             },
     };
     mint_txs.push_back(tx);
