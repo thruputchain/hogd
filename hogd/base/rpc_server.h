@@ -71,7 +71,6 @@ host_port_to_sockaddr(const std::string &host, uint16_t port)
 inline sockaddr_storage
 server_address_to_sockaddr(std::string_view server_address)
 {
-  info("server_address_to_sockaddr: {}", server_address);
   x23::HostPort helper;
   CHECK(helper.parse(server_address));
   std::expected<sockaddr_storage, x23::GaiError> addr =
