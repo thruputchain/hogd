@@ -7,7 +7,6 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>

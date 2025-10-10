@@ -3,14 +3,10 @@
 #include <cassert>
 #include <chrono>
 #include <format>
-#include <string>
-#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 
 #include "hogd/base/log.h"
-#include "hogd/base/network.h"
-#include "hogd/base/types.h"
 #include "hogd/version.h"
 #include "sched_exec.hh"
 #include "x23/cleanup.h"
