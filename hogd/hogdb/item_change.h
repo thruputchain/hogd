@@ -41,6 +41,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
 
@@ -470,7 +471,7 @@ namespace hogd {
 
 class ReplayCacheIt {
 public:
-  ReplayCacheIt(BlockHeight expired_height, ReplayCacheData cache);
+  ReplayCacheIt(BlockHeight expired_height, ReplayCacheData const &cache);
 
   void assert_is_valid() const
   {
@@ -656,7 +657,7 @@ private:
   };
 
   bool exclusive_{false};
-  LazySnapshotCost snapshot_cost_{};
+  LazySnapshotCost snapshot_cost_;
   bool change_committed_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData, AuthDataItem, ReplayCacheIt>

@@ -17,6 +17,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/bits.h"

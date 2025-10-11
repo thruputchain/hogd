@@ -12,12 +12,14 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -260,16 +262,15 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     EXPECT_EQ(2 * cost_model_.kReplayCacheCostPerEntry,
               c1.marginal_storage_cost(&cost_model_).value());
     // store updated cache in db
-    c1.commit(db_, trie_, rckey);
+    ASSERT_TRUE(c1.commit(db_, trie_, rckey));
   }
 
   height++;
 
-  auto r = db_.read_address_replay_cache(rckey.get_address());
-  ASSERT_TRUE(r);
-  auto new_base = *r;
+  auto new_base = db_.read_address_replay_cache(rckey.get_address());
+  ASSERT_TRUE(new_base);
 
-  ReplayCacheIt c3i(height, new_base);
+  ReplayCacheIt c3i(height, *new_base);
 
   {
     // one entry has expired

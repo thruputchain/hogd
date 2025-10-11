@@ -5,9 +5,11 @@
 #include <concepts>
 #include <cstddef>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <type_traits>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 
 #include "account.hh"
@@ -20,6 +22,9 @@
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -349,7 +354,8 @@ AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
   }
 }
 
-ReplayCacheIt::ReplayCacheIt(BlockHeight expired_height, ReplayCacheData cache)
+ReplayCacheIt::ReplayCacheIt(BlockHeight expired_height,
+                             ReplayCacheData const &cache)
   : expired_height_{expired_height}, base_replay_cache_{}
 {
   // prune expired entries right on construction so only live entries get
@@ -450,7 +456,7 @@ ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
 }
 
 bool
-ReplayCacheIt::narrow(const ReplayCacheIt &replay_cache)
+ReplayCacheIt::narrow(const ReplayCacheIt &) // NOLINT - lint wants static
 {
   // Currently, the executor only modifies a replay cache based on the
   // uniquifier assigned to a transaction right at its start and only once.

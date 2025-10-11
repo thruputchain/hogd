@@ -14,6 +14,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "storage_item.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -19,6 +20,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
