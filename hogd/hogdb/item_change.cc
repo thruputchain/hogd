@@ -175,12 +175,10 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                                                   std::as_bytes(std::span(buf)))
             .has_value());
   }
-<<<<<<< HEAD
   ret = db.update_contract_refcount(deployed_contract_hash_.hash, 1);
   if (!ret) {
     return ret.error();
   }
-=======
 
   // Create an empty data record for this address for scheduler state;
   // the scheduler is responsible for populating this with nonzero data.
@@ -193,7 +191,6 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
 
   CHECK(r.has_value());
 
->>>>>>> main
   return ret;
 }
 
