@@ -152,7 +152,7 @@ private:
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
-    db_sched_client_ = std::make_unique<db_sched_client_t>(
+    db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients(client_cp_)[0]));
     exec_clients_ = MempoolExecutorRpc::get_clients(client_cp_);
     event_sched_client_ = std::make_unique<event_sched_client_t>(
@@ -161,8 +161,8 @@ private:
     // TODO(jhumphri): Ask the db for the current block ID and fill in
     // [current_block_id_] with it.
     authentication_ =
-        std::make_unique<Authentication>(current_block_id_, *db_sched_client_);
-    scheduler_ = std::make_shared<Scheduler>(*db_sched_client_);
+        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
   }
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
@@ -192,7 +192,7 @@ private:
   x23::ThreadPool client_pool_;
   x23::CoroPoll client_cp_ = x23::CoroPoll(client_pool_);
   std::unique_ptr<coord_sched_client_t> coord_client_;
-  std::unique_ptr<db_sched_client_t> db_sched_client_;
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 

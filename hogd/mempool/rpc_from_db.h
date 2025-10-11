@@ -52,9 +52,10 @@ public:
     CHECK_PTR(scheduler_.get());
 
     for (const Delta &d : transfers.deltas) {
-      std::println("scheddb_hogs_transferred, block height {}, account {}, num "
-                   "hogs transferred {}",
-                   transfers.block, d.address, from_xdr(d.hog_delta));
+      // std::println("scheddb_hogs_transferred, block height {}, account {},
+      // num "
+      //              "hogs transferred {}",
+      //              transfers.block, d.address, from_xdr(d.hog_delta));
       int128_t hog_delta = from_xdr(d.hog_delta);
       CHECK_NE(hog_delta, 0L);
 

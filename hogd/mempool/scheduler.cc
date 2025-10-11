@@ -59,7 +59,7 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     co_return true;
   }
 
-  HogAgeResult res = co_await db_sched_client_.dbsched_get_hog_ages(to_send);
+  HogAgeResult res = co_await db_sched_client_->dbsched_get_hog_ages(to_send);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     co_return false;
   }
@@ -89,7 +89,7 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
     }
     ages.push_back(it->second);
   }
-  co_return (co_await db_sched_client_.dbsched_write_hog_ages(ages)) ==
+  co_return (co_await db_sched_client_->dbsched_write_hog_ages(ages)) ==
       DbSchedResult::DbSchedResultOK;
 }
 
