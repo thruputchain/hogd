@@ -59,7 +59,7 @@ jobs:
         rm -r ./hogdb_data/ || true
         mkdir -p hogdb_data/
     - name: run bench server
-      run: ./release/hogd/hogexec/bench/control_server -p 11111
+      run: X23TRACE=1 X23SERVER_TRACE=1 ./release/hogd/hogexec/bench/control_server -p 11111
 
   build:
     runs-on: metrics
