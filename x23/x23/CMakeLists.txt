@@ -30,6 +30,8 @@ add_library(x23
   rpc_msg.x
   serialize.cc
   serialize.h
+  signal.cc
+  signal.h
   sockio.cc
   sockio.h
   srpc.cc
