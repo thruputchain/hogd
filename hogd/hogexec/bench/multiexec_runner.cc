@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstdio>
@@ -7,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <print>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -33,12 +36,14 @@
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+#include "hogd/base/worker_pool.h"
 
 namespace hogd {
 
@@ -196,6 +201,23 @@ auto connect_to_exec_server(const ExecCard &card) {
 }
 }
 
+struct BlockValidationQueue {
+
+    BlockValidationQueue(const auto& txs, size_t batch_size)
+        : txs(txs), batch_size(batch_size)
+    {}
+
+    const std::span<const SignedTransaction> txs;
+    const size_t batch_size;
+    std::atomic<uint64_t> offset{0};
+
+    std::span<const SignedTransaction> next_batch()
+    {
+        auto start = offset.fetch_add(batch_size);
+        return {txs.begin() + std::min<size_t>(start, txs.size()), txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
+    }
+};
+
 // this assumes the executors use the same port config
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int num_accounts)
@@ -312,10 +334,38 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
   }
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
-  
+
+  auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id, 1'000, 1000000);
+  if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
+    throw std::runtime_error("Failed to extend loadgen experiment");
+  }
+
+  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 100);
+
+  std::vector<BlockValidationQueue*> jobs = {1000, &block_validation_queue};
+
+  auto& worker_pool = WorkerPool::get_default_pool();
+
   for (size_t i = 0; i < 10; i++) {
     open_block(parent_block_number, current_block_number);
-    // TODO do the work of executing transactions
+    worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue* job) {
+      auto batch = job->next_batch();
+      if (batch.empty()) {
+        return;
+      }
+      x23::Vec<SignedTransaction> batch_vec;
+      batch_vec.reserve(batch.size());
+      for (auto const &tx : batch) {
+        batch_vec.push_back(tx);
+      }
+
+      auto res = exec_clients[0].executorsched_propose_batch(current_block_number, batch_vec);
+      for (auto const &result : res) {
+        if (result.result() != ExecResult::ExecResultOK) {
+          throw std::runtime_error("Failed to propose batch");
+        }
+      }
+    });
 
     close_block(current_block_number);
     parent_block_number = current_block_number;
