@@ -2,6 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <utility>
 
 #include "coord_sched.hh"
@@ -9,10 +12,12 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
@@ -25,7 +30,11 @@
 #include "types.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -91,7 +100,7 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
   {
     // TODO(jhumphri): Implement.
     co_return;
