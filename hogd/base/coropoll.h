@@ -21,6 +21,7 @@ default_coropoll()
   return *cp;
 }
 
+// TODO(jhumphri): Can we take this out?
 inline void
 reconstruct_default_coropoll()
 {
