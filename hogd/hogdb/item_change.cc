@@ -390,6 +390,8 @@ ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
 HogDBStatus<void>
 ReplayCacheIt::try_consume_uniquifier(Uniquifier const &uniquifier)
 {
+  assert_is_valid();
+
   // reject uniquifiers that are used too late
   if (uniquifier.block_expiry_height <= expired_height_)
     return HogDBError(HogDBCode::kConflict);
@@ -400,6 +402,8 @@ ReplayCacheIt::try_consume_uniquifier(Uniquifier const &uniquifier)
     return ret;
 
   additions_.emplace_back(uniquifier);
+
+  assert_is_valid();
   return {};
 }
 
@@ -459,28 +463,37 @@ ReplayCacheIt::narrow(const ReplayCacheIt &replay_cache)
 }
 
 HogDBStatus<int128_t>
-ReplayCacheIt::merge(const ReplayCacheIt &replay_cache_item,
+ReplayCacheIt::merge(const ReplayCacheIt &replay_cache,
                      const StorageCostModel *cost_model)
 {
-  if (base_replay_cache_ != replay_cache_item.base_replay_cache_)
+  assert_is_valid();
+  replay_cache.assert_is_valid();
+
+  if (base_replay_cache_ != replay_cache.base_replay_cache_)
     return HogDBError(HogDBCode::kConflict);
 
   // Check that incoming uniquifiers aren't in this cache or additions.
-  for (auto const &other_addition : replay_cache_item.additions_) {
+  for (auto const &other_addition : replay_cache.additions_) {
     HogDBStatus<void> ret = check_conflict(other_addition);
     if (!ret)
       return ret.error();
   }
 
   // Conflicts checked; now do merge
-  additions_.append_range(replay_cache_item.additions_);
+  additions_.append_range(replay_cache.additions_);
 
-  return marginal_storage_cost(cost_model);
+  assert_is_valid();
+  size_t entries =
+      base_replay_cache_.uniquifiers.size() + replay_cache.additions_.size();
+  return cost_model->get_replay_cache_cost(entries);
 }
 
 void
 ReplayCacheIt::undo_merge(const ReplayCacheIt &replay_cache)
 {
+  assert_is_valid();
+  replay_cache.assert_is_valid();
+
   auto removal_nonces =
       replay_cache.additions_ | std::views::transform(&Uniquifier::nonce);
   std::unordered_set<ReplayNonce> removals(removal_nonces.begin(),
@@ -488,6 +501,8 @@ ReplayCacheIt::undo_merge(const ReplayCacheIt &replay_cache)
   std::erase_if(additions_, [&removals](Uniquifier const &addition) {
     return removals.contains(addition.nonce);
   });
+
+  assert_is_valid();
 }
 
 namespace {

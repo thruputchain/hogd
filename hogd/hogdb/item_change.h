@@ -479,7 +479,8 @@ public:
     nonces.insert_range(base_replay_cache_.uniquifiers |
                         std::views::transform(&Uniquifier::nonce));
     nonces.insert_range(additions_ | std::views::transform(&Uniquifier::nonce));
-    assert(nonces.size() == base_replay_cache_.uniquifiers + additions_.size());
+    assert(nonces.size() ==
+           base_replay_cache_.uniquifiers.size() + additions_.size());
 
     // no expired uniquifiers - can't check this without acccess to dbtip
   }
@@ -602,6 +603,9 @@ public:
   HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
                                        const StorageCostModel *cost_model);
   HogDBStatus<int128_t>
+  marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
+                        const StorageCostModel *cost_model);
+  HogDBStatus<int128_t>
   marginal_storage_cost(const StorageCostModel *cost_model) const;
 
   int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
@@ -617,6 +621,7 @@ private:
   struct LazySnapshotCost {
     std::optional<int128_t> cost_;
 
+    LazySnapshotCost() = default;
     LazySnapshotCost &operator=(const LazySnapshotCost &other)
     {
       if (cost_ && other.cost_) {
@@ -651,7 +656,7 @@ private:
   };
 
   bool exclusive_{false};
-  LazySnapshotCost snapshot_cost_;
+  LazySnapshotCost snapshot_cost_{};
   bool change_committed_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData, AuthDataItem, ReplayCacheIt>

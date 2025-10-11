@@ -48,6 +48,7 @@ protected:
   }
 
   HogDBDAO db_;
+  MerkleTriePrefix trie_;
 
   StorageCostModel cost_model_ = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
@@ -55,6 +56,7 @@ protected:
       .bytestring_cost_per_byte = 10,
       .base_contract_deployment_cost = to_xdr(int128_t{12000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
 };
 
@@ -234,6 +236,62 @@ TEST_F(HogDBTest, ItemChange)
     EXPECT_EQ(x.merge(ItemChange(Bytes(bs)), &cost_model_),
               HogDBStatus<int128_t>(HogDBError(HogDBCode::kConflict)));
   }
+}
+
+TEST_F(HogDBTest, ItemChangeReplayCache)
+{
+  BlockHeight height = 9;
+  auto rckey = make_replay_cache_item_key(make_address("abcd"));
+
+  ReplayCacheData base{};
+  ItemChange c1(ReplayCacheIt(height, base));
+  c1.set_snapshot_cost(0);
+  ReplayCacheIt c2i(height, base);
+  ASSERT_TRUE(c2i.try_consume_uniquifier({height + 1, 101}));
+  ASSERT_TRUE(c2i.try_consume_uniquifier({height + 2, 102}));
+  ItemChange c2(std::move(c2i));
+
+  {
+    auto r = c1.merge(c2, &cost_model_);
+    ASSERT_TRUE(r);
+    // marginal storage cost should include two elements since
+    // stored version has nothing in it.
+    EXPECT_EQ(2 * cost_model_.kReplayCacheCostPerEntry, *r);
+    EXPECT_EQ(2 * cost_model_.kReplayCacheCostPerEntry,
+              c1.marginal_storage_cost(&cost_model_).value());
+    // store updated cache in db
+    c1.commit(db_, trie_, rckey);
+  }
+
+  height++;
+
+  auto r = db_.read_address_replay_cache(rckey.get_address());
+  ASSERT_TRUE(r);
+  auto new_base = *r;
+
+  ReplayCacheIt c3i(height, new_base);
+
+  {
+    // one entry has expired
+    ItemChange change{ReplayCacheIt{c3i}};
+    // normally BlockTX::lock does this, but test skips BlockTX
+    ASSERT_TRUE(change.load_snapshot_cost(db_, rckey, &cost_model_));
+    auto marginal_cost = change.marginal_storage_cost(&cost_model_).value();
+    // -cost_model_.kReplayCacheCostPerEntry change in cost, but
+    // marginal_storage_cost is always at least 0.
+    EXPECT_EQ(0, marginal_cost);
+  }
+
+  // succeeds because the earlier 101 entry expired
+  ASSERT_TRUE(c3i.try_consume_uniquifier({height + 1, 101}));
+  // fails because the earlier 102 entry is still unexpired
+  ASSERT_FALSE(c3i.try_consume_uniquifier({height + 1, 102}));
+  // one expired since last snapshot, one was added, so no change to overall
+  // cost
+  ItemChange change(std::move(c3i));
+  ASSERT_TRUE(change.load_snapshot_cost(db_, rckey, &cost_model_));
+  auto marginal_cost = change.marginal_storage_cost(&cost_model_).value();
+  EXPECT_EQ(0, marginal_cost);
 }
 
 } // namespace hogd

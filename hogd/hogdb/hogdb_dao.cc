@@ -424,6 +424,19 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
       }
       return cost_model->get_auth_data_cost(active_keys);
     }
+  case ItemKeyType::kItemKeyTypeReplayCache:
+    assert(key.is_replay_cache());
+    {
+      auto r = read_address_replay_cache(key.get_address());
+      if (!r && r.error() != HogDBCode::kNotFound) {
+        return r.error();
+      }
+      if (!r) {
+        assert(r.error() == HogDBCode::kNotFound);
+        return 0;
+      }
+      return cost_model->get_replay_cache_cost(r->uniquifiers.size());
+    }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
     {
