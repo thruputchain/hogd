@@ -29,6 +29,7 @@
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -60,21 +61,24 @@ public:
   SchedExecTest(SchedExecTest &&) = delete;
   SchedExecTest &operator=(SchedExecTest &&) = delete;
 
-  IntroExecResult schedexec_intro_exec(const ExecCard& card)
+  x23::Async<IntroExecResult> schedexec_intro_exec(const ExecCard& card)
   {
     info("executor with card {} connected", x23::show(card));
 
-    std::unique_lock lk(mtx_);
-    exec_cards_.push_back(card);
+    auto r = default_coropoll().pool_.async([this, &card]() {
 
-    cv_.wait(lk, [this] { return event_card_ != EventCard{}; });
-    cv_.wait(lk, [this] { return !shard_cards_.empty(); });
+        std::unique_lock lk(mtx_);
+        exec_cards_.push_back(card);
 
-    size_t exec_id = exec_id_++;
+        cv_.wait(lk, [this] { return event_card_ != EventCard{}; });
+        cv_.wait(lk, [this] { return !shard_cards_.empty(); });
 
-    return IntroExecResult{.exec_id = exec_id,
-                              .shards = shard_cards_,
-                              .event = event_card_};
+        return IntroExecResult{.exec_id = exec_id_++,
+            .shards = shard_cards_,
+            .event = event_card_};
+    });
+
+    co_return co_await r;
   }
 
   void register_event_card(EventCard card)
@@ -110,7 +114,7 @@ private:
     x23::Vec<ShardCard> shard_cards_;
 };
 
-static_assert(is_SchedExec1<SchedExecTest *, std::type_identity_t>);
+static_assert(is_SchedExec1<SchedExecTest *, x23::MaybeAsync>);
 
 class SchedDBTest {
 public:
