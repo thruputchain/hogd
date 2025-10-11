@@ -59,7 +59,8 @@ public:
       int128_t hog_delta = from_xdr(d.hog_delta);
       CHECK_NE(hog_delta, 0L);
 
-      auto hog_delta_abs = static_cast<uint128_t>(std::abs(hog_delta));
+      auto hog_delta_abs =
+          static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
 
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,

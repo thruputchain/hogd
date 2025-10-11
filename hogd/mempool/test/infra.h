@@ -90,26 +90,13 @@ public:
     db_executor_server_->shut_down();
     db_executor_server_.reset();
     // [ctx_] holds an instance of [sched_db_client], so we need to destroy it
-    // so that the client does not continue using the coropoll.
-    // TODO(jhumphri): Why do we block on [reconstruct_default_coropoll()] if we
-    // do not destroy the client? Did the following happen?
-    // 1. Client sends an RPC request.
-    // 2. [sched_db_server_] shuts down.
-    // 3. Client does not receive response, so client coroutine does not wake
-    //    up.
-    // 4. Test hangs on [reconstruct_default_coropoll()].
+    // so that the [sched_db_client] is in turned destroyed and therefore does
+    // not continue using the default coropoll.
     ctx_.reset();
 
     sched_exec_server_.shut_down();
     sched_event_server_.shut_down();
     sched_db_server_.shut_down();
-
-    // We want to wait for all of the coroutines to finish. The easiest way to
-    // do this is to destruct the coropoll. Since we are using the global
-    // coropoll and the next test in the test suite will want to also use the
-    // global coropoll, we destruct and then reconstruct it.
-    reconstruct_default_coropoll();
-    std::println("done with first part of destructor");
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
