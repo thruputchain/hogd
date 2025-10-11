@@ -50,6 +50,7 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -64,7 +65,6 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/threadpool.h"
-#include "hogd/version.h"
 
 namespace hogd {
 
@@ -290,7 +290,8 @@ private:
 
 class EventServerWrapper {
 public:
-  EventServerWrapper() {
+  EventServerWrapper()
+  {
     event_server_exec_server_.start_server(0);
     event_server_sched_server_.start_server(0);
   }
@@ -298,15 +299,18 @@ public:
   uint16_t exec_port() { return event_server_exec_server_.port(); }
   uint16_t sched_port() { return event_server_sched_server_.port(); }
 
-  EventCard make_event_card(std::string const& addr = "localhost") {
-    return EventCard{
-      .protocol = version::kHogdProtocol,
-      .upid = {},
-      .address_for_exec = std::format("{}:{}", addr, exec_port()).c_str(),
-      .address_for_sched = std::format("{}:{}", addr, sched_port()).c_str()};
+  EventCard make_event_card(std::string const &addr = "localhost")
+  {
+    return EventCard{.protocol = version::kHogdProtocol,
+                     .upid = {},
+                     .address_for_exec =
+                         std::format("{}:{}", addr, exec_port()).c_str(),
+                     .address_for_sched =
+                         std::format("{}:{}", addr, sched_port()).c_str()};
   }
 
-  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id) {
+  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id)
+  {
     return event_server_.get_events(block_id, tx_id);
   }
 

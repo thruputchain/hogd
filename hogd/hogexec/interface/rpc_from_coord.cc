@@ -24,11 +24,15 @@ ExecutorMempoolRpc::executorsched_propose_transaction(
   // TODO(geoff): co_await cp_.pool_.bg();
   auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
-    info("ExecutorMempoolRpc::executorsched_propose_transaction: No executor context found for block {}", block_id);
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: No executor "
+         "context found for block {}",
+         block_id);
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
   if (ctx->mode() != ExecutionMode::kProposing) {
-    info("ExecutorMempoolRpc::executorsched_propose_transaction: Executor context found for block {} is not in proposing mode", block_id);
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: Executor "
+         "context found for block {} is not in proposing mode",
+         block_id);
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
