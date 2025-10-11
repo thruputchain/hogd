@@ -65,18 +65,18 @@ public:
   {
     info("executor with card {} connected", x23::show(card));
 
-    auto r = default_coropoll().pool_.async([this, &card](this auto self) {
+    auto r = default_coropoll().pool_.async([](const ExecCard& card, std::mutex& mtx, std::condition_variable& cv, std::vector<ExecCard>& exec_cards, uint16_t& exec_id, const EventCard& event_card, const x23::Vec<ShardCard>& shard_cards) {
 
-        std::unique_lock lk(mtx_);
-        exec_cards_.push_back(card);
+        std::unique_lock lk(mtx);
+        exec_cards.push_back(card);
 
-        cv_.wait(lk, [this] { return event_card_ != EventCard{}; });
-        cv_.wait(lk, [this] { return !shard_cards_.empty(); });
+        cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
+        cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
 
-        return IntroExecResult{.exec_id = exec_id_++,
-            .shards = shard_cards_,
-            .event = event_card_};
-    });
+        return IntroExecResult{.exec_id = exec_id++,
+            .shards = shard_cards,
+            .event = event_card};
+    }, card, std::ref(mtx_), std::ref(cv_), std::ref(exec_cards_), std::ref(exec_id_), std::ref(event_card_), std::ref(shard_cards_));
 
     co_return co_await r;
   }
