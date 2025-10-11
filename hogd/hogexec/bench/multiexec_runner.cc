@@ -65,7 +65,7 @@ public:
   {
     info("executor with card {} connected", x23::show(card));
 
-    auto r = default_coropoll().pool_.async([this, &card]() {
+    auto r = default_coropoll().pool_.async([this, &card](this auto self) {
 
         std::unique_lock lk(mtx_);
         exec_cards_.push_back(card);
