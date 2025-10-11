@@ -1,7 +1,9 @@
+#include <cassert>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <print>
@@ -14,6 +16,8 @@
 
 #include "db_sched.hh"
 #include "event_rpc.hh"
+#include "exec_sched.hh"
+#include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -31,6 +35,7 @@
 #include "sched_exec.hh"
 #include "x23/async.h"
 #include "x23/format.h"
+#include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -102,9 +107,6 @@ public:
     cv_.wait(lk, [this, num_cards] { return exec_cards_.size() == num_cards; });
     return std::move(exec_cards_);
   }
-
-  void shut_down()
-  {}
 
 private:
     std::mutex mtx_;
@@ -179,6 +181,19 @@ auto connect_to_db_server(ShardCard const& card) {
     return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
         ->client(DbSched1{});
 }
+
+auto connect_to_exec_server(const ExecCard &card) {
+    x23::HostPort host_port;
+    if (!host_port.parse(card.address)) {
+        throw std::runtime_error("Failed to parse exec server address");
+    }
+    auto server_addr = host_port.to_addr(true);
+    if (!server_addr) {
+        throw std::runtime_error("Failed to connect to exec server");
+    }
+    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+        ->client(ExecutorSched1{});
+}
 }
 
 // this assumes the executors use the same port config
@@ -237,6 +252,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
   auto event_sched_client = connect_to_event_sched_server(event_server_sched_port);
   assert(db_cards.size() == 1);
   auto db_sched_client = connect_to_db_server(db_cards[0]);
+    
+  std::vector<ExecutorSched1::template client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>> exec_clients;
+  exec_clients.reserve(exec_cards.size());
+  for (const auto &exec_card : exec_cards) {
+    exec_clients.emplace_back(connect_to_exec_server(exec_card));
+  }
 
   auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
     event_sched_client.eventsched_open_block(block_number);
@@ -244,10 +265,21 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
     if (res != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
+
+    for (auto &exec_client : exec_clients) {
+      auto r = exec_client.executorsched_open_proposal_block(block_number);
+      if (r != ExecResult::ExecResultOK) {
+        throw std::runtime_error("Failed to open proposal block");
+      }
+    }
   };
 
   auto close_block = [&](uint64_t block_number) {
+    for (auto &exec_client : exec_clients) {
+      exec_client.executorsched_finish_block(block_number);
+    }
     event_sched_client.eventsched_close_block(block_number);
+
     auto res = db_sched_client.dbsched_close_snapshot(block_number);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to close snapshot");
