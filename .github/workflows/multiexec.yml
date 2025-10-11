@@ -53,7 +53,7 @@ jobs:
     - name: configure
       run: ./scripts/build.sh -d release -t Release -c gcc -n
     - name: build
-      run: make -C release -j$(nproc) control_server hogdb hogexec
+      run: make -C release -j$(nproc) control_server hogdb_exec hogexec
     - name: clear hogdb file directory
       run: |
         rm -r ./hogdb_data/ || true
