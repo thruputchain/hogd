@@ -38,6 +38,14 @@ public:
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
                                                std::move(event_server_proxy));
+    ready_flag_ = true;
+  }
+
+  ExecResult executorsched_ready()
+  {
+    if (!ready_flag_)
+      return ExecResult::ExecResultSystemError;
+    return ExecResult::ExecResultOK;
   }
 
   // Disable copy and move
@@ -94,6 +102,7 @@ private:
 
   std::unique_ptr<ExecutorStateManager> executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
+  std::atomic<bool> ready_flag_ = false;
 };
 
 static_assert(is_ExecutorSched1<ExecutorMempoolRpc *, x23::MaybeAsync>);

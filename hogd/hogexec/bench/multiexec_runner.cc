@@ -281,6 +281,22 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
     exec_clients.emplace_back(connect_to_exec_server(exec_card));
   }
 
+  auto await_ready = [&](auto& exec_client) {
+    while(true) {
+      auto res = exec_client.executorsched_ready();
+      if (res != ExecResult::ExecResultOK) {
+        warn_every_n_sec(1.0, "Executor is not ready, retrying...");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        continue;
+      }
+      break;
+    }
+  };
+
+  for (auto &exec_client : exec_clients) {
+    await_ready(exec_client);
+  }
+
   auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
     event_sched_client.eventsched_open_block(block_number);
     auto res = db_sched_client.dbsched_create_snapshot(parent_block_number, block_number, BlockExecutionMode::kBlockExecutionModeProposal);
