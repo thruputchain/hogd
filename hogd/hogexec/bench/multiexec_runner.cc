@@ -375,6 +375,21 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
 
+  for (auto const& init_blocks : loadgen_result.success().initialization_txs) {
+    for (auto const& tx : init_blocks) {
+
+      open_block(parent_block_number, current_block_number);
+
+      auto res = exec_clients.at(0).executorsched_propose_transaction(current_block_number, tx);
+      if (res.result() != ExecResult::ExecResultOK) {
+        throw std::runtime_error("Failed to propose transaction");
+      }
+      close_block(current_block_number);
+      parent_block_number = current_block_number;
+      current_block_number++;
+    }
+  }
+
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
                                             1'000, 1000000);
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
