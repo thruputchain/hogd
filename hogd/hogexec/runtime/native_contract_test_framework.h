@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -49,8 +50,10 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -285,6 +288,40 @@ private:
   client_t event_sched_client_;
 };
 
+class EventServerWrapper {
+public:
+  EventServerWrapper()
+  {
+    event_server_exec_server_.start_server(0);
+    event_server_sched_server_.start_server(0);
+  }
+
+  uint16_t exec_port() { return event_server_exec_server_.port(); }
+  uint16_t sched_port() { return event_server_sched_server_.port(); }
+
+  EventCard make_event_card(std::string const &addr = "localhost")
+  {
+    return EventCard{.protocol = version::kHogdProtocol,
+                     .upid = {},
+                     .address_for_exec =
+                         std::format("{}:{}", addr, exec_port()).c_str(),
+                     .address_for_sched =
+                         std::format("{}:{}", addr, sched_port()).c_str()};
+  }
+
+  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id)
+  {
+    return event_server_.get_events(block_id, tx_id);
+  }
+
+private:
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+  TestEventAggregatorSchedServer event_server_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
+};
+
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
@@ -516,7 +553,7 @@ public:
 
   std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
   {
-    return event_server_.get_events(tx_id.block_id, tx_id.tx_id);
+    return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
   }
 
   std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
@@ -560,18 +597,15 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
-    uint16_t event_server_exec_port = event_server_exec_server_.start_server(0);
-    uint16_t event_server_sched_port =
-        event_server_sched_server_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
     event_sched_wrapper_ =
-        std::make_unique<EventSchedWrapper>(event_server_sched_port);
+        std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());
 
     event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_server_exec_port});
+        x23::HostPort{"localhost", event_server_wrapper_.exec_port()});
 
     if (!empty_genesis) {
       return;
@@ -610,11 +644,7 @@ private:
   std::unique_ptr<EventSchedWrapper> event_sched_wrapper_;
 
   // TODO(geoff): replace with proper event server connection
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  TestEventAggregatorSchedServer event_server_sched_server_ =
-      TestEventAggregatorSchedServer(event_server_);
+  EventServerWrapper event_server_wrapper_;
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

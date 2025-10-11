@@ -12,7 +12,6 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
-#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"

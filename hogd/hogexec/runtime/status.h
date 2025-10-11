@@ -161,6 +161,12 @@ struct InvokeResult {
 
   constexpr bool is_root_success() const { return is_frame_success(); }
 
+  bool has_readable_proposal_data() const
+  {
+    return result_.has_value() ||
+           result_.error().code() == InvokeErrorCode::kInvokeDeterministic;
+  }
+
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
 };
 

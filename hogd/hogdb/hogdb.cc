@@ -1,5 +1,6 @@
 // hogdb.cc - handles initialization for hogdb
 
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -7,11 +8,11 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <thread>
 #include <utility>
 
@@ -38,7 +39,6 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
