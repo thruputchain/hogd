@@ -971,6 +971,19 @@ uformat_to(Out *s, std::format_string<Args...> fmt, Args &&...args)
   });
 }
 
+template<is_bytevec Out>
+void
+uvformat_to(Out *s, std::string_view fmt, std::format_args args)
+{
+  size_t old_size = s->size();
+  size_t new_size = old_size + detail::vformatted_size(fmt, args);
+  s->resize_and_overwrite(new_size, [&](auto *p0, size_t count) {
+    char *p = reinterpret_cast<char *>(p0);
+    char *p2 = std::vformat_to(p + old_size, fmt, args);
+    return p2 - p;
+  });
+}
+
 Str
 hexdump(const is_range_of<uint8_t> auto &r)
 {

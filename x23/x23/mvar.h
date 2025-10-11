@@ -86,7 +86,7 @@ public:
     MVar *mv_{};
   };
 
-  MVar() = default;
+  constexpr MVar() = default;
   template<typename... Args> requires std::constructible_from<T, Args...>
   MVar(Args &&...args) noexcept(noexcept(T(std::forward<Args>(args)...)))
     : t_(std::forward<Args>(args)...)
