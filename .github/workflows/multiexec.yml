@@ -99,7 +99,7 @@ jobs:
     - name: cargo fetch
       run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc
+      run: ./scripts/build.sh -d release -t Release -c clang
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  
