@@ -325,6 +325,12 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
   ASSERT_EQ(from_xdr(res->nnint()), 500);
   // NOLINTEND(bugprone-unchecked-optional-access)
+
+  if (GetParam() == TestDB::kHogDB) {
+    // simple check to make sure blockheight of > 1 is working
+    auto hogs_transferred = get_hogs_transferred(2);
+    ASSERT_EQ(hogs_transferred.size(), 0);
+  }
 }
 
 TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)

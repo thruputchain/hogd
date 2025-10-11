@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
@@ -35,7 +36,9 @@ hogexec_init(const std::string &coordinator_addr)
   Executor executor;
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(coordinator_host, coordinator_port);
-  CHECK_EQ(executor.start(kExecServerPort, coordinator_sockaddr),
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  CHECK_EQ(executor.start(hostname, kExecServerPort, coordinator_sockaddr),
            kExecServerPort);
 
   // block forever

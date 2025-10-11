@@ -29,11 +29,11 @@ namespace {
 
 struct SigState {
   std::atomic<sig_atomic_t> flag{}; // Set to 1 in signal handler
-  unsigned numcb{0};	// Count cbs to reset OS signal handler when 0
+  unsigned numcb{0}; // Count cbs to reset OS signal handler when 0
 };
 
 struct SigCB {
-  std::function<void()> cb;   // The callback to make (if not deleted)
+  std::function<void()> cb;        // The callback to make (if not deleted)
   std::atomic_bool deleted{false}; // True if callback deleted
 
   SigCB(SigCB &&other) noexcept

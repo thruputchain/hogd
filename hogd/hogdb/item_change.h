@@ -22,6 +22,8 @@
 #include <concepts>
 #include <cstddef>
 #include <format>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -99,6 +101,86 @@ template<typename T>
 concept is_item_commit_required = requires(T t, const T &arg) {
   { t.commit_change(arg) } -> std::same_as<void>;
 } && is_item<T>;
+
+template<is_item T> class PointerItem : std::unique_ptr<T> {
+public:
+  template<typename... Args>
+  PointerItem(Args &&...args)
+    : std::unique_ptr<T>(new T(std::forward<Args>(args)...))
+  {}
+
+  PointerItem(PointerItem &&other) noexcept
+    : std::unique_ptr<T>(std::move(other)) {};
+
+  PointerItem &operator=(PointerItem &&other) noexcept
+  {
+    std::unique_ptr<T>::operator=(std::move(other));
+    return *this;
+  }
+
+  // ItemChange requires a copy constructor;
+  // This may be nontrivially expensive; we should correspondinginly increase
+  // gas costs for item types that require this pointer indirection.
+  PointerItem(const PointerItem &other)
+    : std::unique_ptr<T>(new T(*other.get()))
+  {}
+  PointerItem &operator=(const PointerItem &other)
+  {
+    std::unique_ptr<T>::reset(new T(*other.get()));
+    return *this;
+  }
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const
+  {
+    return this->get()->commit(db, trie, key);
+  }
+  bool narrow(const PointerItem &pointer_item)
+  {
+    return this->get()->narrow(*pointer_item.get());
+  }
+  HogDBStatus<int128_t> merge(const PointerItem &pointer_item,
+                              const StorageCostModel *cost_model)
+  {
+    return this->get()->merge(*pointer_item.get(), cost_model);
+  }
+  void undo_merge(const PointerItem &pointer_item)
+  {
+    return this->get()->undo_merge(*pointer_item.get());
+  }
+  size_t storage_size() const { return this->get()->storage_size(); }
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const
+  {
+    return this->get()->committed_storage_cost(cost_model);
+  }
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const
+  {
+    return this->get()->marginal_storage_cost(cost_model);
+  }
+
+  void commit_change(const PointerItem &pointer_item)
+      requires is_item_commit_required<T>
+  {
+    return this->get()->commit_change(*pointer_item.get());
+  }
+
+private:
+  friend struct std::formatter<PointerItem<T>>;
+  friend class ItemChange;
+};
+
+} // namespace hogd
+
+template<hogd::is_item T> struct std::formatter<hogd::PointerItem<T>> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::PointerItem<T> &pointer_item, auto &ctx)
+  {
+    return format_to(ctx.out(), "{}", *pointer_item.get());
+  }
+};
+
+namespace hogd {
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
 // plus does not overflow. The item's value at commit time is base + delta.
@@ -458,7 +540,8 @@ template<> struct std::formatter<hogd::AuthDataItem> {
     return ctx.out();
   }
 };
-static_assert(hogd::is_item_commit_required<hogd::AuthDataItem>);
+static_assert(
+    hogd::is_item_commit_required<hogd::PointerItem<hogd::AuthDataItem>>);
 
 namespace hogd {
 
@@ -502,7 +585,7 @@ public:
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
   bool is_auth_data() const
   {
-    return std::holds_alternative<AuthDataItem>(type_);
+    return std::holds_alternative<PointerItem<AuthDataItem>>(type_);
   }
 
   // commit applies the item's changes to the ramdb.
@@ -523,16 +606,12 @@ public:
 
   HogDBStatus<void> load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
                                        const StorageCostModel *cost_model);
-  HogDBStatus<int128_t>
-  marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
-                        const StorageCostModel *cost_model);
+
   HogDBStatus<int128_t>
   marginal_storage_cost(const StorageCostModel *cost_model) const;
 
   int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
-  HogDBStatus<int128_t>
-  committed_storage_cost(HogDBDAO &db, const ItemKey &key,
-                         const StorageCostModel *cost_model);
+
   auto get_type() const { return type_.index(); }
 
   bool no_storage_cost() const
@@ -543,52 +622,54 @@ public:
 
 private:
   struct LazySnapshotCost {
-    std::optional<int128_t> cost_;
+    // negative values imply that the cost is not set
+    int128_t cost_{std::numeric_limits<int128_t>::min()};
 
     LazySnapshotCost &operator=(const LazySnapshotCost &other)
     {
-      if (cost_ && other.cost_) {
-        assert(*cost_ == *other.cost_);
-      }
-      if (!cost_) {
+      assert(cost_ == other.cost_ || cost_ < 0 || other.cost_ < 0);
+      if (cost_ < 0) {
         cost_ = other.cost_;
       }
       return *this;
     }
     LazySnapshotCost &operator=(int128_t cost)
     {
-      if (cost_) {
-        assert(*cost_ == cost);
-      }
+      assert(cost_ < 0 || cost_ == cost);
       cost_ = cost;
       return *this;
     }
 
-    bool has_value() const { return cost_.has_value(); }
+    bool has_value() const { return cost_ >= 0; }
     int128_t value() const
     {
-      assert(cost_.has_value());
-      return cost_.value();
+      assert(cost_ >= 0);
+      return cost_;
     }
     auto &operator*(this auto &self)
     {
-      assert(self.cost_.has_value());
-      return *self.cost_;
+      assert(self.has_value());
+      return self.cost_;
     }
-    operator bool() const { return cost_.has_value(); }
   };
 
-  bool exclusive_{false};
-  LazySnapshotCost snapshot_cost_;
-  bool change_committed_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData, AuthDataItem>
+               NewContractData, PointerItem<AuthDataItem>>
       type_;
+  LazySnapshotCost snapshot_cost_;
+  bool exclusive_{false};
+  bool change_committed_{false};
 
   size_t storage_size() const;
 
   friend struct std::formatter<ItemChange>;
 };
+
+// Performance can degrade if an ItemChange becomes too large.
+// This is not a hard limit; the current size is 112.  This is a check
+// so that we do not accidentally increase the size.
+// The biggest type in the ItemChange is NNInt128, which is 64 bytes.
+static_assert(sizeof(ItemChange) <= 128);
 
 inline std::optional<int128_t>
 ItemChange::to_nnint128() const
@@ -609,8 +690,8 @@ ItemChange::to_bytes() const
 inline std::optional<AuthDataItem>
 ItemChange::to_auth_data() const
 {
-  if (const auto *tmp = std::get_if<AuthDataItem>(&type_); tmp)
-    return *tmp;
+  if (const auto *tmp = std::get_if<PointerItem<AuthDataItem>>(&type_); tmp)
+    return *(tmp->get());
   return std::nullopt;
 }
 
@@ -634,7 +715,7 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
   }
   auto out = ItemChange(NNInt128(*balance, delta));
   out.set_snapshot_cost(0);
-  return out;
+  return HogDBStatus<ItemChange>(std::in_place_t{}, std::move(out));
 }
 
 } // namespace hogd

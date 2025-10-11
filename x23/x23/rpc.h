@@ -472,10 +472,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
 
-  void log_message(std::string msg) override
-  {
-    logger_.log_message("{}", msg);
-  }
+  void log_message(std::string msg) override { logger_.log_message("{}", msg); }
 };
 
 // The return type of RpcStream<Logger>::client<VersMeta>, for

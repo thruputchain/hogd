@@ -156,7 +156,7 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
 TEST_F(GenesisBlockTest, EmptyGenesisBlock)
 {
   // Create empty genesis block
-  GenesisBlock genesis_block;
+  GenesisBlock genesis_block{};
 
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);

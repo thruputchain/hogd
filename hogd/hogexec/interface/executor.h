@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -10,6 +11,7 @@
 #include "sched_exec.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -19,7 +21,7 @@ public:
 
   // Register this executor with the coordinator.
   IntroExecResult
-  register_with_coordinator(uint16_t executor_port,
+  register_with_coordinator(x23::HostPort const &self_hostport,
                             const sockaddr_storage &coordinator_sockaddr);
 
 private:
@@ -44,7 +46,7 @@ class Executor {
 public:
   ~Executor() { await_shutdown_request(); }
 
-  uint16_t start(uint16_t port_number,
+  uint16_t start(std::string const &self_hostname, uint16_t self_port,
                  const sockaddr_storage &coordinator_sockaddr)
   {
     // When we register with the coordinator, we need to tell the coordinator
@@ -54,12 +56,13 @@ public:
     // Thus, we start the RPC server first, then below we register with the
     // coordinator, and finally we start handling incoming RPCs in
     // [start_rpc_service()].
-    uint16_t executor_port = server_.start_server(port_number);
+    uint16_t executor_port = server_.start_server(self_port);
+    assert(executor_port == self_port || self_port == 0);
 
     // Now register with the coordinator.
     MempoolExecutorClient client(server_.cp_);
-    IntroExecResult exec_result =
-        client.register_with_coordinator(executor_port, coordinator_sockaddr);
+    IntroExecResult exec_result = client.register_with_coordinator(
+        x23::HostPort(self_hostname, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
     server_.impl_.init(std::move(exec_result));

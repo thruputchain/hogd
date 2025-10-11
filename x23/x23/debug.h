@@ -101,7 +101,7 @@ struct NullDebugFd {
 
 #ifdef NDEBUG
 inline NullDebugFd debug;
-#else // !NDEBUG
+#else  // !NDEBUG
 inline DebugFd<"X23SERVER_TRACE"> debug;
 #endif // !NDEBUG
 

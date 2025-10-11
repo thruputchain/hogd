@@ -401,9 +401,9 @@ struct RpcTraceMode {
     ret.fd = DebugFd<EnvVar>::fd();
     if (ret.fd >= 0) {
       if (*DebugFd<EnvVar>::env_val.c_str() == ',')
-	ret.mode = kCsv;
+        ret.mode = kCsv;
       else
-	ret.mode = kTrace;
+        ret.mode = kTrace;
     }
     return ret;
   }
