@@ -89,6 +89,16 @@ public:
     db_scheduler_server_.reset();
     db_executor_server_->shut_down();
     db_executor_server_.reset();
+    // [ctx_] holds an instance of [sched_db_client], so we need to destroy it
+    // so that the client does not continue using the coropoll.
+    // TODO(jhumphri): Why do we block on [reconstruct_default_coropoll()] if we
+    // do not destroy the client? Did the following happen?
+    // 1. Client sends an RPC request.
+    // 2. [sched_db_server_] shuts down.
+    // 3. Client does not receive response, so client coroutine does not wake
+    //    up.
+    // 4. Test hangs on [reconstruct_default_coropoll()].
+    ctx_.reset();
 
     sched_exec_server_.shut_down();
     sched_event_server_.shut_down();
