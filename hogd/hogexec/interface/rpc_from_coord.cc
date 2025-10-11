@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "exec_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"

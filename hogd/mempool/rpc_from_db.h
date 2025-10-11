@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <utility>
 
 #include "discovery.hh"
 #include "hogd/base/rpc_server.h"
@@ -9,6 +10,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/scheduler.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -45,10 +47,34 @@ public:
     co_return;
   }
 
-  static x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
+  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
   {
-    // TODO(jhumphri): Implement.
-    co_return;
+    CHECK_PTR(scheduler_.get());
+
+    for (const Delta &d : transfers.deltas) {
+      // std::println("scheddb_hogs_transferred, block height {}, account {},
+      // num "
+      //              "hogs transferred {}",
+      //              transfers.block, d.address, from_xdr(d.hog_delta));
+      int128_t hog_delta = from_xdr(d.hog_delta);
+      CHECK_NE(hog_delta, 0L);
+
+      auto hog_delta_abs =
+          static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
+
+      if (hog_delta >= 0L) {
+        co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
+                                                   transfers.block);
+      }
+      else {
+        co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
+      }
+    }
+  }
+
+  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
+  {
+    scheduler_ = std::move(scheduler);
   }
 
   static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
@@ -78,6 +104,8 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
+
+  std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 
