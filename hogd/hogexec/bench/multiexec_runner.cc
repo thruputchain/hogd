@@ -154,7 +154,7 @@ public:
 
   static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
 
-  std::vector<ShardCard> await_shard_cards(int num_cards)
+  x23::Vec<ShardCard> await_shard_cards(int num_cards)
   {
     std::unique_lock lk(mtx_);
     cv_.wait(lk,
@@ -165,7 +165,7 @@ public:
 private:
   std::mutex mtx_;
   std::condition_variable cv_;
-  std::vector<ShardCard> shard_cards_;
+  x23::Vec<ShardCard> shard_cards_;
 };
 
 static_assert(is_SchedDb1<SchedDBTest *, std::type_identity_t>);
@@ -286,6 +286,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   auto db_cards = sched_db_test.impl_.await_shard_cards(1);
+  sched_exec_test.impl_.register_shard_cards(db_cards);
   auto exec_cards =
       sched_exec_test.impl_.await_executor_cards(server_addrs.size() - 1);
 
