@@ -9,32 +9,39 @@
 
 namespace x23 {
 
+// A class you can either ignore or convert into an AutoSignalCbHandle
 class RawSignalCbHandle {
-public:
-  void cancel()
-  {
-    assert(!delflag_->load(std::memory_order_relaxed));
-    *delflag_ = true;
-  }
-
 protected:
-  RawSignalCbHandle(std::atomic_bool *d) noexcept : delflag_(d) {}
   std::atomic_bool *delflag_;
+
+  RawSignalCbHandle(std::atomic_bool *d) noexcept : delflag_(d) {}
+
+  // Delete the signal callback.
+  void cancel();
 
   friend class AutoSignalCbHandle;
   friend RawSignalCbHandle signal_cb(int, std::function<void()>);
 };
 
+// A reference to a signal callback that cancels the callback when the
+// AutoSignalCbHandle is destroyed.
 class AutoSignalCbHandle : RawSignalCbHandle {
 public:
   AutoSignalCbHandle() noexcept : RawSignalCbHandle(nullptr) {}
-  AutoSignalCbHandle(const RawSignalCbHandle &raw) : RawSignalCbHandle(raw) {}
   AutoSignalCbHandle(AutoSignalCbHandle &&other) noexcept
-    : RawSignalCbHandle(other.release())
+    : RawSignalCbHandle(std::exchange(other.delflag_, nullptr))
+  {}
+  AutoSignalCbHandle(RawSignalCbHandle &&other)
+    : RawSignalCbHandle(std::exchange(other.delflag_, nullptr))
   {}
   AutoSignalCbHandle &operator=(AutoSignalCbHandle &&other) noexcept
   {
-    RawSignalCbHandle::operator=(other.release());
+    delflag_ = std::exchange(other.delflag_, nullptr);
+    return *this;
+  }
+  AutoSignalCbHandle &operator=(RawSignalCbHandle &&other) noexcept
+  {
+    delflag_ = std::exchange(other.delflag_, nullptr);
     return *this;
   }
   ~AutoSignalCbHandle()

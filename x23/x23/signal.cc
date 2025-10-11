@@ -19,7 +19,7 @@ namespace x23 {
 #ifdef _NSIG
 #define NSIG _NSIG
 #else
-#define NSIG 64 // fallback if you must
+#define NSIG 64
 #endif
 #endif
 
@@ -32,15 +32,30 @@ struct SigState {
   unsigned numcb{0}; // Count cbs to reset OS signal handler when 0
 };
 
+// Per signal callback state
 struct SigCB {
-  std::function<void()> cb;        // The callback to make (if not deleted)
-  std::atomic_bool deleted{false}; // True if callback deleted
+  // The callback to make (if not deleted)
+  std::function<void()> cb;
+
+  // True if the callback should be deleted.  Note that we only ever
+  // actually destroy callbacks in the unique thread that services
+  // them.  Since a callback might want to unregister itself, we just
+  // keep a deleted flag that other threads can set.  Then the service
+  // thead just destroys the callback next time through.
+  std::atomic_bool deleted{false};
 
   SigCB(SigCB &&other) noexcept
     : cb(std::move(other.cb)), deleted(other.deleted.load())
   {}
   SigCB(std::function<void()> &&c) : cb(std::move(c)) {}
 };
+
+// ID of dedicated service thread
+std::thread::id sig_service_thread_id;
+
+// Even when the service thread is quiescent, odd when it is making
+// callbacks.
+std::atomic_uint64_t sig_service_count;
 
 // Per-signal state
 std::array<SigState, NSIG> sig_state;
@@ -75,34 +90,38 @@ get_sig_pipe()
 void
 handler(int sig)
 {
-  assert(size_t(sig) < sig_state.size());
-  sig_state[sig].flag.store(1);
+  if (sig > 0 && size_t(sig) < sig_state.size())
+    sig_state[sig].flag.store(1);
   write(get_sig_pipe()[1], "", 1);
 }
 
 void
 service_once()
 {
-  for (int sig = 0; size_t(sig) < sig_state.size(); ++sig) {
-    if (!sig_state[sig].flag.load() || !sig_state[sig].flag.exchange(0))
-      continue;
-    auto ptr = take_sig_cbs();
-    auto it = ptr->lower_bound(sig);
-    while (it != ptr->end() and it->first == sig) {
-      if (!it->second.deleted) {
-        auto &cb = it->second.cb;
-        ptr.reset();
-        cb();
-        ptr = take_sig_cbs();
-      }
-      if (it->second.deleted) {
-        it = ptr->erase(it);
-        if (!--sig_state[sig].numcb)
-          signal(sig, SIG_DFL);
-      }
-      else
-        ++it;
+  int sig = 0;
+  bool happened = false;
+  auto ptr = take_sig_cbs();
+  auto it = ptr->begin();
+
+  while (it != ptr->end()) {
+    if (sig != it->first) {
+      sig = it->first;
+      happened = sig_state[sig].flag.load();
     }
+
+    if (happened && !it->second.deleted) {
+      ptr.reset();
+      it->second.cb();
+      ptr = take_sig_cbs();
+    }
+
+    if (it->second.deleted) {
+      it = ptr->erase(it);
+      if (!--sig_state[sig].numcb)
+        signal(sig, SIG_DFL);
+    }
+    else
+      ++it;
   }
 }
 
@@ -113,7 +132,10 @@ service_loop()
   for (;;) {
     std::array<char, 64> buf;
     ::read(fd, buf.data(), buf.size());
+    sig_service_count.fetch_add(1);
     service_once();
+    sig_service_count.fetch_add(1);
+    sig_service_count.notify_all();
   }
 }
 
@@ -125,8 +147,11 @@ signal_cb(int sig, std::function<void()> cb)
   assert(sig > 0 && size_t(sig) < sig_state.size());
 
   static std::atomic_flag init{};
-  if (!init.test_and_set(std::memory_order_relaxed))
-    std::thread(service_loop).detach();
+  if (!init.test_and_set(std::memory_order_relaxed)) {
+    std::thread service_thread(service_loop);
+    sig_service_thread_id = service_thread.get_id();
+    service_thread.detach();
+  }
 
   auto ptr = take_sig_cbs();
   auto it = ptr->emplace(sig, std::move(cb));
@@ -139,6 +164,24 @@ signal_cb(int sig, std::function<void()> cb)
       Errno{}.raise("sigaction({})", sig);
   }
   return &it->second.deleted;
+}
+
+void
+RawSignalCbHandle::cancel()
+{
+  assert(delflag_ && !delflag_->load(std::memory_order_relaxed));
+  *delflag_ = true;
+  delflag_ = nullptr;
+
+  auto count = sig_service_count.load();
+  handler(0); // Ensure service_loop removes cb from map
+
+  // If we are servicing signals, wait to ensure callbacks are done
+  // before returning.  Otherwise, if this is happening in a
+  // destructor, we could potentially be right about to fire the
+  // callback as an object accessed by the callback is destroyed.
+  if ((count & 1) && std::this_thread::get_id() != sig_service_thread_id)
+    sig_service_count.wait(count);
 }
 
 } // namespace x23
