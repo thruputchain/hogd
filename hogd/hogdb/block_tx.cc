@@ -141,8 +141,8 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
 }
 
 HogDBStatus<int128_t>
-BlockTX::modify_lock(const ItemKey &key, ItemChange &old_change,
-                     ItemChange &new_change)
+BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
+                     const ItemChange &new_change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {

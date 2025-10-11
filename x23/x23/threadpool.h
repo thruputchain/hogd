@@ -137,7 +137,7 @@ template<typename T> struct CpuHinted {
   [[no_unique_address]] T value;
   unsigned cpuhint;
 
-  template<std::constructible_from<> = T>
+  template<std::same_as<T> U = T> requires std::constructible_from<U>
   CpuHinted() noexcept : value{}, cpuhint{}
   {}
   CpuHinted(T v, unsigned h) noexcept : value(std::move(v)), cpuhint(h) {}
@@ -344,6 +344,8 @@ public:
     void check() const noexcept {}
 #endif // NDEBUG
   };
+
+  std::string show();
 
 private:
   // Timestamp for empty queues
