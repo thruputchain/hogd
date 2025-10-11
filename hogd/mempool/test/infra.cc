@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/mempool/registration.h"
 #include "sched_db.hh"
 
