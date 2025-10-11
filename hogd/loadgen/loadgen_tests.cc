@@ -9,6 +9,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -37,13 +38,20 @@ TEST_P(LoadgenTests, EmptyGenesisBlock)
 
 TEST_P(LoadgenTests, OneInitialConfig)
 {
-  GenesisBlock genesis_block;
+  GenesisBlock genesis_block{};
   genesis_block.initial_config.emplace_back(InitialConfigurationEntry{
       .config = PresetDeploymentConfig{.initial_nonce = sha256(Bytestring{}),
                                        .contract_hash = sha256(Bytestring{}),
                                        .entrypoint = {},
                                        .calldata = Calldata{}},
       .amount = to_xdr(int128_t{1'000'000})});
+  genesis_block.storage_cost_model = {
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+  };
   run_genesis_initialization(genesis_block);
 
   auto bal = lookup_storage_item_from_db(make_free_native_token_balance_addrkey(

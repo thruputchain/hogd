@@ -4,11 +4,13 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -85,8 +87,16 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
+  std::optional<TxEventLog> get_tx_event_log()
+  {
+    return db_.get_tx_event_log(identifier_);
+  }
+
 private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
+
+  DBContext::EphemeralTxIdentifier identifier_;
+  DBContext &db_;
 
   SystemCallHandler handler_;
   std::vector<MockRuntime *> mock_runtime_stack_;

@@ -5,14 +5,12 @@
 #include <cstddef>
 #include <iterator>
 #include <span>
-#include <stdexcept>
 #include <utility>
 
 #include "account.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
@@ -83,7 +81,7 @@ void
 HogConservationInvariant::handle_address_metadata_item_change(
     HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
 {
-  auto get_storage_cost = [](HogDBStatus<DBItem> const &item) -> int128_t {
+  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
       return 0;
     }
@@ -97,7 +95,8 @@ HogConservationInvariant::handle_address_metadata_item_change(
       assert(false);
       return 0;
     }
-    return storage_cost(deployed_contract_hash.contract_size);
+    return cost_model_.get_contract_size_cost(
+        deployed_contract_hash.contract_size);
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);
@@ -109,16 +108,16 @@ void
 HogConservationInvariant::handle_contract_data_item_change(
     HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
 {
-  auto get_storage_cost = [](HogDBStatus<DBItem> const &item) -> int128_t {
+  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
       return 0;
     }
 
     switch (item.value().type) {
     case kNNInt128:
-      return storage_cost(sizeof(int128_t));
+      return cost_model_.get_nnint_cost();
     case kBytes:
-      return storage_cost(item.value().value.size());
+      return cost_model_.get_bytestring_cost(item.value().value.size());
     default:
       warn("unknown db item type: {}", item.value().type);
       assert(false);
@@ -137,7 +136,7 @@ void
 HogConservationInvariant::handle_account_auth_data_item_change(
     HogDBStatus<DBItem> const &before, HogDBStatus<DBItem> const &after)
 {
-  auto get_storage_cost = [](HogDBStatus<DBItem> const &item) -> int128_t {
+  auto get_storage_cost = [this](HogDBStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
       return 0;
     }
@@ -150,8 +149,13 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       assert(false);
       return 0;
     }
-    throw std::runtime_error(
-        "account auth data type not yet implemented in hogdb");
+    size_t active_keys = 0;
+    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      if (auth_data.public_keys[i]) {
+        active_keys++;
+      }
+    }
+    return cost_model_.get_auth_data_cost(active_keys);
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);

@@ -2,19 +2,32 @@
 
 #pragma once
 
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <memory>
 #include <mutex>
 #include <stop_token>
-
+#include <string>
 #include <sys/socket.h>
+#include <system_error>
+#include <type_traits>
+#include <utility>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corosync.h>
+#include <x23/corotrace.h>
+#include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/signal.h>
 #include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
@@ -81,8 +94,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
       std::conditional_t<kStructSize <= 0xffff, std::uint16_t,
                          std::conditional_t<kStructSize <= 0xffffffff,
                                             std::uint32_t, size_t>>>;
-  using Super = std::enable_shared_from_this<GenReadBuffer>;
-  static constexpr size_t kTrimSize = sizeof(Super) + (2 * sizeof(PosType));
+  static constexpr size_t kTrimSize = sizeof(RefCount) + (2 * sizeof(PosType));
   static_assert(kStructSize > kTrimSize);
   using Mem = std::array<char, kStructSize - kTrimSize>;
 
@@ -91,7 +103,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
   Mem m_;
 
   GenReadBuffer() noexcept = default;
-  GenReadBuffer(GenReadBuffer &&) noexcept = delete;
+  GenReadBuffer(const GenReadBuffer &) = delete;
 
   size_t nbuffered() const noexcept { return stop_ - start_; }
 
@@ -116,6 +128,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
     iov[1].iov_base = m_.data();
     iov[1].iov_len = m_.size();
     auto n = ::readv(fd, iov, 2);
+
     if (n <= ptrdiff_t(len))
       return n;
     stop_ = n - len;
@@ -176,6 +189,7 @@ private:
     CoroPoll *cp_;
     BorrowedFd fd_;
     std::unique_lock<std::mutex> lk_;
+    bool got_eagain_{false};
 
     Service(Service &&) noexcept = default;
     bool work_needed()
@@ -288,9 +302,9 @@ private:
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
-    std::atomic<std::uint32_t> ready{0};
+    std::atomic<std::uint32_t> ready_{0};
     // callbacks: [0] = reader, [1] = writer
-    std::array<AtomicWorkItem, 2> callbacks{};
+    std::array<AtomicWorkItem, 2> callbacks_{};
 
     FdState() noexcept = default;
     FdState(FdState &&other) noexcept : BufHolder(std::move(other))
@@ -315,10 +329,10 @@ private:
     void copy_fields(const FdState &other)
     {
       mode_ = other.mode_.load();
-      ready = other.ready.load();
-      for (size_t i = 0; i < callbacks.size(); ++i) {
-        callbacks[i].value = other.callbacks[i].value.load();
-        callbacks[i].cpuhint = other.callbacks[i].cpuhint.load();
+      ready_ = other.ready_.load();
+      for (size_t i = 0; i < callbacks_.size(); ++i) {
+        callbacks_[i].value = other.callbacks_[i].value.load();
+        callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
       }
     }
   };
@@ -330,6 +344,7 @@ private:
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
+  AutoSignalCbHandle sigcb_;
 
   struct FdPtr {
     FdState *p_;
@@ -339,13 +354,16 @@ private:
   };
   FdPtr getfd(BorrowedFd fd);
 
+  std::string showfd(const FdPtr &fdp);
+  void debug_dump();
+
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode();
-    if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange({})) {
+    if ((fdp->ready_ & epflags[write]) || mode != kActive)
+      if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
         wi(mode == kActive ? 0 : EBADF);
       }

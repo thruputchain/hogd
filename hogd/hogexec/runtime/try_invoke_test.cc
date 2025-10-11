@@ -1330,8 +1330,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   auto const *cost_model = get_default_cost_model();
 
   // Cost for one bytestring write ("abc")
-  int128_t one_write_cost = cost_model->kBaseItemCost +
-                            cost_model->get_bytestring_cost(str_abc.size());
+  int128_t one_write_cost = cost_model->get_bytestring_cost(str_abc.size());
 
   // Deploy contract with three methods:
   // 0: Write "abc" to key0
@@ -1466,8 +1465,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   auto str_ghi = make_bytestring("ghi");
 
   auto const *cost_model = get_default_cost_model();
-  int128_t one_write_cost = cost_model->kBaseItemCost +
-                            cost_model->get_bytestring_cost(str_abc.size());
+  int128_t one_write_cost = cost_model->get_bytestring_cost(str_abc.size());
   int128_t half_write_cost = one_write_cost / 2;
   int128_t total_tokens = (one_write_cost * 2) + half_write_cost;
 
@@ -1633,10 +1631,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   auto const *cost_model = get_default_cost_model();
 
   // Cost for each update
-  int128_t cost_short = cost_model->kBaseItemCost +
-                        cost_model->get_bytestring_cost(str_short.size());
-  int128_t cost_medium = cost_model->kBaseItemCost +
-                         cost_model->get_bytestring_cost(str_medium.size());
+  int128_t cost_short = cost_model->get_bytestring_cost(str_short.size());
+  int128_t cost_medium = cost_model->get_bytestring_cost(str_medium.size());
 
   // Marginal cost for updating from short to medium
   int128_t marginal_medium = cost_medium - cost_short;
@@ -1792,10 +1788,8 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   auto const *cost_model = get_default_cost_model();
 
   // Costs
-  int128_t cost_long = cost_model->kBaseItemCost +
-                       cost_model->get_bytestring_cost(str_long.size());
-  int128_t cost_short = cost_model->kBaseItemCost +
-                        cost_model->get_bytestring_cost(str_short.size());
+  int128_t cost_long = cost_model->get_bytestring_cost(str_long.size());
+  int128_t cost_short = cost_model->get_bytestring_cost(str_short.size());
 
   // Grant enough tokens for the long write.
   int128_t total_tokens = cost_long;
@@ -1924,8 +1918,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   auto const *cost_model = get_default_cost_model();
 
   // Costs
-  int128_t cost_long = cost_model->kBaseItemCost +
-                       cost_model->get_bytestring_cost(str_long.size());
+  int128_t cost_long = cost_model->get_bytestring_cost(str_long.size());
 
   // Grant enough tokens for the long write.
   int128_t total_tokens = cost_long;
@@ -2073,8 +2066,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto const *cost_model = get_default_cost_model();
   auto str_hello = make_bytestring("hello");
-  uint128_t write_cost = cost_model->kBaseItemCost +
-                         cost_model->get_bytestring_cost(str_hello.size());
+  uint128_t write_cost = cost_model->get_bytestring_cost(str_hello.size());
   ASSERT_GT(write_cost, 0);
 
   // Sender contract
@@ -2206,6 +2198,14 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
   ASSERT_EQ(data_item_opt.value().bytestring(), str_hello);
+
+  // check that hogdb streamed out the results correctly
+  if (GetParam() == TestDB::kHogDB) {
+    auto hogs_transferred = get_hogs_transferred(1);
+    ASSERT_EQ(hogs_transferred.size(), 2);
+    ASSERT_EQ(hogs_transferred[sender_addr], -write_cost);
+    ASSERT_EQ(hogs_transferred[receiver_addr], 0);
+  }
 }
 
 TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)

@@ -1,18 +1,23 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <print>
+#include <string>
 #include <string_view>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
+
+using namespace std::string_literals;
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
@@ -24,7 +29,7 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
-  void SetUp() override {}
+  void SetUp() override { cost_model_ = get_default_cost_model(); }
 
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
   {
@@ -48,8 +53,7 @@ public:
   // and that that balance is less than or equal to
   // the initial balance
   void check_balances(ContractAddress contract_addr,
-                      ContractAddress reference_addr, int128_t initial_balance,
-                      bool eq_ok = false)
+                      ContractAddress reference_addr, int128_t expected_balance)
   {
     // check that costs are reflected in the balance
     auto bal = lookup_storage_item_from_db(
@@ -62,13 +66,15 @@ public:
     int128_t bal_ref_int = from_xdr(bal_ref.value().nnint());
 
     EXPECT_EQ(bal_int, bal_ref_int);
-    if (eq_ok) {
-      EXPECT_LE(bal_int, initial_balance);
-    }
-    else {
-      EXPECT_LT(bal_int, initial_balance);
-    }
+    EXPECT_EQ(bal_int, expected_balance);
   }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
+  }
+
+  const StorageCostModel *cost_model_;
 };
 
 TEST_P(DirectBytestringTest, ConcurrentWrites)
@@ -159,7 +165,9 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr1, contract_addr2, kInitialBalance);
+  check_balances(contract_addr1, contract_addr2,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("value"s.length()));
 }
 
 TEST_P(DirectBytestringTest, RevertStorageCosts)
@@ -206,7 +214,9 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
 
   advance_block();
 
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("value"s.length()));
 }
 
 TEST_P(DirectBytestringTest, LengthIncreaseCost)
@@ -261,7 +271,9 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance - cost_model_->get_bytestring_cost(
+                                       "much_longer_value"s.length()));
 }
 
 TEST_P(DirectBytestringTest, DecreaseLengthCost)
@@ -314,7 +326,9 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("v"s.length()));
 }
 
 TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
@@ -367,7 +381,9 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("v"s.length()));
 }
 
 TEST_P(DirectBytestringTest, DeletionCost)
@@ -512,7 +528,9 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance - cost_model_->get_bytestring_cost(
+                                       "value_longer"s.length()));
 }
 
 TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
@@ -558,7 +576,9 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance - cost_model_->get_bytestring_cost(
+                                       "value_longer"s.length()));
 }
 
 TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
@@ -666,7 +686,9 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance - cost_model_->get_bytestring_cost(
+                                       "value_longer"s.length()));
 }
 
 TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
@@ -714,7 +736,9 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("value"s.length()));
 }
 
 TEST_P(DirectBytestringTest, TransferKeyCosts)
@@ -769,7 +793,9 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance);
+  check_balances(contract_addr, reference_addr,
+                 kInitialBalance -
+                     cost_model_->get_bytestring_cost("value"s.length()));
 }
 
 TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
@@ -1032,8 +1058,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   ASSERT_TRUE(tx_ref.commit_transaction({}).has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance,
-                 /*eq_ok=*/true);
+  check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
 TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)

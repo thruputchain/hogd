@@ -24,6 +24,7 @@
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/unique_function.h"
@@ -87,6 +88,7 @@ public:
             try {
               fn();
             } catch (...) {
+              warn("exception in worker_pool::submit(); rethrowing");
               p.set_exception(std::current_exception());
               return;
             }
@@ -98,6 +100,7 @@ public:
             try {
               ret = fn();
             } catch (...) {
+              warn("exception in worker_pool::submit(); rethrowing");
               p.set_exception(std::current_exception());
               return;
             }
@@ -148,8 +151,11 @@ public:
       }));
     }
 #endif // defined(__cpp_lib_ranges_chunk)
-    for (const std::future<void> &f : completions)
+    for (std::future<void> &f : completions) {
       f.wait();
+      // Rethrows the exception, if it exists.
+      f.get();
+    }
   }
 
   // adjust_workers changes the number of active worker threads. By setting it

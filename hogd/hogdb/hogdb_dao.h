@@ -18,7 +18,6 @@
 
 // xdr types
 #include "account.hh"
-#include "db_coord.hh"
 #include "db_sched.hh"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
@@ -26,6 +25,7 @@
 #include "hogd/hogdb/invariant.h"
 #include "hogd/hogdb/invariant_contract_refcount.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 
 #include "hogd/base/span.h"
@@ -153,11 +153,12 @@ public:
   // commit persists all pending changes in durable storage.
   HogDBStatus<uint64_t> commit() { return db_.commit(); }
 
-  void enable_debug_invariants()
+  void enable_debug_invariants(StorageCostModel const &cost_model)
   {
     assert(invariants_.empty());
-    invariants_.push_back(std::make_unique<HogConservationInvariant>());
     invariants_.push_back(std::make_unique<HogContractRefcountInvariant>());
+    invariants_.push_back(
+        std::make_unique<HogConservationInvariant>(cost_model));
   }
 
   bool check_invariants()
@@ -188,6 +189,9 @@ public:
 
   HogDBStatus<DbTip> read_dbtip();
   HogDBStatus<void> write_dbtip(const DbTip &tip);
+
+  HogDBStatus<StorageCostModel> read_cost_model();
+  HogDBStatus<void> write_cost_model(const StorageCostModel &cost_model);
 
   //
   // Address Operations
@@ -231,7 +235,9 @@ public:
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t> get_charged_storage_cost(const ItemKey &key);
+  HogDBStatus<size_t>
+  get_charged_storage_cost(const ItemKey &key,
+                           StorageCostModel const *cost_model);
   HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
   HogDBStatus<void> remove_item(const ItemKey &key);

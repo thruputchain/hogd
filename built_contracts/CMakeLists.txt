@@ -28,15 +28,15 @@ function(add_wasm_build target_name)
 
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
-  # run cargo +nightly update to update the lockfile manually.
+  # run cargo update to update the lockfile manually.
   #
-  # This will not fetch crates during the build process; you need to run cargo +nightly fetch
+  # This will not fetch crates during the build process; you need to run the fetch script
+  # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
-    COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
-        cargo +nightly build
+    COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
+        cargo build
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
@@ -45,8 +45,8 @@ function(add_wasm_build target_name)
         --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
-        -Zbuild-std=core,alloc 
-        -Zbuild-std-features="std/optimize_for_size" &&
+        -Zbuild-std=core,alloc
+        -Zbuild-std-features=std/optimize_for_size &&
         cp 
           ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm 
           ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
@@ -56,6 +56,8 @@ function(add_wasm_build target_name)
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
     COMMENT "Building ${target_name}.wasm_unoptimized"
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
   wasmopt_target(
@@ -73,9 +75,12 @@ function(add_spec_json target_name)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        cargo +nightly run
+        cargo run
         --features spec
         --locked
+        --release
+        --frozen
+        --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_spec
@@ -86,9 +91,14 @@ function(add_spec_json target_name)
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
     COMMENT "Generating ${target_name}_spec.json"
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
   add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+  # not strictly necessary as a dependency, but this should prevent concurrent invocations of cargo
+  # on the same crate
+  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
 endfunction()
 
 function(add_contract_header target_name)
@@ -125,9 +135,11 @@ function(add_types_xdr target_name)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        cargo +nightly run
+        cargo run
         --features spec
         --locked
+        --frozen
+        --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
         --bin generate_types
@@ -139,6 +151,8 @@ function(add_types_xdr target_name)
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
     COMMENT "Generating ${target_name}.x"
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
   add_xdr(${target_name}_hh ./${target_name}.x)

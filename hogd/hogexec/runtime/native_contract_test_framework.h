@@ -1,52 +1,69 @@
 #pragma once
 
+#include <condition_variable>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <cassert>
 #include <cstring>
+#include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
 #include "account.hh"
 #include "contract.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
+#include "event.hh"
+#include "event_rpc.hh"
 #include "genesis.hh"
-#include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/db_interface/db_sched_server.h"
 #include "hogd/hogdb/block_id_manager.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
+#include "sched_db.hh"
+#include "sched_event.hh"
+#include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/event.h"
+#include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -58,10 +75,14 @@ enum class TestDB : int8_t {
 
 class MockDBWrapper {
 public:
-  MockDBWrapper() { coord_port_ = db_coord_server_.start_server(0); }
+  MockDBWrapper()
+  {
+    db_sched_server_.start_server(/*port=*/0);
+    db_executor_server_.start_server(/*port=*/0);
+  }
 
-  uint16_t exec_port() const { return db_executor_server_.port(); }
-  uint16_t coord_port() const { return coord_port_; }
+  uint16_t exec_port() { return db_executor_server_.port(); }
+  uint16_t coord_port() { return db_sched_server_.port(); }
 
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item)
@@ -100,6 +121,14 @@ public:
                             amount, get_default_cost_model()));
   }
 
+  static std::map<ContractAddress, int128_t>
+  get_hogs_transferred(BlockHeight /*unused*/)
+  {
+    // unimplemented
+    error("get_hogs_transferred in MockDB: unimplemented");
+    return std::map<ContractAddress, int128_t>();
+  }
+
   const StorageCostModel *get_default_cost_model() const
   {
     return &block_manager_.cost_model_;
@@ -109,23 +138,67 @@ private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
-  SrpcDbExecutorServer db_executor_server_ =
-      SrpcDbExecutorServer(&block_manager_, 0);
+  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
-  DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
-  uint16_t coord_port_ = 0;
+  DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
 };
+
+class TestSchedDBServer {
+public:
+  using rpc_service = SchedDb1;
+
+  void scheddb_intro_shard(ShardCard const & /*unused*/) {};
+  void scheddb_hogs_transferred(HogsTransferred const &hogs)
+  {
+    std::map<ContractAddress, int128_t> hogs_transferred;
+    for (const auto &delta : hogs.deltas) {
+      hogs_transferred[delta.address] = from_xdr(delta.hog_delta);
+    }
+    register_height(hogs.block, hogs_transferred);
+  };
+
+  // access methods
+
+  void wait_for_height(BlockHeight height)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    cv_.wait(lock,
+             [this, height] { return hogs_transferred_.contains(height); });
+  }
+
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    return hogs_transferred_.at(height);
+  }
+
+private:
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
+
+  void register_height(BlockHeight height,
+                       std::map<ContractAddress, int128_t> hogs_transferred)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    assert(!hogs_transferred_.contains(height));
+    hogs_transferred_[height] = std::move(hogs_transferred);
+    cv_.notify_all();
+  }
+};
+
+static_assert(is_SchedDb1<TestSchedDBServer *, std::type_identity_t>);
 
 class HogdbWrapper {
 public:
-  HogdbWrapper() : db_(open_db())
+  HogdbWrapper() : db_(open_db()), ctx_(db_, trie_, make_sched_db_client())
   {
-    db_coord_server_.start_server(0);
-    db_executor_server_.start_server(0);
+    db_sched_server_.start_server(/*port=*/0);
+    db_executor_server_.start_server(/*port=*/0);
   }
 
-  uint16_t exec_port() const { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_coord_server_.port(); }
+  uint16_t exec_port() { return db_executor_server_.port(); }
+  uint16_t coord_port() { return db_sched_server_.port(); }
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
@@ -138,28 +211,31 @@ public:
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model);
 
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    test_sched_db_server_.impl_.wait_for_height(height);
+    return test_sched_db_server_.impl_.get_hogs_transferred(height);
+  }
+
   // different storage cost models unimplemented currently
   const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
 
-  const StorageCostModel *get_default_cost_model() const
+  const StorageCostModel *get_default_cost_model()
   {
-    return &kDefaultCostModel;
+    return &ctx_.get_cost_model();
   }
 
 private:
-  static HogDBDAO open_db()
-  {
-    Directory dir = Directory::open_temporary().value();
-    constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-    auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
-    return HogDBDAO(RAMDB(std::move(db)));
-  }
+  static HogDBDAO open_db();
+  std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+  make_sched_db_client();
 
   HogDBDAO db_;
   MerkleTriePrefix trie_;
-  RPCContext ctx_ = RPCContext(db_, trie_);
+  RpcServer<TestSchedDBServer> test_sched_db_server_;
+  RPCContext ctx_;
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
-  HogDBCoordServer db_coord_server_ = HogDBCoordServer(ctx_);
+  HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
 
 class CoordWrapper {
@@ -172,12 +248,12 @@ public:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
 
-        return client_config->template client<DbCoord1>();
+        return client_config->template client<DbSched1>();
       }())
   {}
 
   using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   coord_client_t &client() { return coord_client_; }
 
@@ -186,6 +262,64 @@ private:
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   coord_client_t coord_client_;
+};
+
+class EventSchedWrapper {
+public:
+  EventSchedWrapper(uint16_t port)
+    : event_sched_client_(connect_to_event_sched_server(port))
+  {}
+
+  auto &client() { return event_sched_client_; }
+
+private:
+  using client_t =
+      EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>;
+
+  static client_t connect_to_event_sched_server(uint16_t port)
+  {
+    auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
+    if (!server_addr) {
+      throw std::runtime_error("Failed to connect to event server");
+    }
+    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+        ->client(EventSched1{});
+  }
+  client_t event_sched_client_;
+};
+
+class EventServerWrapper {
+public:
+  EventServerWrapper()
+  {
+    event_server_exec_server_.start_server(0);
+    event_server_sched_server_.start_server(0);
+  }
+
+  uint16_t exec_port() { return event_server_exec_server_.port(); }
+  uint16_t sched_port() { return event_server_sched_server_.port(); }
+
+  EventCard make_event_card(std::string const &addr = "localhost")
+  {
+    return EventCard{.protocol = version::kHogdProtocol,
+                     .upid = {},
+                     .address_for_exec =
+                         std::format("{}:{}", addr, exec_port()).c_str(),
+                     .address_for_sched =
+                         std::format("{}:{}", addr, sched_port()).c_str()};
+  }
+
+  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id)
+  {
+    return event_server_.get_events(block_id, tx_id);
+  }
+
+private:
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+  TestEventAggregatorSchedServer event_server_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
 };
 
 // Common setup utilities for testing native contracts.
@@ -229,6 +363,11 @@ public:
     }
   }
 
+  struct EphemeralTxIdentifier {
+    BlockID block_id;
+    TransactionID tx_id;
+  };
+
   // Commits the current block and creates a new one.
   void advance_block(BlockExecutionMode mode =
                          BlockExecutionMode::kBlockExecutionModeProposal);
@@ -239,12 +378,19 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::shared_ptr<RuntimeContext> runtime_context)
+                               std::shared_ptr<RuntimeContext> runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);
+    auto txid = allocate_txid();
+    if (identifier) {
+      identifier->block_id = block_number_;
+      identifier->tx_id = txid;
+    }
     return SystemCallHandler(tx, *storage_snapshot_cache_,
-                             make_new_per_tx_db_proxy(), ExecutionModeData{},
-                             std::move(runtime_context));
+                             make_new_per_tx_db_proxy(txid),
+                             make_new_per_tx_event_server_proxy(txid),
+                             ProposalModeCtor{}, std::move(runtime_context));
   }
 
   std::optional<StorageItem>
@@ -349,18 +495,28 @@ public:
   void write_deployment(ContractAddress const &addr,
                         std::shared_ptr<const Contract> const &contract);
 
-  const StorageCostModel *get_default_cost_model() const
+  const StorageCostModel *get_default_cost_model()
   {
     return std::visit(
         [&](auto &db_wrapper) { return db_wrapper.get_default_cost_model(); },
         db_wrapper_);
   }
 
-  PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
+  PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
-                                       allocate_txid());
+    if (tx_id == std::numeric_limits<TransactionID>::max()) {
+      tx_id = allocate_txid();
+    }
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);
+  }
+
+  PerTransactionEventServerProxy
+  make_new_per_tx_event_server_proxy(TransactionID tx_id)
+  {
+    assert(event_server_proxy_);
+    return PerTransactionEventServerProxy(*event_server_proxy_, block_number_,
+                                          tx_id);
   }
 
   void run_genesis_initialization(
@@ -395,6 +551,20 @@ public:
                                 .contract_size = contract_size};
   }
 
+  std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
+  {
+    return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
+  }
+
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  {
+    return std::visit(
+        [&](auto &db_wrapper) {
+          return db_wrapper.get_hogs_transferred(height);
+        },
+        db_wrapper_);
+  }
+
 private:
   void write_deployment(ContractAddress const &addr,
                         DeployedContractHash const &deployment,
@@ -404,14 +574,18 @@ private:
   {
     block_number_++;
     auto r =
-        coord_wrapper_->client().dbcoord_create_snapshot(dbtip_block_id_,
+        coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
                                                          block_number_, mode)();
-    if (r != DbResult::DbResultOK) {
-      throw std::runtime_error("open_block: dbcoord_create_snapshot failed");
+    if (r != DbSchedResult::DbSchedResultOK) {
+      throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
+    open_event_block(block_number_);
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
+
+  void open_event_block(BlockID block_id);
+  void close_event_block(BlockID block_id);
 
   void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
@@ -427,17 +601,31 @@ private:
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
+    event_sched_wrapper_ =
+        std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());
+
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_server_wrapper_.exec_port()});
 
     if (!empty_genesis) {
       return;
     }
 
     {
-      auto r =
-          coord_wrapper_->client().dbcoord_load_genesis_block(GenesisBlock{})();
-      if (r != DbResult::DbResultOK) {
+      StorageCostModelXdr cost_model_xdr = {
+          .ext = ExtensionPoint(0),
+          .base_data_item_cost = to_xdr(int128_t{12000}),
+          .bytestring_cost_per_byte = 10,
+          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+          .auth_per_key_cost = to_xdr(int128_t{1111}),
+      };
+      auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
+          .storage_cost_model = cost_model_xdr,
+      })();
+      if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
-            "initialize: dbcoord_load_genesis_block failed");
+            "initialize: dbsched_load_genesis_block failed");
       }
     }
 
@@ -452,6 +640,11 @@ private:
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+  std::unique_ptr<EventSchedWrapper> event_sched_wrapper_;
+
+  // TODO(geoff): replace with proper event server connection
+  EventServerWrapper event_server_wrapper_;
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 

@@ -61,6 +61,8 @@ add_executable(
 )
 target_link_libraries(
   merkle_trie_bench
+  base
+  hogd
   merkle
   benchmark::benchmark
 )

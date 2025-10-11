@@ -1,11 +1,14 @@
 #pragma once
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/types.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23/serialize.h"
 #include <unordered_map>
 
@@ -20,7 +23,7 @@ public:
 
   // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any
   // accounts whose [AccountAuthData] has changed.
-  x23::Vec<ContractAddress> update_block_id(BlockID block_id)
+  x23::Async<x23::Vec<ContractAddress>> update_block_id(BlockID block_id)
   {
     current_block_id_ = block_id;
 
@@ -31,8 +34,8 @@ public:
     }
 
     DbAccountAuthDataBatchResult res =
-        db_sched_client_.dbsched_get_account_auth_data(current_block_id_,
-                                                       accounts)();
+        co_await db_sched_client_.dbsched_get_account_auth_data(
+            current_block_id_, accounts);
     CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
     CHECK_EQ(res.account_auth_data_batch().size(), accounts.size());
 
@@ -46,15 +49,16 @@ public:
         ret.push_back(account);
       }
     }
-    return ret;
+    co_return ret;
   }
 
-  bool authenticate(const SignedTransaction &tx)
+  x23::Async<bool> authenticate(const SignedTransaction &tx)
   {
     AccountAuthData *auth_data =
-        get_account(current_block_id_, tx.tx.invocation.invoked_address);
+        co_await get_account(current_block_id_,
+                             tx.tx.invocation.invoked_address);
     if (!auth_data) {
-      return false;
+      co_return false;
     }
     const AuthSignaturePreimage preimage{.signature_weight =
                                              tx.signature_weight,
@@ -69,13 +73,13 @@ public:
       Ed25519PublicKey public_key;
       if (!get_public_key(*auth_data, dec_sig.public_key_id, weight,
                           public_key)) {
-        return false;
+        co_return false;
       }
       if (!check_decorated_signature(dec_sig, public_key, msg)) {
-        return false;
+        co_return false;
       }
       if (dec_sig.public_key_id >= MAX_SIGNERS) {
-        return false;
+        co_return false;
       }
       total_weight += weight;
       if ((1 << dec_sig.public_key_id) &
@@ -93,7 +97,7 @@ public:
     // that submitted the tx can contribute its key weights to the nonce weight.
     // Auxiliary accounts cannot do this.
     if (nonce_weight < auth_data->nonce_config.required_weight) {
-      return false;
+      co_return false;
     }
     // Similarly, we check if we have enough gas available here rather than
     // below because only the account that submitted the tx can contribute gas.
@@ -106,14 +110,14 @@ public:
       }
     }
     if (gas_available < tx.tx.invocation.gas_limit) {
-      return false;
+      co_return false;
     }
 
     for (const AuxiliaryDecoratedSignatures &aux : tx.aux_signatures) {
       AccountAuthData *aux_auth_data =
-          get_account(current_block_id_, aux.address);
+          co_await get_account(current_block_id_, aux.address);
       if (!aux_auth_data) {
-        return false;
+        co_return false;
       }
 
       for (const DecoratedSignature &dec_sig : aux.signatures) {
@@ -121,17 +125,17 @@ public:
         Ed25519PublicKey public_key;
         if (!get_public_key(*aux_auth_data, dec_sig.public_key_id, weight,
                             public_key)) {
-          return false;
+          co_return false;
         }
         if (!check_decorated_signature(dec_sig, public_key, msg)) {
-          return false;
+          co_return false;
         }
         total_weight += weight;
       }
     }
     // We check [total_weight] down here rather than above with the nonce weight
     // because we need to include the weight of the auxiliary keys.
-    return total_weight >= tx.signature_weight;
+    co_return total_weight >= tx.signature_weight;
   }
 
   static SignedTransaction
@@ -206,21 +210,23 @@ private:
     return true;
   }
 
-  AccountAuthData *get_account(BlockID block_id, const ContractAddress &account)
+  x23::Async<AccountAuthData *> get_account(BlockID block_id,
+                                            const ContractAddress &account)
   {
     auto it = accounts_.find(account);
     if (it != accounts_.end()) {
-      return &it->second;
+      co_return &it->second;
     }
 
     DbAccountAuthDataBatchResult res =
-        db_sched_client_.dbsched_get_account_auth_data(block_id, {account})();
+        co_await db_sched_client_.dbsched_get_account_auth_data(block_id,
+                                                                {account});
     if (res.result() != DbSchedResult::DbSchedResultOK) {
-      return nullptr;
+      co_return nullptr;
     }
     CHECK_EQ(res.account_auth_data_batch().size(), 1UL);
     accounts_[account] = res.account_auth_data_batch()[0];
-    return &accounts_[account];
+    co_return &accounts_[account];
   }
 
   BlockID current_block_id_;

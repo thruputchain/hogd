@@ -8,6 +8,8 @@ add_library(x23
   corotrace.h
   cpumap.cc
   cpumap.h
+  debug.h
+  debug.cc
   err.h
   event.cc
   event.h
@@ -18,6 +20,8 @@ add_library(x23
   format.h
   heap.h
   mvar.h
+  progname.cc
+  progname.h
   refcnt.h
   rpc.cc
   rpc_common.cc
@@ -26,6 +30,8 @@ add_library(x23
   rpc_msg.x
   serialize.cc
   serialize.h
+  signal.cc
+  signal.h
   sockio.cc
   sockio.h
   srpc.cc
@@ -35,7 +41,6 @@ add_library(x23
   threadpool.h
   typename.h
   uiobuf.h
-  utility.cc
   utility.h
   vec.h
   x23.h

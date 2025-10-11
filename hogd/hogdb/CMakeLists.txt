@@ -9,7 +9,6 @@ add_library(hogdb_objects OBJECT
   item_change.cc
   hogdb_dao.cc
   rpc_context.cc
-  rpc_from_coord.cc
   rpc_from_exec.cc
   rpc_from_sched.cc
   status.cc
@@ -30,6 +29,7 @@ target_link_libraries(
   hogd
   merkle
   genesis
+  storage_cost
 )
 
 # Build the backend database (hogdb) executable
@@ -57,11 +57,13 @@ target_link_libraries(
 add_executable(
   hogdb_test
   hogdb_test.cc
+  item_change_auth_test.cc
   recovery_tests.cc
 )
 target_link_libraries(
   hogdb_test
   hogdb
+  model_checker
   GTest::gtest_main
 )
 gtest_discover_tests(

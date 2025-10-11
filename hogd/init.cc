@@ -1,6 +1,4 @@
-#include <cstddef>
 #include <cstdlib>
-#include <fstream>
 #include <iomanip>
 #include <ios>
 #include <memory>
@@ -8,7 +6,10 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
+
+#include <x23/fileio.h>
+#include <x23/progname.h>
+#include <x23/vec.h>
 
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
@@ -34,36 +35,17 @@ const std::pair<InitFunc, std::string_view> init_tbl[] = {
 };
 
 // Reads the binary of the currently running process.
-std::vector<std::byte>
+x23::Buf
 read_self_binary()
 {
-#ifdef __APPLE__
-  char path[1024];
-  memset(path, 0, sizeof(path));
-  uint32_t size = sizeof(path);
-  if (_NSGetExecutablePath(path, &size) == 0)
-    info("executable path is {}", path);
-  else
-    error("buffer too small; need size {}", size);
-
-  std::ifstream f(std::string(path), std::ios::binary | std::ios::ate);
-
-#else
-  std::ifstream f("/proc/self/exe", std::ios::binary | std::ios::ate);
-#endif
-  CHECK(f.is_open());
-
-  const std::streamsize len = f.tellg();
-  CHECK_GT(len, 0L);
-
-  std::vector<std::byte> buf(static_cast<size_t>(len));
-  f.seekg(0, std::ios::beg);
-  CHECK(f.good());
-
-  f.read(reinterpret_cast<char *>(buf.data()), len);
-  CHECK_EQ(f.gcount(), len);
-  CHECK(f.good());
-  return buf;
+  const std::string &path = x23::getprogpath();
+  if (path.empty())
+    panic("unable to determine path of binary");
+  auto rres = x23::readfile<x23::Buf>(path);
+  if (!rres)
+    panic("{}: {}", path, rres.error());
+  CHECK_GT(rres->size(), 0UZ);
+  return *rres;
 }
 
 // Generates the hash of the binary for the currently running process.
@@ -102,7 +84,14 @@ hogd_init(int argc, char *argv[], bool do_print_version)
   // TODO(amb): parse arguments and set up configuration
 
   // initialize logging
+  // NOTE: this must come before any use of the CHECK macros
   log_init(std::make_unique<ConsoleLogger>());
+
+  // Ensure we have a pathname for our executable
+  if (x23::getprogpath().empty()) {
+    CHECK_GT(argc, 0);
+    x23::setprogpath(argv[0]);
+  }
 
   // initialize each subsystem
   for (auto [func, name] : init_tbl) {

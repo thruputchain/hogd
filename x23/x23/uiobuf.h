@@ -8,11 +8,18 @@
 #include <unistd.h>
 
 #include <x23/cleanup.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
 #include <x23/vec.h>
 
 namespace x23 {
+
+enum class IoResult {
+  kComplete, // Nothing more to do
+  kQueued,   // No IO attempted, data added to queue
+  kAgain,    // Received EAGAIN error
+};
 
 // VecQ is a vector that lets you pop from the front as well as from
 // the back.
@@ -248,51 +255,48 @@ struct BufVec {
     return ret;
   }
 
-  // Returns true if the buffer is not empty and you need to call
-  // write again as soon as fd is writable.
-  std::expected<bool, Errno> write(BorrowedFd fd)
+  std::expected<IoResult, Errno> write(BorrowedFd fd)
   {
-    if (empty())
-      return false;
-    auto iov{to_vec()};
-    if (auto n = writev(fd.get(), iov.data(), iov.size()); n > 0) {
+    using enum IoResult;
+    while (!empty()) {
+      auto iov{to_vec()};
+      auto n = writev(fd.get(), iov.data(), iov.size());
+      if (n < 0) {
+        if (errno == EAGAIN)
+          return kAgain;
+        Errno ret;
+        clear();
+        return ret;
+      }
       trim(n);
-      return !empty();
     }
-    if (errno == EAGAIN) // XXX not appropriate for srpc
-      return true;
-    Errno ret;
-    clear();
-    return ret;
+    return kComplete;
   }
 
-  // Returns true if the buffer was empty and is no longer, so you
-  // need to call write when fd is writable.  If the buffer was
-  // already not empty, it is assumed that there was already a call to
-  // write scheduled, so does not even attempt a write and returns
-  // false.
+  // Returns false on full write, true on EAGAIN, error otherwise.
   template<typename Buf>
-  std::expected<bool, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
+  std::expected<IoResult, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
       requires requires { append(std::forward<Buf>(buf)); }
   {
-    if (empty()) {
-      auto n = ::write(fd.get(), buf.data(), buf.size());
-      if (n < 0) {
-        if (errno != EAGAIN) {
-          Errno ret;
-          clear();
-          return ret;
-        }
-        n = 0;
-      }
-      if (size_t(n) < buf.size()) {
-        append(std::forward<Buf>(buf), n);
-        return true;
-      }
-    }
-    else
+    using enum IoResult;
+    if (!empty() || buf.empty()) {
       append(std::forward<Buf>(buf));
-    return false;
+      return kQueued;
+    }
+
+    for (size_t pos = 0, end = buf.size(); pos != end;) {
+      auto n = ::write(fd.get(), buf.data() + pos, end - pos);
+      if (n < 0) {
+        if (Errno err; err != EAGAIN) {
+          clear();
+          return err;
+        }
+        append(std::forward<Buf>(buf), pos);
+        return kAgain;
+      }
+      pos += n;
+    }
+    return kComplete;
   }
 
 private:

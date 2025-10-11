@@ -110,8 +110,12 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
 {
   sockaddr_storage ss;
   socklen_t socklen;
-  while (auto s =
-             co_await self->cps_.get(0).accept(self->lfd_, &ss, &socklen)) {
+  for (;;) {
+    auto s = co_await self->cps_.get(0).accept(self->lfd_, &ss, &socklen);
+    if (!s) {
+      std::println("accept: {}", Errno{});
+      break;
+    }
     //    std::println("accepted fd {} TCP port {} from {}", *s,
     //                 get_port(self->addr_), HostPort(ss));
     make_rpc_stream(self->cps_.get(*s), *s)
@@ -208,7 +212,7 @@ do_client(int port, const char *server)
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
   count = 0;
-  sleep(opt_seconds);
+  std::this_thread::sleep_for(seconds(opt_seconds));
   auto final_count = count.load();
   auto elapsed = high_resolution_clock::now() - start;
 

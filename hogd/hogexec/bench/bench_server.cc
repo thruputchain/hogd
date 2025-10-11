@@ -14,8 +14,8 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "x23/threadpool.h"
@@ -24,6 +24,7 @@ namespace hogd {
 
 namespace {
 
+// runs a db server to support an executor benchmark.
 void
 run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 {
@@ -41,12 +42,12 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   HogDBDAO db(RAMDB(std::move(*db_result)));
   MerkleTriePrefix trie;
-  RPCContext ctx(db, trie);
+  RPCContext ctx(db, trie, nullptr);
 
-  // Start the coordinator server
-  std::println("Starting coordinator server on port {}", coord_port);
-  HogDBCoordServer db_coord_server(ctx);
-  db_coord_server.start_server(coord_port);
+  // Start the scheduler server
+  std::println("Starting scheduler server on port {}", coord_port);
+  HogDBSchedServer db_sched_server(ctx);
+  db_sched_server.start_server(coord_port);
 
   // Start the executor server
   std::println("Starting executor server on port {}", exec_port);
@@ -65,7 +66,7 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port>", argv[0]);
+  std::println("Usage: {} -e <exec_port> -c <sched_port>", argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace

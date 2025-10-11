@@ -1,0 +1,163 @@
+#include "hogd/hogexec/interface/rpc_from_coord.h"
+
+#include <atomic>
+#include <cassert>
+
+#include "exec_sched.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
+#include "rpc_types.hh"
+#include "transaction.hh"
+#include "x23/async.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+x23::Async<ExecProposeResult>
+ExecutorMempoolRpc::executorsched_propose_transaction(
+    BlockID block_id, SignedTransaction signed_tx)
+{
+  // The initialize guard could, in principle, be made a debug-only check.
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+  // TODO(geoff): co_await cp_.pool_.bg();
+  auto ctx = executor_states_->get_executor_context(block_id);
+  if (!ctx) {
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: No executor "
+         "context found for block {}",
+         block_id);
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+  if (ctx->mode() != ExecutionMode::kProposing) {
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: Executor "
+         "context found for block {} is not in proposing mode",
+         block_id);
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+
+  co_return ctx->propose_transaction(signed_tx, allocate_tx_id());
+}
+
+x23::Async<ExecResult>
+ExecutorMempoolRpc::executorsched_validate_transaction(
+    BlockID block_id, ProposedTransaction proposed_tx)
+{
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecResult::ExecResultSystemError;
+  }
+  // TODO(geoff): co_await cp_.pool_.bg();
+  auto ctx = executor_states_->get_executor_context(block_id);
+  if (!ctx) {
+    co_return ExecResult::ExecResultSystemError;
+  }
+  if (ctx->mode() != ExecutionMode::kValidating) {
+    co_return ExecResult::ExecResultSystemError;
+  }
+
+  co_return ctx->validate_transaction(proposed_tx, allocate_tx_id());
+}
+
+x23::Async<ExecProposeBatchResult>
+ExecutorMempoolRpc::executorsched_propose_batch(
+    BlockID block_id, SignedTransactionBatch signed_txs)
+{
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+  // TODO(geoff): co_await cp_.pool_.bg();
+  // TODO(jhumphri): Uncomment this below!!!
+  // co_await cp_.pool_.bg();
+  auto ctx = executor_states_->get_executor_context(block_id);
+  if (!ctx) {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+  if (ctx->mode() != ExecutionMode::kProposing) {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+
+  x23::Vec<ExecProposeResult> results;
+  results.reserve(signed_txs.size());
+  for (SignedTransaction const &signed_tx : signed_txs) {
+    results.push_back(ctx->propose_transaction(signed_tx, allocate_tx_id()));
+  }
+
+  co_return results;
+}
+
+x23::Async<ExecValidateBatchResult>
+ExecutorMempoolRpc::executorsched_validate_batch(
+    BlockID block_id, ProposedTransactionBatch proposed_txs)
+{
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
+  // TODO(geoff): co_await cp_.pool_.bg();
+  auto ctx = executor_states_->get_executor_context(block_id);
+  if (!ctx) {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
+  if (ctx->mode() != ExecutionMode::kValidating) {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
+
+  x23::Vec<ExecResult> results;
+  results.reserve(proposed_txs.size());
+  for (auto const &proposed_tx : proposed_txs) {
+    results.push_back(ctx->validate_transaction(proposed_tx, allocate_tx_id()));
+  }
+
+  co_return results;
+}
+
+ExecResult
+ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
+{
+  if (!initialize_check()) [[unlikely]] {
+    return ExecResult::ExecResultSystemError;
+  }
+  return executor_states_->open_proposal(id);
+}
+
+ExecResult
+ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
+{
+  if (!initialize_check()) [[unlikely]] {
+    return ExecResult::ExecResultSystemError;
+  }
+  return executor_states_->open_validation(id);
+}
+
+void
+ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
+{
+  if (!initialize_check()) [[unlikely]] {
+    return;
+  }
+  executor_states_->remove_block(id);
+}
+
+TransactionID
+ExecutorMempoolRpc::allocate_tx_id()
+{
+  uint64_t base = self_id_.fetch_add(1, std::memory_order_relaxed);
+  return TransactionID{base + (uint64_t{self_executor_id_} << 48)};
+}
+
+x23::Async<void>
+ExecutorMempoolRpc::executorsched_shutdown()
+{
+  shut_down();
+  co_return;
+}
+
+} // namespace hogd

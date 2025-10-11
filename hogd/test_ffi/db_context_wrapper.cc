@@ -4,20 +4,23 @@
 #include <cstdlib>
 #include <memory>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
-DBContext::DBContext(uint32_t db_read_port)
-  : block_manager_(current_block_id_, &db_),
-    executor_server_(&block_manager_, db_read_port), db_proxy_(nullptr),
-    snapshot_cache_(nullptr)
+DBContext::DBContext()
+  : block_manager_(current_block_id_, &db_), executor_server_(&block_manager_),
+    db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
+  executor_server_.start_server(0);
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = executor_server_.port()});
+  event_server_proxy_ = std::make_unique<EventServerProxy>(
+      x23::HostPort{"localhost", event_exec_server_.start_server(0)});
 
   advance_new_block();
 }
@@ -29,6 +32,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
     auto b = block_manager_.get_block_data(current_block_id_);
     assert(b);
     b->close_block();
+    event_server_.close_block(current_block_id_);
   }
 
   [[maybe_unused]] auto res =
@@ -37,6 +41,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   current_block_id_++;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+  event_server_.open_block(current_block_id_);
 }
 
 } // namespace hogd

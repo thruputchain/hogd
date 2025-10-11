@@ -1,5 +1,3 @@
-#include <map>
-#include <print>
 
 #include <netdb.h>
 
@@ -74,75 +72,10 @@ msg_show_stat(const rpc_msg &msg)
     return std::format("{}", stat);
 }
 
-std::string
-replace_percent(std::string target, std::map<char, std::string> subst)
-{
-  std::string out;
-  for (size_t i = 0, e = target.size(); i < e; ++i) {
-    char c = target[i];
-    if (c != '%' || i + 1 == e) {
-      out.push_back(c);
-      continue;
-    }
-    c = target[++i];
-    if (auto s = subst.find(c); s != subst.end()) {
-      out += s->second;
-    }
-    else {
-      if (c != '%')
-        out.push_back('%');
-      out.push_back(c);
-    }
-  }
-  return out;
-}
-
-RpcTraceMode
-RpcTraceMode::getenv(const char *env_var)
-{
-  const char *p{};
-  const auto &pn = getprogname();
-  if (!pn.empty()) {
-    auto env = std::format("{}_{}", env_var, pn);
-    p = ::getenv(env.c_str());
-  }
-  if (!p)
-    p = ::getenv(env_var);
-  if (!p || !*p)
-    return {};
-
-  bool csv = false;
-  if (*p == ',') {
-    csv = true;
-    ++p;
-  }
-
-  int fd{-1};
-  if (*p == '.' || *p == '/') {
-    auto path =
-        replace_percent(p, {{'f', pn}, {'p', std::to_string(getpid())}});
-    fd = open(path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0666);
-    if (fd == -1) {
-      perror(path.c_str());
-      return {};
-    }
-  }
-  else {
-    char *e;
-    fd = std::strtol(p, &e, 10);
-    if (p == e || *e) {
-      std::println(stderr, "Ignoring invalid {} value", env_var);
-      return {};
-    }
-  }
-
-  return RpcTraceMode{.mode = csv ? kCsv : kTrace, .fd = fd};
-}
-
 RpcTraceMode &
 server_trace()
 {
-  static RpcTraceMode m = RpcTraceMode::getenv("X23SERVER_TRACE");
+  static RpcTraceMode m = RpcTraceMode::getenv<"X23SERVER_TRACE">();
   return m;
 }
 

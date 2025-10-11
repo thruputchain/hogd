@@ -9,11 +9,18 @@
 #include <new>
 #include <ranges>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+#if __has_include(<sanitizer/lsan_interface.h>)
+#include <sanitizer/lsan_interface.h>
+#endif // !__has_include(<sanitizer/lsan_interface.h>)
+
+#if !defined(__SANITIZE_ADDRESS__) &&                                          \
+    (!defined(__has_feature) || !__has_feature(address_sanitizer))
+#define __lsan_ignore_object(ptr) ((void)0)
+#endif // address sanitizer disabled
 
 #if HAVE_BUILTIN_ARM_YIELD
 #include <arm_acle.h>
@@ -54,6 +61,18 @@ using std::declval;
 #define FORWARD(arg)                                                           \
   static_cast<decltype(arg) &&>(arg)                                           \
       __FORWARD_APPLY_IGNORE(__FORWARD_PARENTHESIZED_TO_COMMA arg)
+
+// When creating global objects that should not be destroyed at
+// shutdown, wrap them in make_permanent_ref to avoid address
+// sanitizer warnings about leaks.  For example:
+//
+// auto &my_global_map = make_nodestroy(new std::map<int, std::string>);
+inline decltype(auto)
+make_nodestroy(auto *p)
+{
+  __lsan_ignore_object(p);
+  return *p;
+}
 
 // Types T and U differ only in reference and const/volatile
 // qualifiers or pointer/array.
@@ -357,11 +376,5 @@ pause_instruction()
 constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
 #pragma GCC diagnostic pop
-
-// Set argv0 for debug logging purposes, in case it can't be inferred
-void setprogname(std::string_view argv0);
-
-// Get short program name
-const std::string &getprogname();
 
 } // namespace x23

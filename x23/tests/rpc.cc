@@ -89,13 +89,9 @@ main(int argc, char **argv)
       client(c)();
       return 0;
     }
-    else if (argv[1] == "-s"s) {
-      x23::DestroyInhibit di;
-      tcp_rpc_server(cp, std::stoi(argv[2]), [di = x23::RefPtr{di}](auto c) {
-        c->template server<myvers>(&impl, context);
-      });
-      di.destroy_wait();
-    }
+    else if (argv[1] == "-s"s)
+      tcp_rpc_server_wait(cp, std::stoi(argv[2]),
+                          [](auto c) { c->server(&impl, myvers{}, context); });
     else {
       std::println(stderr, "usage: {} [{{-c | -s}} port]", argv[0]);
       return 2;

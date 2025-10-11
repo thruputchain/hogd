@@ -53,7 +53,7 @@ protected:
   // Helper to create a test genesis block
   static GenesisBlock create_test_genesis_block()
   {
-    GenesisBlock genesis_block;
+    GenesisBlock genesis_block{};
 
     // Add a preset contract entry
     InitialConfigurationEntry preset_entry;
@@ -156,7 +156,7 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
 TEST_F(GenesisBlockTest, EmptyGenesisBlock)
 {
   // Create empty genesis block
-  GenesisBlock genesis_block;
+  GenesisBlock genesis_block{};
 
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);

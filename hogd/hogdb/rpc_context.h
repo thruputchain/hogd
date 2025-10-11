@@ -10,13 +10,13 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
-// xdr types
-#include "db_coord.hh"
-
+#include "db_sched.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
@@ -25,6 +25,9 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "sched_db.hh"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -32,12 +35,28 @@ namespace hogd {
 // by the database.
 class RPCContext {
 public:
-  RPCContext(HogDBDAO &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
+  using sched_db_client_t =
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  RPCContext(HogDBDAO &db, MerkleTriePrefix &trie,
+             std::unique_ptr<sched_db_client_t> sched_db_client)
+    : db_(db), trie_(trie), sched_db_client_(std::move(sched_db_client))
+  {}
 
   // getters.
   HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
   DbTip &get_tip() { return tip_; }
+  StorageCostModel const &get_cost_model()
+  {
+    assert(cost_model_.has_value());
+    return *cost_model_;
+  }
+
+  void initialize_cost_model(StorageCostModel cost_model)
+  {
+    cost_model_.emplace(cost_model);
+  }
 
   // opens a new block transaction.
   HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
@@ -54,6 +73,8 @@ public:
 
   HogDBStatus<void> update_dbtip(BlockTXID bid);
 
+  const auto &get_sched_db_client() { return sched_db_client_; }
+
 private:
   struct BlockCache {
     std::mutex lock;
@@ -69,6 +90,9 @@ private:
   MerkleTriePrefix &trie_;
   // tracks details about the last committed block.
   DbTip tip_ = DbTip{.id = UINT64_MAX};
+  // the storage cost model for computing storage costs at the current block
+  // height.
+  std::optional<StorageCostModel> cost_model_;
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
@@ -77,6 +101,8 @@ private:
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
+
+  std::shared_ptr<sched_db_client_t> sched_db_client_;
 
   // slow path for get_block_tx().
   BlockTX *get_block_tx_slow(BlockTXID bid);

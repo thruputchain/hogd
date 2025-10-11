@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <string_view>
@@ -7,6 +8,7 @@
 #include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -51,9 +53,11 @@ public:
 
   static auto make_auth_data_delta(std::vector<uint32_t> const &key_ids)
   {
-    const auto empty_config =
+    auto [pk, _] = ed25519_keygen();
+    auto empty_config =
         PublicKeyConfig{.key = PublicKey{CryptographicScheme::Ed25519},
                         .max_weight = Weight{1}};
+    empty_config.key.ed25519() = pk;
     StorageDelta delta(StorageDeltaType::kDeltaTypeAuthDataChange);
     for (auto key_id : key_ids) {
       delta.auth_data_change().auth_data_change_signers.push_back(
@@ -92,6 +96,11 @@ public:
     delta.replay_cache_modify().minimum_threshold = 0;
     delta.replay_cache_modify().nonces = {nonce};
     return delta;
+  }
+
+  auto make_new_per_tx_db_proxy()
+  {
+    return NativeContractTestFramework::make_new_per_tx_db_proxy(UINT64_MAX);
   }
 };
 
@@ -164,10 +173,6 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 // and making sure the item does not exist in the next block.
 TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Auth data is not supported in HogDB";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -326,11 +331,6 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Auth data is not supported in HogDB";
-    return;
-  }
-
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 

@@ -3,7 +3,7 @@
 #include <cassert>
 #include <memory>
 
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -37,9 +37,10 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   }
 
   [[maybe_unused]] auto [_, inserted] = active_blocks->emplace(
-      new_block_id, ContextEntry{.refcount = 1,
-                                 .context = std::make_unique<ExecutorContext>(
-                                     mode, new_block_id, *db_proxy_)});
+      new_block_id,
+      ContextEntry{.refcount = 1,
+                   .context = std::make_unique<ExecutorContext>(
+                       mode, new_block_id, *db_proxy_, *event_server_proxy_)});
   assert(inserted);
   return ExecResult::ExecResultOK;
 }

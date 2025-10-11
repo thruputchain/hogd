@@ -20,6 +20,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "storage_item.hh"
 
 namespace hogd {
 
@@ -89,6 +90,11 @@ public:
   // request_new_contract requests to create a new contract.
   // Does NOT update the refcount on the contract.
   HogDBStatus<void> request_new_contract(Contract contract);
+
+  // request_auth_data requests to change the auth data for an address.
+  HogDBStatus<void>
+  request_auth_data(Address const &addr,
+                    const AuthDataChangeArgs &auth_data_change);
 
 private:
   struct ItemVersion {

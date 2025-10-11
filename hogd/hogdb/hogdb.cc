@@ -1,5 +1,6 @@
 // hogdb.cc - handles initialization for hogdb
 
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -7,17 +8,18 @@
 #include <future>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <thread>
 #include <utility>
 
 // XDR headers
-#include "coord.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
+#include "hogd/base/coropoll.h"
+#include "sched_db.hh"
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -27,7 +29,6 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogdb/status.h"
@@ -38,16 +39,14 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
 namespace {
 
 // port numbers used by servers hosted inside hogdb.
-constexpr uint16_t kCoordServerPort = 8080;
-constexpr uint16_t kExecServerPort = 8081;
-constexpr uint16_t kSchedServerPort = 8082;
+constexpr uint16_t kExecServerPort = 8080;
+constexpr uint16_t kSchedServerPort = 8081;
 
 std::string
 create_address(uint16_t port)
@@ -55,6 +54,38 @@ create_address(uint16_t port)
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
   return std::format("{}:{}", hostname, port);
+}
+
+auto
+create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
+{
+  x23::HostPort host_port;
+  if (!host_port.parse(coordinator_addr)) {
+    throw std::runtime_error(
+        std::format("Invalid coordinator address: {}", coordinator_addr));
+  }
+  auto addr = host_port.to_addr(true);
+  if (!addr) {
+    throw std::runtime_error(
+        std::format("failed to resolve coordinator address: {}",
+                    coordinator_addr));
+  }
+
+  auto fd = [&cp](sockaddr_storage addr) {
+    while (true) {
+      auto fd = cp.tcpconnect(&addr)();
+      if (fd) {
+        return *fd;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      warn_every_n_sec(5.0F, "waiting for coordinator address {}",
+                       x23::show_ipaddr(addr));
+    }
+  }(*addr);
+
+  return std::make_unique<
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
+      x23::rpc_stream_logged(cp, fd)->template client<SchedDb1>());
 }
 
 int
@@ -82,7 +113,19 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   MerkleTriePrefix trie;
   db.load_trie(trie);
-  RPCContext ctx(db, trie);
+
+  std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+      sched_db_client;
+
+  if (coordinator_addr) {
+    sched_db_client =
+        create_sched_db_client(default_coropoll(), *coordinator_addr);
+  }
+  else {
+    warn("no coordinator address provided, skipping coordinator connection");
+  }
+
+  RPCContext ctx(db, trie, std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
@@ -93,17 +136,19 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
+    if (auto cost_model = db.read_cost_model(); cost_model) {
+      ctx.initialize_cost_model(*cost_model);
+    }
+    else {
+      critical("Failed to read cost model: {}", cost_model.error());
+      return EXIT_FAILURE;
+    }
   }
   else {
     CHECK_EQ(trie.size(), 0UL);
     ctx.get_tip().height = 0;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
-
-  // start the coordinator server.
-  info("starting coordinator server.");
-  HogDBCoordServer coord_server(ctx);
-  coord_server.start_server(kCoordServerPort);
 
   // start the executor server.
   info("starting executor server.");
@@ -115,56 +160,19 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   HogDBSchedServer sched_server(ctx);
   sched_server.start_server(kSchedServerPort);
 
-  // TODO(jhumphri): Check this and clean it up.
-  x23::ThreadPool x23_pool(/*nthreads=*/1);
-  x23::CoroPoll cp(x23_pool);
   if (coordinator_addr) {
-    x23::HostPort host_port;
-    if (!host_port.parse(*coordinator_addr)) {
-      throw std::runtime_error(
-          std::format("Invalid coordinator address: {}", *coordinator_addr));
-    }
-    const std::string host = {host_port.host.begin(), host_port.host.end()};
-    const std::string port = {host_port.port.begin(), host_port.port.end()};
+    auto const &client = ctx.get_sched_db_client();
+    assert(client);
 
-    auto fd = [&cp, host = std::move(host), port = std::move(port),
-               &coordinator_addr]() {
-      while (true) {
-        auto fd = cp.tcpconnect(host, port)();
-        if (fd) {
-          return *fd;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        warn_every_n_sec(5.0F, "waiting for coordinator address {}",
-                         *coordinator_addr);
-      }
-    }();
+    const std::string exec_address = create_address(kExecServerPort);
+    const std::string sched_address = create_address(kSchedServerPort);
+    ShardCard card{.protocol = version::kHogdProtocol,
+                   .upid = {},
+                   .block_height = 0,
+                   .address_for_exec = exec_address.c_str(),
+                   .address_for_sched = sched_address.c_str()};
 
-    auto client_config = x23::rpc_stream_logged(cp, fd);
-    while (true) {
-      auto client =
-          std::make_optional(client_config->template client<Coordinator1>());
-      if (!client) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        continue;
-      }
-
-      const std::string coord_address = create_address(kCoordServerPort);
-      const std::string exec_address = create_address(kExecServerPort);
-      const std::string sched_address = create_address(kSchedServerPort);
-      ShardCard card{.protocol = version::kHogdProtocol,
-                     .upid = {},
-                     .block_height = 0,
-                     .shard_count = 1,
-                     .address_for_coord = coord_address.c_str(),
-                     .address_for_exec = exec_address.c_str(),
-                     .address_for_sched = sched_address.c_str()};
-      client->coordinator_intro_shard(card)();
-      break;
-    }
-  }
-  else {
-    warn("no coordinator address provided, skipping coordinator connection");
+    client->scheddb_intro_shard(card)();
   }
 
   // block forever

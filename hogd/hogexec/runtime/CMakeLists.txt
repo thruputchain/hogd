@@ -15,6 +15,7 @@ add_subdirectory(test_util)
 add_library(runtime_objects OBJECT
   contract_trait.cc
   database_proxy.cc
+  event_server_proxy.cc
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
@@ -55,6 +56,7 @@ add_library(runtime_test_lib
 target_link_libraries(
   runtime_test_lib
   runtime
+  runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
   db_interface
   hogdb
   GTest::gtest
@@ -65,9 +67,11 @@ add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc
+  direct_auth_data_tests.cc
   direct_bytestring_test.cc
   direct_nnint_test.cc
   error_handling_test.cc
+  event_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
   gas_api_test.cc
@@ -108,10 +112,10 @@ add_executable(
 
 target_link_libraries(
   runtime
-  wasmi_lib
-  runtime_trampoline
+  unified_lib
   protocol
   metrics
+  event
   hogd
 )
 

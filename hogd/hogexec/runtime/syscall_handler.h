@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -55,7 +56,8 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
-                    ExecutionModeData execution_mode_data,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
                     std::shared_ptr<RuntimeContext> runtime_context);
 
   // Disable move and copy.
@@ -64,10 +66,20 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
+  // Debug management operations
+  void enable_transaction_stats()
+  {
+    stats_ = std::make_unique<TransactionStats>();
+  }
+
+  auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
+
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
   // Must only be called once per transaction.
   InvokeResult root_invoke();
+
+  // Operations after root_invoke()
 
   // Attempt to commit the current transaction to the database.
   // Requirement: root_invoke() must be called first.
@@ -76,18 +88,18 @@ public:
   // the root_invoke earlier had an error.
   SystemStatus<bool> try_commit_transaction();
 
+  // Get the proposal data.
+  // Can only be called after root_invoke()
+  // (as otherwise the proposal data is not available)
+  NondeterministicProposalData const &get_proposal_data() const;
+
+  // Syscalls: operations within an invocation
+
   // Create and run a child call frame.
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
-
-  void enable_transaction_stats()
-  {
-    stats_ = std::make_unique<TransactionStats>();
-  }
-
-  auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -109,7 +121,8 @@ public:
   // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
 
-  SyscallStatus<void> log(std::span<const std::byte> message);
+  void log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
+                 SHA256Hash const *topic2, std::span<const std::byte> data);
 
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
@@ -118,8 +131,6 @@ public:
 
   SystemStatus<SyscallStatus<ContractAddress>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
-
-  ProposalModeData const &get_proposal_data() const;
 
   bool is_read_only() const
   {
@@ -175,6 +186,7 @@ private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
   PerTransactionDatabaseProxy db_proxy_;
+  PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current
@@ -190,7 +202,8 @@ private:
   std::optional<InvocationFrame> last_frame_;
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool transaction_committed_or_aborted_ = false;
+  bool root_invoke_succeeded_{false};
+  bool transaction_committed_or_aborted_{false};
 
   StorageSnapshotCache &snapshot_cache_;
 
@@ -223,6 +236,13 @@ private:
                ? BlockExecutionMode::kBlockExecutionModeProposal
                : BlockExecutionMode::kBlockExecutionModeValidation;
   }
+
+  // Get the hash of the proposed transaction.
+  // Can only be called after root_invoke()
+  // (as otherwise the proposal data is not available)
+  SHA256Hash get_proposed_tx_hash() const;
+
+  SystemStatus<void> emit_events();
 };
 
 } // namespace hogd

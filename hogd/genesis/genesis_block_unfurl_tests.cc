@@ -3,11 +3,12 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <set>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -39,12 +40,20 @@ protected:
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 
+  void check_uniquifier(const Uniquifier &uniquifier)
+  {
+    auto r = uniquifiers_.insert(uniquifier);
+    EXPECT_TRUE(r.second);
+  }
+
   static SHA256Hash make_nonce(uint64_t nonce)
   {
     SHA256Hash nonce_hash{};
     std::memcpy(nonce_hash.data(), &nonce, sizeof(nonce));
     return nonce_hash;
   }
+
+  std::set<Uniquifier> uniquifiers_;
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -89,6 +98,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
   // run the unfurl transactions
 
   for (auto const &tx : unfurl_txns) {
+    check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -194,6 +204,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
   // run the unfurl transactions
 
   for (auto const &tx : unfurl_txns) {
+    check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -248,10 +259,10 @@ TEST_P(GenesisBlockUnfurlTest, DoubleLoadError)
 {
   GenesisBlock genesis_block{};
 
-  auto r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
-  ASSERT_EQ(r, DbResult::DbResultOK);
-  r = get_coord_client().dbcoord_load_genesis_block(genesis_block)();
-  ASSERT_EQ(r, DbResult::DbResultError);
+  auto r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
+  r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

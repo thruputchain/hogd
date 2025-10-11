@@ -1,0 +1,16 @@
+[package]
+name = "unified_lib"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+
+[dependencies]
+crypto_lib = { path = "../crypto" }
+wasmi_lib = { path = "../wasmi" }
+
+[features]
+debug_logging = ["wasmi_lib/debug_logging"]
+
+[lib]
+crate-type = ["staticlib"]
+

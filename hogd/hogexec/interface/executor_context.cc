@@ -2,10 +2,11 @@
 
 #include <cassert>
 
-#include "exec_coord.hh"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -18,6 +19,12 @@ PerTransactionDatabaseProxy
 ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 {
   return PerTransactionDatabaseProxy(db_proxy_, block_id_, tx_id);
+}
+
+PerTransactionEventServerProxy
+ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
+{
+  return PerTransactionEventServerProxy(event_server_proxy_, block_id_, tx_id);
 }
 
 namespace {
@@ -64,7 +71,8 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
-                                    ProposalModeData{}, make_hogexec_context());
+                                    make_per_tx_event_server_proxy(tx_id),
+                                    ProposalModeCtor{}, make_hogexec_context());
   auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
@@ -79,7 +87,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     assert(invoke_res.result_.error().code() != InvokeErrorCode::kInvokeNone);
     if (invoke_res.result_.error().code() ==
         InvokeErrorCode::kInvokeDeterministic) {
-      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+      out.proposal_data() = syscall_handler.get_proposal_data();
     }
     return out;
   }
@@ -94,7 +102,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 
   if (commit_res.value()) {
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
-    out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+    out.proposal_data() = syscall_handler.get_proposal_data();
     return out;
   }
   return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
@@ -109,7 +117,8 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 
   SystemCallHandler syscall_handler(
       proposed_tx.signed_tx, snapshot_cache_, proxy,
-      ValidationModeData{proposed_tx.nondeterministic_proposal_data},
+      make_per_tx_event_server_proxy(tx_id),
+      ValidationModeCtor{proposed_tx.nondeterministic_proposal_data},
       make_hogexec_context());
 
   auto invoke_res = syscall_handler.root_invoke();

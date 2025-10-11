@@ -10,24 +10,28 @@
 #include <utility>
 #include <vector>
 
-#include "coord.hh"
-#include "db_coord.hh"
+#include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
+#include "sched_db.hh"
+#include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -43,6 +47,8 @@ public:
     start_db_server();
     connect_coord();
     connect_exec();
+    event_server_port_ = event_server_exec_server_.start_server(0);
+    connect_event();
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
@@ -56,8 +62,11 @@ public:
       txid = allocate_txid();
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
-    return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{}, make_hogexec_context());
+    auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
+                                                      block_number_, txid);
+    return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
+                             std::move(event_proxy), ProposalModeCtor{},
+                             make_hogexec_context());
   }
 
   void advance_block();
@@ -81,9 +90,15 @@ private:
         }
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
         return std::make_unique<coord_client_t>(
-            client_config->template client<DbCoord1>());
+            client_config->template client<DbSched1>());
       }
     }();
+  }
+
+  void connect_event()
+  {
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_server_port_});
   }
 
   void connect_exec()
@@ -114,6 +129,7 @@ private:
   std::string server_addr_;
   uint16_t exec_port_;
   uint16_t coord_port_;
+  uint16_t event_server_port_;
 
   uint16_t ci_server_port_;
 
@@ -131,8 +147,14 @@ private:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
+  // TODO(geoff): replace with proper event server connection
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+
   using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
 };
@@ -140,20 +162,20 @@ private:
 inline void
 CommonBenchState::advance_block()
 {
-  auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
-  if (r.result() != DbResult::DbResultOK) {
+  auto r = coord_client_->dbsched_close_snapshot(block_number_)();
+  if (r.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
 
-  auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
-  if (r2.result() != DbResult::DbResultOK) {
+  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_)();
+  if (r2.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
 
-  auto r3 = coord_client_->dbcoord_create_snapshot(
+  auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal)();
-  if (r3 != DbResult::DbResultOK) {
+  if (r3 != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
 
@@ -181,16 +203,16 @@ CommonBenchState::run_genesis_block(
 
   assert(block_number_ == 0);
   {
-    auto r = coord_client_->dbcoord_load_genesis_block(genesis_block)();
-    if (r != DbResult::DbResultOK) {
+    auto r = coord_client_->dbsched_load_genesis_block(genesis_block)();
+    if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to write genesis block");
     }
   }
 
   {
-    auto r = coord_client_->dbcoord_create_snapshot(
+    auto r = coord_client_->dbsched_create_snapshot(
         0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
-    if (r != DbResult::DbResultOK) {
+    if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
   }
