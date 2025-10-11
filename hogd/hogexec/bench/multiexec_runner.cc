@@ -320,6 +320,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
+    info("opening block {}", block_number);
     event_sched_client.eventsched_open_block(block_number);
     auto res = db_sched_client.dbsched_create_snapshot(
         parent_block_number, block_number,
@@ -337,6 +338,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   };
 
   auto close_block = [&](uint64_t block_number) {
+    info("closing block {}", block_number);
     for (auto &exec_client : exec_clients) {
       exec_client.executorsched_finish_block(block_number);
     }
@@ -376,19 +378,23 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   write_genesis_block(genesis_block);
 
   for (auto const& init_blocks : loadgen_result.success().initialization_txs) {
+    open_block(parent_block_number, current_block_number);
+
     for (auto const& tx : init_blocks) {
 
-      open_block(parent_block_number, current_block_number);
 
       auto res = exec_clients.at(0).executorsched_propose_transaction(current_block_number, tx);
       if (res.result() != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to propose transaction");
       }
-      close_block(current_block_number);
-      parent_block_number = current_block_number;
-      current_block_number++;
     }
+
+    close_block(current_block_number);
+    parent_block_number = current_block_number;
+    current_block_number++;
   }
+
+  info("done initialization txs");
 
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
                                             1'000, 1000000);
@@ -402,7 +408,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   auto &worker_pool = WorkerPool::get_default_pool();
 
-  for (size_t i = 0; i < 10; i++) {
+  for (size_t i = 0; i < 100; i++) {
     open_block(parent_block_number, current_block_number);
     worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
       auto batch = job->next_batch();
