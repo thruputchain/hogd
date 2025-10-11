@@ -102,7 +102,7 @@ CoroPollImpl::debug_dump()
   int fd = debug.fd();
   if (fd < 0)
     fd = 2;
-  ::write(2, msg.data(), msg.size());
+  ::write(fd, msg.data(), msg.size());
 }
 
 void
