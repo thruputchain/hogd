@@ -99,6 +99,10 @@ struct NullDebugFd {
   static void operator()(auto &&...) {}
 };
 
-// inline DebugFd<"X23SERVER_TRACE"> debug;
+#ifdef NDEBUG
+inline NullDebugFd debug;
+#else // !NDEBUG
+inline DebugFd<"X23SERVER_TRACE"> debug;
+#endif // !NDEBUG
 
 } // namespace x23

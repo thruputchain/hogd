@@ -125,8 +125,14 @@ signal_cb(int sig, std::function<void()> cb)
 
   auto ptr = sig_cbs.take();
   auto it = ptr->emplace(sig, std::move(cb));
-  if (!sig_state[sig].numcb++)
-    signal(sig, handler);
+  if (!sig_state[sig].numcb++) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handler;
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(sig, &sa, nullptr) == -1)
+      Errno{}.raise("sigaction({})", sig);
+  }
   return &it->second.deleted;
 }
 

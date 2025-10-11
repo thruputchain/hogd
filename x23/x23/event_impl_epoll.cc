@@ -1,4 +1,5 @@
 
+#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
@@ -19,6 +20,7 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
   if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
     Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
+  sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
 };
 
 CoroPollImpl::~CoroPollImpl()
@@ -77,10 +79,30 @@ CoroPollImpl::showfd(const FdPtr &fdp)
   auto ret = std::format("fd {}, mode {}, ready {}", fd, int(fdp->mode_.load()),
                          fdp->ready_.load());
   if (fdp->callbacks_[0].value.load())
-    ret += ", reader";
+    uformat_to(&ret, ", reader (CPU {})", fdp->callbacks_[0].cpuhint.load());
   if (fdp->callbacks_[1].value.load())
-    ret += ", writer";
+    uformat_to(&ret, ", writer (CPU {})", fdp->callbacks_[1].cpuhint.load());
   return ret;
+}
+
+void
+CoroPollImpl::debug_dump()
+{
+  using enum FdState::Mode;
+  std::string msg = pool_.show();
+  uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
+             (void *)static_cast<CoroPoll *>(this), eventfd_.get());
+  std::lock_guard _lg(resize_lock_);
+  for (unsigned i = 0; i < state_size_; ++i) {
+    FdState *p = state_ + i;
+    if (p->mode_ == kFree)
+      continue;
+    uformat_to(&msg, "  {}\n", showfd(FdPtr{.p_ = p}));
+  }
+  int fd = debug.fd();
+  if (fd < 0)
+    fd = 2;
+  ::write(2, msg.data(), msg.size());
 }
 
 void

@@ -27,6 +27,7 @@
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/signal.h>
 #include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
@@ -127,13 +128,6 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
     iov[1].iov_base = m_.data();
     iov[1].iov_len = m_.size();
     auto n = ::readv(fd, iov, 2);
-
-    /*
-    int saved_errno = errno;
-    if (n < 0)
-      debug("::readv({}): {}", fd, Errno{saved_errno});
-    errno = saved_errno;
-    */
 
     if (n <= ptrdiff_t(len))
       return n;
@@ -350,6 +344,7 @@ private:
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
+  AutoSignalCbHandle sigcb_;
 
   struct FdPtr {
     FdState *p_;
@@ -360,6 +355,7 @@ private:
   FdPtr getfd(BorrowedFd fd);
 
   std::string showfd(const FdPtr &fdp);
+  void debug_dump();
 
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)

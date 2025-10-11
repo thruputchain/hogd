@@ -32,6 +32,11 @@ public:
   AutoSignalCbHandle(AutoSignalCbHandle &&other) noexcept
     : RawSignalCbHandle(other.release())
   {}
+  AutoSignalCbHandle &operator=(AutoSignalCbHandle &&other) noexcept
+  {
+    RawSignalCbHandle::operator=(other.release());
+    return *this;
+  }
   ~AutoSignalCbHandle()
   {
     if (delflag_)
