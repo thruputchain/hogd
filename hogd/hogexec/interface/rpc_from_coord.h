@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "exec_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
@@ -82,6 +83,11 @@ public:
 
 private:
   TransactionID allocate_tx_id();
+
+  ATTRIBUTE_ALWAYS_INLINE bool initialize_check()
+  {
+    return executor_states_ != nullptr;
+  }
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
