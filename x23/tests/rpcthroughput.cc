@@ -212,7 +212,7 @@ do_client(int port, const char *server)
   using namespace std::chrono;
   auto start = high_resolution_clock::now();
   count = 0;
-  std::this_thread::sleep_for(seconds(30));
+  std::this_thread::sleep_for(seconds(opt_seconds));
   auto final_count = count.load();
   auto elapsed = high_resolution_clock::now() - start;
 

@@ -166,12 +166,12 @@ with_proc_meta(std::uint32_t procno, F &&f)
   return [procno,
           &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {
     // Don't want invokers destroyed at the end of the program
-    static const auto &invokers = *new auto{std::unordered_map{std::pair{
-        Vers::valid_procnos[I], +[](F &&f) -> R {
-          return std::forward<F>(f)
-              .template operator()<
-                  typename Vers::template proc_meta<Vers::valid_procnos[I]>>();
-        }}...}};
+    static const auto &invokers = make_nodestroy(new auto{std::unordered_map{
+        std::pair{Vers::valid_procnos[I], +[](F &&f) -> R {
+                    return std::forward<F>(f)
+                        .template operator()<typename Vers::template proc_meta<
+                            Vers::valid_procnos[I]>>();
+                  }}...}});
     if (auto it = invokers.find(procno); it != invokers.end())
       return it->second(std::forward<F>(f));
     return std::forward<F>(f).template operator()<void>();
