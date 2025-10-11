@@ -80,12 +80,16 @@ public:
            std::vector<ExecCard> &exec_cards, uint16_t &exec_id,
            const EventCard &event_card,
            const x23::Vec<ShardCard> &shard_cards) {
+          info("doing lambda for schedexec_intro_exec");
           std::unique_lock lk(mtx);
           exec_cards.push_back(card);
+          info("pushed card {} to exec_cards", exec_cards.size());
           cv.notify_all();
 
           cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
+          info("event_card is not empty");
           cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
+          info("shard_cards is not empty");
 
           return IntroExecResult{.exec_id = exec_id++,
                                  .shards = shard_cards,
