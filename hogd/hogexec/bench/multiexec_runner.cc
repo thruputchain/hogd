@@ -26,6 +26,7 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
@@ -43,7 +44,6 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
-#include "hogd/base/worker_pool.h"
 
 namespace hogd {
 
@@ -71,23 +71,28 @@ public:
   SchedExecTest(SchedExecTest &&) = delete;
   SchedExecTest &operator=(SchedExecTest &&) = delete;
 
-  x23::Async<IntroExecResult> schedexec_intro_exec(const ExecCard& card)
+  x23::Async<IntroExecResult> schedexec_intro_exec(const ExecCard &card)
   {
     info("executor with card {} connected", x23::show(card));
 
-    auto r = default_coropoll().pool_.async([](const ExecCard& card, std::mutex& mtx, std::condition_variable& cv, std::vector<ExecCard>& exec_cards, uint16_t& exec_id, const EventCard& event_card, const x23::Vec<ShardCard>& shard_cards) {
+    auto r = default_coropoll().pool_.async(
+        [](const ExecCard &card, std::mutex &mtx, std::condition_variable &cv,
+           std::vector<ExecCard> &exec_cards, uint16_t &exec_id,
+           const EventCard &event_card,
+           const x23::Vec<ShardCard> &shard_cards) {
+          std::unique_lock lk(mtx);
+          exec_cards.push_back(card);
+          cv.notify_all();
 
-        std::unique_lock lk(mtx);
-        exec_cards.push_back(card);
-        cv.notify_all();
+          cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
+          cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
 
-        cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
-        cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
-
-        return IntroExecResult{.exec_id = exec_id++,
-            .shards = shard_cards,
-            .event = event_card};
-    }, card, std::ref(mtx_), std::ref(cv_), std::ref(exec_cards_), std::ref(exec_id_), std::ref(event_card_), std::ref(shard_cards_));
+          return IntroExecResult{.exec_id = exec_id++,
+                                 .shards = shard_cards,
+                                 .event = event_card};
+        },
+        card, std::ref(mtx_), std::ref(cv_), std::ref(exec_cards_),
+        std::ref(exec_id_), std::ref(event_card_), std::ref(shard_cards_));
 
     co_return co_await r;
   }
@@ -114,12 +119,12 @@ public:
   }
 
 private:
-    std::mutex mtx_;
-    std::condition_variable cv_;
-    std::vector<ExecCard> exec_cards_;
-    uint16_t exec_id_ = 0;
-    EventCard event_card_{};
-    x23::Vec<ShardCard> shard_cards_;
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::vector<ExecCard> exec_cards_;
+  uint16_t exec_id_ = 0;
+  EventCard event_card_{};
+  x23::Vec<ShardCard> shard_cards_;
 };
 
 static_assert(is_SchedExec1<SchedExecTest *, x23::MaybeAsync>);
@@ -143,15 +148,13 @@ public:
     cv_.notify_all();
   }
 
-  static void scheddb_hogs_transferred(const HogsTransferred &hogs)
-  {
-
-  }
+  static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
 
   std::vector<ShardCard> await_shard_cards(int num_cards)
   {
     std::unique_lock lk(mtx_);
-    cv_.wait(lk, [this, num_cards] { return shard_cards_.size() == num_cards; });
+    cv_.wait(lk,
+             [this, num_cards] { return shard_cards_.size() == num_cards; });
     return shard_cards_;
   }
 
@@ -164,63 +167,70 @@ private:
 static_assert(is_SchedDb1<SchedDBTest *, std::type_identity_t>);
 
 namespace {
-auto connect_to_event_sched_server(uint16_t port)
+auto
+connect_to_event_sched_server(uint16_t port)
 {
-    auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
-    if (!server_addr) {
+  auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
+  if (!server_addr) {
     throw std::runtime_error("Failed to connect to event server");
-    }
-    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-        ->client(EventSched1{});
+  }
+  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+      ->client(EventSched1{});
 }
 
-auto connect_to_db_server(ShardCard const& card) {
-    x23::HostPort host_port;
-    if (!host_port.parse(card.address_for_sched)) {
-        throw std::runtime_error("Failed to parse db server address");
-    }
-    auto server_addr = host_port.to_addr(true);
-    if (!server_addr) {
-        throw std::runtime_error("Failed to connect to db server");
-    }
-    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-        ->client(DbSched1{});
+auto
+connect_to_db_server(ShardCard const &card)
+{
+  x23::HostPort host_port;
+  if (!host_port.parse(card.address_for_sched)) {
+    throw std::runtime_error("Failed to parse db server address");
+  }
+  auto server_addr = host_port.to_addr(true);
+  if (!server_addr) {
+    throw std::runtime_error("Failed to connect to db server");
+  }
+  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+      ->client(DbSched1{});
 }
 
-auto connect_to_exec_server(const ExecCard &card) {
-    x23::HostPort host_port;
-    if (!host_port.parse(card.address)) {
-        throw std::runtime_error("Failed to parse exec server address");
-    }
-    auto server_addr = host_port.to_addr(true);
-    if (!server_addr) {
-        throw std::runtime_error("Failed to connect to exec server");
-    }
-    return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-        ->client(ExecutorSched1{});
+auto
+connect_to_exec_server(const ExecCard &card)
+{
+  x23::HostPort host_port;
+  if (!host_port.parse(card.address)) {
+    throw std::runtime_error("Failed to parse exec server address");
+  }
+  auto server_addr = host_port.to_addr(true);
+  if (!server_addr) {
+    throw std::runtime_error("Failed to connect to exec server");
+  }
+  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+      ->client(ExecutorSched1{});
 }
-}
+} // namespace
 
 struct BlockValidationQueue {
 
-    BlockValidationQueue(const auto& txs, size_t batch_size)
-        : txs(txs), batch_size(batch_size)
-    {}
+  BlockValidationQueue(const auto &txs, size_t batch_size)
+    : txs(txs), batch_size(batch_size)
+  {}
 
-    const std::span<const SignedTransaction> txs;
-    const size_t batch_size;
-    std::atomic<uint64_t> offset{0};
+  const std::span<const SignedTransaction> txs;
+  const size_t batch_size;
+  std::atomic<uint64_t> offset{0};
 
-    std::span<const SignedTransaction> next_batch()
-    {
-        auto start = offset.fetch_add(batch_size);
-        return {txs.begin() + std::min<size_t>(start, txs.size()), txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
-    }
+  std::span<const SignedTransaction> next_batch()
+  {
+    auto start = offset.fetch_add(batch_size);
+    return {txs.begin() + std::min<size_t>(start, txs.size()),
+            txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
+  }
 };
 
 // this assumes the executors use the same port config
 void
-run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int num_accounts)
+run_multiexec_bench(const std::vector<std::string> &server_addrs,
+                    unsigned int num_accounts)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -251,15 +261,18 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
 
-  sched_exec_test.impl_.register_event_card(EventCard {.protocol = version::kHogdProtocol,
-                                                       .upid = {},
-                                                       .address_for_exec = std::format("{}:{}", hostname, event_server_exec_port).c_str(),
-                                                       .address_for_sched = std::format("{}:{}", hostname, event_server_sched_port).c_str()});
+  sched_exec_test.impl_.register_event_card(EventCard{
+      .protocol = version::kHogdProtocol,
+      .upid = {},
+      .address_for_exec =
+          std::format("{}:{}", hostname, event_server_exec_port).c_str(),
+      .address_for_sched =
+          std::format("{}:{}", hostname, event_server_sched_port).c_str()});
 
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
-      "hogd/hogdb/hogdb",
-      {"hogdb_data/", "10000000000", std::format("{}:{}", hostname, sched_db_port)});
+      "hogd/hogdb/hogdb", {"hogdb_data/", "10000000000",
+                           std::format("{}:{}", hostname, sched_db_port)});
   server_idx++;
 
   for (; server_idx < server_addrs.size(); server_idx++) {
@@ -269,20 +282,24 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
   }
 
   auto db_cards = sched_db_test.impl_.await_shard_cards(1);
-  auto exec_cards = sched_exec_test.impl_.await_executor_cards(server_addrs.size() - 1);
+  auto exec_cards =
+      sched_exec_test.impl_.await_executor_cards(server_addrs.size() - 1);
 
-  auto event_sched_client = connect_to_event_sched_server(event_server_sched_port);
+  auto event_sched_client =
+      connect_to_event_sched_server(event_server_sched_port);
   assert(db_cards.size() == 1);
   auto db_sched_client = connect_to_db_server(db_cards[0]);
-    
-  std::vector<ExecutorSched1::template client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>> exec_clients;
+
+  std::vector<ExecutorSched1::template client<
+      x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>>
+      exec_clients;
   exec_clients.reserve(exec_cards.size());
   for (const auto &exec_card : exec_cards) {
     exec_clients.emplace_back(connect_to_exec_server(exec_card));
   }
 
-  auto await_ready = [&](auto& exec_client) {
-    while(true) {
+  auto await_ready = [&](auto &exec_client) {
+    while (true) {
       auto res = exec_client.executorsched_ready();
       if (res != ExecResult::ExecResultOK) {
         warn_every_n_sec(1.0, "Executor is not ready, retrying...");
@@ -299,7 +316,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
 
   auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
     event_sched_client.eventsched_open_block(block_number);
-    auto res = db_sched_client.dbsched_create_snapshot(parent_block_number, block_number, BlockExecutionMode::kBlockExecutionModeProposal);
+    auto res = db_sched_client.dbsched_create_snapshot(
+        parent_block_number, block_number,
+        BlockExecutionMode::kBlockExecutionModeProposal);
     if (res != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
@@ -340,7 +359,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
 
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments() = {
-    .num_accounts = num_accounts,
+      .num_accounts = num_accounts,
   };
 
   LoadgenRpc loadgen;
@@ -351,20 +370,21 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
 
-  auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id, 1'000, 1000000);
+  auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
+                                            1'000, 1000000);
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 100);
 
-  std::vector<BlockValidationQueue*> jobs = {1000, &block_validation_queue};
+  std::vector<BlockValidationQueue *> jobs = {1000, &block_validation_queue};
 
-  auto& worker_pool = WorkerPool::get_default_pool();
+  auto &worker_pool = WorkerPool::get_default_pool();
 
   for (size_t i = 0; i < 10; i++) {
     open_block(parent_block_number, current_block_number);
-    worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue* job) {
+    worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
       auto batch = job->next_batch();
       if (batch.empty()) {
         return;
@@ -375,7 +395,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs, unsigned int n
         batch_vec.push_back(tx);
       }
 
-      auto res = exec_clients[0].executorsched_propose_batch(current_block_number, batch_vec);
+      auto res =
+          exec_clients[0].executorsched_propose_batch(current_block_number,
+                                                      batch_vec);
       for (auto const &result : res) {
         if (result.result() != ExecResult::ExecResultOK) {
           throw std::runtime_error("Failed to propose batch");
@@ -395,10 +417,9 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println(
-      "Usage: {} -s <server_addr, repeated> -a "
-      "<num_accounts>",
-      argv[0]);
+  std::println("Usage: {} -s <server_addr, repeated> -a "
+               "<num_accounts>",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace
