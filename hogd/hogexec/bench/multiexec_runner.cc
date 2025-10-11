@@ -24,6 +24,7 @@
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
+#include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
