@@ -69,6 +69,7 @@ public:
 
         std::unique_lock lk(mtx);
         exec_cards.push_back(card);
+        cv.notify_all();
 
         cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
         cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
