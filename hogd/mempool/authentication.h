@@ -11,6 +11,7 @@
 #include "x23/vec.h"
 #include "x23/x23/serialize.h"
 #include <unordered_map>
+#include <utility>
 
 namespace hogd {
 
@@ -19,7 +20,8 @@ class Authentication {
 public:
   Authentication(BlockID current_block_id,
                  std::shared_ptr<db_sched_client_t> db_sched_client)
-    : current_block_id_(current_block_id), db_sched_client_(db_sched_client)
+    : current_block_id_(current_block_id),
+      db_sched_client_(std::move(db_sched_client))
   {}
 
   // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any

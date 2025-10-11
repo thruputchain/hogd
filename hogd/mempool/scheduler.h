@@ -23,7 +23,7 @@ namespace hogd {
 class Scheduler {
 public:
   Scheduler(std::shared_ptr<db_sched_client_t> db_sched_client)
-    : db_sched_client_(db_sched_client)
+    : db_sched_client_(std::move(db_sched_client))
   {}
 
   x23::Async<void> shut_down()
