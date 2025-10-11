@@ -87,3 +87,27 @@ target_link_libraries(
 
 set_property(TARGET control_cli PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
+add_executable(
+  multiexec_runner
+  multiexec_runner.cc
+)
+target_link_libraries(
+  multiexec_runner
+  hogd
+  protocol
+  runtime
+  exec_interface
+  db_interface
+  hogdb
+  runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
+  contract_loader
+  loadgen
+)
+
+target_include_directories(
+  multiexec_runner
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+set_property(TARGET multiexec_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
