@@ -94,7 +94,10 @@ public:
     sched_event_server_.shut_down();
     sched_db_server_.shut_down();
 
-    // TODO(jhumphri): Add comment explaining why we are doing this.
+    // We want to wait for all of the coroutines to finish. The easiest way to
+    // do this is to destruct the coropoll. Since we are using the global
+    // coropoll and the next test in the test suite will want to also use the
+    // global coropoll, we destruct and then reconstruct it.
     reconstruct_default_coropoll();
     std::println("done with first part of destructor");
   }
