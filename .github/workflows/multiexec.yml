@@ -1,9 +1,7 @@
-name: E2E Payment
+name: MultiExec Trial
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 11 * * *'  # 4am Pacific Time (UTC-7)
 
 jobs:
   bench_servers:
