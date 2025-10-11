@@ -49,6 +49,8 @@ TEST(Mempool, SubmitUnvetted)
                                  {{0, private_key}},
                                  /*auxiliary_private_keys=*/{});
   server.mempool_coord_rpc().schedulercoord_submit_unvetted({tx})();
+
+  std::println("Great! shutting down now");
 }
 
 TEST(Mempool, SubmitVetted)

@@ -13,11 +13,19 @@ default_threadpool()
   return pool;
 }
 
+inline x23::CoroPoll *cp = new x23::CoroPoll{default_threadpool()};
+
 inline x23::CoroPoll &
 default_coropoll()
 {
-  static x23::CoroPoll cp{default_threadpool()};
-  return cp;
+  return *cp;
+}
+
+inline void
+reconstruct_default_coropoll()
+{
+  delete cp;
+  cp = new x23::CoroPoll{default_threadpool()};
 }
 
 } // namespace hogd

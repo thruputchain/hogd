@@ -72,10 +72,31 @@ public:
 
   ~MempoolTestInfra()
   {
+    mempool_coord_server_.impl_.scheduler()->shut_down()();
+    mempool_coord_server_.shut_down();
+
     // TODO(jhumphri): Implement clean shutdown for all RPC servers.
     // We need to call [executor_.shut_down()] so that the [Exector] destructor
     // does not block.
     executor_.shut_down();
+
+    coordinator_sched_server_.shut_down();
+
+    event_exec_server_.shut_down();
+    event_sched_server_.shut_down();
+
+    db_scheduler_server_->shut_down();
+    db_scheduler_server_.reset();
+    db_executor_server_->shut_down();
+    db_executor_server_.reset();
+
+    sched_exec_server_.shut_down();
+    sched_event_server_.shut_down();
+    sched_db_server_.shut_down();
+
+    // TODO(jhumphri): Add comment explaining why we are doing this.
+    reconstruct_default_coropoll();
+    std::println("done with first part of destructor");
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
@@ -269,14 +290,14 @@ private:
   CoordinatorSchedServer coordinator_sched_server_;
 
   // The mempool servers.
-  RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolEventRpc> sched_event_server_;
-  RpcServer<MempoolExecutorRpc> sched_exec_server_;
   // We keep the [mempool_coord_server_] declaration below the various
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
   MempoolCoordinatorServer mempool_coord_server_;
+  RpcServer<MempoolDbRpc> sched_db_server_;
+  RpcServer<MempoolEventRpc> sched_event_server_;
+  RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };
 
 } // namespace hogd

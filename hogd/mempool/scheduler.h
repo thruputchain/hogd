@@ -26,27 +26,11 @@ public:
     : db_sched_client_(db_sched_client)
   {}
 
-  // Destructors cannot throw exceptions, though the destructor below calls
-  // [write_cache()], which is capable of throwing an exception (due to the
-  // [CHECK()]). We need to catch and squash this exception in the destructor so
-  // that the destructor itself cannot throw an exception.
-  //
-  // We know that the CHECK will never fail. Thus, in the event of an exception,
-  // we just print an error message to [stderr] and take no further action.
-  ~Scheduler()
+  x23::Async<void> shut_down()
   {
-    try {
-      // Note that we are invoking [write_cache()] synchronously below. If you
-      // notice a deadlock around here, this synchronous call is likely the
-      // culprit.
-      write_cache()();
-    } catch (const std::exception &e) {
-      std::cerr << "[Scheduler::~Scheduler] Exception in write_cache(): "
-                << e.what() << '\n';
-    } catch (...) {
-      std::cerr << "[Scheduler::~Scheduler] Unknown exception in write_cache()"
-                << '\n';
-    }
+    // TODO(jhumphri): Need to remove the txs from the runqueue and add their
+    // hogs back to the [kHogAgeGroupToSchedule] group for each wallet.
+    co_await write_cache();
   }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
