@@ -560,9 +560,15 @@ public:
   {
     // no duplicate nonces anywhere
     std::unordered_set<ReplayNonce> nonces{};
-    nonces.insert_range(base_replay_cache_.uniquifiers |
-                        std::views::transform(&Uniquifier::nonce));
-    nonces.insert_range(additions_ | std::views::transform(&Uniquifier::nonce));
+    {
+      auto view = base_replay_cache_.uniquifiers |
+                  std::views::transform(&Uniquifier::nonce);
+      nonces.insert(view.begin(), view.end());
+    }
+    {
+      auto view = additions_ | std::views::transform(&Uniquifier::nonce);
+      nonces.insert(view.begin(), view.end());
+    }
     assert(nonces.size() ==
            base_replay_cache_.uniquifiers.size() + additions_.size());
 
