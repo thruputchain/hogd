@@ -17,8 +17,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -34,9 +32,6 @@ protected:
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(/*block_id=*/1);
-
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
 
