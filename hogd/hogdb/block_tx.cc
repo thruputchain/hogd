@@ -191,15 +191,12 @@ namespace {
 x23::Detached
 async_dispatch_balance_deltas(BlockHeight block_height,
                               PerThread<std::vector<Delta>> balance_deltas,
-                              std::unique_lock<std::mutex> ul,
                               auto sched_db_client)
 {
-
-  // TODO(geoff): ask DM if this is ok, if default_threadpool() is a different
-  // pool from that of sched_db_client
   co_await default_threadpool().bg();
 
   HogsTransferred transferred{.block = block_height, .deltas = {}};
+  auto ul = balance_deltas.lock_threads();
   balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
     transferred.deltas.append_range(deltas);
   });
@@ -226,7 +223,6 @@ BlockTX::commit(WorkerPool &pool)
       kDefaultParallelRangeWidth, pool);
 
   PerThread<std::vector<Delta>> balance_deltas;
-  auto ul = balance_deltas.lock_threads();
 
   // write address balances.
   addr_balance_locks_.for_each_parallel(
@@ -261,7 +257,7 @@ BlockTX::commit(WorkerPool &pool)
 
   if (sched_db_client_) {
     async_dispatch_balance_deltas(block_height_, std::move(balance_deltas),
-                                  std::move(ul), sched_db_client_);
+                                  sched_db_client_);
   }
 
   return ret;
