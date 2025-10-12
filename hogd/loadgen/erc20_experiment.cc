@@ -70,11 +70,11 @@ ERC20ExperimentState::generate_experiment()
   const ContractAddress owner_address = get_owner_address();
 
   GenesisBlockBuilder builder;
-  builder.add_initial_config(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<"initialize">(),
-                             erc20_meta::make_calldata<"initialize">(
-                                 owner_address),
-                             int128_t{1'000'000} * config_.num_accounts);
+  builder.add_initial_config(
+      erc20_contract, make_nonce(0), erc20_meta::entrypoint<"initialize">(),
+      erc20_meta::make_calldata<"initialize">(owner_address),
+      // The number of hogs each wallet starts with.
+      int128_t{500'000'000'000'000} * config_.num_accounts);
   erc20_address_ =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
@@ -89,7 +89,7 @@ ERC20ExperimentState::generate_experiment()
                                wallet_meta::entrypoint<"initialize">(),
                                wallet_meta::make_calldata<"initialize">(
                                    wallet.public_key),
-                               1'000'000'000);
+                               500'000'000'000'000);
   }
 
   // make unfurl txs
