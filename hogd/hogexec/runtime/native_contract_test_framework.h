@@ -25,7 +25,6 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -59,13 +58,10 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
