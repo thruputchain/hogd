@@ -2,9 +2,12 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -26,6 +29,7 @@
 #include "sched_db.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -82,7 +86,19 @@ private:
           panic("failed to parse address to coord on {} port {}", server_addr_,
                 coord_port_);
         }
-        auto fd = x23::tcpconnect(*addr);
+        x23::UniqueFd fd;
+        try {
+          fd = x23::tcpconnect(*addr);
+        } catch (const std::system_error &e) {
+          if (e.code() == std::errc::connection_refused) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            warn_every_n_sec(5.0F, "coord on {}:{} is not ready", server_addr_,
+                             coord_port_);
+            continue;
+          }
+          error("caught system error: {} {}", e.what(), e.code().message());
+          throw;
+        }
         auto client_config = x23::srpc_stream_logged(fd.release());
         return std::make_unique<coord_client_t>(
             client_config->template client<DbSched1>());

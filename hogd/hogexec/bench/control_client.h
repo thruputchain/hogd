@@ -85,6 +85,7 @@ connect_to_control_server(
         }
         continue;
       }
+      error("caught system error: {} {}", e.what(), e.code().message());
       throw;
     }
     auto client_config = x23::srpc_stream_logged(fd.release());
