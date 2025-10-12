@@ -85,7 +85,10 @@ connect_to_control_server(
         }
         continue;
       }
+      std::println("caught system error: {} {}", e.what(), e.code().message());
       throw;
+    } catch(...) {
+      std::println("caught exception of unknown type");
     }
     auto client_config = x23::srpc_stream_logged(fd.release());
     return ControlClientWrapper(client_config->template client<CIServer1>());
