@@ -189,23 +189,18 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
 
 namespace {
 x23::Detached
-async_dispatch_balance_deltas(
-    BlockHeight block_height,
-    std::unique_ptr<PerThread<std::vector<Delta>>> balance_deltas,
-    auto sched_db_client)
+async_dispatch_balance_deltas(BlockHeight block_height,
+                              PerThread<std::vector<Delta>> balance_deltas,
+                              auto sched_db_client)
 {
-  assert(balance_deltas);
-
-  // TODO(geoff): ask DM if this is ok, if default_threadpool() is a different
-  // pool from that of sched_db_client
   co_await default_threadpool().bg();
 
   HogsTransferred transferred{.block = block_height, .deltas = {}};
-  auto lk = balance_deltas->lock_threads();
-  balance_deltas->for_each(lk, [&](const std::vector<Delta> &deltas) {
+  auto ul = balance_deltas.lock_threads();
+  balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
     transferred.deltas.append_range(deltas);
   });
-  sched_db_client->scheddb_hogs_transferred(std::move(transferred))([]() {});
+  co_await sched_db_client->scheddb_hogs_transferred(std::move(transferred));
   co_return;
 }
 } // namespace
@@ -227,8 +222,7 @@ BlockTX::commit(WorkerPool &pool)
       },
       kDefaultParallelRangeWidth, pool);
 
-  std::unique_ptr<PerThread<std::vector<Delta>>> balance_deltas =
-      std::make_unique<PerThread<std::vector<Delta>>>();
+  PerThread<std::vector<Delta>> balance_deltas;
 
   // write address balances.
   addr_balance_locks_.for_each_parallel(
@@ -246,9 +240,8 @@ BlockTX::commit(WorkerPool &pool)
 
         auto [delta, of] = overflowing_sub(new_val, prev_val);
         assert(!of);
-        (*balance_deltas)
-            ->push_back(Delta{.address = v.first.get_raw(),
-                              .hog_delta = to_xdr(delta)});
+        balance_deltas->push_back(
+            Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
 
         // write the address balance to the trie
         // TODO(geoff,jhumphri): should the value type here be byte_view(little

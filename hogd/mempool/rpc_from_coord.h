@@ -12,6 +12,7 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -34,7 +35,6 @@
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -156,16 +156,17 @@ private:
 
   void finish_init()
   {
+    auto &coropoll = default_coropoll();
     coord_client_ =
-        std::make_unique<coord_sched_client_t>(get_client(client_cp_));
+        std::make_unique<coord_sched_client_t>(get_client(coropoll));
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
     db_sched_client_ = std::make_shared<db_sched_client_t>(
-        std::move(MempoolDbRpc::get_clients(client_cp_)[0]));
-    exec_clients_ = MempoolExecutorRpc::get_clients(client_cp_);
+        std::move(MempoolDbRpc::get_clients(coropoll)[0]));
+    exec_clients_ = MempoolExecutorRpc::get_clients(coropoll);
     event_sched_client_ = std::make_unique<event_sched_client_t>(
-        MempoolEventRpc::get_client(client_cp_));
+        MempoolEventRpc::get_client(coropoll));
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
     // [current_block_id_] with it.
@@ -197,9 +198,6 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  // TODO(jhumphri): Replace with global pool and cp.
-  x23::ThreadPool client_pool_;
-  x23::CoroPoll client_cp_ = x23::CoroPoll(client_pool_);
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
