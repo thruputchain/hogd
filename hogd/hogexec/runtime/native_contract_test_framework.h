@@ -251,7 +251,7 @@ public:
         if (!fd) {
           throw std::runtime_error("Failed to connect to coord server");
         }
-        auto client_config = x23::srpc_stream_logged( fd.release());
+        auto client_config = x23::srpc_stream_logged(fd.release());
 
         return client_config->template client<DbSched1>();
       }())
@@ -651,10 +651,6 @@ private:
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   std::unique_ptr<Logger> previous_logger_ = nullptr;
 };
 
