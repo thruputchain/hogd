@@ -53,7 +53,7 @@ public:
                               .event = event_card};
   }
 
-  static x23::Vec<exec_sched_client_t> get_clients(x23::CoroPoll &cp)
+  static x23::Vec<exec_sched_client_t> get_clients()
   {
     x23::Vec<ExecCard> cards;
     Registration::registration().executors_registered(&cards);
@@ -64,8 +64,8 @@ public:
     for (const ExecCard &card : cards) {
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address));
-      ret.push_back(
-          x23::rpc_stream_logged(cp, fd.release())->client(ExecutorSched1{}));
+      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
+                        ->client(ExecutorSched1{}));
     }
     return ret;
   }

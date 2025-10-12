@@ -77,7 +77,7 @@ public:
     scheduler_ = std::move(scheduler);
   }
 
-  static x23::Vec<db_sched_client_t> get_clients(x23::CoroPoll &cp)
+  static x23::Vec<db_sched_client_t> get_clients()
   {
     x23::Vec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);
@@ -88,8 +88,8 @@ public:
     for (const ShardCard &card : cards) {
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-      ret.push_back(
-          x23::rpc_stream_logged(cp, fd.release())->client(DbSched1{}));
+      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
+                        ->client(DbSched1{}));
     }
     return ret;
   }
