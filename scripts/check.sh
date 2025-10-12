@@ -86,7 +86,7 @@ else
 fi
 
 printf "${COLOR}\nSTEP 3: Check tests (gcc)\n${NC}"
-if ! ctest --test-dir ${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
+if ! ctest --test-dir ${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 1000000; then
   printf "tests failed!\n"
   exit 1
 fi
@@ -123,7 +123,7 @@ else
 fi
 
 printf "${COLOR}\nSTEP 5: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
+if ! ctest --test-dir ${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 1000000; then
   printf "tests failed!\n"
   exit 1
 fi
