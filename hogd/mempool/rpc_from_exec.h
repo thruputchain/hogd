@@ -1,28 +1,23 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <mutex>
 
-#include "discovery.hh"
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
-#include "hogd/mempool/rpc_from_db.h"
-#include "hogd/mempool/rpc_from_event.h"
-#include "nomination.hh"
-#include "rpc_types.hh"
-#include "sched_coord.hh"
+#include "sched_db.hh"
+#include "sched_event.hh"
 #include "sched_exec.hh"
-#include "scheduler.h"
-#include "transaction.hh"
 #include "types.h"
-#include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
+#include "x23/format.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -58,7 +53,7 @@ public:
                               .event = event_card};
   }
 
-  static x23::Vec<exec_sched_client_t> get_clients(x23::CoroPoll &cp)
+  static x23::Vec<exec_sched_client_t> get_clients()
   {
     x23::Vec<ExecCard> cards;
     Registration::registration().executors_registered(&cards);
@@ -69,8 +64,8 @@ public:
     for (const ExecCard &card : cards) {
       x23::UniqueFd fd =
           x23::tcpconnect(server_address_to_sockaddr(card.address));
-      ret.push_back(
-          x23::rpc_stream_logged(cp, fd.release())->client(ExecutorSched1{}));
+      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
+                        ->client(ExecutorSched1{}));
     }
     return ret;
   }

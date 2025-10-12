@@ -2,10 +2,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <condition_variable>
 #include <cstdint>
-#include <mutex>
-#include <optional>
 #include <type_traits>
 
 // generated x23 headers
@@ -17,11 +14,9 @@
 #include "types.hh"
 
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 

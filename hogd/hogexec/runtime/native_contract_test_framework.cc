@@ -10,19 +10,26 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
+#include "x23/rpc.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -30,13 +37,13 @@ void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
   }
   {
-    auto r = coord_wrapper_->client().dbsched_commit_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_commit_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
     }
@@ -48,7 +55,7 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
   {
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
@@ -63,7 +70,7 @@ void
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
@@ -74,7 +81,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   {
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
@@ -156,7 +163,7 @@ NativeContractTestFramework::run_genesis_initialization(
   assert(!storage_snapshot_cache_);
   assert(block_number_ == 0);
 
-  auto r = coord_wrapper_->client().dbsched_load_genesis_block(genesis_block)();
+  auto r = coord_wrapper_->client().dbsched_load_genesis_block(genesis_block);
   if (r != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "run_genesis_initialization: dbsched_load_genesis_block failed");
@@ -233,6 +240,28 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
   }
+}
+
+HogDBDAO
+HogdbWrapper::open_db()
+{
+  Directory dir = Directory::open_temporary().value();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
+  return HogDBDAO(RAMDB(std::move(db)));
+}
+
+std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
+HogdbWrapper::make_sched_db_client()
+{
+  auto sched_db_port = test_sched_db_server_.start_server(/*port=*/0);
+  x23::UniqueFd fd =
+      x23::tcpconnect(*x23::HostPort{"localhost", sched_db_port}.to_addr(true));
+  using sched_db_client_t =
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+  return std::make_unique<sched_db_client_t>(
+      x23::rpc_stream_logged(default_coropoll(), fd.release())
+          ->client(SchedDb1{}));
 }
 
 void

@@ -20,7 +20,7 @@ DBContext::DBContext()
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = executor_server_.port()});
   event_server_proxy_ = std::make_unique<EventServerProxy>(
-      x23::HostPort{"localhost", event_server_exec_rpc_.start_server(0)});
+      x23::HostPort{"localhost", event_exec_server_.start_server(0)});
 
   advance_new_block();
 }

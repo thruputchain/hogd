@@ -92,7 +92,7 @@ protected:
     contract_map.emplace(0, std::move(contract_0));
     contract_map.emplace(1, std::move(contract_1));
 
-    auto event_exec_port = event_server_exec_rpc_.start_server(0);
+    auto event_exec_port = event_server_exec_server_.start_server(0);
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
     db_proxy_ = std::make_unique<DatabaseProxy>(
@@ -104,8 +104,8 @@ protected:
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
   TestEventAggregator event_server_;
-  TestEventAggregatorExecRpc event_server_exec_rpc_ =
-      TestEventAggregatorExecRpc(event_server_);
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
@@ -241,9 +241,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -322,10 +321,9 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
-  snapshot_server_.get_impl().setup_ban_item(
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.impl_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   SystemCallHandler handler = make_handler(
@@ -437,10 +435,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  snapshot_server_.get_impl().setup_create_contract(contract);
-  snapshot_server_.get_impl().setup_create_deployment(address,
-                                                      sha256(contract));
-  snapshot_server_.get_impl().setup_ban_item(
+  snapshot_server_.impl_.setup_create_contract(contract);
+  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.impl_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
   {

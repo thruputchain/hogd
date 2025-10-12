@@ -22,8 +22,10 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool_) : pool_(pool_)
   int fds[2];
   if (pipe(fds))
     Errno{}.raise("pipe");
-  for (int i = 0; i < 2; ++i)
+  for (int i = 0; i < 2; ++i) {
+    fcntl(fds[i], F_SETFD, 1);
     selfpipe_[i].reset(fds[i]);
+  }
   // Don't combine loops; set_nonblock might throw.
   for (int i = 0; i < 2; ++i)
     set_nonblock(selfpipe_[i].get());

@@ -12,7 +12,6 @@
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
-#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -39,11 +38,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   SignedTransactionBatch authenticated;
   authenticated.reserve(batch.size());
   for (const SignedTransaction &tx : batch) {
-    if (authentication_->authenticate(tx)) {
+    if (co_await authentication_->authenticate(tx)) {
       authenticated.push_back(tx);
     }
   }
-  scheduler_->add_txs(authenticated);
+  co_await scheduler_->add_txs(authenticated);
   co_return co_await coord_client_->coordscheduler_notify_vetted(authenticated);
 }
 
@@ -51,8 +50,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  scheduler_->add_txs(batch);
-  co_return;
+  co_return co_await scheduler_->add_txs(batch);
 }
 
 x23::Async<bool>
@@ -233,8 +231,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
-      scheduler_->schedule(/*block_height=*/nomination.block_height,
-                           kMaxBlockSize);
+      co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
+                                    kMaxBlockSize);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -246,15 +244,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   for (size_t i = 0; i < statuses.size(); i++) {
     if (statuses[i]) {
-      CHECK_PTR(my_cp_);
-      co_await my_cp_->pool_.bg();
-      scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
-                                    nomination.block_height);
+      co_await scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
+                                             nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
-      scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
-      scheduler_->add_txs({txs[i]});
+      co_await scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
+      co_await scheduler_->add_txs({txs[i]});
     }
   }
 
@@ -343,8 +339,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   CHECK(!txs.empty());
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
-        scheduler_->mark_txs_failed(nomination.transaction_hashes);
-    scheduler_->add_txs(reenqueue);
+        co_await scheduler_->mark_txs_failed(nomination.transaction_hashes);
+    co_await scheduler_->add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -357,8 +353,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // that all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     SignedTransactionBatch reenqueue =
-        scheduler_->mark_txs_failed(nomination.transaction_hashes);
-    scheduler_->add_txs(reenqueue);
+        co_await scheduler_->mark_txs_failed(nomination.transaction_hashes);
+    co_await scheduler_->add_txs(reenqueue);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -366,8 +362,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  scheduler_->mark_txs_executed(nomination.transaction_hashes,
-                                nomination.block_height);
+  co_await scheduler_->mark_txs_executed(nomination.transaction_hashes,
+                                         nomination.block_height);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
@@ -386,24 +382,21 @@ x23::Async<void>
 MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 {
   current_block_id_ = block_id;
-  x23::Vec<ContractAddress> changed_accounts =
-      co_await authentication_->update_block_id(current_block_id_);
-  for (const ContractAddress &account : changed_accounts) {
-    scheduler_->filter_txs_for_account(account, auth_filter_);
-  }
+  co_return;
+
+  // TODO(jhumphri): We are temporarily disabling authentication until it is
+  // implemented in hogexec.
+  // x23::Vec<ContractAddress> changed_accounts =
+  //     co_await authentication_->update_block_id(current_block_id_);
+  // for (const ContractAddress &account : changed_accounts) {
+  //   co_await scheduler_->filter_txs_for_account(account, auth_filter_);
+  // }
 }
 
 x23::Async<DbTipResult>
 MempoolCoordinatorRpc::schedcoord_get_tip()
 {
   return db_sched_client_->dbsched_get_tip();
-}
-
-x23::Async<DbSchedResult>
-MempoolCoordinatorRpc::schedcoord_load_genesis_block(
-    const GenesisBlock &genesis_block)
-{
-  return db_sched_client_->dbsched_load_genesis_block(genesis_block);
 }
 
 x23::Async<void>

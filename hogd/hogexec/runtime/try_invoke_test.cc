@@ -2198,6 +2198,14 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
   ASSERT_EQ(data_item_opt.value().bytestring(), str_hello);
+
+  // check that hogdb streamed out the results correctly
+  if (GetParam() == TestDB::kHogDB) {
+    auto hogs_transferred = get_hogs_transferred(1);
+    ASSERT_EQ(hogs_transferred.size(), 2);
+    ASSERT_EQ(hogs_transferred[sender_addr], -write_cost);
+    ASSERT_EQ(hogs_transferred[receiver_addr], 0);
+  }
 }
 
 TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)

@@ -21,10 +21,12 @@ target_link_libraries(
 add_executable(
   exec_interface_test
   executor_state_manager_test.cc
+  rpc_open_proposal_block_test.cc
 )
 
 target_link_libraries(
   exec_interface_test
   exec_interface
+  runtime_test_lib
   GTest::gtest
 )

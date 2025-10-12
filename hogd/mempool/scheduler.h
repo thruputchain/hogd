@@ -16,33 +16,21 @@
 #include "types.h"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/x23/async.h"
 
 namespace hogd {
 
 class Scheduler {
 public:
-  Scheduler(db_sched_client_t &db_sched_client)
-    : db_sched_client_(db_sched_client)
+  Scheduler(std::shared_ptr<db_sched_client_t> db_sched_client)
+    : db_sched_client_(std::move(db_sched_client))
   {}
 
-  // Destructors cannot throw exceptions, though the destructor below calls
-  // [write_cache()], which is capable of throwing an exception (due to the
-  // [CHECK()]). We need to catch and squash this exception in the destructor so
-  // that the destructor itself cannot throw an exception.
-  //
-  // We know that the CHECK will never fail. Thus, in the event of an exception,
-  // we just print an error message to [stderr] and take no further action.
-  ~Scheduler()
+  x23::Async<void> shut_down()
   {
-    try {
-      write_cache();
-    } catch (const std::exception &e) {
-      std::cerr << "[Scheduler::~Scheduler] Exception in write_cache(): "
-                << e.what() << '\n';
-    } catch (...) {
-      std::cerr << "[Scheduler::~Scheduler] Unknown exception in write_cache()"
-                << '\n';
-    }
+    // TODO(jhumphri): Need to remove the txs from the runqueue and add their
+    // hogs back to the [kHogAgeGroupToSchedule] group for each wallet.
+    co_await write_cache();
   }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
@@ -54,14 +42,17 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  void add_txs(const SignedTransactionBatch &txs);
+  x23::Async<void> add_txs(const SignedTransactionBatch &txs);
 
   // Call this method when account [account_address] receives [num_received]
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
-  void process_received_hogs(const ContractAddress &account,
-                             uint128_xdr num_received,
-                             BlockHeight current_block);
+  x23::Async<void> process_received_hogs(const ContractAddress &account,
+                                         uint128_t num_received,
+                                         BlockHeight current_block);
+
+  x23::Async<void> process_deducted_hogs(const ContractAddress &account,
+                                         uint128_t num_deducted);
 
   // Reorders txs in the runqueue and adds/removes txs from the runqueue based
   // on the number of hogs and hog ages for an account. Note that this function
@@ -73,14 +64,16 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
+  x23::Async<
+      std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
   schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed*. This method just removes the remaining tx state
   // from the scheduler, so we need to call this to prevent a memory leak.
-  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                         BlockHeight block);
+  x23::Async<void>
+  mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                    BlockHeight block);
 
   // Call this method when txs failed to execute. This method adds the hogs
   // consumed by the tx back to the account and removes the remaining tx state
@@ -92,7 +85,7 @@ public:
   // returns the failed txs and the caller can choose to what to do next,
   // whether that is reenqueing the txs in the scheduler, dropping the txs, or
   // doing something else.
-  SignedTransactionBatch
+  x23::Async<SignedTransactionBatch>
   mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
@@ -118,9 +111,10 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  bool read_average_hog_age(const ContractAddressBatch &addresses, bool force);
+  x23::Async<bool> read_average_hog_age(const ContractAddressBatch &addresses,
+                                        bool force);
   HogAge &get_cached_hog_age(const ContractAddress &address);
-  bool write_average_hog_age(const ContractAddressBatch &addresses);
+  x23::Async<bool> write_average_hog_age(const ContractAddressBatch &addresses);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
@@ -135,11 +129,12 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  void cycle_groups(const ContractAddress &account);
+  x23::Async<void> cycle_groups(const ContractAddress &account);
 
-  void filter_txs_for_account(
+  x23::Async<void> filter_txs_for_account(
       const ContractAddress &account,
-      const std::function<bool(const SignedTransaction &tx)> &filter);
+      const std::function<x23::Async<bool>(const SignedTransaction &tx)>
+          &filter);
 
   // Debug.
   void dump_runqueue() const;
@@ -169,7 +164,7 @@ private:
   // [cached_hogs_]. So [cached_hogs_] is the same both before and after this
   // method calls, and the [kHogAgeGroupToSchedule] group written to hogdb
   // contains the correct number of hogs.
-  void write_cache();
+  x23::Async<void> write_cache();
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
@@ -177,7 +172,8 @@ private:
   // currently on the runqueue for [account] and the [kHogAgeGroupToSchedule]
   // group does not have enough hogs to schedule a tx with a gas limit of
   // [gas_limit].
-  void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
+  x23::Async<void> cycle_if_needed(const ContractAddress &account,
+                                   GasAmount gas_limit);
 
   void remove_tx_from_runqueue(TxInfo *info,
                                x23::Vec<SignedTransactionHash> &hashes,
@@ -199,8 +195,9 @@ private:
   // if [current_height] is the height of the current block being scheduled,
   // then all txs that expire at heights [current_height - 1] and smaller are
   // discarded.
-  void discard_expired_txs(BlockHeight current_height);
-  void discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes);
+  x23::Async<void> discard_expired_txs(BlockHeight current_height);
+  x23::Async<void>
+  discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   bool on_runqueue(TxInfo &info)
   {
@@ -211,7 +208,7 @@ private:
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
-  db_sched_client_t &db_sched_client_;
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
 
   // Caches the number of hogs and hog ages for an account so that the scheduler
   // does not need to make as many RPC calls to the database.

@@ -4,8 +4,11 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <sys/socket.h>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
@@ -30,8 +33,13 @@ hogexec_init(const std::string &coordinator_addr)
   const uint16_t coordinator_port = static_cast<uint16_t>(
       std::stoul(std::string{host_port.port.begin(), host_port.port.end()}));
 
-  Executor executor(coordinator_host, coordinator_port);
-  CHECK_EQ(executor.start(kExecServerPort), kExecServerPort);
+  Executor executor;
+  const sockaddr_storage coordinator_sockaddr =
+      host_port_to_sockaddr(coordinator_host, coordinator_port);
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  CHECK_EQ(executor.start(hostname, kExecServerPort, coordinator_sockaddr),
+           kExecServerPort);
 
   // block forever
   info("hogexec initialization complete.");

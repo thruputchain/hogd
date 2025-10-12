@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "exec_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"
@@ -17,12 +18,22 @@ x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
+  // The initialize guard could, in principle, be made a debug-only check.
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
   // TODO(geoff): co_await cp_.pool_.bg();
   auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: No executor "
+         "context found for block {}",
+         block_id);
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
   if (ctx->mode() != ExecutionMode::kProposing) {
+    info("ExecutorMempoolRpc::executorsched_propose_transaction: Executor "
+         "context found for block {} is not in proposing mode",
+         block_id);
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
@@ -33,6 +44,9 @@ x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecResult::ExecResultSystemError;
+  }
   // TODO(geoff): co_await cp_.pool_.bg();
   auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
@@ -49,6 +63,11 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
   // TODO(geoff): co_await cp_.pool_.bg();
   // TODO(jhumphri): Uncomment this below!!!
   // co_await cp_.pool_.bg();
@@ -77,6 +96,10 @@ x23::Async<ExecValidateBatchResult>
 ExecutorMempoolRpc::executorsched_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
+  if (!initialize_check()) [[unlikely]] {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
   // TODO(geoff): co_await cp_.pool_.bg();
   auto ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
@@ -100,18 +123,27 @@ ExecutorMempoolRpc::executorsched_validate_batch(
 ExecResult
 ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
 {
+  if (!initialize_check()) [[unlikely]] {
+    return ExecResult::ExecResultSystemError;
+  }
   return executor_states_->open_proposal(id);
 }
 
 ExecResult
 ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
 {
+  if (!initialize_check()) [[unlikely]] {
+    return ExecResult::ExecResultSystemError;
+  }
   return executor_states_->open_validation(id);
 }
 
 void
 ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 {
+  if (!initialize_check()) [[unlikely]] {
+    return;
+  }
   executor_states_->remove_block(id);
 }
 

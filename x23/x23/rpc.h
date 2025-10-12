@@ -84,16 +84,15 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
-#include <cstdio>
 #include <exception>
 #include <expected>
 #include <map>
 #include <print>
 #include <stop_token>
 #include <tuple>
-
 #include <type_traits>
 #include <utility>
+
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/corosync.h>
@@ -106,6 +105,8 @@
 #include <x23/rpc_common.h> // IWYU pragma: export
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
+#include <x23/sockio.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
@@ -320,6 +321,7 @@ protected:
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
   Detached reader(SLOC_PARM0);
+  virtual void log_message(std::string msg) = 0;
 
 private:
   struct ClientState {
@@ -385,12 +387,11 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
   RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
   {
-    logger_.template log_server_advertise<VersMeta>(fd_);
-    assert(!reader_running_);
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
             std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
     srvmap_.emplace(dispatch->getpv(), dispatch);
+    logger_.log_message("serving {}", VersMeta::version_name);
     return this;
   }
   template<typename VersMeta, typename Server, typename... ExtraArgs>
@@ -406,7 +407,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     if (!reader_running_) {
       reader_running_ = true;
+      logger_.log_message("launching reader");
       reader();
+      logger_.log_message("reader launched");
     }
   }
 
@@ -468,6 +471,8 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
+
+  void log_message(std::string msg) override { logger_.log_message("{}", msg); }
 };
 
 // The return type of RpcStream<Logger>::client<VersMeta>, for
@@ -511,18 +516,33 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 // X23SERVER_TRACE_progname or X23SERVER_TRACE environment variable.
 // See RpcTraceMode::getenv for a description of this environment
 // variable.
-int
+//
+// Returns a pair consisting of the port number on which it is
+// listening and the listening file descriptor.  The only reasonable
+// thing to do for the listening file descriptor is to poison it when
+// you want to shut the server down, i.e.:
+//
+//   auto [port, fd] = tcp_rpc_server(cp, 0, [](auto c) {
+//        c->server(&impl, myvers{});
+//     });
+//
+//   // ...
+//   // later on to shut down server
+//   cp.poison(fd);
+std::pair<uint16_t, BorrowedFd>
 tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
   if (backlog < 0)
     backlog = 5 + cp.pool_.nthreads_;
   auto lfd = tcplisten(port, backlog);
+  int rawfd = lfd.get();
   if (port == 0)
     port = get_port(local_addr(lfd));
 
   [&cp, lfd = std::move(lfd),
    cb = std::move(cb)](this auto /*copy*/) -> Detached {
+    Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
     while (auto c = co_await (cp.accept(lfd))) {
       server_trace().with_logger(*c, [&](auto logger) {
         std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
@@ -531,7 +551,23 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     }
   }();
 
-  return port;
+  return std::pair{port, rawfd};
+}
+
+// Similar to tcp_rpc_server, but doesn't return unless/until it
+// accept returns an error or the CoroPoll is destroyed.
+void
+tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
+    requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
+{
+  std::mutex m;
+  tcp_rpc_server(
+      cp, port,
+      [cb = std::move(cb), _ul = std::unique_lock{m}](auto configurator) {
+        std::invoke(cb, std::move(configurator));
+      },
+      backlog);
+  std::unique_lock _ul(m);
 }
 
 } // namespace x23

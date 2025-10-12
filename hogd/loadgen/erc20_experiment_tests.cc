@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <set>
 
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_block.h"
@@ -12,6 +13,7 @@
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -29,6 +31,13 @@ protected:
   void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
+
+  std::set<Uniquifier> uniquifiers_;
+
+  void check_uniquifier(const Uniquifier &uniquifier)
+  {
+    EXPECT_TRUE(uniquifiers_.insert(uniquifier).second);
+  }
 
   void check_initial_balance()
   {
@@ -57,6 +66,7 @@ TEST_P(ERC20ExperimentTest, Basic)
 
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
+      check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
@@ -70,11 +80,12 @@ TEST_P(ERC20ExperimentTest, Basic)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(100);
+  auto work_txs = state->extend_experiment(100, 10);
   ASSERT_TRUE(work_txs.has_value());
   ASSERT_EQ(work_txs.value().work_txs.size(), 100);
 
   for (auto &tx : work_txs.value().work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
@@ -101,6 +112,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
+      check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
@@ -114,10 +126,11 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   std::optional<GasAmount> gas_used;
 
-  auto work_txs = state->extend_experiment(10000);
+  auto work_txs = state->extend_experiment(10000, 10);
   ASSERT_TRUE(work_txs.has_value());
 
   for (auto &tx : work_txs.value().work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
     auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
