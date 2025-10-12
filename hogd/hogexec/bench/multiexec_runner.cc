@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -231,7 +233,8 @@ struct BlockValidationQueue {
   }
 };
 
-// this assumes the executors use the same port config
+
+namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts)
@@ -435,6 +438,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     parent_block_number = current_block_number;
     current_block_number++;
   }
+}
+
 }
 
 } // namespace hogd
