@@ -449,7 +449,7 @@ ReplayCacheData
 ReplayCacheIt::build_result() const
 {
   ReplayCacheData result = base_replay_cache_;
-  result.uniquifiers.append_range(additions_);
+  std::ranges::copy(additions_, std::back_inserter(result.uniquifiers));
   return result;
 }
 
@@ -500,7 +500,7 @@ ReplayCacheIt::merge(const ReplayCacheIt &replay_cache,
   }
 
   // Conflicts checked; now do merge
-  additions_.append_range(replay_cache.additions_);
+  std::ranges::copy(replay_cache.additions_, std::back_inserter(additions_));
 
   assert_is_valid();
   size_t entries =
