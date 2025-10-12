@@ -57,6 +57,7 @@ add_executable(
   hogdb_test
   hogdb_test.cc
   item_change_auth_test.cc
+  item_change_replay_cache_test.cc
   recovery_tests.cc
 )
 target_link_libraries(

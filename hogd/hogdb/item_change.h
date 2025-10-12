@@ -27,6 +27,7 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -42,6 +43,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
 
@@ -56,12 +58,17 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
                            const StorageCostModel *cost_model) {
   // applies the change to the ramdb.
   { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
-  // makes the change's reservation at least as restrictive as arg. However,
-  // does not merge the value change in arg. Returns true if narrowing was
-  // successful.
+  // narrow() is called when a transaction wants to modify its pending change to
+  // an item.  Makes the change's reservation at least as restrictive as arg.
+  // However, does not merge the value change in arg. Instead, the narrowed
+  // change replaces the prior change for the item (InvokeTX::request_change).
+  // Returns true if narrowing was successful. If narrowing is unsuccessful,
+  // then the change becomes exclusive and all future changes (merges)
+  // attempted by other transactions for this item will fail.
   { t.narrow(arg) } -> std::same_as<bool>;
   // merges the change and reservation in arg (will fail if there is a
-  // conflict).
+  // conflict). This combines a change from one transaction with a change from
+  // another transaction.
   // Returns an upper bound of the TOTAL amount of storage tokens
   // that must be locked to support the item, after the merge.
   // THIS AMOUNT IS DETERMINISTIC (unless we implement retrocausal nnints).
@@ -545,6 +552,73 @@ static_assert(
 
 namespace hogd {
 
+class ReplayCacheIt {
+public:
+  ReplayCacheIt(BlockHeight expired_height, ReplayCacheData const &cache);
+
+  void assert_is_valid() const
+  {
+    // no duplicate nonces anywhere
+    std::unordered_set<ReplayNonce> nonces{};
+    nonces.insert_range(base_replay_cache_.uniquifiers |
+                        std::views::transform(&Uniquifier::nonce));
+    nonces.insert_range(additions_ | std::views::transform(&Uniquifier::nonce));
+    assert(nonces.size() ==
+           base_replay_cache_.uniquifiers.size() + additions_.size());
+
+    // no expired uniquifiers - can't check this without acccess to dbtip
+  }
+
+  HogDBStatus<void> check_conflict(Uniquifier const &uniquifier);
+  HogDBStatus<void> try_consume_uniquifier(Uniquifier const &uniquifier);
+
+  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
+
+  bool narrow(const ReplayCacheIt &replay_cache_item);
+
+  HogDBStatus<int128_t> merge(const ReplayCacheIt &replay_cache_item,
+                              const StorageCostModel *cost_model);
+
+  void undo_merge(const ReplayCacheIt &replay_cache_item);
+
+  // TODO(stutsman): implement or remove storage_size entirely
+  static size_t storage_size() { return 0; }
+
+  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
+  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const;
+
+  ReplayCacheData build_result() const;
+
+  BlockHeight expired_height_;
+  ReplayCacheData base_replay_cache_;
+  std::vector<Uniquifier> additions_;
+
+  friend struct std::formatter<ReplayCacheIt>;
+};
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::ReplayCacheIt> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::ReplayCacheIt &replay_cache_item, auto &ctx)
+  {
+    format_to(ctx.out(), "ReplayCacheIt{{");
+    format_to(ctx.out(), "base_replay_cache_: {}, ",
+              x23::show(replay_cache_item.base_replay_cache_));
+    format_to(ctx.out(), "additions_: [");
+    for (auto const &addition : replay_cache_item.additions_)
+      format_to(ctx.out(), "{},", x23::show(addition));
+    format_to(ctx.out(), "]");
+    return ctx.out();
+  }
+};
+
+namespace hogd {
+
+static_assert(hogd::is_item<hogd::ReplayCacheIt>);
+
 // ItemChange represents a pending modification to an item.
 class ItemChange {
 public:
@@ -560,6 +634,7 @@ public:
   {}
   ItemChange(AuthDataItem &&auth_data_item) : type_(std::move(auth_data_item))
   {}
+  ItemChange(ReplayCacheIt &&replay_cache) : type_(std::move(replay_cache)) {}
   ~ItemChange() = default;
 
   // setters
@@ -574,6 +649,7 @@ public:
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
+  std::optional<ReplayCacheIt> to_replay_cache() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
@@ -586,6 +662,10 @@ public:
   bool is_auth_data() const
   {
     return std::holds_alternative<PointerItem<AuthDataItem>>(type_);
+  }
+  bool is_replay_cache() const
+  {
+    return std::holds_alternative<ReplayCacheIt>(type_);
   }
 
   // commit applies the item's changes to the ramdb.
@@ -625,6 +705,7 @@ private:
     // negative values imply that the cost is not set
     int128_t cost_{std::numeric_limits<int128_t>::min()};
 
+    LazySnapshotCost() = default;
     LazySnapshotCost &operator=(const LazySnapshotCost &other)
     {
       assert(cost_ == other.cost_ || cost_ < 0 || other.cost_ < 0);
@@ -654,7 +735,7 @@ private:
   };
 
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData, PointerItem<AuthDataItem>>
+               NewContractData, PointerItem<AuthDataItem>, ReplayCacheIt>
       type_;
   LazySnapshotCost snapshot_cost_;
   bool exclusive_{false};
@@ -699,6 +780,14 @@ inline std::optional<NNInt128>
 ItemChange::get_raw_nnint128() const
 {
   if (const auto *tmp = std::get_if<NNInt128>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+inline std::optional<ReplayCacheIt>
+ItemChange::to_replay_cache() const
+{
+  if (const auto *tmp = std::get_if<ReplayCacheIt>(&type_); tmp)
     return *tmp;
   return std::nullopt;
 }

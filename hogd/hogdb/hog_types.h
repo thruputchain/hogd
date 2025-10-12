@@ -102,6 +102,7 @@ enum class ItemKeyType {
   kItemKeyTypeAddressMetadata = 3,
   kItemKeyTypeContractCode = 4,
   kItemKeyTypeContractRefcount = 5,
+  kItemKeyTypeReplayCache = 6,
 };
 
 } // namespace hogd
@@ -124,6 +125,8 @@ template<> struct std::formatter<hogd::ItemKeyType> {
       return format_to(ctx.out(), "kItemKeyTypeContractCode");
     case hogd::ItemKeyType::kItemKeyTypeContractRefcount:
       return format_to(ctx.out(), "kItemKeyTypeContractRefcount");
+    case hogd::ItemKeyType::kItemKeyTypeReplayCache:
+      return format_to(ctx.out(), "kItemKeyTypeReplayCache");
     }
     return format_to(ctx.out(), "Unknown");
   }
@@ -151,6 +154,7 @@ public:
     // not an Address.
     case ItemKeyType::kItemKeyTypeContractCode:
     case ItemKeyType::kItemKeyTypeContractRefcount:
+    case ItemKeyType::kItemKeyTypeReplayCache:
       return item_key_.addr.as_bytes();
     case ItemKeyType::kItemKeyTypeContractData:
       return byte_view(item_key_);
@@ -170,6 +174,7 @@ public:
     // not an Address.
     case ItemKeyType::kItemKeyTypeContractCode:
     case ItemKeyType::kItemKeyTypeContractRefcount:
+    case ItemKeyType::kItemKeyTypeReplayCache:
       return item_key_.addr == key.item_key_.addr;
     case ItemKeyType::kItemKeyTypeContractData:
       return item_key_.addr == key.item_key_.addr &&
@@ -201,6 +206,10 @@ public:
   constexpr bool is_contract_refcount() const
   {
     return key_type_ == ItemKeyType::kItemKeyTypeContractRefcount;
+  }
+  constexpr bool is_replay_cache() const
+  {
+    return key_type_ == ItemKeyType::kItemKeyTypeReplayCache;
   }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
 
@@ -276,6 +285,13 @@ make_contract_refcount_item_key(SHA256Hash const &hash)
 }
 
 [[nodiscard]] constexpr ItemKey
+make_replay_cache_item_key(const Address &addr)
+{
+  RawKey buf{};
+  return ItemKey(addr, buf, ItemKeyType::kItemKeyTypeReplayCache);
+}
+
+[[nodiscard]] constexpr ItemKey
 make_item_key(const AddressAndKey &addrkey)
 {
   switch (addrkey.key.key_type()) {
@@ -287,6 +303,8 @@ make_item_key(const AddressAndKey &addrkey)
     return make_address_metadata_item_key(addrkey.address);
   case StorageKeyType::kStorageKeyTypeContractData:
     return ItemKey(addrkey.address, addrkey.key.contract_data_key());
+  case StorageKeyType::kStorageKeyTypeReplayCache:
+    return make_replay_cache_item_key(addrkey.address);
   }
   std::unreachable();
 }
