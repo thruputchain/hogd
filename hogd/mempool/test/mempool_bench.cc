@@ -30,6 +30,7 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 1000;
+constexpr size_t kNumLoadgenTxs = 10'000;
 constexpr uint32_t kNumAccounts = 100;
 
 // Helper class to manage a loadgen server and client
@@ -78,7 +79,6 @@ public:
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
     for (const InitializationBlock &init_tx : init_txs) {
-      std::println("next block");
       infra.mempool_coord_rpc().schedulercoord_submit_vetted(kValidatorId,
                                                              init_tx)();
 
@@ -87,9 +87,6 @@ public:
       size_t num_nominated_txs = 0;
       SchedulerNomination nomination{};
       while (num_nominated_txs < init_tx.size()) {
-        std::println(
-            "nominate now, num_nominated_txs so far {}, init_tx.size() {}",
-            num_nominated_txs, init_tx.size());
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
@@ -101,8 +98,6 @@ public:
         nomination = res_nominate.scheduler_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
-        std::println("nominated {} txs",
-                     nomination.nomination.transaction_hashes.size());
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
     }
@@ -251,7 +246,7 @@ submit_unvetted_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -268,7 +263,7 @@ submit_vetted_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -287,9 +282,12 @@ nominate_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     // Submit unvetted transactions so there's something to nominate
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    std::println("schedulercoord_submit_vetted() {} txs", txs.size());
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     state.ResumeTiming();
 
@@ -297,9 +295,12 @@ nominate_loadgen(benchmark::State &state)
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
+    std::println("loadgen NOMINATED {} txs",
+                 res.nominate.scheduler_nomination()
+                     .nomination.transaction_hashes.size());
   }
 }
-BENCHMARK(nominate_loadgen)->Unit(benchmark::kMillisecond)->Iterations(3);
+BENCHMARK(nominate_loadgen)->Unit(benchmark::kMillisecond);
 
 void
 validate_loadgen(benchmark::State &state)
@@ -310,9 +311,11 @@ validate_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
@@ -320,7 +323,6 @@ validate_loadgen(benchmark::State &state)
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
 
-    ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
     state.ResumeTiming();

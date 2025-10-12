@@ -52,6 +52,9 @@ while getopts 'c:f:d:t:x:nh' flag; do
   esac
 done
 
+# Shift past the parsed options to get remaining arguments (build targets)
+shift $((OPTIND-1))
+
 if [[ "$OSTYPE" == "darwin"* ]]; then
   CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
 fi
@@ -71,5 +74,5 @@ CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   "$ROOT_DIR"
 
 if test -z "$NO_MAKE"; then
-  exec make -j "$NPROC" -C "$BUILD_DIR"
+  exec make -j "$NPROC" -C "$BUILD_DIR" "$@"
 fi

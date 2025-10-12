@@ -346,6 +346,7 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   }
 }
 
+// TODO(jhumphri): Add test for this.
 x23::Async<void>
 Scheduler::process_deducted_hogs(const ContractAddress &account,
                                  uint128_t num_deducted)
