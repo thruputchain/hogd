@@ -3,6 +3,7 @@
 #include <chrono>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -11,7 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/version.h"
-#include "x23/event.h"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -63,21 +64,28 @@ connect_to_control_server(
 {
   auto start_time = std::chrono::steady_clock::now();
   uint16_t port_num = std::stoi(port);
+  info("connecting to control server on {}:{}", host, port);
   while (true) {
-    info("connecting to control server on {}:{}", host, port);
     x23::HostPort hp{host, port_num};
     auto addr_res = hp.to_addr(true);
     if (!addr_res) {
       throw std::runtime_error("Failed to parse address to control server");
     }
-    auto fd = x23::tcpconnect(*addr_res);
-    if (!fd) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      auto elapsed = std::chrono::steady_clock::now() - start_time;
-      if (timeout != std::chrono::milliseconds(0) && elapsed > timeout) {
-        throw std::runtime_error("timeout connecting to control server");
+    x23::UniqueFd fd;
+    try {
+      fd = x23::tcpconnect(*addr_res);
+    } catch (const std::system_error &e) {
+      if (e.code() == std::errc::connection_refused) {
+        warn_every_n_sec(5.0F, "control server on {}:{} is not ready", host,
+                         port);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        auto elapsed = std::chrono::steady_clock::now() - start_time;
+        if (timeout != std::chrono::milliseconds(0) && elapsed > timeout) {
+          throw std::runtime_error("timeout connecting to control server");
+        }
+        continue;
       }
-      continue;
+      throw;
     }
     auto client_config = x23::srpc_stream_logged(fd.release());
     return ControlClientWrapper(client_config->template client<CIServer1>());

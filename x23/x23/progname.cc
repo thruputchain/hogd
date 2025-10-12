@@ -1,4 +1,4 @@
-
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iterator>
@@ -8,8 +8,12 @@
 
 #include <unistd.h>
 
-#include "x23/config.h"
 #include "x23/progname.h"
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <vector> // IWYU pragma: keep
+#endif
 
 namespace x23 {
 
@@ -41,6 +45,36 @@ find_exe(std::filesystem::path prog)
   return prog; // not found
 }
 
+#ifdef __APPLE__
+
+// mac-specific utilities for getting path to the current program
+std::string
+get_executable_path()
+{
+  uint32_t size = 0;
+  // First call with nullptr to get the buffer size
+  _NSGetExecutablePath(nullptr, &size);
+
+  std::vector<char> buffer;
+  buffer.resize(size);
+
+  if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+    // Shouldn't happen since we resized
+    return {};
+  }
+  // NOLINTBEGIN(misc-include-cleaner)
+  // Canonicalize the path (resolve symlinks, etc.)
+  char resolved[PATH_MAX];
+  if (realpath(buffer.data(), resolved)) {
+    return std::string(resolved);
+  }
+  // fallback to possibly non-canonical path
+  return std::string(buffer.data());
+  // NOLINTEND(misc-include-cleaner)
+}
+
+#endif
+
 void
 setprogpath(std::string_view argv0)
 {
@@ -58,8 +92,8 @@ const std::string &
 getprogpath()
 {
   if (progpath.empty()) {
-#if HAVE_GETPROGNAME
-    progpath = find_exe(::getprogname());
+#ifdef __APPLE__
+    progpath = get_executable_path();
 #else  // !HAVE_GETPROGNAME
     std::string buf(1024UZ, '\0');
     for (;;) {
