@@ -86,7 +86,7 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
   SignedTransaction stx =
       SignedTransaction{.tx = make_transaction({claim}), .signatures = {{sig}}};
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
   auto [pk2, _] = make_key_pair();
 
@@ -134,7 +134,7 @@ TEST_F(AuthClaimTests, GasAllSponsored)
 
   SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
   AccountAuthData aux_data = AccountAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -154,7 +154,7 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       .nonce_config = kAnyKeyNonceConfig,
   };
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, self_data,
                                                {{aux_contract, &aux_data}})
                   .has_value());
@@ -178,7 +178,7 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
 
   SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
 
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
   AccountAuthData aux_data = AccountAuthData{
       .public_keys = {x23::Ptr<PublicKeyConfig>(
@@ -200,7 +200,7 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
 
   // Gas claims can have 0 weight required, and the sponsored claim is implicit,
   // so this auth data is plausible.
-  EXPECT_TRUE(lightweight_plausible_auth_claims(stx).has_value());
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   ASSERT_FALSE(lightweight_validate_auth_claims(stx, self_data,
                                                 {{aux_contract, &aux_data}})
                    .has_value());

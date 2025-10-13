@@ -12,14 +12,27 @@
 
 namespace hogd {
 
+// There are three steps to validating a transaction for scheduling:
+// 1. Verification that the transaction is well-formed.  This requires
+// a small number of checks beyond parsing the transaction data into the
+// correct format.  These checks can be performed by reading only the
+// transaction data.
+// 2. Verification that the auth data referred to by the transaction exists.
+// This requires loading all of the auth data referenced by the transaction
+// from the database.
+// 3. Verification that the signatures on the transaction are all valid,
+// using the auth data loaded in step 2.
+//
+// These steps are increasinbly expensive computationally.  So we would like to
+// not perform any of the work in later steps if the earlier ones fail.
+
 // Lightweight verification that the signed transaction is well-formed.
 // Does not validate any signatures.  Checks that
 // each DecoratedSignature has a valid public key id, and that bitmaps are
 // valid. Does not check against any items in the database.
-AuthVerifyStatus<void>
-lightweight_plausible_auth_claims(const SignedTransaction &stx);
+AuthVerifyStatus<void> auth_claim_is_well_formed(const SignedTransaction &stx);
 
-// Performs all of the checks of lightweight_plausible_auth_claims,
+// Performs all of the checks of auth_claim_is_well_formed,
 // as well as checks that the signatures correspond to public keys that exist,
 // and that claims about signature weights are satisfied.
 AuthVerifyStatus<void> lightweight_validate_auth_claims(
@@ -44,7 +57,7 @@ constexpr GasClaim
 calculate_source_address_implicit_gas_claim(const Transaction &tx)
 {
   GasAmount remaining = tx.invocation.gas_limit;
-  for (auto const &gas_claim : tx.gas_claims) {
+  for (const GasClaim &gas_claim : tx.gas_claims) {
     if (remaining > gas_claim.amount) {
       remaining -= gas_claim.amount;
     }
@@ -61,10 +74,10 @@ inline std::unordered_set<ContractAddress>
 get_aux_addresses(const Transaction &tx)
 {
   std::unordered_set<ContractAddress> aux_addresses;
-  for (auto const &gas_claim : tx.gas_claims) {
+  for (const GasClaim &gas_claim : tx.gas_claims) {
     aux_addresses.insert(gas_claim.sponsored_contract);
   }
-  for (auto const &auth_claim : tx.auth_claims) {
+  for (const AuthClaim &auth_claim : tx.auth_claims) {
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kOtherAddressSignature:
       aux_addresses.insert(auth_claim.other_address_signature_id().address);

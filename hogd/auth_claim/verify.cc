@@ -64,7 +64,7 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
 {
   assert(has_public_key(auth_data, dec_sig.public_key_id));
 
-  auto const &pk = auth_data.public_keys[dec_sig.public_key_id];
+  const PublicKeyConfigOpt &pk = auth_data.public_keys[dec_sig.public_key_id];
   assert(pk);
 
   switch (pk->key.scheme()) {
@@ -140,7 +140,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
-  for (const auto &sig : sigs) {
+  for (const DecoratedSignature &sig : sigs) {
     if (!bitmap_accepts_key(accepted_keys, sig.public_key_id)) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
@@ -149,7 +149,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     size_t w = 0;
-    for (const auto &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs) {
       if (!has_public_key(*auth_data, sig.public_key_id)) {
         return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
@@ -163,7 +163,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
 
-    for (const auto &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs) {
       if (auto r = verify_decorated_signature(sig, *auth_data, tx_hash); !r) {
         return r;
       }
@@ -221,12 +221,12 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
   Weight total_weight = 0;
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const auto &sigs = stx.signatures[i];
-    const auto &auth_claim = stx.tx.auth_claims[i];
+    const DecoratedSignatureList &sigs = stx.signatures[i];
+    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
     case AuthClaimType::kInvokedAddressSignedWeight:
-      for (const auto &sig : sigs) {
+      for (const DecoratedSignature &sig : sigs) {
         if (!bitmap_accepts_key(nonce_config.accepted_keys,
                                 sig.public_key_id)) {
           return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
@@ -259,10 +259,10 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
       auth_data.gas_permissions.size(), 0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const auto &sigs = stx.signatures[i];
-    const auto &auth_claim = stx.tx.auth_claims[i];
+    const DecoratedSignatureList &sigs = stx.signatures[i];
+    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
 
-    const auto &claim_addr = [&auth_claim, &stx]() {
+    const ContractAddress &claim_addr = [&auth_claim, &stx]() {
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
       case AuthClaimType::kInvokedAddressSignedWeight:
@@ -278,7 +278,7 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     if (claim_addr != gas_claim.sponsored_contract) {
       continue;
     }
-    for (const auto &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs) {
       for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
         if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
                                 sig.public_key_id)) {
@@ -323,9 +323,10 @@ verify_auth_claims_internal(
 
   // Verify that each claimed auth has a corresponding set of valid signatures.
   for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
-    auto const &auth_claim = stx.tx.auth_claims[i];
-    auto const &sigs = stx.signatures[i];
+    const AuthClaim &auth_claim = stx.tx.auth_claims[i];
+    const DecoratedSignatureList &sigs = stx.signatures[i];
     const AccountAuthData *auth_data = nullptr;
+
     if constexpr (verify_weights_against_auth_data(VerfType)) {
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
@@ -357,7 +358,7 @@ verify_auth_claims_internal(
 
   // The gas claims are only about gas sponsorships; the gas claim
   // from the source account should be implicit.
-  for (auto const &gas_claim : stx.tx.gas_claims) {
+  for (const GasClaim &gas_claim : stx.tx.gas_claims) {
     if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
       return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
     }
@@ -373,7 +374,7 @@ verify_auth_claims_internal(
       return r;
     }
     // Check all of the sponsored gas claims.
-    for (const auto &gas_claim : stx.tx.gas_claims) {
+    for (const GasClaim &gas_claim : stx.tx.gas_claims) {
       assert(aux_auth_data.contains(gas_claim.sponsored_contract));
       if (auto r = validate_gas_permission<VerfType>(
               stx, gas_claim, *aux_auth_data.at(gas_claim.sponsored_contract));
@@ -382,7 +383,7 @@ verify_auth_claims_internal(
       }
     }
 
-    auto implicit_gas_claim =
+    GasClaim implicit_gas_claim =
         calculate_source_address_implicit_gas_claim(stx.tx);
 
     // Check the implicit gas sponsorship from the source account.
@@ -421,7 +422,7 @@ lightweight_validate_auth_claims(
 }
 
 AuthVerifyStatus<void>
-lightweight_plausible_auth_claims(const SignedTransaction &stx)
+auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
       stx, nullptr,
