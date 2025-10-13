@@ -150,7 +150,7 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr size_t kRamDbBytes = 20UL * 1024 * 1024 * 1024; // 20 GiB.
+  static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
   using sched_db_client_t =
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
