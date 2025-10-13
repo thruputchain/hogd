@@ -14,7 +14,6 @@
 #include <format>
 #include <initializer_list>
 #include <limits>
-#include <print>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -473,7 +472,6 @@ struct Deserializer
         write(2, msg, sizeof(msg) - 1);
         std::terminate();
       }
-      std::println("input too short B");
       throw XdrBadInput("x23::Deserializer: input too short");
     }
   }
@@ -485,7 +483,6 @@ struct Deserializer
         throw XdrBadInput("x23::Deserializer: size too large");
     }
     if (e - p < std::ptrdiff_t(n)) [[unlikely]] {
-      std::println("input too short C");
       throw XdrBadInput("x23::Deserializer: input too short");
     }
   }
@@ -643,7 +640,6 @@ struct Deserializer
     // case of a structure that starts with a bunch of integers and
     // ends with a vector, like call_body.
     else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_)) {
-      std::println("input too short A");
       throw XdrBadInput("x23::Deserializer: input too short");
     }
     else {
