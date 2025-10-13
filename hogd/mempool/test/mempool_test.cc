@@ -6,7 +6,6 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "hogd/base/types.h"
-#include "hogd/init.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
@@ -398,13 +397,3 @@ TEST(Mempool, Stress)
 }
 
 } // namespace hogd
-
-int
-main(int argc, char *argv[])
-{
-  auto ret = hogd::hogd_init(argc, argv, false);
-  if (ret != 0)
-    return ret;
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
