@@ -84,7 +84,7 @@ class TestEventAggregatorExecServer
   : public RpcServer<TestEventAggregatorExecRpc> {
 public:
   TestEventAggregatorExecServer(TestEventAggregator &event_aggregator)
-    : RpcServer(default_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 
@@ -131,7 +131,7 @@ class TestEventAggregatorSchedServer
   : public RpcServer<TestEventAggregatorSchedRpc> {
 public:
   TestEventAggregatorSchedServer(TestEventAggregator &event_aggregator)
-    : RpcServer(default_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 

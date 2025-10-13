@@ -4,6 +4,7 @@
 #include <set>
 #include <utility>
 
+#include "hogd/base/types.h"
 #include "storage_item.hh"
 #include "types.hh"
 
