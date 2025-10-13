@@ -23,10 +23,10 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/invariant.h"
+#include "hogd/hogdb/invariant_contract_refcount.h"
 #include "hogd/hogdb/invariant_hog_conservation.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/replay_cache.h"
-#include "sched_coord.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/span.h"
@@ -158,6 +158,7 @@ public:
   void enable_debug_invariants(StorageCostModel const &cost_model)
   {
     assert(invariants_.empty());
+    invariants_.push_back(std::make_unique<HogContractRefcountInvariant>());
     invariants_.push_back(
         std::make_unique<HogConservationInvariant>(cost_model));
   }
@@ -212,6 +213,8 @@ public:
                                   const AccountAuthData &auth);
   HogDBStatus<void> write_address_metadata(Address const &addr,
                                            const DeployedContractHash &hash);
+  HogDBStatus<void> update_contract_refcount(SHA256Hash const &hash,
+                                             int32_t delta);
   HogDBStatus<void>
   write_address_replay_cache(Address const &addr,
                              ReplayCacheData const &replay_cache);
