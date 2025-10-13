@@ -1,31 +1,40 @@
 #include "hogd/storage_item/replay_cache.h"
 
-#include "types.hh"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include <algorithm>
 #include <cstddef>
-#include <iterator>
+#include <utility>
 
 namespace hogd {
 
 bool
-ReplayCache::contains(ReplayNonce nonce) const
+ReplayCache::contains(Uniquifier uniquifier) const
 {
-  return nonces_.contains(nonce);
+  return std::ranges::find(data_.uniquifiers, uniquifier) != data_.uniquifiers.end();
 }
 
 bool
-ReplayCache::can_accept(ReplayNonce nonce) const
+ReplayCache::can_accept(Uniquifier uniquifier) const
 {
-  if (nonce <= metadata_.minimum_threshold) {
+  if (uniquifier.block_expiry_height <= expired_height_) {
     return false;
   }
 
-  return !contains(nonce);
+  return !contains(uniquifier);
 }
 
-size_t
-ReplayCache::count_remaining_after_clear(ReplayNonce threshold) const
+void
+ReplayCache::filter_expired()
 {
-  return std::distance(nonces_.upper_bound(threshold), nonces_.end());
+  ReplayCacheData new_data;
+  new_data.uniquifiers.reserve(data_.uniquifiers.size());
+  for (Uniquifier const &uniquifier : data_.uniquifiers) {
+    if (uniquifier.block_expiry_height > expired_height_) {
+      new_data.uniquifiers.push_back(uniquifier);
+    }
+  }
+  data_ = std::move(new_data);
 }
 
 } // namespace hogd

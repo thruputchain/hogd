@@ -1,34 +1,34 @@
 #pragma once
 
 #include <cstddef>
-#include <set>
 #include <utility>
 
 #include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
 class ReplayCache {
 public:
-  ReplayCache(ReplayCacheMetadata metadata, std::set<ReplayNonce> nonces)
-    : metadata_(std::move(metadata)), nonces_(std::move(nonces))
-  {}
+  ReplayCache(ReplayCacheData data, BlockHeight expired_height)
+    : data_(std::move(data)), expired_height_(expired_height)
+  {
+    filter_expired();
+  }
 
-  bool contains(ReplayNonce nonce) const;
-  bool can_accept(ReplayNonce nonce) const;
+  bool contains(Uniquifier uniquifier) const;
+  bool can_accept(Uniquifier uniquifier) const;
 
-  size_t size() const { return nonces_.size(); }
+  size_t size() const { return data_.uniquifiers.size(); }
 
-  auto const &metadata() const { return metadata_; }
-
-  auto const &nonces() const { return nonces_; }
-
-  size_t count_remaining_after_clear(ReplayNonce threshold) const;
+  auto const &uniquifiers() const { return data_.uniquifiers; }
 
 private:
-  ReplayCacheMetadata metadata_;
-  std::set<ReplayNonce> nonces_;
+  ReplayCacheData data_;
+  BlockHeight expired_height_;
+
+  void filter_expired();
 };
 
 } // namespace hogd
