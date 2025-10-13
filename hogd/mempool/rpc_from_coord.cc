@@ -260,7 +260,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
 
-  std::println("ret D");
   co_return result;
 }
 
