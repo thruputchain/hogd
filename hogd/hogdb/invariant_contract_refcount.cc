@@ -46,6 +46,7 @@ HogContractRefcountInvariant::log_item_change(std::span<const std::byte> key,
   case Prefix::kBalance:
   case Prefix::kAccountAuthData:
   case Prefix::kContractDataKey:
+  case Prefix::kReplayCache:
     // nothing to do here
     return;
   case Prefix::kWasmCodeRefcount:
