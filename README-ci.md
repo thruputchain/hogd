@@ -1,3 +1,8 @@
+# CI Debug information
+
+- Core dumps are saved to `../core_dumps`
+	- On the hogN machines: this is `$WORK_DIR/hogd/core_dumps`.  Usually `$WORK_DIR=/home/hogci/actions-runner/_work`, although on `hog11` this is `/home/hogci/general_runner/_work`
+
 # CI runner setup instructions
 - Create the hogci home directory on the machine in question
 - Follow the instructions to clone and register the runner as they appear on Github.

@@ -4,6 +4,7 @@
 #include <print>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
@@ -121,6 +122,14 @@ private:
   LoadgenContextID context_id_;
 };
 
+constexpr AuthClaim
+make_self_sign_claim(uint32_t key_id)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+  claim.invoked_address_signature_id() = key_id;
+  return claim;
+}
+
 SignedTransactionBatch
 generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
                     size_t num_txs)
@@ -140,11 +149,11 @@ generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
                                auth_data);
 
   SignedTransactionBatch txs;
-  for (const SignedTransaction &unsigned_tx : unsigned_txs) {
-    txs.push_back(hogd::Authentication::sign(unsigned_tx.tx,
-                                             /*signature_weight=*/1,
-                                             {{0, private_key}},
-                                             /*auxiliary_private_keys=*/{}));
+  for (SignedTransaction &unsigned_tx : unsigned_txs) {
+    unsigned_tx.tx.auth_claims.push_back(make_self_sign_claim(0));
+    txs.push_back(
+        hogd::Authentication::sign_claims(unsigned_tx.tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
   }
   return txs;
 }
