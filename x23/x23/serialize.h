@@ -482,9 +482,8 @@ struct Deserializer
       if (n > PTRDIFF_MAX)
         throw XdrBadInput("x23::Deserializer: size too large");
     }
-    if (e - p < std::ptrdiff_t(n)) [[unlikely]] {
+    if (e - p < std::ptrdiff_t(n)) [[unlikely]]
       throw XdrBadInput("x23::Deserializer: input too short");
-    }
   }
 
   template<bool Safe> uint32_t get32()
@@ -639,9 +638,8 @@ struct Deserializer
     // unmarshal the first few fields unsafely.  That optimizes the
     // case of a structure that starts with a bunch of integers and
     // ends with a vector, like call_body.
-    else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_)) {
+    else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
       throw XdrBadInput("x23::Deserializer: input too short");
-    }
     else {
       constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
       [this, &x]<size_t... I>(std::index_sequence<I...>) {
