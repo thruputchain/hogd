@@ -53,7 +53,7 @@ while getopts 'c:f:d:t:x:nh' flag; do
 done
 
 # Shift past the parsed options to get remaining arguments (build targets)
-shift $((OPTIND-1))
+shift $((OPTIND - 1))
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
