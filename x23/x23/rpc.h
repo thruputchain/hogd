@@ -472,6 +472,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
 
+  // NOLINTNEXTLINE(portability-template-virtual-member-function)
   void log_message(std::string msg) override { logger_.log_message("{}", msg); }
 };
 
