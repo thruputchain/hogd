@@ -133,13 +133,6 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
-    std::println(
-        "invoked addr {}, tx expiry is {}, tx.tx.invocation.gas_limit {}, "
-        "from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) {}",
-        tx.tx.invocation.invoked_address, tx.tx.uniquifier.block_expiry_height,
-        tx.tx.invocation.gas_limit,
-        from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
-
     co_await cycle_if_needed(tx.tx.invocation.invoked_address,
                              tx.tx.invocation.gas_limit);
     if (tx.tx.invocation.gas_limit <=
@@ -153,7 +146,6 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
       CHECK(age_to_tx_[info.age].insert(&it->second).second);
     }
     else {
-      std::println("not enough hogs");
       // Not enough hogs for this tx.
       CHECK(stranded_[info.account][tx.tx.invocation.gas_limit]
                 .insert(&it->second)
@@ -346,6 +338,7 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   }
 }
 
+// TODO(jhumphri): Add test for this.
 x23::Async<void>
 Scheduler::process_deducted_hogs(const ContractAddress &account,
                                  uint128_t num_deducted)
