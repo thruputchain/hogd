@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "account.hh"
+#include "db_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -19,6 +20,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
@@ -409,6 +411,31 @@ InvokeTX::request_auth_data(Address const &addr,
   }
   return request_change(make_account_auth_data_item_key(addr),
                         std::move(auth_data_item));
+}
+
+HogDBStatus<void>
+InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
+{
+  auto base_replay_cache = block_.get_db().read_address_replay_cache(addr);
+  if (!base_replay_cache) {
+    if (base_replay_cache.error() != HogDBCode::kNotFound) {
+      return base_replay_cache.error();
+    }
+    base_replay_cache = ReplayCacheData{};
+  }
+
+  HogDBStatus<DbTip> tip = block_.get_db().read_dbtip();
+  if (!tip)
+    return tip.error();
+
+  ReplayCacheIt replay_cache_item(tip->height,
+                                  std::move(base_replay_cache.value()));
+  HogDBStatus<void> ret = replay_cache_item.try_consume_uniquifier(uniquifier);
+  if (!ret)
+    return ret;
+
+  return request_change(make_replay_cache_item_key(addr),
+                        std::move(replay_cache_item));
 }
 
 } // namespace hogd

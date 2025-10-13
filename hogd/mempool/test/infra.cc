@@ -56,6 +56,9 @@ MempoolTestInfra::MempoolTestInfra()
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool();
+
+  sched_db_server_.impl_.register_scheduler(
+      mempool_coord_server_.impl_.scheduler());
 }
 
 } // namespace hogd

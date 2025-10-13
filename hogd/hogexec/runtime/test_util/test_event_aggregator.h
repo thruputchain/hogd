@@ -1,19 +1,17 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <optional>
 
 #include "event.hh"
 #include "event_rpc.hh"
-#include "hogd/base/log.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -37,12 +35,7 @@ public:
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
-  auto &get_coropoll() { return cp_; }
-
 private:
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   std::mutex mtx_;
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
@@ -72,7 +65,17 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
 private:
+  std::atomic<bool> shutdown_flag_ = false;
+
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
@@ -81,7 +84,7 @@ class TestEventAggregatorExecServer
   : public RpcServer<TestEventAggregatorExecRpc> {
 public:
   TestEventAggregatorExecServer(TestEventAggregator &event_aggregator)
-    : RpcServer(event_aggregator.get_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 
@@ -109,7 +112,17 @@ struct TestEventAggregatorSchedRpc {
     event_aggregator_.close_block(block_id);
   }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
 private:
+  std::atomic<bool> shutdown_flag_ = false;
+
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
@@ -118,7 +131,7 @@ class TestEventAggregatorSchedServer
   : public RpcServer<TestEventAggregatorSchedRpc> {
 public:
   TestEventAggregatorSchedServer(TestEventAggregator &event_aggregator)
-    : RpcServer(event_aggregator.get_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 

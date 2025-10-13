@@ -37,13 +37,13 @@ void
 NativeContractTestFramework::advance_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
   }
   {
-    auto r = coord_wrapper_->client().dbsched_commit_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_commit_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_commit_snapshot failed");
     }
@@ -55,7 +55,7 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
   {
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
@@ -70,7 +70,7 @@ void
 NativeContractTestFramework::discard_block(BlockExecutionMode mode)
 {
   {
-    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_)();
+    auto r = coord_wrapper_->client().dbsched_close_snapshot(block_number_);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_close_snapshot failed");
     }
@@ -81,7 +81,7 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   {
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("advance_block: dbsched_create_snapshot failed");
     }
@@ -163,7 +163,7 @@ NativeContractTestFramework::run_genesis_initialization(
   assert(!storage_snapshot_cache_);
   assert(block_number_ == 0);
 
-  auto r = coord_wrapper_->client().dbsched_load_genesis_block(genesis_block)();
+  auto r = coord_wrapper_->client().dbsched_load_genesis_block(genesis_block);
   if (r != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error(
         "run_genesis_initialization: dbsched_load_genesis_block failed");
