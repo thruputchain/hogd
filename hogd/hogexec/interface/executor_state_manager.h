@@ -18,9 +18,10 @@ namespace hogd {
 class ExecutorStateManager {
 public:
   ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
-                       std::unique_ptr<EventServerProxy> event_server_proxy)
+                       std::unique_ptr<EventServerProxy> event_server_proxy,
+                       size_t nthreads = available_parallelism())
     : db_proxy_(std::move(db_proxy)),
-      event_server_proxy_(std::move(event_server_proxy))
+      event_server_proxy_(std::move(event_server_proxy)), worker_pool_(nthreads)
   {}
 
   std::shared_ptr<ExecutorContext> get_executor_context(BlockID block_id);
@@ -41,6 +42,7 @@ private:
   x23::MVar<std::unordered_map<BlockID, ContextEntry>> active_blocks_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
+  WorkerPool worker_pool_;
 };
 
 } // namespace hogd

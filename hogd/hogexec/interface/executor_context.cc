@@ -4,6 +4,7 @@
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -12,6 +13,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -64,13 +66,76 @@ make_exec_result(SystemErrorCode error_code)
 }
 } // namespace
 
-ExecProposeResult
+x23::Async<ExecProposeResult>
 ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
+  auto [async, cb] = x23::make_async<ExecProposeResult>();
+  worker_pool_.submit([this, signed_tx, tx_id, cb]() {
+    auto res = run_propose_transaction(signed_tx, tx_id);
+    cb(res);
+  });
+  co_return co_await async;
+}
+
+x23::Async<ExecProposeBatchResult>
+ExecutorContext::propose_transaction_batch(
+    SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
+{
+  assert(mode_ == ExecutionMode::kProposing);
+  auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
+  worker_pool_.submit([this, signed_txs, first_tx_id, cb]() {
+    ExecProposeBatchResult batch_res;
+    for (size_t i = 0; i < signed_txs.size(); i++) {
+      auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
+      batch_res.push_back(res);
+    }
+    cb(batch_res);
+  });
+  co_return co_await async;
+}
+
+x23::Async<ExecValidateBatchResult>
+ExecutorContext::validate_transaction_batch(
+    ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
+{
+  assert(mode_ == ExecutionMode::kValidating);
+  auto [async, cb] = x23::make_async<ExecValidateBatchResult>();
+  worker_pool_.submit([this, proposed_txs, first_tx_id, cb]() {
+    ExecValidateBatchResult batch_res;
+    for (size_t i = 0; i < proposed_txs.size(); i++) {
+      auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
+      batch_res.push_back(res);
+    }
+    cb(batch_res);
+  });
+  co_return co_await async;
+}
+
+x23::Async<ExecResult>
+ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
+                                      TransactionID tx_id)
+{
+  assert(mode_ == ExecutionMode::kValidating);
+
+  auto [async, cb] = x23::make_async<ExecResult>();
+
+  worker_pool_.submit([this, proposed_tx, tx_id, cb]() {
+    auto res = run_validate_transaction(proposed_tx, tx_id);
+    cb(res);
+  });
+
+  co_return co_await async;
+}
+
+ExecProposeResult
+ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
+                                         TransactionID tx_id)
+{
+  assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(tx, snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, make_hogexec_context());
   auto invoke_res = syscall_handler.root_invoke();
@@ -109,18 +174,16 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 }
 
 ExecResult
-ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
-                                      TransactionID tx_id)
+ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
+                                          TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
-
-  SystemCallHandler syscall_handler(
-      proposed_tx.signed_tx, snapshot_cache_, proxy,
-      make_per_tx_event_server_proxy(tx_id),
-      ValidationModeCtor{proposed_tx.nondeterministic_proposal_data},
-      make_hogexec_context());
-
+  SystemCallHandler syscall_handler(tx.signed_tx, snapshot_cache_, proxy,
+                                    make_per_tx_event_server_proxy(tx_id),
+                                    ValidationModeCtor{
+                                        tx.nondeterministic_proposal_data},
+                                    make_hogexec_context());
   auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
