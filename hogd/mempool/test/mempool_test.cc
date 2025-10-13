@@ -242,6 +242,7 @@ TEST(Mempool, ValidateBatchMissingTx)
 
 // [kMaxBlockSize] is 10,000, which causes this test to time out. We should
 // re-enable this test once we add performance improvements.
+// NOLINTNEXTLINE
 #if 0
 TEST(Mempool, AuthChanged)
 {
