@@ -10,9 +10,11 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
@@ -82,12 +84,18 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  TransactionID allocate_tx_id();
+  // Allocates a contiguous block of transaction IDs.
+  // Returns the first transaction ID in the block
+  // (so i.e. the allocated ids are [first_id, first_id + count - 1] inclusive)
+  TransactionID allocate_tx_ids(size_t count);
 
   ATTRIBUTE_ALWAYS_INLINE bool initialize_check()
   {
     return executor_states_ != nullptr;
   }
+
+  std::shared_ptr<ExecutorContext> try_get_context(BlockID block_id,
+                                                   ExecutionMode mode);
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
