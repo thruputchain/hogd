@@ -9,6 +9,9 @@ target_link_libraries(mempool_test_infra
   GTest::gtest
   hogd_interface
 )
+add_dependencies(mempool_test_infra
+  all_wasm_contracts
+)
 
 add_library(mempool_test_objects OBJECT
   auth_test.cc
@@ -22,7 +25,9 @@ target_include_directories(mempool_test_objects
 target_link_libraries(mempool_test_objects
   GTest::gtest
   hogd_interface
-  built_contracts
+)
+add_dependencies(mempool_test_objects
+  all_wasm_contracts
 )
 
 add_executable(
