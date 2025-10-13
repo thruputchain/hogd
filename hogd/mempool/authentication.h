@@ -17,11 +17,8 @@
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
-<<<<<<< HEAD
 #include <unordered_set>
-=======
 #include <utility>
->>>>>>> main
 
 namespace hogd {
 
@@ -34,8 +31,8 @@ public:
       db_sched_client_(std::move(db_sched_client))
   {}
 
-  // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any
-  // accounts whose [AccountAuthData] has changed.
+  // Pulls in the newest [AccountAuthData] for all cached accounts. Returns
+  // any accounts whose [AccountAuthData] has changed.
   x23::Async<x23::Vec<ContractAddress>> update_block_id(BlockID block_id)
   {
     current_block_id_ = block_id;
@@ -55,8 +52,9 @@ public:
     x23::Vec<ContractAddress> ret;
     for (size_t i = 0; i < res.account_auth_data_batch().size(); i++) {
       const ContractAddress &account = accounts[i];
-      // TODO(jhumphri): We only need to reauthenticate the txs for [account] if
-      // the refreshed auth data differs from the auth data we already have.
+      // TODO(jhumphri): We only need to reauthenticate the txs for [account]
+      // if the refreshed auth data differs from the auth data we already
+      // have.
       assert(accounts_.contains(account));
       if (res.account_auth_data_batch()[i] != *accounts_[account]) {
         accounts_[account] =
@@ -176,14 +174,9 @@ private:
   }
 
   BlockID current_block_id_;
-<<<<<<< HEAD
-  db_sched_client_t &db_sched_client_;
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
   std::unordered_map<ContractAddress, std::unique_ptr<AccountAuthData>>
       accounts_;
-=======
-  std::shared_ptr<db_sched_client_t> db_sched_client_;
-  std::unordered_map<ContractAddress, AccountAuthData> accounts_;
->>>>>>> main
 };
 
 } // namespace hogd

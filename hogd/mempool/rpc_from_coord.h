@@ -12,10 +12,7 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
-<<<<<<< HEAD
-=======
 #include "hogd/base/coropoll.h"
->>>>>>> main
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -25,23 +22,18 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/types.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "scheduler.h"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
-#include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-<<<<<<< HEAD
-#include "x23/threadpool.h"
-=======
->>>>>>> main
 #include "x23/vec.h"
 
 namespace hogd {
