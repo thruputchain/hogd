@@ -270,7 +270,6 @@ TEST(Mempool, AuthChanged)
   SignedTransactionBatch signed_txs;
 
   for (const SignedTransaction &stx : txs) {
-    std::println("sign another claim");
     auto make_sign_claim = [&](uint32_t idx) {
       AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
       claim.invoked_address_signature_id() = idx;

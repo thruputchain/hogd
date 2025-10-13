@@ -233,8 +233,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
-  std::println("asked schedule for {} txs, got back {}", kMaxBlockSize,
-               txs.size());
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
