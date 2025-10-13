@@ -22,6 +22,7 @@ target_include_directories(mempool_test_objects
 target_link_libraries(mempool_test_objects
   GTest::gtest
   hogd_interface
+  built_contracts
 )
 
 add_executable(
