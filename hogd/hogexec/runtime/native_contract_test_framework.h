@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <format>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -49,19 +50,18 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -238,26 +238,27 @@ private:
 class CoordWrapper {
 public:
   CoordWrapper(uint16_t port)
-    : coord_client_([this, port] {
-        auto fd = cp_.tcpconnect("localhost", std::to_string(port))();
+    : coord_client_([port] {
+        auto addr = x23::HostPort{"localhost", port}.to_addr(true);
+        if (!addr) {
+          throw std::runtime_error("Failed to parse address to coord server");
+        }
+        auto fd = x23::tcpconnect(*addr);
         if (!fd) {
           throw std::runtime_error("Failed to connect to coord server");
         }
-        auto client_config = x23::rpc_stream_logged(cp_, *fd);
+        auto client_config = x23::srpc_stream_logged(fd.release());
 
         return client_config->template client<DbSched1>();
       }())
   {}
 
   using coord_client_t =
-      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   coord_client_t &client() { return coord_client_; }
 
 private:
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   coord_client_t coord_client_;
 };
 
@@ -283,6 +284,40 @@ private:
         ->client(EventSched1{});
   }
   client_t event_sched_client_;
+};
+
+class EventServerWrapper {
+public:
+  EventServerWrapper()
+  {
+    event_server_exec_server_.start_server(0);
+    event_server_sched_server_.start_server(0);
+  }
+
+  uint16_t exec_port() { return event_server_exec_server_.port(); }
+  uint16_t sched_port() { return event_server_sched_server_.port(); }
+
+  EventCard make_event_card(std::string const &addr = "localhost")
+  {
+    return EventCard{.protocol = version::kHogdProtocol,
+                     .upid = {},
+                     .address_for_exec =
+                         std::format("{}:{}", addr, exec_port()).c_str(),
+                     .address_for_sched =
+                         std::format("{}:{}", addr, sched_port()).c_str()};
+  }
+
+  std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id)
+  {
+    return event_server_.get_events(block_id, tx_id);
+  }
+
+private:
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+  TestEventAggregatorSchedServer event_server_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
 };
 
 // Common setup utilities for testing native contracts.
@@ -516,7 +551,7 @@ public:
 
   std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)
   {
-    return event_server_.get_events(tx_id.block_id, tx_id.tx_id);
+    return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
   }
 
   std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
@@ -538,7 +573,7 @@ private:
     block_number_++;
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
@@ -560,18 +595,15 @@ private:
     uint16_t coord_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
-    uint16_t event_server_exec_port = event_server_exec_server_.start_server(0);
-    uint16_t event_server_sched_port =
-        event_server_sched_server_.start_server(0);
 
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
     event_sched_wrapper_ =
-        std::make_unique<EventSchedWrapper>(event_server_sched_port);
+        std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());
 
     event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_server_exec_port});
+        x23::HostPort{"localhost", event_server_wrapper_.exec_port()});
 
     if (!empty_genesis) {
       return;
@@ -588,7 +620,7 @@ private:
       };
       auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
           .storage_cost_model = cost_model_xdr,
-      })();
+      });
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
             "initialize: dbsched_load_genesis_block failed");
@@ -610,19 +642,11 @@ private:
   std::unique_ptr<EventSchedWrapper> event_sched_wrapper_;
 
   // TODO(geoff): replace with proper event server connection
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  TestEventAggregatorSchedServer event_server_sched_server_ =
-      TestEventAggregatorSchedServer(event_server_);
+  EventServerWrapper event_server_wrapper_;
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   std::unique_ptr<Logger> previous_logger_ = nullptr;
 };
 

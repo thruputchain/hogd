@@ -17,6 +17,7 @@
 #include <utility>
 
 #include <x23/cleanup.h>
+#include <x23/debug.h>
 #include <x23/format.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
@@ -165,12 +166,12 @@ with_proc_meta(std::uint32_t procno, F &&f)
   return [procno,
           &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {
     // Don't want invokers destroyed at the end of the program
-    static const auto &invokers = *new auto{std::unordered_map{std::pair{
-        Vers::valid_procnos[I], +[](F &&f) -> R {
-          return std::forward<F>(f)
-              .template operator()<
-                  typename Vers::template proc_meta<Vers::valid_procnos[I]>>();
-        }}...}};
+    static const auto &invokers = make_nodestroy(new auto{std::unordered_map{
+        std::pair{Vers::valid_procnos[I], +[](F &&f) -> R {
+                    return std::forward<F>(f)
+                        .template operator()<typename Vers::template proc_meta<
+                            Vers::valid_procnos[I]>>();
+                  }}...}});
     if (auto it = invokers.find(procno); it != invokers.end())
       return it->second(std::forward<F>(f));
     return std::forward<F>(f).template operator()<void>();
@@ -261,14 +262,15 @@ struct RpcLogger {
     write(logfd_, logmsg.data(), logmsg.size());
   }
 
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd)
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
   {
     if (logfd_ < 0)
       return;
-    auto logmsg = std::format("Advertising program {}::{} on {} (fd {})\n",
-                              VersMeta::program_name, VersMeta::version_name,
-                              show_addr(remote_addr(fd)), fd.get());
-    write(logfd_, logmsg.data(), logmsg.size());
+    std::string msg = peername_ + ' ';
+    uvformat_to(&msg, fmt.get(), std::make_format_args(args...));
+    msg += '\n';
+    write(logfd_, msg.data(), msg.size());
   }
 };
 
@@ -320,7 +322,10 @@ struct RpcCsvLogger {
   {
     do_log<Meta>(true, msg, pl...);
   }
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
+
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
+  {}
 };
 
 struct RpcNoLogger {
@@ -337,7 +342,9 @@ struct RpcNoLogger {
   void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
-  template<typename VersMeta> void log_server_advertise(BorrowedFd fd) {}
+  template<typename... Args>
+  void log_message(std::format_string<Args...> fmt, Args &&...args)
+  {}
 };
 
 extern size_t default_max_message_size;
@@ -388,9 +395,18 @@ struct RpcTraceMode {
   //
   // For settings where environment variables could be untrusted, set
   // disable_env = true to disable this behavior globally.
-  static RpcTraceMode getenv(const char *env_var);
-
-  static bool disable_env;
+  template<FixedStr EnvVar> static RpcTraceMode getenv()
+  {
+    RpcTraceMode ret;
+    ret.fd = DebugFd<EnvVar>::fd();
+    if (ret.fd >= 0) {
+      if (*DebugFd<EnvVar>::env_val.c_str() == ',')
+        ret.mode = kCsv;
+      else
+        ret.mode = kTrace;
+    }
+    return ret;
+  }
 };
 
 RpcTraceMode &server_trace();

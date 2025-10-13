@@ -14,3 +14,17 @@ main()
       std::format("{}", std::stacktrace::current());
 }
 ]=] HAVE_STD_STACKTRACE)
+
+check_cxx_source_compiles([=[
+#include <execinfo.h>
+#include <stdlib.h>
+
+int
+main()
+{
+  void *bt[64];
+  int n = backtrace(bt, 64);
+  char **syms = backtrace_symbols(bt, n);
+  free(syms);
+}
+]=] HAVE_BACKTRACE_SYMBOLS)

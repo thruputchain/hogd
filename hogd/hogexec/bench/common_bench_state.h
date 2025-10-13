@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -25,14 +26,13 @@
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
-#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "x23/event.h"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/threadpool.h"
+#include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -81,14 +81,25 @@ private:
   {
     coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
       while (true) {
-        auto fd = cp_.tcpconnect(server_addr_, std::to_string(coord_port_))();
-        if (!fd) {
-          error("failed to connect:{} to coord on {} port {}, retrying",
-                fd.error().what(), server_addr_, coord_port_);
-          std::this_thread::sleep_for(std::chrono::milliseconds(500));
-          continue;
+        auto addr = x23::HostPort{server_addr_, coord_port_}.to_addr(true);
+        if (!addr) {
+          panic("failed to parse address to coord on {} port {}", server_addr_,
+                coord_port_);
         }
-        auto client_config = x23::rpc_stream_logged(cp_, *fd);
+        x23::UniqueFd fd;
+        try {
+          fd = x23::tcpconnect(*addr);
+        } catch (const std::system_error &e) {
+          if (e.code() == std::errc::connection_refused) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            warn_every_n_sec(5.0F, "coord on {}:{} is not ready", server_addr_,
+                             coord_port_);
+            continue;
+          }
+          error("caught system error: {} {}", e.what(), e.code().message());
+          throw;
+        }
+        auto client_config = x23::srpc_stream_logged(fd.release());
         return std::make_unique<coord_client_t>(
             client_config->template client<DbSched1>());
       }
@@ -112,7 +123,7 @@ private:
 
   void start_db_server()
   {
-    auto ci_client = connect_to_control_server(cp_, server_addr_,
+    auto ci_client = connect_to_control_server(server_addr_,
                                                std::to_string(ci_server_port_));
     ci_client.start_server("hogd/hogexec/bench/bench_server",
                            {"-e", std::to_string(exec_port_), "-c",
@@ -121,7 +132,7 @@ private:
 
   void stop_db_server()
   {
-    auto ci_client = connect_to_control_server(cp_, server_addr_,
+    auto ci_client = connect_to_control_server(server_addr_,
                                                std::to_string(ci_server_port_));
     ci_client.stop_server();
   }
@@ -141,9 +152,6 @@ private:
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
 
-  x23::ThreadPool db_pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
-
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
@@ -154,7 +162,7 @@ private:
       TestEventAggregatorExecServer(event_server_);
 
   using coord_client_t =
-      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
 };
@@ -162,19 +170,19 @@ private:
 inline void
 CommonBenchState::advance_block()
 {
-  auto r = coord_client_->dbsched_close_snapshot(block_number_)();
+  auto r = coord_client_->dbsched_close_snapshot(block_number_);
   if (r.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
 
-  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_)();
+  auto r2 = coord_client_->dbsched_commit_snapshot(block_number_);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
 
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
-      BlockExecutionMode::kBlockExecutionModeProposal)();
+      BlockExecutionMode::kBlockExecutionModeProposal);
   if (r3 != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
@@ -203,7 +211,7 @@ CommonBenchState::run_genesis_block(
 
   assert(block_number_ == 0);
   {
-    auto r = coord_client_->dbsched_load_genesis_block(genesis_block)();
+    auto r = coord_client_->dbsched_load_genesis_block(genesis_block);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to write genesis block");
     }
@@ -211,7 +219,7 @@ CommonBenchState::run_genesis_block(
 
   {
     auto r = coord_client_->dbsched_create_snapshot(
-        0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+        0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }

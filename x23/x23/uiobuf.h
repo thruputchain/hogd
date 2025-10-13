@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <x23/cleanup.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
 #include <x23/vec.h>

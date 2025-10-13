@@ -17,15 +17,21 @@
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
+<<<<<<< HEAD
 #include <unordered_set>
+=======
+#include <utility>
+>>>>>>> main
 
 namespace hogd {
 
 // TODO(jhumphri): Handle [block_expiry_height].
 class Authentication {
 public:
-  Authentication(BlockID current_block_id, db_sched_client_t &db_sched_client)
-    : current_block_id_(current_block_id), db_sched_client_(db_sched_client)
+  Authentication(BlockID current_block_id,
+                 std::shared_ptr<db_sched_client_t> db_sched_client)
+    : current_block_id_(current_block_id),
+      db_sched_client_(std::move(db_sched_client))
   {}
 
   // Pulls in the newest [AccountAuthData] for all cached accounts. Returns any
@@ -41,7 +47,7 @@ public:
     }
 
     DbAccountAuthDataBatchResult res =
-        co_await db_sched_client_.dbsched_get_account_auth_data(
+        co_await db_sched_client_->dbsched_get_account_auth_data(
             current_block_id_, accounts);
     CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
     CHECK_EQ(res.account_auth_data_batch().size(), accounts.size());
@@ -158,8 +164,8 @@ private:
     }
 
     DbAccountAuthDataBatchResult res =
-        co_await db_sched_client_.dbsched_get_account_auth_data(block_id,
-                                                                {account});
+        co_await db_sched_client_->dbsched_get_account_auth_data(block_id,
+                                                                 {account});
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       co_return nullptr;
     }
@@ -170,9 +176,14 @@ private:
   }
 
   BlockID current_block_id_;
+<<<<<<< HEAD
   db_sched_client_t &db_sched_client_;
   std::unordered_map<ContractAddress, std::unique_ptr<AccountAuthData>>
       accounts_;
+=======
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
+  std::unordered_map<ContractAddress, AccountAuthData> accounts_;
+>>>>>>> main
 };
 
 } // namespace hogd

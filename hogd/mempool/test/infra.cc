@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/mempool/registration.h"
 #include "sched_db.hh"
 
@@ -55,6 +56,9 @@ MempoolTestInfra::MempoolTestInfra()
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool();
+
+  sched_db_server_.impl_.register_scheduler(
+      mempool_coord_server_.impl_.scheduler());
 }
 
 } // namespace hogd

@@ -1,6 +1,7 @@
 
 #include <cerrno>
 #include <csignal>
+#include <thread>
 
 #include <fcntl.h>
 #include <mutex>
@@ -14,8 +15,6 @@
 #include "x23/event.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
-
-#include <thread>
 
 namespace x23 {
 

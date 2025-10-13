@@ -462,7 +462,9 @@ SystemCallHandler::get_calldata() const
 NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
-  assert(root_invoke_succeeded_);
+  // Either succeeded on the root tx, or deterministic error during execution.
+  // Not allowed to have i.e. validation failure here, or block abort.
+  assert(cumulative_invoke_result_.has_readable_proposal_data());
   return std::visit([](auto const &arg) -> NondeterministicProposalData const
                                             & { return arg.proposal_data(); },
                     execution_mode_data_);
@@ -471,8 +473,6 @@ SystemCallHandler::get_proposal_data() const
 SHA256Hash
 SystemCallHandler::get_proposed_tx_hash() const
 {
-  assert(root_invoke_succeeded_);
-
   ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
                                   .nondeterministic_proposal_data =
                                       get_proposal_data()};
