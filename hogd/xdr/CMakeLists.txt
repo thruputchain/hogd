@@ -1,6 +1,7 @@
 add_xdr(
   protocol
   ../../protocol/account.x
+  ../../protocol/auth_claim.x
   ../../protocol/batch.x
   ../../protocol/catchup.x
   ../../protocol/ci_server.x

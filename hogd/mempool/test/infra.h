@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "account.hh"
+#include "built_contracts/contract_loader.h"
 #include "contract.hh"
-#include "contract_loader.h"
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
