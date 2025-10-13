@@ -89,6 +89,7 @@
 #include <map>
 #include <print>
 #include <stop_token>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -472,6 +473,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
 
+  // NOLINTNEXTLINE(portability-template-virtual-member-function)
   void log_message(std::string msg) override { logger_.log_message("{}", msg); }
 };
 

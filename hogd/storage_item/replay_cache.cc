@@ -1,5 +1,6 @@
 #include "hogd/storage_item/replay_cache.h"
 
+#include "hogd/base/types.h"
 #include "types.hh"
 #include <cstddef>
 #include <iterator>

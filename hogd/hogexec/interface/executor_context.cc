@@ -72,7 +72,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto [async, cb] = x23::make_async<ExecProposeResult>();
-  worker_pool_.submit([this, signed_tx, tx_id, cb]() {
+  worker_pool_.submit([this, &signed_tx, tx_id, cb]() {
     auto res = run_propose_transaction(signed_tx, tx_id);
     cb(res);
   });
@@ -85,7 +85,7 @@ ExecutorContext::propose_transaction_batch(
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
-  worker_pool_.submit([this, signed_txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
       auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
@@ -102,7 +102,7 @@ ExecutorContext::validate_transaction_batch(
 {
   assert(mode_ == ExecutionMode::kValidating);
   auto [async, cb] = x23::make_async<ExecValidateBatchResult>();
-  worker_pool_.submit([this, proposed_txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
     ExecValidateBatchResult batch_res;
     for (size_t i = 0; i < proposed_txs.size(); i++) {
       auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
@@ -121,7 +121,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 
   auto [async, cb] = x23::make_async<ExecResult>();
 
-  worker_pool_.submit([this, proposed_tx, tx_id, cb]() {
+  worker_pool_.submit([this, &proposed_tx, tx_id, cb]() {
     auto res = run_validate_transaction(proposed_tx, tx_id);
     cb(res);
   });
