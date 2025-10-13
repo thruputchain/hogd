@@ -296,6 +296,11 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   template<typename ProcMeta>
   ProcMeta::return_type send_call(const is_xdr_type auto &...args)
   {
+    // If this fails, you tried to make a blocking RPC call from
+    // within a coroutine, which can cause deadlock.
+    extern bool in_thread_pool();
+    assert(!in_thread_pool());
+
     auto msg = call_msg<ProcMeta>();
     const bool logging = logger_.active();
     Xid xid = logging ? genxid() : 0;

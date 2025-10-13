@@ -62,7 +62,7 @@ public:
         status_.compare_exchange_weak(prev, kLockedWantNotify,
                                       std::memory_order_acquire);
       else
-	assert(prev == kUnlocked || prev == kLockedWantNotify);
+        assert(prev == kUnlocked || prev == kLockedWantNotify);
       if (prev == kUnlocked)
         return;
       status_.wait(kLockedWantNotify);
@@ -74,7 +74,7 @@ private:
   static constexpr int kUnlocked = 0;
   static constexpr int kLocked = 1;
   static constexpr int kLockedWantNotify = 2;
-#else // !NDEBUG
+#else  // !NDEBUG
   static constexpr int kUnlocked = 0x4e3b3298;
   static constexpr int kLocked = 0x309eba84;
   static constexpr int kLockedWantNotify = 0x24ee0ff5;
