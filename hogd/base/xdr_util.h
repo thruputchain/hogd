@@ -151,6 +151,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
       case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
       case hogd::StorageKeyType::kStorageKeyTypeAccountAuthData:
       case hogd::StorageKeyType::kStorageKeyTypeAddressMetadata:
+      case hogd::StorageKeyType::kStorageKeyTypeReplayCache:
         return std::string_view();
       }
       assert(false);

@@ -58,13 +58,10 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -241,26 +238,27 @@ private:
 class CoordWrapper {
 public:
   CoordWrapper(uint16_t port)
-    : coord_client_([this, port] {
-        auto fd = cp_.tcpconnect("localhost", std::to_string(port))();
+    : coord_client_([port] {
+        auto addr = x23::HostPort{"localhost", port}.to_addr(true);
+        if (!addr) {
+          throw std::runtime_error("Failed to parse address to coord server");
+        }
+        auto fd = x23::tcpconnect(*addr);
         if (!fd) {
           throw std::runtime_error("Failed to connect to coord server");
         }
-        auto client_config = x23::rpc_stream_logged(cp_, *fd);
+        auto client_config = x23::srpc_stream_logged(fd.release());
 
         return client_config->template client<DbSched1>();
       }())
   {}
 
   using coord_client_t =
-      DbSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   coord_client_t &client() { return coord_client_; }
 
 private:
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   coord_client_t coord_client_;
 };
 
@@ -575,7 +573,7 @@ private:
     block_number_++;
     auto r =
         coord_wrapper_->client().dbsched_create_snapshot(dbtip_block_id_,
-                                                         block_number_, mode)();
+                                                         block_number_, mode);
     if (r != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("open_block: dbsched_create_snapshot failed");
     }
@@ -622,7 +620,7 @@ private:
       };
       auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
           .storage_cost_model = cost_model_xdr,
-      })();
+      });
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
             "initialize: dbsched_load_genesis_block failed");
@@ -649,10 +647,6 @@ private:
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
   std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   std::unique_ptr<Logger> previous_logger_ = nullptr;
 };
 

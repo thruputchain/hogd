@@ -259,9 +259,9 @@ TEST_P(GenesisBlockUnfurlTest, DoubleLoadError)
 {
   GenesisBlock genesis_block{};
 
-  auto r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  auto r = get_coord_client().dbsched_load_genesis_block(genesis_block);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
-  r = get_coord_client().dbsched_load_genesis_block(genesis_block)();
+  r = get_coord_client().dbsched_load_genesis_block(genesis_block);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 

@@ -39,6 +39,8 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
                         item.replay_cache_metadata()};
   case StorageItemType::kItemTypeAuthData:
     throw std::runtime_error("Auth data not yet supported");
+  case StorageItemType::kItemTypeReplayCacheData:
+    throw std::runtime_error("Replay cache data not yet supported");
   case StorageItemType::kItemTypeDeployedContractHash:
     throw std::runtime_error("Deployed contract hash cached elsewhere");
   }
@@ -62,6 +64,8 @@ SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
       return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
     case StorageItemType::kItemTypeAuthData:
       throw std::runtime_error("Auth data not yet supported");
+    case StorageItemType::kItemTypeReplayCacheData:
+      throw std::runtime_error("Replay cache data not yet supported");
     default:
       assert(false);
       throw std::runtime_error("Impossible");

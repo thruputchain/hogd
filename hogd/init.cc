@@ -41,6 +41,7 @@ read_self_binary()
   const std::string &path = x23::getprogpath();
   if (path.empty())
     panic("unable to determine path of binary");
+  info("reading self binary from {}", path);
   auto rres = x23::readfile<x23::Buf>(path);
   if (!rres)
     panic("{}: {}", path, rres.error());

@@ -8,8 +8,6 @@
 #include "ci_server.hh"
 #include "control_client.h"
 #include "hogd/init.h"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace {
 
@@ -29,9 +27,7 @@ int
 handle_expect_running_command(std::string const &host, std::string const &port)
 {
   try {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto client = hogd::connect_to_control_server(host, port);
     auto status = client.query_proc_status();
     if (status.error_code() ==
         hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
@@ -54,10 +50,8 @@ int
 handle_shutdown_command(std::string const &host, std::string const &port)
 {
   try {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
     auto client =
-        hogd::connect_to_control_server(cp, host, port,
+        hogd::connect_to_control_server(host, port,
                                         std::chrono::milliseconds(10000));
 
     std::println("Sending shutdown command to {}:{}", host, port);
@@ -76,9 +70,7 @@ handle_start_command(std::string const &host, std::string const &port,
                      std::vector<std::string> const &args)
 {
   try {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto client = hogd::connect_to_control_server(host, port);
     // gcc14 has vector<string> format problems in CI
     std::string command;
     for (auto const &arg : args) {
@@ -99,9 +91,7 @@ int
 handle_stop_command(std::string const &host, std::string const &port)
 {
   try {
-    x23::ThreadPool pool;
-    x23::CoroPoll cp(pool);
-    auto client = hogd::connect_to_control_server(cp, host, port);
+    auto client = hogd::connect_to_control_server(host, port);
     client.stop_server();
     return 0;
   } catch (std::exception const &e) {
