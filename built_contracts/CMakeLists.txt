@@ -42,6 +42,7 @@ function(add_wasm_build target_name)
         --release
         --locked
         --frozen
+        -F logging
         --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
