@@ -229,7 +229,7 @@ echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "$X23ENV; \
-    nohup \"$HOGEXEC_BINARY\" \"$chuckd_server\":7888 > $logdir/hogexec.log 2>&1 &"
+    nohup \"$HOGEXEC_BINARY\" \"$mempool_server\":8071 > $logdir/hogexec.log 2>&1 &"
 done
 
 # Start event.
@@ -245,7 +245,7 @@ for s in "${hogdb_servers[@]}"; do
   ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     "$X23ENV; \
     rm -rf $logdir/hogdb; \
-    nohup \"$HOGDB_BINARY\" $logdir/hogdb 10000000000 \"$chuckd_server\":7888 \
+    nohup \"$HOGDB_BINARY\" $logdir/hogdb 10000000000 \"$mempool_server\":8072 \
     > $logdir/hogdb.log 2>&1 &"
 done
 
