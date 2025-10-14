@@ -102,8 +102,6 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: build chuckd
-      run: go build -C groundhog-go/chuckd/chuckd
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  

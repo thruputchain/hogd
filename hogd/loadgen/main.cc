@@ -75,7 +75,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("Starting loadgen server on port {}", port);
 
   // Create and start the loadgen server
-  hogd::LoadgenServer server;
+  hogd::RpcServer<hogd::LoadgenRpc> server;
   auto actual_port = server.start_server(port);
   hogd::info("Loadgen server started successfully on port {}", actual_port);
 
