@@ -76,3 +76,15 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 set_property(TARGET mempool_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  coordinator
+  coordinator.cc
+)
+target_link_libraries(
+  coordinator
+  hogd
+  mempool
+)
+
+set_property(TARGET coordinator PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
