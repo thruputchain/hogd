@@ -22,17 +22,16 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/types.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "scheduler.h"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
-#include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -46,7 +45,7 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 128;
+  static constexpr size_t kMaxBlockSize = 10'000;
 
   MempoolCoordinatorRpc() = default;
 

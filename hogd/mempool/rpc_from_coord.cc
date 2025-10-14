@@ -337,6 +337,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
   }
   CHECK(!txs.empty());
+  // Now execute the txs on the executor.
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
         co_await scheduler_->mark_txs_failed(nomination.transaction_hashes);

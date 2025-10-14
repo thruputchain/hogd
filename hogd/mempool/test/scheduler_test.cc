@@ -6,7 +6,6 @@
 
 #include "db_sched.hh"
 #include "exec_sched.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -1632,13 +1631,3 @@ TEST(Scheduler, FilterStranded)
 }
 
 } // namespace hogd
-
-int
-main(int argc, char *argv[])
-{
-  testing::InitGoogleTest(&argc, argv);
-  // Initialize logging. This is needed for the CHECK macros.
-  log_init(std::make_unique<hogd::ConsoleLogger>());
-
-  return RUN_ALL_TESTS();
-}

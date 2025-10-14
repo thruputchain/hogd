@@ -21,6 +21,7 @@ namespace hogd {
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
+// TODO(jhumphri): why is this not just returning a Vec<Transaction>?
 inline SignedTransactionBatch
 generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 {

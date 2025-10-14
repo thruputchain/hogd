@@ -51,4 +51,10 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
       run: ./scripts/check.sh -p -b
+    - name: save core dumps
+      if: failure()
+      run: |
+        echo "Saving core dumps"
+        mkdir -p ../core_dumps
+        find . -name '*.core' -print0 | xargs -0 mv -t ../core_dumps/
 

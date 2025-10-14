@@ -4,6 +4,7 @@
 #include <print>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
@@ -30,6 +31,7 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 1000;
+constexpr size_t kNumLoadgenTxs = 10'000;
 constexpr uint32_t kNumAccounts = 100;
 
 // Helper class to manage a loadgen server and client
@@ -78,7 +80,6 @@ public:
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
     for (const InitializationBlock &init_tx : init_txs) {
-      std::println("next block");
       infra.mempool_coord_rpc().schedulercoord_submit_vetted(kValidatorId,
                                                              init_tx)();
 
@@ -87,9 +88,6 @@ public:
       size_t num_nominated_txs = 0;
       SchedulerNomination nomination{};
       while (num_nominated_txs < init_tx.size()) {
-        std::println(
-            "nominate now, num_nominated_txs so far {}, init_tx.size() {}",
-            num_nominated_txs, init_tx.size());
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
@@ -101,8 +99,6 @@ public:
         nomination = res_nominate.scheduler_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
-        std::println("nominated {} txs",
-                     nomination.nomination.transaction_hashes.size());
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
     }
@@ -126,6 +122,14 @@ private:
   LoadgenContextID context_id_;
 };
 
+constexpr AuthClaim
+make_self_sign_claim(uint32_t key_id)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+  claim.invoked_address_signature_id() = key_id;
+  return claim;
+}
+
 SignedTransactionBatch
 generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
                     size_t num_txs)
@@ -145,11 +149,11 @@ generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
                                auth_data);
 
   SignedTransactionBatch txs;
-  for (const SignedTransaction &unsigned_tx : unsigned_txs) {
-    txs.push_back(hogd::Authentication::sign(unsigned_tx.tx,
-                                             /*signature_weight=*/1,
-                                             {{0, private_key}},
-                                             /*auxiliary_private_keys=*/{}));
+  for (SignedTransaction &unsigned_tx : unsigned_txs) {
+    unsigned_tx.tx.auth_claims.push_back(make_self_sign_claim(0));
+    txs.push_back(
+        hogd::Authentication::sign_claims(unsigned_tx.tx, {{0, private_key}},
+                                          /*auxiliary_private_keys=*/{}));
   }
   return txs;
 }
@@ -243,7 +247,7 @@ BENCHMARK(validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 
 // Loadgen-based benchmarks.
 void
-submit_unvetted_loadgen(benchmark::State &state)
+loadgen_submit_unvetted(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
@@ -251,16 +255,16 @@ submit_unvetted_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
   }
 }
-BENCHMARK(submit_unvetted_loadgen)->Unit(benchmark::kMillisecond);
+BENCHMARK(loadgen_submit_unvetted)->Unit(benchmark::kMillisecond);
 
 void
-submit_vetted_loadgen(benchmark::State &state)
+loadgen_submit_vetted(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
@@ -268,7 +272,7 @@ submit_vetted_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -276,10 +280,10 @@ submit_vetted_loadgen(benchmark::State &state)
                                                             txs)();
   }
 }
-BENCHMARK(submit_vetted_loadgen)->Unit(benchmark::kMicrosecond);
+BENCHMARK(loadgen_submit_vetted)->Unit(benchmark::kMicrosecond);
 
 void
-nominate_loadgen(benchmark::State &state)
+loadgen_nominate(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
@@ -287,9 +291,11 @@ nominate_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     // Submit unvetted transactions so there's something to nominate
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     state.ResumeTiming();
 
@@ -299,10 +305,10 @@ nominate_loadgen(benchmark::State &state)
              SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
-BENCHMARK(nominate_loadgen)->Unit(benchmark::kMillisecond)->Iterations(3);
+BENCHMARK(loadgen_nominate)->Unit(benchmark::kMillisecond);
 
 void
-validate_loadgen(benchmark::State &state)
+loadgen_validate(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
@@ -310,9 +316,11 @@ validate_loadgen(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumTxs);
+    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
 
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
@@ -320,7 +328,6 @@ validate_loadgen(benchmark::State &state)
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
 
-    ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
     state.ResumeTiming();
@@ -331,7 +338,84 @@ validate_loadgen(benchmark::State &state)
              SchedulerValidationResult::SchedulerValidationOK);
   }
 }
-BENCHMARK(validate_loadgen)->Unit(benchmark::kMillisecond)->Iterations(3);
+BENCHMARK(loadgen_validate)->Unit(benchmark::kMillisecond)->Iterations(3);
+
+void
+loadgen_nominate_throughput(benchmark::State &state)
+{
+  constexpr size_t kTotalTxsToRun = 100000;
+
+  MempoolTestInfra server;
+  LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
+  for (auto _ : state) {
+    size_t txs_so_far = 0;
+
+    while (txs_so_far < kTotalTxsToRun) {
+      std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
+                   kTotalTxsToRun);
+      // TODO(jhumphri): Get txs from loadgen in a separate thread.
+      const SignedTransactionBatch txs =
+          loadgen.get_transactions(kNumLoadgenTxs);
+
+      ValidatorID validator_id{};
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                              txs)();
+
+      DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+      auto res_nominate =
+          server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+      CHECK_EQ(res_nominate.outcome(),
+               SchedulerNominationOutcome::SchedulerNominationOK);
+
+      txs_so_far += res_nominate.scheduler_nomination()
+                        .nomination.transaction_hashes.size();
+    }
+  }
+}
+BENCHMARK(loadgen_nominate_throughput)->Unit(benchmark::kSecond)->Iterations(1);
+
+void
+loadgen_validate_throughput(benchmark::State &state)
+{
+  constexpr size_t kTotalTxsToRun = 100000;
+
+  MempoolTestInfra server;
+  LoadgenHelper loadgen;
+  loadgen.init_experiment(server);
+
+  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  CHECK_EQ(res_nominate.outcome(),
+           SchedulerNominationOutcome::SchedulerNominationOK);
+
+  for (auto _ : state) {
+    size_t txs_so_far = 0;
+
+    while (txs_so_far < kTotalTxsToRun) {
+      std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
+                   kTotalTxsToRun);
+      ValidatorID validator_id{};
+      server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                              txs)();
+
+      auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
+          db_tip, res_nominate.scheduler_nomination().nomination)();
+      CHECK_EQ(res_validate.outcome(),
+               SchedulerValidationResult::SchedulerValidationOK);
+      txs_so_far += res_nominate.scheduler_nomination()
+                        .nomination.transaction_hashes.size();
+    }
+  }
+}
+BENCHMARK(loadgen_validate_throughput)->Unit(benchmark::kSecond)->Iterations(1);
 
 struct Init {
   Init()

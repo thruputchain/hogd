@@ -1,10 +1,12 @@
 #include "hogd/storage_item/replay_cache.h"
 
-#include "storage_item.hh"
-#include "transaction.hh"
 #include <algorithm>
 #include <cstddef>
 #include <utility>
+
+#include "storage_item.hh"
+#include "transaction.hh"
+
 
 namespace hogd {
 

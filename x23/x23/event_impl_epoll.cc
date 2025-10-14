@@ -92,12 +92,14 @@ CoroPollImpl::debug_dump()
   std::string msg = pool_.show();
   uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
              (void *)static_cast<CoroPoll *>(this), eventfd_.get());
-  std::lock_guard _lg(resize_lock_);
-  for (unsigned i = 0; i < state_size_; ++i) {
-    FdState *p = state_ + i;
-    if (p->mode_ == kFree)
-      continue;
-    uformat_to(&msg, "  {}\n", showfd(FdPtr{.p_ = p}));
+  {
+    auto _lk = resize_lock_.hold_shared();
+    for (unsigned i = 0; i < state_size_; ++i) {
+      FdState *p = state_ + i;
+      if (p->mode_ == kFree)
+        continue;
+      uformat_to(&msg, "  {}\n", showfd(FdPtr{.p_ = p}));
+    }
   }
   int fd = debug.fd();
   if (fd < 0)
