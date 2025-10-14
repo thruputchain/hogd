@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -25,6 +24,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
@@ -90,13 +90,10 @@ make_nnint_add_delta(int128_t add)
 }
 
 auto
-make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
+make_replay_delta(Uniquifier uniquifier)
 {
-  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
-  delta.replay_cache_modify() = {
-      .minimum_threshold = minimum_threshold,
-      .nonces = std::move(nonces),
-  };
+  StorageDelta delta(StorageDeltaType::kDeltaTypeConsumeUniquifier);
+  delta.consume_uniquifier_args().uniquifier = uniquifier;
   return delta;
 };
 
@@ -114,8 +111,8 @@ protected:
 TEST_P(DeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   StorageDelta nnint_set_add_1 = make_nnint_delta(0, 10);
@@ -175,7 +172,7 @@ TEST_P(DeltaManagerTest, RewriteVariantFromBase)
       std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
-                               &cost_model);
+                               &cost_model, 0);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -210,7 +207,7 @@ TEST_P(DeltaManagerTest, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag, mode_, &cost_model);
+                                &invalid_state_flag, mode_, &cost_model, 1);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -223,12 +220,12 @@ TEST_P(DeltaManagerTest, DeleteItem)
       std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
 
   StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
-                               &cost_model);
+                               &cost_model, 0);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag, mode_, &cost_model);
+                                &invalid_state_flag, mode_, &cost_model, 1);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -248,7 +245,7 @@ TEST_P(DeltaManagerTest, DeleteItem)
                                                    // post block
 
   StorageItemDeltaManager item3(item2.get_post_close_block_item(),
-                                &invalid_state_flag, mode_, &cost_model);
+                                &invalid_state_flag, mode_, &cost_model, 2);
 
   EXPECT_FALSE(item3.get_snapshot_item());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -257,8 +254,8 @@ TEST_P(DeltaManagerTest, DeleteItem)
 TEST_P(DeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   auto lock1 =
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
@@ -281,8 +278,8 @@ TEST_P(DeltaManagerTest, ExclusiveLockAcquire)
 TEST_P(DeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, -4);
@@ -339,8 +336,8 @@ TEST_P(DeltaManagerTest, NNIntSharedLock2SubSecondFails)
 TEST_P(DeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(10, -4);
@@ -370,8 +367,8 @@ TEST_P(DeltaManagerTest, NNIntFromExclusiveLock)
 TEST_P(DeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(-5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(-10, 4);
@@ -401,8 +398,8 @@ TEST_P(DeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 TEST_P(DeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -430,8 +427,8 @@ TEST_P(DeltaManagerTest, ExclusiveBytestring)
 TEST_P(DeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // This is just a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -477,7 +474,7 @@ TEST_P(DeltaManagerTest, PermanentExclusiveLockMultiAcquire)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
                                BlockExecutionMode::kBlockExecutionModeProposal,
-                               &cost_model);
+                               &cost_model, 0);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -515,8 +512,8 @@ TEST_P(DeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 TEST_P(DeltaManagerTest, NNIntSimpleSetAdd)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -541,7 +538,7 @@ TEST_P(DeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
                                BlockExecutionMode::kBlockExecutionModeProposal,
-                               &cost_model);
+                               &cost_model, 0);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -573,8 +570,8 @@ TEST_P(DeltaManagerTest, NNIntSetAddInvalidState)
     return;
   }
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // drive invalid and then back to valid
 
@@ -622,8 +619,8 @@ TEST_P(DeltaManagerTest, NNIntSetAddInvalidState)
 TEST_P(DeltaManagerTest, NNIntSetAddNegativeSet)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
                                 StorageLock(StorageLockType::kNone)));
@@ -653,8 +650,8 @@ TEST_P(DeltaManagerTest, NNIntSetAddNegativeSet)
 TEST_P(DeltaManagerTest, NNIntRetrocausalityInProposalMode)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   auto nnint_set_add_pos = make_nnint_delta(0, 10);
   auto nnint_set_add_neg = make_nnint_delta(0, -6);
@@ -699,20 +696,18 @@ TEST_P(DeltaManagerTest, NNIntRetrocausalityInProposalMode)
 
 TEST_P(DeltaManagerTest, ReplayCacheInsertFromEmpty)
 {
-  StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model, 0);
 
-  auto delta1 = make_replay_delta({1, 2, 3}, 0);
-  auto delta2 = make_replay_delta({4, 5, 6}, 4);
-  // conflicts with delta1 and delta2
-  auto delta3 = make_replay_delta({1, 4, 7}, 5);
+  auto delta1 =
+      make_replay_delta(Uniquifier{.block_expiry_height = 1, .nonce = 1});
+  auto delta2 =
+      make_replay_delta(Uniquifier{.block_expiry_height = 2, .nonce = 2});
+  // conflicts with delta1
+  auto delta3 =
+      make_replay_delta(Uniquifier{.block_expiry_height = 1, .nonce = 1});
 
-  auto delta4 = make_replay_delta(
-      {
-          8,
-          9,
-          10,
-      },
-      7);
+  auto delta4 =
+      make_replay_delta(Uniquifier{.block_expiry_height = 4, .nonce = 4});
 
   auto lock1 = item.try_reserve(delta1, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock1);
@@ -733,9 +728,8 @@ TEST_P(DeltaManagerTest, ReplayCacheInsertFromEmpty)
 
   auto r = item.get_post_close_block_item();
   ASSERT_TRUE(r);
-  EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCache);
-  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 4);
-  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{4, 5, 6}));
+  EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCacheData);
+  EXPECT_EQ(r->replay_cache().data().uniquifiers.size(), 2);
 }
 
 namespace {
@@ -760,8 +754,8 @@ make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
 TEST_P(DeltaManagerTest, RCQInsertThenConsume)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // try insert one entry
   auto insert_delta =
@@ -802,8 +796,8 @@ TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
   }
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // try consume one entry
   auto consume_delta = make_rcq_delta(
@@ -849,7 +843,8 @@ TEST_P(DeltaManagerTest, NNIntInterleavings)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(nullptr,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -931,7 +926,8 @@ TEST_P(DeltaManagerTest, NNIntConflictingInterleavings)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(nullptr,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -1041,7 +1037,8 @@ TEST_P(DeltaManagerTest, RCQAccountingEdgeCase)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(nullptr,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -1181,7 +1178,8 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(committed_item,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -1317,7 +1315,8 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(committed_item,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -1401,7 +1400,8 @@ TEST_P(DeltaManagerTest, NNIntAdd)
           [&]() {
             return std::make_tuple(StorageItemDeltaManager(committed_item,
                                                            &invalid_state_flag,
-                                                           mode_, &cost_model),
+                                                           mode_, &cost_model,
+                                                           0),
                                    int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
@@ -1465,8 +1465,8 @@ TEST_P(DeltaManagerTest, AuthDataChangeSigner)
   };
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // Create an auth data change delta for key ID 0
   StorageDelta auth_delta(StorageDeltaType::kDeltaTypeAuthDataChange);
@@ -1513,8 +1513,8 @@ TEST_P(DeltaManagerTest, AuthDataChangeSigner)
 TEST_P(DeltaManagerTest, RCQFailedReservationReleasesReference)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // First, reserve RCQ with consume to set the consumer_lock_
   StorageDelta rcq_delta1(StorageDeltaType::kDeltaTypeRetrocausalQueue);
@@ -1567,8 +1567,8 @@ TEST_P(DeltaManagerTest, AuthDataFailedReservationReleasesReference)
   };
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model,
+                               0);
 
   // First, create a successful auth data reservation to occupy key ID 0
   StorageDelta auth_delta1(StorageDeltaType::kDeltaTypeAuthDataChange);

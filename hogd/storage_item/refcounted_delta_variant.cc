@@ -43,7 +43,9 @@ get_marginal_item_creation_bound(StorageCostModel const *current_model,
 }
 
 std::shared_ptr<const StorageItemWrapper>
-BytestringArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
+BytestringArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const & /*unused*/,
+    StorageCostModel const *cost_model) const
 {
   assert(committed_);
   return std::make_shared<const StorageItemWrapper>(bytestring_set_,
@@ -88,7 +90,9 @@ BytestringArgs::get_marginal_cost_upper_bound_static(
 }
 
 std::shared_ptr<const StorageItemWrapper>
-NNIntSetAddArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
+NNIntSetAddArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const & /*unused*/,
+    StorageCostModel const *cost_model) const
 {
   assert(lower_bound_.is_in_range<int128_t>() &&
          upper_bound_.is_in_range<int128_t>());
@@ -184,8 +188,9 @@ make_block(std::multiset<QueueEntry> const &entries)
 } // namespace
 
 std::shared_ptr<const StorageItemWrapper>
-RetrocausalQueueArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item,
-                              StorageCostModel const *cost_model) const
+RetrocausalQueueArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const &previous_item,
+    StorageCostModel const *cost_model) const
 {
   assert(!consumer_lock_);
 
@@ -423,10 +428,13 @@ ReplayCacheArgs::undo_insert(Uniquifier nonce)
 }
 
 std::shared_ptr<const StorageItemWrapper>
-ReplayCacheArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item, StorageCostModel const *cost_model) const
+ReplayCacheArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const &previous_item,
+    StorageCostModel const *cost_model) const
 {
   if (has_committed_delta_) {
-    return std::make_shared<const StorageItemWrapper>(current_cache_, cost_model);
+    return std::make_shared<const StorageItemWrapper>(current_cache_,
+                                                      cost_model);
   }
   return previous_item;
 }
@@ -461,8 +469,9 @@ ReplayCacheArgs::get_marginal_cost_upper_bound_static(
   }
   // could subtract off the savings by reusing storage from the base item
 
-  return base_cost + current_model->get_replay_cache_cost(
-                         delta.replay_cache_modify().nonces.size());
+  assert(delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier);
+  // assert that this delta has only one uniquifier
+  return base_cost + current_model->get_replay_cache_cost(1);
 }
 
 int128_t
@@ -470,9 +479,9 @@ ReplayCacheArgs::get_marginal_cost_upper_bound(
     StorageDelta const &delta, StorageCostModel const *current_model,
     StorageItemWrapper const *base_item) const
 {
-  assert(delta.type() == StorageDeltaType::kDeltaTypeReplayCacheModify);
-  return get_marginal_cost_upper_bound_static(has_committed_delta_,
-                                              delta, current_model, base_item);
+  assert(delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier);
+  return get_marginal_cost_upper_bound_static(has_committed_delta_, delta,
+                                              current_model, base_item);
 }
 
 bool
@@ -509,7 +518,9 @@ AuthDataArgs::commit_change_signer(uint32_t key_id,
 }
 
 std::shared_ptr<const StorageItemWrapper>
-AuthDataArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
+AuthDataArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const & /*unused*/,
+    StorageCostModel const *cost_model) const
 {
   AccountAuthData new_auth_data{};
   if (base_auth_data_) {
@@ -636,7 +647,9 @@ DeployedContractArgs::get_marginal_cost_upper_bound(
 }
 
 std::shared_ptr<const StorageItemWrapper>
-DeployedContractArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
+DeployedContractArgs::to_item(
+    std::shared_ptr<const StorageItemWrapper> const & /*unused*/,
+    StorageCostModel const *cost_model) const
 {
   return std::make_shared<const StorageItemWrapper>(deployed_contract_hash_,
                                                     cost_model);
@@ -666,7 +679,7 @@ ExclusiveLockedState::get_marginal_cost_upper_bound(
     RetrocausalQueueArgs args;
     return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
   }
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta,
                                                                  cost_model,
                                                                  base_item);
@@ -710,8 +723,8 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
           // hack because the signature of the ctor has to match the
           // typeclass_match signature in this implemebntation
           return typeclass.item_type() ==
-                     StorageItemType::kItemTypeReplayCache &&
-                 args.typeclass_match(nullptr);
+                     StorageItemType::kItemTypeReplayCacheData &&
+                 args.typeclass_match(nullptr, 0);
         }
         else if constexpr (std::same_as<args_t, AuthDataArgs>) {
           // hack because the signature of the ctor has to match the
@@ -742,9 +755,7 @@ RefcountedDeltaVariant::to_item(
 {
   if (refcount_ > 0) {
     return std::visit(
-        [&](auto &arm) {
-          return arm.to_item(previous_item, cost_model);
-        },
+        [&](auto &arm) { return arm.to_item(previous_item, cost_model); },
         variant_);
   }
   return previous_item;

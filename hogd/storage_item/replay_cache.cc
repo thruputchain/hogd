@@ -8,19 +8,19 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 
-
 namespace hogd {
 
 bool
 ReplayCache::contains(Uniquifier uniquifier) const
 {
-  return std::ranges::find(data_.uniquifiers, uniquifier) != data_.uniquifiers.end();
+  return std::ranges::find(data_.uniquifiers, uniquifier) !=
+         data_.uniquifiers.end();
 }
 
 bool
 ReplayCache::can_accept(Uniquifier uniquifier) const
 {
-  if (uniquifier.block_expiry_height <= expired_height_) {
+  if (uniquifier.block_expiry_height < expired_height_) {
     return false;
   }
 
@@ -34,7 +34,8 @@ ReplayCache::add(Uniquifier uniquifier)
   data_.uniquifiers.push_back(uniquifier);
 }
 
-void ReplayCache::commit_add(Uniquifier uniquifier)
+void
+ReplayCache::commit_add(Uniquifier uniquifier)
 {
   assert(contains(uniquifier));
   committed_size_++;
@@ -53,7 +54,7 @@ ReplayCache::filter_expired()
   ReplayCacheData new_data;
   new_data.uniquifiers.reserve(data_.uniquifiers.size());
   for (Uniquifier const &uniquifier : data_.uniquifiers) {
-    if (uniquifier.block_expiry_height > expired_height_) {
+    if (uniquifier.block_expiry_height >= expired_height_) {
       new_data.uniquifiers.push_back(uniquifier);
     }
   }

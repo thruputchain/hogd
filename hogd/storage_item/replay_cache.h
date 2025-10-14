@@ -12,9 +12,10 @@ namespace hogd {
 
 class ReplayCache {
 public:
+  ReplayCache(BlockHeight expired_height) : expired_height_(expired_height) {}
+
   ReplayCache(ReplayCacheData data, BlockHeight expired_height)
-    : data_(std::move(data)), expired_height_(expired_height),
-    committed_size_(data_.uniquifiers.size())
+    : data_(std::move(data)), expired_height_(expired_height)
   {
     filter_expired();
   }
@@ -26,15 +27,11 @@ public:
   void commit_add(Uniquifier uniquifier);
   void remove(Uniquifier uniquifier);
 
-  size_t size() const { return data_.uniquifiers.size(); }
+  ReplayCacheData const &data() const { return data_; }
 
-  ReplayCacheData const& data() const {
-    return data_;
-  }
+  size_t committed_size() const { return committed_size_; }
 
-  size_t committed_size() const {
-    return committed_size_;
-  }
+  BlockHeight expired_height() const { return expired_height_; }
 
 private:
   ReplayCacheData data_;

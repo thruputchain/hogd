@@ -12,10 +12,12 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -161,6 +163,8 @@ StorageView::commit_to_database()
   for (auto &[hash, contract] : *contract_creates) {
     base_database->write_contract(hash, contract);
   }
+
+  base_database->update_height(current_height_);
 }
 
 std::optional<SHA256Hash>
@@ -237,6 +241,19 @@ StorageView::get_concurrent_retrocausal_queue_entry(
 
   return std::nullopt;
 }
+
+SnapshotStorageView::SnapshotStorageView(InMemoryDatabase *root_db,
+                                         BlockExecutionMode execution_mode,
+                                         StorageCostModel const *cost_model)
+  : execution_mode_(execution_mode), cost_model_(cost_model),
+    parent_view_(root_db), current_height_(root_db->get_height())
+{}
+SnapshotStorageView::SnapshotStorageView(ParentBlockView *parent_view,
+                                         BlockExecutionMode execution_mode,
+                                         StorageCostModel const *cost_model)
+  : execution_mode_(execution_mode), cost_model_(cost_model),
+    parent_view_(parent_view), current_height_(parent_view->get_height() + 1)
+{}
 
 // NOLINTEND(misc-no-recursion)
 
