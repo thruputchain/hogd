@@ -120,6 +120,8 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
+  bool ready() const { return ready_.load(std::memory_order_acquire); }
+
   void dump_stats() { scheduler_->dump_runqueue(); }
 
   void shut_down()
@@ -171,6 +173,8 @@ private:
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
+
+    ready_.store(true, std::memory_order_release);
   }
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
@@ -206,6 +210,7 @@ private:
   std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
+  std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);

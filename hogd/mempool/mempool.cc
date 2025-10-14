@@ -60,6 +60,9 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   RpcServer<MempoolCoordinatorRpc> coord;
   db.impl_.register_scheduler(coord.impl_.scheduler());
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
+  while (!coord.impl_.ready()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 
   std::optional<LoadgenClientManager> loadgen =
       loadgen_address.empty()
@@ -95,7 +98,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting mempool!");
 
   if (argc != 3 && argc != 5) {
-    std::println("usage: num_db_shards num_executor_shards [--loadgen "
+    std::println("usage: num_db_shards num_executor_shards [--loadgen-address "
                  "<loadgen_server_address>]");
     return EXIT_FAILURE;
   }
