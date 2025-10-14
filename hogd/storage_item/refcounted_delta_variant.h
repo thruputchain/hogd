@@ -21,6 +21,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/x23.h"
 
@@ -76,7 +77,7 @@ struct BytestringArgs {
                                        StorageItemWrapper const *base_item);
 
   std::shared_ptr<const StorageItemWrapper>
-  to_item(StorageCostModel const *cost_model) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const;
 };
 
 // NNInt state
@@ -125,7 +126,7 @@ public:
   }
 
   std::shared_ptr<const StorageItemWrapper>
-  to_item(StorageCostModel const *cost_model) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const;
 
   void release_bounds_lock(NNIntBoundsLock const &bounds_lock);
   bool try_acquire_bounds_lock(NNIntBoundsLock const &bounds_lock);
@@ -146,7 +147,7 @@ private:
 // Deleted state
 struct DeleteArgs {
   static bool typeclass_match() { return true; }
-  std::shared_ptr<const StorageItemWrapper> to_item() const
+  std::shared_ptr<const StorageItemWrapper> to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const * /*unused*/) const
   {
     assert(committed_);
     return nullptr;
@@ -179,7 +180,7 @@ class RetrocausalQueueArgs {
 public:
   static bool typeclass_match() { return true; }
   std::shared_ptr<const StorageItemWrapper>
-  to_item(const StorageItemWrapper *previous_item,
+  to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item,
           StorageCostModel const *cost_model) const;
 
   int128_t get_cost(RetrocausalQueueDelta const &delta,
@@ -251,21 +252,19 @@ private:
 
 class ReplayCacheArgs {
 public:
-  ReplayCacheArgs(const ReplayCache *base_cache) : base_cache_(base_cache) {}
+  ReplayCacheArgs(const ReplayCache *base_cache, BlockHeight current_height) : base_cache_(base_cache), current_cache_(base_cache_->data(), current_height) {}
 
   static bool typeclass_match(const ReplayCache * /*unused*/) { return true; }
 
   std::shared_ptr<const StorageItemWrapper>
-  to_item(StorageCostModel const *cost_model) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item, StorageCostModel const *cost_model) const;
 
-  bool try_reserve_insert(ReplayNonce nonce);
-  void undo_insert(ReplayNonce nonce);
-
-  void commit_threshold_change(ReplayNonce new_threshold);
-  void commit_insert(ReplayNonce nonce)
+  bool try_reserve_insert(Uniquifier nonce);
+  void undo_insert(Uniquifier nonce);
+  
+  void commit_insert(Uniquifier nonce)
   {
-    [[maybe_unused]] auto [_, inserted] = committed_nonces_.insert(nonce);
-    assert(inserted);
+    current_cache_.add(nonce);
     has_committed_delta_ = true;
   }
 
@@ -286,10 +285,8 @@ public:
 
 private:
   const ReplayCache *base_cache_;
+  ReplayCache current_cache_;
 
-  std::set<ReplayNonce> new_nonces_;
-  std::set<ReplayNonce> committed_nonces_;
-  ReplayCacheMetadata metadata_ = {.minimum_threshold = 0};
   bool has_committed_delta_ = false;
 };
 
@@ -305,7 +302,7 @@ public:
   }
 
   std::shared_ptr<const StorageItemWrapper>
-  to_item(StorageCostModel const *cost_model) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const;
 
   bool try_reserve_change_signer(uint32_t key_id);
   void undo_change_signer(uint32_t key_id);
@@ -347,7 +344,7 @@ struct DeployedContractArgs {
     return hash == deployed_contract_hash_;
   }
   std::shared_ptr<const StorageItemWrapper>
-  to_item(StorageCostModel const *cost_model) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const;
   int128_t
   get_current_committed_cost(StorageCostModel const *cost_model,
                              StorageItemWrapper const *base_item) const;
@@ -363,7 +360,7 @@ struct DeployedContractArgs {
 // with refcount 0).
 struct ExclusiveLockedState {
   static bool typeclass_match() { return false; }
-  static std::shared_ptr<const StorageItemWrapper> to_item()
+  static std::shared_ptr<const StorageItemWrapper> to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const * /*unused*/)
   {
     throw std::runtime_error("Impossible state");
   }
@@ -389,7 +386,7 @@ struct ExclusiveLockedState {
 struct UnmodifiedState {
   static bool typeclass_match() { return true; }
   static std::shared_ptr<const StorageItemWrapper>
-  to_item(std::shared_ptr<const StorageItemWrapper> item)
+  to_item(std::shared_ptr<const StorageItemWrapper> const& item, StorageCostModel const * /*unused*/)
   {
     return item;
   }

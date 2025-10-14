@@ -23,6 +23,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
 #include "x23/vec.h"
@@ -42,7 +43,7 @@ get_marginal_item_creation_bound(StorageCostModel const *current_model,
 }
 
 std::shared_ptr<const StorageItemWrapper>
-BytestringArgs::to_item(StorageCostModel const *cost_model) const
+BytestringArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
 {
   assert(committed_);
   return std::make_shared<const StorageItemWrapper>(bytestring_set_,
@@ -87,7 +88,7 @@ BytestringArgs::get_marginal_cost_upper_bound_static(
 }
 
 std::shared_ptr<const StorageItemWrapper>
-NNIntSetAddArgs::to_item(StorageCostModel const *cost_model) const
+NNIntSetAddArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
 {
   assert(lower_bound_.is_in_range<int128_t>() &&
          upper_bound_.is_in_range<int128_t>());
@@ -183,7 +184,7 @@ make_block(std::multiset<QueueEntry> const &entries)
 } // namespace
 
 std::shared_ptr<const StorageItemWrapper>
-RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item,
+RetrocausalQueueArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item,
                               StorageCostModel const *cost_model) const
 {
   assert(!consumer_lock_);
@@ -405,42 +406,29 @@ RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(
 }
 
 bool
-ReplayCacheArgs::try_reserve_insert(ReplayNonce nonce)
+ReplayCacheArgs::try_reserve_insert(Uniquifier nonce)
 {
-  if (base_cache_ && !base_cache_->can_accept(nonce)) {
-    return false;
+  if (current_cache_.can_accept(nonce)) {
+    current_cache_.add(nonce);
+    return true;
   }
-  auto [_, inserted] = new_nonces_.insert(nonce);
-  return inserted;
+  return false;
 }
 
 void
-ReplayCacheArgs::undo_insert(ReplayNonce nonce)
+ReplayCacheArgs::undo_insert(Uniquifier nonce)
 {
-  [[maybe_unused]] auto res = new_nonces_.erase(nonce);
-  assert(res == 1);
+  assert(current_cache_.contains(nonce));
+  current_cache_.remove(nonce);
 }
 
 std::shared_ptr<const StorageItemWrapper>
-ReplayCacheArgs::to_item(StorageCostModel const *cost_model) const
+ReplayCacheArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& previous_item, StorageCostModel const *cost_model) const
 {
-  std::set<ReplayNonce> nonces =
-      base_cache_ ? base_cache_->nonces() : std::set<ReplayNonce>();
-  ReplayNonce min_nonce =
-      std::max<ReplayNonce>(metadata_.minimum_threshold,
-                            base_cache_
-                                ? base_cache_->metadata().minimum_threshold
-                                : 0);
-  auto it = nonces.upper_bound(min_nonce);
-  nonces.erase(nonces.begin(), it);
-
-  nonces.insert(committed_nonces_.begin(), committed_nonces_.end());
-
-  ReplayCacheMetadata new_metadata = {.minimum_threshold = min_nonce};
-
-  return std::make_shared<const StorageItemWrapper>(ReplayCache{new_metadata,
-                                                                nonces},
-                                                    cost_model);
+  if (has_committed_delta_) {
+    return std::make_shared<const StorageItemWrapper>(current_cache_, cost_model);
+  }
+  return previous_item;
 }
 
 int128_t
@@ -455,11 +443,7 @@ ReplayCacheArgs::get_current_committed_cost(
     return 0;
   }
 
-  size_t committed_size = committed_nonces_.size();
-  if (base_item) {
-    committed_size += base_item->replay_cache().count_remaining_after_clear(
-        metadata_.minimum_threshold);
-  }
+  size_t committed_size = current_cache_.committed_size();
   return current_model->kBaseItemCost +
          current_model->get_replay_cache_cost(committed_size);
 }
@@ -487,39 +471,8 @@ ReplayCacheArgs::get_marginal_cost_upper_bound(
     StorageItemWrapper const *base_item) const
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeReplayCacheModify);
-  return get_marginal_cost_upper_bound_static(!committed_nonces_.empty() ||
-                                                  has_committed_delta_,
+  return get_marginal_cost_upper_bound_static(has_committed_delta_,
                                               delta, current_model, base_item);
-}
-
-/*
-int128_t
-ReplayCacheArgs::get_cost(ReplayCacheModifyArgs const &delta) const
-{
-  auto new_min = std::max<ReplayNonce>(
-      {metadata_.minimum_threshold, delta.minimum_threshold,
-       base_cache_ ? base_cache_->metadata().minimum_threshold : 0});
-
-  size_t prev_count = 0;
-  if (base_cache_) {
-    auto const &nonces = base_cache_->nonces();
-    auto it = nonces.upper_bound(new_min);
-    prev_count = std::distance(it, nonces.end());
-  }
-
-  auto it = new_nonces_.upper_bound(new_min);
-  size_t new_count = std::distance(it, new_nonces_.end());
-
-  return kBaseItemCost + replay_cache_cost(new_count + prev_count);
-} */
-
-void
-ReplayCacheArgs::commit_threshold_change(ReplayNonce new_threshold)
-{
-  metadata_.minimum_threshold =
-      std::max<ReplayNonce>({new_threshold, metadata_.minimum_threshold});
-  auto bound = committed_nonces_.upper_bound(new_threshold);
-  committed_nonces_.erase(committed_nonces_.begin(), bound);
 }
 
 bool
@@ -556,7 +509,7 @@ AuthDataArgs::commit_change_signer(uint32_t key_id,
 }
 
 std::shared_ptr<const StorageItemWrapper>
-AuthDataArgs::to_item(StorageCostModel const *cost_model) const
+AuthDataArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
 {
   AccountAuthData new_auth_data{};
   if (base_auth_data_) {
@@ -683,7 +636,7 @@ DeployedContractArgs::get_marginal_cost_upper_bound(
 }
 
 std::shared_ptr<const StorageItemWrapper>
-DeployedContractArgs::to_item(StorageCostModel const *cost_model) const
+DeployedContractArgs::to_item(std::shared_ptr<const StorageItemWrapper> const& /*unused*/, StorageCostModel const *cost_model) const
 {
   return std::make_shared<const StorageItemWrapper>(deployed_contract_hash_,
                                                     cost_model);
@@ -790,26 +743,7 @@ RefcountedDeltaVariant::to_item(
   if (refcount_ > 0) {
     return std::visit(
         [&](auto &arm) {
-          if constexpr (requires(decltype(arm) &a) { a.to_item(); }) {
-            return arm.to_item();
-          }
-          else if constexpr (requires(decltype(arm) &a,
-                                      const StorageItemWrapper *b,
-                                      const StorageCostModel *c) {
-                               a.to_item(b, c);
-                             }) {
-            return arm.to_item(previous_item.get(), cost_model);
-          }
-          else if constexpr (requires(
-                                 decltype(arm) &a,
-                                 std::shared_ptr<const StorageItemWrapper> b) {
-                               a.to_item(b);
-                             }) {
-            return arm.to_item(previous_item);
-          }
-          else {
-            return arm.to_item(cost_model);
-          }
+          return arm.to_item(previous_item, cost_model);
         },
         variant_);
   }

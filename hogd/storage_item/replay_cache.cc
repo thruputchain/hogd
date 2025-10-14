@@ -1,6 +1,7 @@
 #include "hogd/storage_item/replay_cache.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <utility>
 
@@ -27,6 +28,26 @@ ReplayCache::can_accept(Uniquifier uniquifier) const
 }
 
 void
+ReplayCache::add(Uniquifier uniquifier)
+{
+  assert(can_accept(uniquifier));
+  data_.uniquifiers.push_back(uniquifier);
+}
+
+void ReplayCache::commit_add(Uniquifier uniquifier)
+{
+  assert(contains(uniquifier));
+  committed_size_++;
+}
+
+void
+ReplayCache::remove(Uniquifier uniquifier)
+{
+  assert(contains(uniquifier));
+  data_.uniquifiers.erase(std::ranges::find(data_.uniquifiers, uniquifier));
+}
+
+void
 ReplayCache::filter_expired()
 {
   ReplayCacheData new_data;
@@ -37,6 +58,7 @@ ReplayCache::filter_expired()
     }
   }
   data_ = std::move(new_data);
+  committed_size_ = data_.uniquifiers.size();
 }
 
 } // namespace hogd
