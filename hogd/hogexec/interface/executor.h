@@ -31,10 +31,6 @@ private:
   static std::string get_executor_address(std::string_view hostname,
                                           uint16_t executor_port);
 
-  // Create an RPC client that is connected to the coordinator.
-  SchedExec1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
-  connect_to_coordinator(const sockaddr_storage &coordinator_sockaddr);
-
   x23::CoroPoll &cp_;
 };
 

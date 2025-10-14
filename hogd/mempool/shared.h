@@ -21,6 +21,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -45,18 +46,54 @@ using sched_db_client_t =
 
 template<typename T>
 inline auto
-create_client(x23::HostPort &host_port)
+create_client(const sockaddr_storage &ss, bool retry = false)
 {
-  x23::UniqueFd fd = x23::tcpconnect(*host_port.to_addr());
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())->client(T{});
+  while (true) {
+    try {
+      x23::UniqueFd fd = x23::tcpconnect(ss);
+      CHECK(static_cast<bool>(fd));
+      return x23::rpc_stream_logged(default_coropoll(), fd.release())
+          ->client(T{});
+    } catch (std::system_error &e) {
+      std::println("CATCH 1");
+      const std::string msg =
+          std::format("Could not open RPC client: {}", e.what());
+      if (!retry) {
+        std::println("went in here?");
+        panic("{}", msg);
+      }
+      info("{}", msg);
+      std::println("Should retry now");
+    } catch (...) {
+      std::println("CATCH 2");
+      const std::string msg = std::format("Could not open RPC client");
+      if (!retry) {
+        panic("{}", msg);
+      }
+      info("{}", msg);
+    }
+    std::println("Retrying...");
+    // Common retry path.
+    // Wait briefly and then try again on the next iteration...
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 }
 
 template<typename T>
 inline auto
-create_client(const std::string &host, uint16_t port)
+create_client(x23::HostPort &host_port, bool retry = false)
+{
+  auto ss_or_error = host_port.to_addr(/*dns=*/true);
+  CHECK(ss_or_error.has_value());
+  return create_client<T>(*ss_or_error, retry);
+}
+
+template<typename T>
+inline auto
+create_client(const std::string &host, uint16_t port, bool retry = false)
 {
   x23::HostPort host_port{host.c_str(), port};
-  return create_client<T>(host_port);
+  return create_client<T>(host_port, retry);
 }
 
 } // namespace hogd

@@ -18,12 +18,8 @@ public:
     }
 
     // Connect to the loadgen server.
-    x23::UniqueFd fd = x23::tcpconnect(*host_port.to_addr());
-    CHECK(fd.operator bool());
-
-    auto stream = x23::rpc_stream_logged(default_coropoll(), fd.release());
-    client_ = std::make_unique<loadgen_client_t>(
-        stream->client(LoadgenInterfaceV1{}));
+    client_ = std::make_unique<loadgen_client_t>(std::move(
+        create_client<LoadgenInterfaceV1>(host_port, /*retry=*/true)));
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
