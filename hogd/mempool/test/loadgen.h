@@ -1,15 +1,13 @@
 #pragma once
 
 #include "hogd/base/log.h"
+#include "hogd/mempool/shared.h"
 
 namespace hogd {
 
 // Helper class to manage a loadgen client.
 class LoadgenClient {
 public:
-  using loadgen_client_t =
-      LoadgenInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   LoadgenClient(const std::string &loadgen_address)
   {
     // Parse the loadgen address.
@@ -30,8 +28,8 @@ public:
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
   // do not want that setup when using loadgen.
-  void init_experiment(MempoolCoordinatorRpc &mempool_coord_rpc,
-                       uint32_t num_accounts)
+  DbTip init_experiment(MempoolCoordinatorRpc &mempool_coord_rpc,
+                        uint32_t num_accounts)
   {
     // Initialize the experiment.
     ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
@@ -52,6 +50,7 @@ public:
     const x23::Vec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
+    DbTip ret{};
     for (const InitializationBlock &init_tx : init_txs) {
       mempool_coord_rpc.schedulercoord_submit_vetted(kValidatorId, init_tx)();
 
@@ -72,9 +71,14 @@ public:
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
+
+      ret = {.height = nomination.nomination.block_height,
+             .hash = nomination.nomination.block_hash,
+             .id = nomination.block_id};
     }
 
     info("Initialized loadgen experiment with context_id {}", context_id_);
+    return ret;
   }
 
   SignedTransactionBatch get_transactions(size_t num_txs)
@@ -88,6 +92,56 @@ public:
 private:
   std::unique_ptr<loadgen_client_t> client_;
   LoadgenContextID context_id_;
+};
+
+class LoadgenClientManager {
+public:
+  LoadgenClientManager(const std::string &loadgen_address,
+                       MempoolCoordinatorRpc &mempool, size_t num_accounts)
+    : loadgen_client_(loadgen_address), mempool_(mempool),
+      worker_([this] { work(); })
+  {
+    init_block_db_tip_ = loadgen_client_.init_experiment(mempool, num_accounts);
+  }
+
+  ~LoadgenClientManager()
+  {
+    shutdown_flag_.store(true, std::memory_order_release);
+  }
+
+private:
+  // The number of txs we request at a time from loadgen.
+  static constexpr size_t kLoadgenTxBatchSize = 10'000;
+
+  void work()
+  {
+    DbTip db_tip = init_block_db_tip_;
+
+    while (!shutdown_flag_.load(std::memory_order_acquire)) {
+      const SignedTransactionBatch txs =
+          loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+
+      ValidatorID validator_id{};
+      mempool_.schedulercoord_submit_vetted(validator_id, txs)();
+
+      auto res_nominate = mempool_.schedulercoord_nominate(db_tip)();
+      CHECK_EQ(res_nominate.outcome(),
+               SchedulerNominationOutcome::SchedulerNominationOK);
+
+      const SchedulerNomination nomination =
+          res_nominate.scheduler_nomination();
+      db_tip = {.height = nomination.nomination.block_height,
+                .hash = nomination.nomination.block_hash,
+                .id = nomination.block_id};
+    }
+  }
+
+  LoadgenClient loadgen_client_;
+  MempoolCoordinatorRpc &mempool_;
+  DbTip init_block_db_tip_;
+
+  std::atomic<bool> shutdown_flag_ = false;
+  std::jthread worker_;
 };
 
 } // namespace hogd

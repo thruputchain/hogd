@@ -26,9 +26,15 @@ constexpr uint16_t kDbServerPort = 8072;
 constexpr uint16_t kEventServerPort = 8073;
 
 int
-mempool_init(size_t num_db_shards, size_t num_exec_shards)
+mempool_init(size_t num_db_shards, size_t num_exec_shards,
+             const std::string &loadgen_address)
 {
   Registration &registration = Registration::registration();
+
+  if (!loadgen_address.empty()) {
+    // We are using loadgen to feed the mempool with traffic. Thus, we need to
+    // connect to the loadgen server.
+  }
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
@@ -83,8 +89,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting mempool!");
 
-  if (argc != 3) {
-    std::println("usage: num_db_shards num_executor_shards");
+  if (argc != 3 && argc != 5) {
+    std::println("usage: num_db_shards num_executor_shards [--loadgen "
+                 "<loadgen_server_address>]");
     return EXIT_FAILURE;
   }
 
@@ -93,10 +100,26 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::println("[num_db_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
-  size_t num_exec_shards = std::stoul(argv[1], nullptr, 0);
+
+  size_t num_exec_shards = std::stoul(argv[2], nullptr, 0);
   if (num_exec_shards <= 0) {
     std::println("[num_exec_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
-  return hogd::mempool_init(num_db_shards, num_exec_shards);
-};
+
+  std::string loadgen_address;
+  if (argc == 5) {
+    std::string flag = argv[3];
+    if (flag == "--loadgen_address") {
+      loadgen_address = argv[4];
+      std::println("loadgen address provided: {}", loadgen_address);
+    }
+    else {
+      std::println("Unexpected flag '{}'. Did you mean '--loadgen_address "
+                   "<loadgen_server_address>'?",
+                   flag);
+      return EXIT_FAILURE;
+    }
+  }
+  return hogd::mempool_init(num_db_shards, num_exec_shards, loadgen_address);
+}

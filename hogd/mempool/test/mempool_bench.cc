@@ -38,9 +38,6 @@ constexpr uint32_t kNumAccounts = 100;
 // Helper class to manage a loadgen server and client
 class LoadgenHelper {
 public:
-  using loadgen_client_t =
-      LoadgenInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   LoadgenHelper()
   {
     // Start loadgen server with auto-assigned port
@@ -52,9 +49,9 @@ public:
     client_ = std::make_unique<LoadgenClient>(loadgen_server_address);
   }
 
-  void init_experiment(MempoolTestInfra &infra)
+  DbTip init_experiment(MempoolTestInfra &infra)
   {
-    client_->init_experiment(infra.mempool_coord_rpc(), kNumAccounts);
+    return client_->init_experiment(infra.mempool_coord_rpc(), kNumAccounts);
   }
 
   SignedTransactionBatch get_transactions(size_t num_txs)
@@ -234,7 +231,7 @@ loadgen_nominate(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
-  loadgen.init_experiment(server);
+  DbTip db_tip = loadgen.init_experiment(server);
 
   for (auto _ : state) {
     state.PauseTiming();
@@ -243,7 +240,6 @@ loadgen_nominate(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
-    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     state.ResumeTiming();
 
     auto res_nominate =
@@ -259,7 +255,7 @@ loadgen_validate(benchmark::State &state)
 {
   MempoolTestInfra server;
   LoadgenHelper loadgen;
-  loadgen.init_experiment(server);
+  DbTip db_tip = loadgen.init_experiment(server);
 
   for (auto _ : state) {
     state.PauseTiming();
@@ -269,7 +265,6 @@ loadgen_validate(benchmark::State &state)
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
 
-    DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     CHECK_EQ(res_nominate.outcome(),
@@ -294,7 +289,7 @@ loadgen_nominate_throughput(benchmark::State &state)
 
   MempoolTestInfra server;
   LoadgenHelper loadgen;
-  loadgen.init_experiment(server);
+  DbTip db_tip = loadgen.init_experiment(server);
 
   for (auto _ : state) {
     size_t txs_so_far = 0;
@@ -310,14 +305,17 @@ loadgen_nominate_throughput(benchmark::State &state)
       server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                               txs)();
 
-      DbTip db_tip{.height = 0, .hash = {}, .id = 0};
       auto res_nominate =
           server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
 
-      txs_so_far += res_nominate.scheduler_nomination()
-                        .nomination.transaction_hashes.size();
+      const SchedulerNomination nomination =
+          res_nominate.scheduler_nomination();
+      db_tip = {.height = nomination.nomination.block_height,
+                .hash = nomination.nomination.block_hash,
+                .id = nomination.block_id};
+      txs_so_far += nomination.nomination.transaction_hashes.size();
     }
   }
 }
@@ -330,14 +328,13 @@ loadgen_validate_throughput(benchmark::State &state)
 
   MempoolTestInfra server;
   LoadgenHelper loadgen;
-  loadgen.init_experiment(server);
+  DbTip db_tip = loadgen.init_experiment(server);
 
   const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   CHECK_EQ(res_nominate.outcome(),

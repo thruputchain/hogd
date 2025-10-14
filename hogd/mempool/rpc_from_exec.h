@@ -8,10 +8,10 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
-#include "types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"

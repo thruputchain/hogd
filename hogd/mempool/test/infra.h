@@ -33,6 +33,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -52,7 +53,7 @@
 
 namespace hogd {
 
-constexpr static ContractAddress
+constexpr inline ContractAddress
 make_account_address(uint8_t i)
 {
   ContractAddress
@@ -152,21 +153,9 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
-  using sched_db_client_t =
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   static std::string address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
-  }
-
-  template<typename T>
-  static auto create_client(const std::string &host, uint16_t port)
-  {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
-    return x23::rpc_stream_logged(default_coropoll(), fd.release())
-        ->client(T{});
   }
 
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)

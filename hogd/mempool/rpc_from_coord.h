@@ -22,7 +22,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/types.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
