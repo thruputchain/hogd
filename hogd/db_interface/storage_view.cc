@@ -44,7 +44,7 @@ SnapshotStorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
   // negative and positive lookups are cached
   modified_items_.insert(addrkey,
                          StorageItemDeltaManager(res, &invalid_state_flag_,
-                                                 execution_mode_, cost_model_));
+                                                 execution_mode_, cost_model_, current_height_));
   return res.get();
 }
 
@@ -113,7 +113,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
   auto parent_item = get_parent_storage_item(addrkey);
   auto [item, ul] = modified_items_.insert(
       addrkey, StorageItemDeltaManager(parent_item, &invalid_state_flag_,
-                                       execution_mode_, cost_model_));
+                                       execution_mode_, cost_model_, current_height_));
   return mod_lambda(item);
 }
 
@@ -246,7 +246,7 @@ SnapshotStorageView::SnapshotStorageView(InMemoryDatabase *root_db,
                                          BlockExecutionMode execution_mode,
                                          StorageCostModel const *cost_model)
   : execution_mode_(execution_mode), cost_model_(cost_model),
-    parent_view_(root_db), current_height_(root_db->get_height())
+    parent_view_(root_db), current_height_(root_db->get_height() + 1)
 {}
 SnapshotStorageView::SnapshotStorageView(ParentBlockView *parent_view,
                                          BlockExecutionMode execution_mode,

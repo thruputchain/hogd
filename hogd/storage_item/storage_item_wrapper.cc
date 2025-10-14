@@ -83,10 +83,9 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 }
 
 StorageItem
-StorageItemWrapper::ReplayCacheWrapper::to_wire_item() const
+StorageItemWrapper::ReplayCacheWrapper::to_wire_item()
 {
   StorageItem item(StorageItemType::kItemTypeReplayCacheData);
-  item.replay_cache_data() = cache_.data();
   return item;
 }
 

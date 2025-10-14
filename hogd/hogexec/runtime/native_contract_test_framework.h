@@ -468,6 +468,13 @@ public:
   }
 
   constexpr static AddressAndKey
+  make_replay_cache_addrkey(ContractAddress const &address)
+  {
+    return AddressAndKey{.address = address,
+                         .key = StorageKey(StorageKeyType::kStorageKeyTypeReplayCache)};
+  }
+
+  constexpr static AddressAndKey
   make_free_native_token_balance_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{

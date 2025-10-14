@@ -16,6 +16,7 @@
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -114,42 +115,15 @@ private:
 
 class ReplayCacheItem {
 public:
-  ReplayCacheItem(ReplayCacheMetadata metadata) : metadata_(metadata) {}
+  ReplayCacheItem(Uniquifier consumed_uniquifier) : consumed_uniquifier_(consumed_uniquifier) {}
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  SyscallStatus<void> try_insert(ReplayNonce nonce)
-  {
-    if (nonce <= metadata_.minimum_threshold) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    if (inserted_nonces_.contains(nonce)) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    [[maybe_unused]] auto [_, inserted] = inserted_nonces_.insert(nonce);
-    assert(inserted);
-
-    return {};
-  }
-
-  SyscallStatus<void> raise_minimum_threshold(ReplayNonce new_threshold)
-  {
-    if (new_threshold < metadata_.minimum_threshold) {
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    }
-    metadata_.minimum_threshold = new_threshold;
-    return {};
-  }
-
   constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
 
 private:
-  ReplayCacheMetadata metadata_;
-  std::set<ReplayNonce> inserted_nonces_;
+  Uniquifier consumed_uniquifier_;
 };
 
 class AccountAuthDataItem {

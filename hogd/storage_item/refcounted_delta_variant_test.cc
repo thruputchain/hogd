@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <optional>
-#include <set>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -15,7 +14,6 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
