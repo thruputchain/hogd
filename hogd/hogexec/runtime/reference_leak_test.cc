@@ -245,8 +245,9 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
   advance_block();
   // hogdb (deliberately) does not support reading replay cache data in the
-  // executor So we just check that the storage cost has not increased.
+  // executor.  So we just check that the storage cost has not increased.
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   AddressAndKey token_addrkey =
       make_free_native_token_balance_addrkey(contract_addr);
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
@@ -254,6 +255,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
   ASSERT_EQ(token_item_opt.value().type(),
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Test NNInt reference leak: when try_acquire_bounds_lock() fails,
