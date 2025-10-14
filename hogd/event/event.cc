@@ -9,12 +9,13 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
-#include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/loadgen.h"
 
 namespace hogd {
@@ -27,6 +28,22 @@ constexpr uint16_t kSchedulerServerPort = 8091;
 int
 event_init(const std::string &mempool_address)
 {
+  // Start the event servers.
+  TestEventAggregator event_aggregator;
+
+  RpcServer<TestEventAggregatorExecRpc> exec(event_aggregator);
+  CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
+
+  RpcServer<TestEventAggregatorSchedRpc> sched(event_aggregator);
+  CHECK_EQ(sched.start_server(kSchedulerServerPort), kSchedulerServerPort);
+
+  // Register with the mempool.
+  x23::HostPort host_port;
+  if (!host_port.parse(mempool_address)) {
+    throw std::runtime_error(
+        std::format("Invalid mempool address: {}", mempool_address));
+  }
+  auto client = create_client<SchedEvent1>(host_port);
 
   // The event server is initialized. Now block forever.
   info("event initialization complete.");

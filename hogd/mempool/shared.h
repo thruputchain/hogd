@@ -45,11 +45,18 @@ using sched_db_client_t =
 
 template<typename T>
 inline auto
+create_client(x23::HostPort &host_port)
+{
+  x23::UniqueFd fd = x23::tcpconnect(*host_port.to_addr());
+  return x23::rpc_stream_logged(default_coropoll(), fd.release())->client(T{});
+}
+
+template<typename T>
+inline auto
 create_client(const std::string &host, uint16_t port)
 {
-  x23::UniqueFd fd =
-      x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())->client(T{});
+  x23::HostPort host_port{host.c_str(), port};
+  return create_client<T>(host_port);
 }
 
 } // namespace hogd
