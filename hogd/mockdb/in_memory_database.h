@@ -41,6 +41,8 @@ public:
   std::shared_ptr<const Contract>
   get_post_block_contract(SHA256Hash const &hash);
 
+  BlockHeight get_height() const { return height_; }
+
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item)
   {
@@ -94,12 +96,20 @@ public:
                      nullptr);
   }
 
+  void update_height(BlockHeight height)
+  {
+    assert(height_ == height - 1);
+    height_ = height;
+  }
+
 private:
   x23::MVar<std::unordered_map<AddressAndKey,
                                std::shared_ptr<const StorageItemWrapper>>>
       items_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_creates_;
+
+  BlockHeight height_{0};
 };
 
 } // namespace hogd

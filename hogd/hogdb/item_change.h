@@ -25,6 +25,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <type_traits>
 #include <unordered_set>
@@ -43,6 +44,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"

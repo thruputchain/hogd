@@ -61,18 +61,14 @@ protected:
   std::shared_ptr<const StorageItemWrapper>
   get_parent_storage_item(AddressAndKey const &addrkey);
 
+  BlockHeight get_height() const { return current_height_; }
+
   SnapshotStorageView(InMemoryDatabase *root_db,
                       BlockExecutionMode execution_mode,
-                      StorageCostModel const *cost_model)
-    : execution_mode_(execution_mode), cost_model_(cost_model),
-      parent_view_(root_db)
-  {}
+                      StorageCostModel const *cost_model);
   SnapshotStorageView(ParentBlockView *parent_view,
                       BlockExecutionMode execution_mode,
-                      StorageCostModel const *cost_model)
-    : execution_mode_(execution_mode), cost_model_(cost_model),
-      parent_view_(parent_view)
-  {}
+                      StorageCostModel const *cost_model);
 
   SynchronizedMap<AddressAndKey, StorageItemDeltaManager> modified_items_;
   InvalidStateFlag invalid_state_flag_;
@@ -92,6 +88,7 @@ protected:
   // to the parent_view_ have finished.
   std::shared_mutex mtx_;
   std::variant<ParentBlockView *, InMemoryDatabase *> parent_view_;
+  const BlockHeight current_height_;
 };
 
 // Maintains one consistent view of the database state for a single block.
@@ -138,6 +135,8 @@ public:
   get_post_block_contract(SHA256Hash const &hash);
 
   bool is_closed() const { return closed_; }
+
+  using SnapshotStorageView::get_height;
 
 protected:
   template<typename... Args>

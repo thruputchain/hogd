@@ -83,10 +83,9 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 }
 
 StorageItem
-StorageItemWrapper::ReplayCacheWrapper::to_wire_item() const
+StorageItemWrapper::ReplayCacheWrapper::to_wire_item()
 {
-  StorageItem item(StorageItemType::kItemTypeReplayCache);
-  item.replay_cache_metadata() = cache_.metadata();
+  StorageItem item(StorageItemType::kItemTypeReplayCacheData);
   return item;
 }
 
@@ -135,7 +134,7 @@ StorageItemWrapper::ReplayCacheWrapper::storage_cost(
     StorageCostModel const *cost_model) const
 {
   return cost_model->kBaseItemCost +
-         cost_model->get_replay_cache_cost(cache_.size());
+         cost_model->get_replay_cache_cost(cache_.committed_size());
 }
 
 int128_t

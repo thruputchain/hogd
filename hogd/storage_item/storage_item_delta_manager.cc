@@ -30,11 +30,11 @@ namespace hogd {
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
     InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode,
-    StorageCostModel const *cost_model)
+    StorageCostModel const *cost_model, BlockHeight current_height)
   : committed_item_(std::move(snapshot_state)),
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
     invalid_state_flag_(invalid_state_flag), cost_model_(cost_model),
-    execution_mode_(execution_mode)
+    execution_mode_(execution_mode), current_height_(current_height)
 {}
 
 bool
@@ -114,29 +114,19 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     }
     return false;
   }
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
   {
-    auto const *prev_cache =
+    const auto *prev_cache =
         (committed_item_ &&
-         committed_item_->type() == StorageItemType::kItemTypeReplayCache)
+         committed_item_->type() == StorageItemType::kItemTypeReplayCacheData)
             ? &committed_item_->replay_cache()
             : nullptr;
-    if (auto *args = variant_.try_set_variant<ReplayCacheArgs>(prev_cache)) {
-      bool insert_failed = false;
-      size_t insert_count = 0;
-      for (; insert_count < delta.replay_cache_modify().nonces.size();
-           insert_count++) {
-        if (!args->try_reserve_insert(
-                delta.replay_cache_modify().nonces[insert_count])) {
-          insert_failed = true;
-          break;
-        }
-      }
-      if (!insert_failed) {
+    if (auto *args =
+            variant_.try_set_variant<ReplayCacheArgs>(prev_cache,
+                                                      current_height_)) {
+      if (args->try_reserve_insert(
+              delta.consume_uniquifier_args().uniquifier)) {
         return true;
-      }
-      for (size_t i = 0; i < insert_count; i++) {
-        args->undo_insert(delta.replay_cache_modify().nonces[i]);
       }
       variant_.release_reference();
       return false;
@@ -227,13 +217,10 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
                           *invalid_state_flag_);
     }
   } break;
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
   {
     auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
-    args.commit_threshold_change(delta.replay_cache_modify().minimum_threshold);
-    for (auto nonce : delta.replay_cache_modify().nonces) {
-      args.commit_insert(nonce);
-    }
+    args.commit_insert(delta.consume_uniquifier_args().uniquifier);
   } break;
   case StorageDeltaType::kDeltaTypeAuthDataChange:
   {
@@ -425,12 +412,10 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
     }
     break;
   }
-  case StorageItemType::kItemTypeReplayCache:
+  case StorageItemType::kItemTypeReplayCacheData:
   {
     auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
-    for (auto nonce : type_specific_lock.nonces()) {
-      args.undo_insert(nonce);
-    }
+    args.undo_insert(type_specific_lock.uniquifier());
     break;
   }
   case StorageItemType::kItemTypeBytestring:
@@ -535,31 +520,13 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     assert(req_lock.full_typeclass_lock() == prev_typeclass_lock);
     return req_lock;
   }
-  case StorageItemType::kItemTypeReplayCache:
+  case StorageItemType::kItemTypeReplayCacheData:
   {
     assert(variant_.has_variant_arm<ReplayCacheArgs>());
-    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
-    std::set<ReplayNonce> marginal_new_nonces = {
-        delta.replay_cache_modify().nonces.begin(),
-        delta.replay_cache_modify().nonces.end()};
-    for (auto nonce : prev_typeclass_lock.extra_lock_data.nonces()) {
-      marginal_new_nonces.erase(nonce);
-    }
-
-    bool insert_failed = false;
-    auto it = marginal_new_nonces.begin();
-    for (; it != marginal_new_nonces.end(); it++) {
-      if (!args.try_reserve_insert(*it)) {
-        insert_failed = true;
-        break;
-      }
-    }
-    if (insert_failed) {
-      for (auto it2 = marginal_new_nonces.begin(); it2 != it; it2++) {
-        args.undo_insert(*it2);
-      }
-      return std::nullopt;
-    }
+    assert(delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier);
+    assert(delta.consume_uniquifier_args().uniquifier ==
+           prev_typeclass_lock.extra_lock_data.uniquifier());
+    // nothing to do
     return req_lock;
   }
   case StorageItemType::kItemTypeBytestring:
@@ -723,16 +690,12 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     break;
   }
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
   {
-    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
-    for (auto nonce : lock.full_typeclass_lock().extra_lock_data.nonces()) {
-      args.undo_insert(nonce);
-    }
-    for (auto nonce : delta.replay_cache_modify().nonces) {
-      [[maybe_unused]] auto r = args.try_reserve_insert(nonce);
-      assert(r);
-    }
+    assert(delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier);
+    assert(delta.consume_uniquifier_args().uniquifier ==
+           lock.full_typeclass_lock().extra_lock_data.uniquifier());
+    // nothing to do
     break;
   }
   case StorageDeltaType::kDeltaTypeAuthDataChange:

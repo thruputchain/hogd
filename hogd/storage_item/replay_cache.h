@@ -1,35 +1,45 @@
 #pragma once
 
 #include <cstddef>
-#include <set>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
 class ReplayCache {
 public:
-  ReplayCache(ReplayCacheMetadata metadata, std::set<ReplayNonce> nonces)
-    : metadata_(std::move(metadata)), nonces_(std::move(nonces))
-  {}
+  ReplayCache(BlockHeight expired_height) : expired_height_(expired_height) {}
 
-  bool contains(ReplayNonce nonce) const;
-  bool can_accept(ReplayNonce nonce) const;
+  ReplayCache(ReplayCacheData data, BlockHeight expired_height)
+    : data_(std::move(data)), expired_height_(expired_height)
+  {
+    filter_expired();
+  }
 
-  size_t size() const { return nonces_.size(); }
+  bool contains(Uniquifier uniquifier) const;
+  bool can_accept(Uniquifier uniquifier) const;
 
-  auto const &metadata() const { return metadata_; }
+  void add(Uniquifier uniquifier);
+  void commit_add(Uniquifier uniquifier);
+  void remove(Uniquifier uniquifier);
 
-  auto const &nonces() const { return nonces_; }
+  ReplayCacheData const &data() const { return data_; }
 
-  size_t count_remaining_after_clear(ReplayNonce threshold) const;
+  size_t committed_size() const { return committed_size_; }
+
+  BlockHeight expired_height() const { return expired_height_; }
 
 private:
-  ReplayCacheMetadata metadata_;
-  std::set<ReplayNonce> nonces_;
+  ReplayCacheData data_;
+  BlockHeight expired_height_;
+
+  size_t committed_size_;
+
+  void filter_expired();
 };
 
 } // namespace hogd

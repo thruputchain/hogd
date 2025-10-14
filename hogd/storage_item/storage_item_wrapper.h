@@ -107,9 +107,9 @@ private:
   struct ReplayCacheWrapper {
     ReplayCache cache_;
     constexpr static StorageItemType kItemType =
-        StorageItemType::kItemTypeReplayCache;
+        StorageItemType::kItemTypeReplayCacheData;
     // Converts to wire format for network transmission
-    StorageItem to_wire_item() const;
+    static StorageItem to_wire_item();
     // Returns storage cost based on replay cache metadata
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
