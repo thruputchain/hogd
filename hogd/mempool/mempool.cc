@@ -15,6 +15,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/test/loadgen.h"
 
 namespace hogd {
 
@@ -60,13 +61,13 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   db.impl_.register_scheduler(coord.impl_.scheduler());
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
 
-  std::optional<LoadgenClientManager> loadgen;
-  if (!loadgen_address.empty()) {
-    // We are using loadgen to feed the mempool with traffic. Thus, we need to
-    // connect to the loadgen server.
-    loadgen = LoadgenClientManager(loadgen_address, coord.impl_,
-                                   /*num_accounts=*/10000);
-  }
+  std::optional<LoadgenClientManager> loadgen =
+      loadgen_address.empty()
+          ? std::nullopt
+          : // We are using loadgen to feed the mempool with traffic. Thus, we
+            // need to connect to the loadgen server.
+          std::make_optional<LoadgenClientManager>(loadgen_address, coord.impl_,
+                                                   /*num_accounts=*/10000);
 
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");
