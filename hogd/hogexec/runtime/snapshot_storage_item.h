@@ -92,12 +92,6 @@ public:
     return std::get<NativeTokenBalanceEntry>(entry_).base_value_;
   }
 
-  auto const &replay_cache_metadata() const
-  {
-    assert(type() == ItemViewType::kReplayCache);
-    return std::get<ReplayCacheEntry>(entry_).metadata_;
-  }
-
   auto const &addrkey() const { return addrkey_; }
 
 private:
@@ -150,7 +144,6 @@ private:
   };
 
   struct ReplayCacheEntry {
-    ReplayCacheMetadata metadata_;
     constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
   };
 

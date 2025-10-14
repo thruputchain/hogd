@@ -15,6 +15,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -33,7 +34,7 @@ public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
       InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode,
-      StorageCostModel const *cost_model);
+      StorageCostModel const *cost_model, BlockHeight current_height);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -144,6 +145,7 @@ private:
   StorageCostModel const *cost_model_;
 
   BlockExecutionMode execution_mode_;
+  BlockHeight current_height_;
 };
 
 } // namespace hogd
