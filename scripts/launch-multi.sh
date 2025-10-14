@@ -34,12 +34,17 @@ CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
+MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 
-procs=("chuckd" "loadgen_server" "hogexec" "hogdb")
+# procs=("chuckd" "loadgen_server" "hogexec" "hogdb" "mempool_exec")
+procs=("loadgen_server" "hogexec" "hogdb" "mempool_exec")
 
-binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY")
-all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
-  "${hogdb_servers[@]}")
+# binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY" "$MEMPOOL_BINARY")
+binaries=("$LOADGEN_BINARY" "$HOGEXEC_BINARY" "$HOGDB_BINARY" "$MEMPOOL_BINARY")
+# all_servers=("$loadgen_server" "$chuckd_server" "${hogexec_servers[@]}"
+#   "${hogdb_servers[@]}" "$mempool_server")
+all_servers=("$loadgen_server" "${hogexec_servers[@]}" "${hogdb_servers[@]}"
+  "$mempool_server")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -112,8 +117,8 @@ trap cleanup EXIT INT TERM
 
 build_all() {
   for s in "${all_servers[@]}"; do
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
+    # ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+    #   "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
       "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
   done
@@ -198,24 +203,24 @@ ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
   nohup \"$LOADGEN_BINARY\" -p 11222 >$logdir/loadgen.log 2>&1 &"
 wait_port "$loadgen_server" 11222
 
-echo "Start chuckd..."
-# Start chuckd.
-ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  "$X23ENV;                  \
-  nohup \"$CHUCKD_BINARY\"                     \
-  bench loadgen                                \
-  --stack                                      \
-  --level info                                 \
-  --in-addr :7888                              \
-  --loadgen-addr \"$loadgen_server\":11222     \
-  --num-accts 10000                            \
-  --num-txs 20000                              \
-  --exec-batch 100                             \
-  --exec-par 10                                \
-  --num-blocks 100                             \
-  --max-msg-size 400000000                     \
-  > $logdir/chuckd.log 2>&1 &"
-wait_port "$chuckd_server" 7888
+# echo "Start chuckd..."
+# # Start chuckd.
+# ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+#   "$X23ENV;                  \
+#   nohup \"$CHUCKD_BINARY\"                     \
+#   bench loadgen                                \
+#   --stack                                      \
+#   --level info                                 \
+#   --in-addr :7888                              \
+#   --loadgen-addr \"$loadgen_server\":11222     \
+#   --num-accts 10000                            \
+#   --num-txs 20000                              \
+#   --exec-batch 100                             \
+#   --exec-par 10                                \
+#   --num-blocks 100                             \
+#   --max-msg-size 400000000                     \
+#   > $logdir/chuckd.log 2>&1 &"
+# wait_port "$chuckd_server" 7888
 
 # Start hogexec.
 echo "Start hogexec..."
@@ -237,17 +242,34 @@ for s in "${hogdb_servers[@]}"; do
 done
 
 # TODO(jhumphri): Launch the mempool.
+# Start mempool.
+echo "Start mempool..."
+ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
+  "$X23ENV; \
+  nohup \"$MEMPOOL_BINARY\"                   \
+  ${#hogdb_servers[@]}                        \
+  ${#hogexec_servers[@]}                      \
+  --loadgen-address \"$loadgen_server\":11222 \
+  > $logdir/mempool.log 2>&1 &"
 
 # Wait for hogexec (port 8070).
 for s in "${hogexec_servers[@]}"; do
   wait_port "$s" 8070
 done
 
-# Wait for hogdb (ports 8080, 8081, and 8082).
+# Wait for hogdb (ports 8080-8082).
 for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8080
   wait_port "$s" 8081
   wait_port "$s" 8082
+done
+
+# Wait for mempool (ports 8070-8073).
+for s in "${hogdb_servers[@]}"; do
+  wait_port "$s" 8070
+  wait_port "$s" 8071
+  wait_port "$s" 8072
+  wait_port "$s" 8073
 done
 
 echo "Done with launch."

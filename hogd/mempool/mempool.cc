@@ -115,12 +115,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string loadgen_address;
   if (argc == 5) {
     std::string flag = argv[3];
-    if (flag == "--loadgen_address") {
+    if (flag == "--loadgen-address") {
       loadgen_address = argv[4];
       std::println("loadgen address provided: {}", loadgen_address);
     }
     else {
-      std::println("Unexpected flag '{}'. Did you mean '--loadgen_address "
+      std::println("Unexpected flag '{}'. Did you mean '--loadgen-address "
                    "<loadgen_server_address>'?",
                    flag);
       return EXIT_FAILURE;
