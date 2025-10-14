@@ -471,7 +471,8 @@ public:
   make_replay_cache_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{.address = address,
-                         .key = StorageKey(StorageKeyType::kStorageKeyTypeReplayCache)};
+                         .key = StorageKey(
+                             StorageKeyType::kStorageKeyTypeReplayCache)};
   }
 
   constexpr static AddressAndKey

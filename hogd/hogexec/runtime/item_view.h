@@ -115,7 +115,9 @@ private:
 
 class ReplayCacheItem {
 public:
-  ReplayCacheItem(Uniquifier consumed_uniquifier) : consumed_uniquifier_(consumed_uniquifier) {}
+  ReplayCacheItem(Uniquifier consumed_uniquifier)
+    : consumed_uniquifier_(consumed_uniquifier)
+  {}
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }

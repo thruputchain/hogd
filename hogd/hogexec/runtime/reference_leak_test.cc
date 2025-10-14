@@ -94,7 +94,8 @@ public:
   static auto make_replay_cache_delta(Uniquifier nonce)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeConsumeUniquifier);
-    delta.consume_uniquifier_args() = ConsumeUniquifierArgs{.uniquifier = nonce};
+    delta.consume_uniquifier_args() =
+        ConsumeUniquifierArgs{.uniquifier = nonce};
     return delta;
   }
 
@@ -218,7 +219,9 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
   // First, create a replay cache with nonce 100
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_replay_cache_delta(Uniquifier{.block_expiry_height = 100, .nonce = 100}),
+  tx1.add_delta(key,
+                make_replay_cache_delta(
+                    Uniquifier{.block_expiry_height = 100, .nonce = 100}),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -226,7 +229,9 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
   // Now try to reserve the same nonce again - this should fail
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_replay_cache_delta(Uniquifier{.block_expiry_height = 100, .nonce = 100}), // Same nonce
+  tx2.add_delta(key,
+                make_replay_cache_delta(Uniquifier{.block_expiry_height = 100,
+                                                   .nonce = 100}), // Same nonce
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
@@ -239,11 +244,11 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
   ASSERT_TRUE(tx2.abort_transaction().has_value());
 
   advance_block();
-  // hogdb (deliberately) does not support reading replay cache data in the executor
-  // So we just check that the storage cost has not increased.
+  // hogdb (deliberately) does not support reading replay cache data in the
+  // executor So we just check that the storage cost has not increased.
 
   AddressAndKey token_addrkey =
-  make_free_native_token_balance_addrkey(contract_addr);
+      make_free_native_token_balance_addrkey(contract_addr);
   auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
   ASSERT_TRUE(token_item_opt.has_value());
   ASSERT_EQ(token_item_opt.value().type(),
