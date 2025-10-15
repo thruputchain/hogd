@@ -24,8 +24,7 @@ MempoolExecutorClient::register_with_coordinator(
   const ExecCard card = {.protocol = version::kHogdProtocol,
                          .upid = {},
                          .address = self_hostport.show()};
-  auto ret = client.schedexec_intro_exec(card);
-  return ret;
+  return client.schedexec_intro_exec(card)();
 }
 
 } // namespace hogd
