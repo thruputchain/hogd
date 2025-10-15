@@ -18,8 +18,8 @@ public:
     }
 
     // Connect to the loadgen server.
-    client_ = std::make_unique<loadgen_client_t>(std::move(
-        create_client<LoadgenInterfaceV1>(host_port, /*retry=*/true)));
+    client_ = std::make_unique<loadgen_client_t>(
+        create_client<LoadgenInterfaceV1>(host_port, /*retry=*/true));
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
