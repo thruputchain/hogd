@@ -364,6 +364,7 @@ private:
 
   std::string work_dir_;
 };
+static_assert(is_CIServer1<CIControlRpc *, x23::Async>);
 
 class CIControlServer : public RpcServer<CIControlRpc> {
 public:
