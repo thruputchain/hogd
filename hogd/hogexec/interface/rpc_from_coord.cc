@@ -41,7 +41,6 @@ x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
-
   auto ctx = try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);

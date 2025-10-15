@@ -46,6 +46,7 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -243,7 +244,7 @@ struct BlockValidationQueue {
 namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts)
+                    unsigned int num_accounts, unsigned int num_concurrent_rpcs)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -416,18 +417,19 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   info("done initialization txs");
 
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
-                                            1'000, 1000000);
+                                            100'000, 1000000);
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
-  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 100);
+  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
-  std::vector<BlockValidationQueue *> jobs = {1000, &block_validation_queue};
+  auto worker_pool = WorkerPool(num_concurrent_rpcs);
+  std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
 
-  auto &worker_pool = WorkerPool::get_default_pool();
 
-  for (size_t i = 0; i < 100; i++) {
+  for (size_t i = 0; i < 10; i++) {
+    auto ts = x23::fastclock::get_ns();
     open_block(parent_block_number, current_block_number);
     worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
       auto batch = job->next_batch();
@@ -451,6 +453,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     });
 
     close_block(current_block_number);
+    auto end_time = x23::fastclock::get_ns();
+    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={}", end_time - ts, work_txs.success().work_txs.size(), num_concurrent_rpcs, num_accounts, 1);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -500,7 +504,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);

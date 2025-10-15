@@ -3,12 +3,10 @@
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "exec_sched.hh"
 #include "hogd/base/compiler.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
