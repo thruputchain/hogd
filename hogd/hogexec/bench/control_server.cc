@@ -13,6 +13,7 @@
 #include <string>
 #include <sys/wait.h>
 #include <thread>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -364,6 +365,8 @@ private:
 
   std::string work_dir_;
 };
+static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
+
 static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
 
 class CIControlServer : public RpcServer<CIControlRpc> {

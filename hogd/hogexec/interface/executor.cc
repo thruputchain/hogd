@@ -6,10 +6,15 @@
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "sched_exec.hh"
+#include "x23/cleanup.h"
+#include "x23/refcnt.h"
+#include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
+// static
 IntroExecResult
 MempoolExecutorClient::register_with_coordinator(
     x23::HostPort const &self_hostport,
@@ -19,7 +24,7 @@ MempoolExecutorClient::register_with_coordinator(
   const ExecCard card = {.protocol = version::kHogdProtocol,
                          .upid = {},
                          .address = self_hostport.show()};
-  auto ret = client.schedexec_intro_exec(card)();
+  auto ret = client.schedexec_intro_exec(card);
   return ret;
 }
 
