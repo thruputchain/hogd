@@ -227,9 +227,7 @@ struct BlockValidationQueue {
 
   BlockValidationQueue(const auto &txs, size_t batch_size)
     : txs(txs), batch_size(batch_size)
-  {
-    std::println("BlockValidationQueue: txs={} batch_size={}", txs.size(), batch_size);
-  }
+  {}
 
   void reset_offset()
   {
@@ -243,7 +241,6 @@ struct BlockValidationQueue {
   std::span<const SignedTransaction> next_batch()
   {
     auto start = offset.fetch_add(batch_size);
-    std::println("BlockValidationQueue: start={} batch_size={}", start, batch_size);
     return {txs.begin() + std::min<size_t>(start, txs.size()),
             txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
   }
@@ -467,7 +464,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
     close_block(current_block_number);
     auto end_time = x23::fastclock::get_ns();
-    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={}", end_time - ts, num_txs_per_block, num_concurrent_rpcs, num_accounts, 1);
+    double elapsed_time = end_time - ts;
+    auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
+    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={} tps={}", elapsed_time, num_txs_per_block, num_concurrent_rpcs, num_accounts, 1, tps);
     parent_block_number = current_block_number;
     current_block_number++;
 
@@ -520,7 +519,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 1000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 1024, 100'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
