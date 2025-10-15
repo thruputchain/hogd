@@ -38,6 +38,7 @@ public:
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
                                                std::move(event_server_proxy));
+    info("ExecutorMempoolRpc: initialized with {} threads", nthreads_);
     ready_flag_ = true;
   }
 
@@ -109,6 +110,7 @@ private:
   std::unique_ptr<ExecutorStateManager> executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
   std::atomic<bool> ready_flag_ = false;
+  size_t nthreads_ = 1024;
 };
 
 static_assert(is_ExecutorSched1<ExecutorMempoolRpc *, x23::MaybeAsync>);
