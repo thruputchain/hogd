@@ -289,10 +289,12 @@ struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static auto kInnerFunc = &syscall_{name}_inner;
     constexpr static SyscallNo kSyscallNo = SyscallNo::k{name};
 
-    constexpr static std::array<std::string_view, {len(syscall_input_names)}> kInputNames = {{
+    constexpr static std::array<std::string_view, {len(syscall_input_names)}>
+        kInputNames = {{
         {", ".join(syscall_input_names)}
     }};
-    constexpr static std::array<std::string_view, {len(syscall_output_names)}> kOutputNames = {{
+    constexpr static std::array<std::string_view, {len(syscall_output_names)}>
+        kOutputNames = {{
         {", ".join(syscall_output_names)}
     }};
 }};
@@ -365,6 +367,7 @@ class Runtime;
 
 }}// namespace hogd
 """
+
 
 def gen_syscall_x(spec_full: dict) -> str:
     spec = spec_full["syscalls"]
