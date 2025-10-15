@@ -14,6 +14,7 @@
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/x23.h"
 
@@ -90,11 +91,11 @@ public:
     return delta;
   }
 
-  static auto make_replay_cache_delta(ReplayNonce nonce)
+  static auto make_replay_cache_delta(Uniquifier nonce)
   {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
-    delta.replay_cache_modify().minimum_threshold = 0;
-    delta.replay_cache_modify().nonces = {nonce};
+    StorageDelta delta(StorageDeltaType::kDeltaTypeConsumeUniquifier);
+    delta.consume_uniquifier_args() =
+        ConsumeUniquifierArgs{.uniquifier = nonce};
     return delta;
   }
 
@@ -211,18 +212,16 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 // reference should be released allowing other types to be reserved
 TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Replay cache is not supported in HogDB";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_addrkey(contract_addr, "test");
+  auto key = make_replay_cache_addrkey(contract_addr);
 
   // First, create a replay cache with nonce 100
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_replay_cache_delta(100),
+  tx1.add_delta(key,
+                make_replay_cache_delta(
+                    Uniquifier{.block_expiry_height = 100, .nonce = 100}),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -230,42 +229,33 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
   // Now try to reserve the same nonce again - this should fail
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_replay_cache_delta(100), // Same nonce
+  tx2.add_delta(key,
+                make_replay_cache_delta(Uniquifier{.block_expiry_height = 100,
+                                                   .nonce = 100}), // Same nonce
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()) << "replay_conflict: Duplicate nonce should fail";
 
-  // Here the reference is held; adding a bytestring here should fail
-  {
-    auto tx_intermediate = make_new_per_tx_db_proxy();
-    tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
-                              std::to_underlying(
-                                  StorageItemRPCFlags::kStorageNone));
-    auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
-    ASSERT_TRUE(r_intermediate.has_value());
-    ASSERT_FALSE(r_intermediate.value())
-        << "bytestring_conflict: Intermediate bytestring should fail";
-    ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
-  }
-
   // Here's where the reference must be released.
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
-  // The bug test: now try to reserve a different type after the failed replay
-  // cache reservation This should succeed if the reference was properly
-  // released on the failure above
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_bytestring_delta("value"),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
-  auto r3 = tx3.try_push_current_subtransaction();
-  ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value())
-      << "Should be able to reserve bytestring after replay cache conflict";
-
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+
+  advance_block();
+  // hogdb (deliberately) does not support reading replay cache data in the
+  // executor.  So we just check that the storage cost has not increased.
+
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  AddressAndKey token_addrkey =
+      make_free_native_token_balance_addrkey(contract_addr);
+  auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
+  ASSERT_TRUE(token_item_opt.has_value());
+  ASSERT_EQ(token_item_opt.value().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Test NNInt reference leak: when try_acquire_bounds_lock() fails,

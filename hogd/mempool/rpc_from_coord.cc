@@ -337,6 +337,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
   }
   CHECK(!txs.empty());
+  // Now execute the txs on the executor.
   if (!co_await validate_batch(block_id, txs)) {
     SignedTransactionBatch reenqueue =
         co_await scheduler_->mark_txs_failed(nomination.transaction_hashes);
@@ -382,11 +383,15 @@ x23::Async<void>
 MempoolCoordinatorRpc::mark_block_committed(BlockID block_id)
 {
   current_block_id_ = block_id;
-  x23::Vec<ContractAddress> changed_accounts =
-      co_await authentication_->update_block_id(current_block_id_);
-  for (const ContractAddress &account : changed_accounts) {
-    co_await scheduler_->filter_txs_for_account(account, auth_filter_);
-  }
+  co_return;
+
+  // TODO(jhumphri): We are temporarily disabling authentication until it is
+  // implemented in hogexec.
+  // x23::Vec<ContractAddress> changed_accounts =
+  //     co_await authentication_->update_block_id(current_block_id_);
+  // for (const ContractAddress &account : changed_accounts) {
+  //   co_await scheduler_->filter_txs_for_account(account, auth_filter_);
+  // }
 }
 
 x23::Async<DbTipResult>

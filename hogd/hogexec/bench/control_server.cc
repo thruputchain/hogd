@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -13,6 +14,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "ci_server.hh"
@@ -30,6 +32,8 @@ namespace hogd {
 class CIControlRpc {
 public:
   using rpc_service = CIServer1;
+
+  CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
 
   ~CIControlRpc()
   {
@@ -184,12 +188,12 @@ public:
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
-  void ciserver_stop(HogdGitHash const &hogd_git_hash)
+  CIServerErrorCode ciserver_stop(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
       error("version mismatch: received {}, expected {}", hogd_git_hash,
             version::kHogdGitHash);
-      return;
+      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
     auto pid = [&]() {
@@ -209,14 +213,15 @@ public:
     else {
       error("no running process to stop");
     }
+    return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
-  void ciserver_shutdown(HogdGitHash const &hogd_git_hash)
+  CIServerErrorCode ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
     if (!check_hogd_git_hash(hogd_git_hash)) {
       error("version mismatch: received {}, expected {}", hogd_git_hash,
             version::kHogdGitHash);
-      return;
+      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
     info("stopping any running process");
@@ -225,6 +230,7 @@ public:
     info("shutting down control server");
     waiting_for_shutdown_ = true;
     waiting_for_shutdown_.notify_all();
+    return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
   CIProcStatus ciserver_query_proc_status(HogdGitHash const &hogd_git_hash)
@@ -247,6 +253,38 @@ public:
       return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
     }
     return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
+  }
+
+  CIWorkDirStatus ciserver_query_work_dir(HogdGitHash const &hogd_git_hash)
+  {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return CIWorkDirStatus(
+          CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
+    }
+    CIWorkDirStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
+    status.work_dir() = {work_dir_.begin(), work_dir_.end()};
+    return status;
+  }
+
+  CIServerErrorCode ciserver_clear_work_dir(HogdGitHash const &hogd_git_hash)
+  {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
+    }
+    // clear the work directory
+    try {
+      std::filesystem::path dir_path(work_dir_);
+      std::filesystem::remove_all(dir_path);
+    } catch (const std::exception &e) {
+      error("Exception clearing work directory {}: {}", work_dir_, e.what());
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+
+    return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
@@ -323,9 +361,16 @@ private:
 
   // For waiting on child process
   std::jthread waitpid_thread_;
+
+  std::string work_dir_;
 };
 
-class CIControlServer : public RpcServer<CIControlRpc> {};
+class CIControlServer : public RpcServer<CIControlRpc> {
+public:
+  CIControlServer(std::string const &work_dir)
+    : RpcServer<CIControlRpc>(work_dir)
+  {}
+};
 
 } // namespace hogd
 
@@ -333,7 +378,7 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -p <control_port>", argv[0]);
+  std::println("Usage: {} -p <control_port> -w <work_dir>", argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -346,13 +391,17 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
 
   std::optional<int> control_port;
+  std::string work_dir;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "p:")) != -1) {
+  while ((opt = getopt(argc, argv, "p:w:")) != -1) {
     switch (opt) {
     case 'p':
       control_port = std::stoi(optarg);
+      break;
+    case 'w':
+      work_dir = optarg;
       break;
     default:
       usage(argv);
@@ -363,7 +412,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     control_port = hogd::kControlServerPort;
   }
 
-  hogd::CIControlServer control_server;
+  if (work_dir.empty()) {
+    usage(argv);
+  }
+
+  std::filesystem::path p(work_dir);
+  work_dir = std::filesystem::absolute(p).string();
+
+  hogd::info("using work directory: {}", work_dir);
+
+  hogd::CIControlServer control_server(work_dir);
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   control_server.start_server(*control_port);

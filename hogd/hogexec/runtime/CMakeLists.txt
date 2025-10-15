@@ -70,9 +70,11 @@ add_library(runtime_test_objects OBJECT
   direct_auth_data_tests.cc
   direct_bytestring_test.cc
   direct_nnint_test.cc
+  direct_nonce_tests.cc
   error_handling_test.cc
   event_test.cc
   execution_mode_test.cc
+  ffi_helpers_tests.cc
   fibonacci_test.cc
   gas_api_test.cc
   interleaving_tests.cc
@@ -124,6 +126,7 @@ add_dependencies(
   generate_syscall_inner_h
   generate_syscall_meta_h
   generate_wasmi_ffi_h
+  generate_contract_types_ffi_h
   protocol
 )
 

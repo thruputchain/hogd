@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -35,7 +36,6 @@ public:
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
 private:
-
   std::mutex mtx_;
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
@@ -65,7 +65,17 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
 private:
+  std::atomic<bool> shutdown_flag_ = false;
+
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
@@ -74,7 +84,7 @@ class TestEventAggregatorExecServer
   : public RpcServer<TestEventAggregatorExecRpc> {
 public:
   TestEventAggregatorExecServer(TestEventAggregator &event_aggregator)
-    : RpcServer(default_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 
@@ -102,7 +112,17 @@ struct TestEventAggregatorSchedRpc {
     event_aggregator_.close_block(block_id);
   }
 
+  void shut_down()
+  {
+    // TODO(jhumphri): Implement.
+    shutdown_flag_ = true;
+  }
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
 private:
+  std::atomic<bool> shutdown_flag_ = false;
+
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
@@ -111,7 +131,7 @@ class TestEventAggregatorSchedServer
   : public RpcServer<TestEventAggregatorSchedRpc> {
 public:
   TestEventAggregatorSchedServer(TestEventAggregator &event_aggregator)
-    : RpcServer(default_coropoll(), event_aggregator)
+    : RpcServer(event_aggregator)
   {}
 };
 

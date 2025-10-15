@@ -94,6 +94,10 @@ public:
   HogDBStatus<void>
   request_auth_data(Address const &addr,
                     const AuthDataChangeArgs &auth_data_change);
+  // add uniquifier to replay cache if it is not already in the cache,
+  // otherwise fail.
+  HogDBStatus<void> request_consume_uniquifier(Address const &addr,
+                                               Uniquifier uniquifier);
 
 private:
   struct ItemVersion {

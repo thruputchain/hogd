@@ -51,7 +51,10 @@ jobs:
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: run bench server
-      run: ./release/hogd/hogexec/bench/control_server -p 11111
+      # local work dir on CI is on disk
+      run: 
+        mkdir -p ci_work_dir/
+        ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
 
   build:
     runs-on: metrics

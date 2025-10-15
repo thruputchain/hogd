@@ -3,6 +3,7 @@
 #pragma once
 
 #include <x23/event.h>
+#include <x23/threadpool.h>
 
 namespace hogd {
 
