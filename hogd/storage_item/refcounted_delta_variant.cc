@@ -452,8 +452,7 @@ ReplayCacheArgs::get_current_committed_cost(
   }
 
   size_t committed_size = current_cache_.committed_size();
-  return current_model->kBaseItemCost +
-         current_model->get_replay_cache_cost(committed_size);
+  return current_model->get_replay_cache_cost(committed_size);
 }
 
 int128_t
@@ -471,7 +470,7 @@ ReplayCacheArgs::get_marginal_cost_upper_bound_static(
 
   assert(delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier);
   // assert that this delta has only one uniquifier
-  return base_cost + current_model->get_replay_cache_cost(1);
+  return base_cost + (current_model->kReplayCacheCostPerEntry * 1);
 }
 
 int128_t

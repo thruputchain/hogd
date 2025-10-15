@@ -70,6 +70,20 @@ enum class TestDB : int8_t {
   kHogDB = 1,
 };
 
+constexpr StorageCostModelXdr
+get_default_cost_model_xdr()
+{
+  return StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .auth_per_key_cost = to_xdr(int128_t{1111}),
+      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+  };
+}
+
 class MockDBWrapper {
 public:
   MockDBWrapper()
@@ -215,7 +229,8 @@ public:
   }
 
   // different storage cost models unimplemented currently
-  const StorageCostModel kDefaultCostModel = StorageCostModel(128, 1, 0, 0, 0);
+  const StorageCostModel kDefaultCostModel =
+      StorageCostModel(get_default_cost_model_xdr());
 
   const StorageCostModel *get_default_cost_model()
   {
@@ -618,16 +633,8 @@ private:
     }
 
     {
-      StorageCostModelXdr cost_model_xdr = {
-          .ext = ExtensionPoint(0),
-          .base_data_item_cost = to_xdr(int128_t{12000}),
-          .bytestring_cost_per_byte = 10,
-          .base_contract_deployment_cost = to_xdr(int128_t{12000}),
-          .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-          .auth_per_key_cost = to_xdr(int128_t{1111}),
-      };
       auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
-          .storage_cost_model = cost_model_xdr,
+          .storage_cost_model = get_default_cost_model_xdr(),
       });
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(

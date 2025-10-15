@@ -76,7 +76,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
           .invoked_address_signature_id =
               cpp_auth_claim.invoked_address_signature_id(),
       };
-      break;
+      return ffi_auth_claim;
     case AuthClaimType::kInvokedAddressSignedWeight:
       ffi_auth_claim.k_invoked_address_signed_weight = {
           .tag = generated::AuthClaim::AuthClaim_kInvokedAddressSignedWeight,
@@ -90,7 +90,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
                           .required_weight,
               },
       };
-      break;
+      return ffi_auth_claim;
     case AuthClaimType::kOtherAddressSignature:
       ffi_auth_claim.k_other_address_signature = {
           .tag = generated::AuthClaim::AuthClaim_kOtherAddressSignature,
@@ -101,7 +101,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
                   .key_id = cpp_auth_claim.other_address_signature_id().key_id,
               },
       };
-      break;
+      return ffi_auth_claim;
     case AuthClaimType::kOtherAddressSignedWeight:
       ffi_auth_claim.k_other_address_signed_weight = {
           .tag = generated::AuthClaim::AuthClaim_kOtherAddressSignedWeight,
@@ -116,7 +116,7 @@ template<> struct FFIHelperType<generated::AuthClaim> {
                           .required_weight,
               },
       };
-      break;
+      return ffi_auth_claim;
     }
     panic("Unknown auth claim type: {}", cpp_auth_claim.claim_type());
   }
