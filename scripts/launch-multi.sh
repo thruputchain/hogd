@@ -252,7 +252,7 @@ for s in "${hogdb_servers[@]}"; do
 done
 
 # Start fake coordinator.
-ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server"        \
+ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
   "$X23ENV;                                                   \
   nohup \"$FAKE_COORDINATOR_BINARY\" \"$mempool_server\":8070 \
   > $logdir/fake_coordinator.log 2>&1 &"
