@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
 
@@ -5,12 +6,13 @@
 #include <cstring>
 #include <memory>
 #include <span>
-#include <tuple>
+#include <string_view>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_meta_concept.h"
 #include "hogd/init.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_contract.h"
@@ -21,7 +23,6 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -68,6 +69,27 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
 
 } // namespace
 
+struct IntTypeTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &int_type_test;
+  constexpr static std::array<std::string_view, 3> kInputNames = {
+      "inp_1", "inp_128", "inp_128_by_value"};
+  constexpr static std::array<std::string_view, 3> kOutputNames = {"out_1",
+                                                                   "out_2",
+                                                                   "out_128"};
+};
+
+struct SpanTypeTestSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
+  constexpr static auto kInnerFunc = &span_type_test;
+  constexpr static std::array<std::string_view, 1> kInputNames = {"span_in"};
+  constexpr static std::array<std::string_view, 1> kOutputNames = {"span_out"};
+};
+static_assert(is_syscall_meta<IntTypeTestSyscallMeta>);
+static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
+
 TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context;
@@ -89,9 +111,7 @@ TEST(MockSyscallTest, IntTypeTest)
   uint64_t out_2;
   int128_t out_128;
 
-  auto res = mock_syscall_parser<
-      SyscallNo::kExit, std::tuple<uint32_t, int128_xdr, int128_xdr>,
-      std::tuple<uint32_t, uint64_t, int128_xdr>, &int_type_test>(
+  auto res = mock_syscall_parser<IntTypeTestSyscallMeta>(
       inp_1, reinterpret_cast<uint64_t>(&inp_128),
       reinterpret_cast<uint64_t>(&inp_128_by_value),
       reinterpret_cast<uint64_t>(&out_1), reinterpret_cast<uint64_t>(&out_2),
@@ -128,12 +148,9 @@ TEST(MockSyscallTest, SpanTest)
   std::span<const std::byte> inp_span = std::as_bytes(std::span(&inp, 1));
   std::span<std::byte> out_span = std::as_writable_bytes(std::span(&out, 1));
 
-  auto res =
-      mock_syscall_parser<SyscallNo::kExit, std::tuple<x23::Vec<uint8_t>>,
-                          std::tuple<x23::Vec<uint8_t>>, &span_type_test>(
-          reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
-          reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0,
-          0);
+  auto res = mock_syscall_parser<SpanTypeTestSyscallMeta>(
+      reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
+      reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0, 0);
   context.pop_mock_runtime();
   context.pop_context();
 
