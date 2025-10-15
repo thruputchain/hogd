@@ -470,6 +470,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={}", end_time - ts, num_txs_per_block, num_concurrent_rpcs, num_accounts, 1);
     parent_block_number = current_block_number;
     current_block_number++;
+
+    // TODO(geoff): once we add uniquifiers, generate all the txs up front, or at least generate them off the critical path
+    block_validation_queue.reset_offset();
   }
 }
 
