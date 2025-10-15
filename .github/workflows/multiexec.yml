@@ -1,4 +1,4 @@
-name: MultiExec Trial
+name: MultiExec Interface Benchmark
 
 on:
   workflow_dispatch:
