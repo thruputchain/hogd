@@ -255,6 +255,7 @@ done
 ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
   "$X23ENV;                                                   \
   nohup \"$FAKE_COORDINATOR_BINARY\" \"$mempool_server\":8070 \
+  \"$loadgen_server\":11222                                   \
   > $logdir/fake_coordinator.log 2>&1 &"
 
 # TODO(jhumphri): Launch the mempool.
@@ -265,7 +266,6 @@ echo "Start mempool..."
 #   nohup \"$MEMPOOL_BINARY\"                   \
 #   ${#hogdb_servers[@]}                        \
 #   ${#hogexec_servers[@]}                      \
-#   --loadgen-address \"$loadgen_server\":11222 \
 #   > $logdir/mempool.log 2>&1 &"
 
 sleep 10000
@@ -285,6 +285,9 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8081
   wait_port "$s" 8082
 done
+
+# Wait for fake coordinator (port 7888).
+wait_port "$fake_coordinator_server" 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070

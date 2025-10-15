@@ -280,7 +280,8 @@ Scheduler::dump_runqueue() const
   for (const auto &[height, tx_infos] : age_to_tx_) {
     std::println("runqueue age {}:", height);
     for (const TxInfo *info : tx_infos) {
-      std::println("  - account {}", info->tx.tx.invocation.invoked_address[0]);
+      std::println("  - tx from account {}",
+                   info->tx.tx.invocation.invoked_address[0]);
     }
   }
   size_t num_stranded = 0;

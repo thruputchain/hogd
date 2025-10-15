@@ -16,6 +16,7 @@
 #include "loadgen.hh"
 #include "nomination.hh"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -40,6 +41,9 @@ using exec_sched_client_t =
 
 using loadgen_client_t =
     LoadgenInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+using sched_coord_client_t =
+    SchedulerCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 using sched_db_client_t =
     SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;

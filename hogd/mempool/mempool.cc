@@ -28,8 +28,7 @@ constexpr uint16_t kDbServerPort = 8072;
 constexpr uint16_t kEventServerPort = 8073;
 
 int
-mempool_init(size_t num_db_shards, size_t num_exec_shards,
-             const std::string &loadgen_address)
+mempool_init(size_t num_db_shards, size_t num_exec_shards)
 {
   Registration &registration = Registration::registration();
 
@@ -64,20 +63,11 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  std::optional<LoadgenClientManager> loadgen =
-      loadgen_address.empty()
-          ? std::nullopt
-          : // We are using loadgen to feed the mempool with traffic. Thus, we
-            // need to connect to the loadgen server.
-          std::make_optional<LoadgenClientManager>(loadgen_address, coord.impl_,
-                                                   /*num_accounts=*/10000);
-
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");
   std::promise<void>().get_future().wait();
 
   // TODO(jhumphri): Implement shutdown path.
-  // loadgen.reset();
   // coord.shut_down();
   // exec.shut_down();
   // db.shut_down();
@@ -97,9 +87,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting mempool!");
 
-  if (argc != 3 && argc != 5) {
-    std::println("usage: num_db_shards num_executor_shards [--loadgen-address "
-                 "<loadgen_server_address>]");
+  if (argc != 3) {
+    std::println("usage: num_db_shards num_executor_shards");
     return EXIT_FAILURE;
   }
 
@@ -115,19 +104,5 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
-  std::string loadgen_address;
-  if (argc == 5) {
-    std::string flag = argv[3];
-    if (flag == "--loadgen-address") {
-      loadgen_address = argv[4];
-      std::println("loadgen address provided: {}", loadgen_address);
-    }
-    else {
-      std::println("Unexpected flag '{}'. Did you mean '--loadgen-address "
-                   "<loadgen_server_address>'?",
-                   flag);
-      return EXIT_FAILURE;
-    }
-  }
-  return hogd::mempool_init(num_db_shards, num_exec_shards, loadgen_address);
+  return hogd::mempool_init(num_db_shards, num_exec_shards);
 }

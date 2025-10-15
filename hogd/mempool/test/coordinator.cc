@@ -12,6 +12,7 @@
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
+#include "hogd/mempool/test/loadgen.h"
 #include "hogd/version.h"
 #include "sched_coord.hh"
 #include "x23/sockio.h"
@@ -31,7 +32,8 @@ create_address(uint16_t port)
 }
 
 int
-coordinator_init(const std::string &mempool_address)
+coordinator_init(const std::string &mempool_address,
+                 const std::string &loadgen_address)
 {
   // Start the coordinator server.
   RpcServer<CoordinatorSchedRpc> sched;
@@ -49,6 +51,14 @@ coordinator_init(const std::string &mempool_address)
                  .address_for_sched = address_for_sched.c_str()};
   CHECK_EQ(client.schedulercoord_intro_coord(card)(),
            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
+
+  std::optional<LoadgenClientManager> loadgen =
+      loadgen_address.empty()
+          ? std::nullopt
+          : // We are using loadgen to feed the mempool with traffic. Thus, we
+            // need to connect to the loadgen server.
+          std::make_optional<LoadgenClientManager>(loadgen_address, client,
+                                                   /*num_accounts=*/10000);
 
   // The coordinator server is initialized. Now block forever.
   info("coordinator initialization complete.");
@@ -71,11 +81,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting coordinator server!");
 
-  if (argc != 2) {
-    std::println("usage: mempool_server_address");
+  if (argc != 3) {
+    std::println("usage: mempool_address loadgen_address");
     return EXIT_FAILURE;
   }
 
   std::string mempool_address = argv[1];
-  return hogd::coordinator_init(mempool_address);
+  std::string loadgen_address = argv[2];
+  return hogd::coordinator_init(mempool_address, loadgen_address);
 }

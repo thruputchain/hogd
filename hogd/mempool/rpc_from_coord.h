@@ -115,7 +115,7 @@ public:
   x23::Async<void> schedulercoord_shutdown();
 
   x23::Async<DbSchedResult>
-  send_genesis_block(const GenesisBlock &genesis_block)
+  schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
   {
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }

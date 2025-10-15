@@ -24,7 +24,8 @@ public:
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
   // do not want that setup when using loadgen.
-  DbTip init_experiment(MempoolCoordinatorRpc &mempool_coord_rpc,
+  template<typename SchedCoordClient>
+  DbTip init_experiment(SchedCoordClient &sched_coord_client,
                         uint32_t num_accounts)
   {
     // Initialize the experiment.
@@ -36,7 +37,7 @@ public:
     context_id_ = result.success().context_id;
 
     // Pass the genesis block to the db.
-    CHECK_EQ(mempool_coord_rpc.send_genesis_block(
+    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_block(
                  result.success().genesis_block)(),
              DbSchedResult::DbSchedResultOK);
 
@@ -48,7 +49,7 @@ public:
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};
     for (const InitializationBlock &init_tx : init_txs) {
-      mempool_coord_rpc.schedulercoord_submit_vetted(kValidatorId, init_tx)();
+      sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
@@ -58,8 +59,8 @@ public:
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
-        auto res_nominate = mempool_coord_rpc.schedulercoord_nominate(db_tip)();
-        mempool_coord_rpc.dump_stats();
+        auto res_nominate =
+            sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
         nomination = res_nominate.scheduler_nomination();
@@ -93,11 +94,13 @@ private:
 class LoadgenClientManager {
 public:
   LoadgenClientManager(const std::string &loadgen_address,
-                       MempoolCoordinatorRpc &mempool, size_t num_accounts)
-    : loadgen_client_(loadgen_address), mempool_(mempool)
+                       sched_coord_client_t &sched_coord_client,
+                       size_t num_accounts)
+    : loadgen_client_(loadgen_address), sched_coord_client_(sched_coord_client)
   {
     info("Initializing loadgen experiment...");
-    init_block_db_tip_ = loadgen_client_.init_experiment(mempool, num_accounts);
+    init_block_db_tip_ =
+        loadgen_client_.init_experiment(sched_coord_client, num_accounts);
     info("Done initializing experiment. Now running.");
     worker_ = std::make_optional<std::jthread>([this] { work(); });
   }
@@ -120,9 +123,9 @@ private:
           loadgen_client_.get_transactions(kLoadgenTxBatchSize);
 
       ValidatorID validator_id{};
-      mempool_.schedulercoord_submit_vetted(validator_id, txs)();
+      sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs)();
 
-      auto res_nominate = mempool_.schedulercoord_nominate(db_tip)();
+      auto res_nominate = sched_coord_client_.schedulercoord_nominate(db_tip)();
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
 
@@ -135,7 +138,7 @@ private:
   }
 
   LoadgenClient loadgen_client_;
-  MempoolCoordinatorRpc &mempool_;
+  sched_coord_client_t &sched_coord_client_;
   DbTip init_block_db_tip_;
 
   std::atomic<bool> shutdown_flag_ = false;
