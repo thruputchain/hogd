@@ -118,7 +118,7 @@ public:
     cv_.notify_all();
   }
 
-  std::vector<ExecCard> await_executor_cards(int num_cards)
+  std::vector<ExecCard> await_executor_cards(unsigned int num_cards)
   {
     std::unique_lock lk(mtx_);
     cv_.wait(lk, [this, num_cards] { return exec_cards_.size() == num_cards; });
@@ -157,7 +157,7 @@ public:
 
   static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
 
-  x23::Vec<ShardCard> await_shard_cards(int num_cards)
+  x23::Vec<ShardCard> await_shard_cards(unsigned int num_cards)
   {
     std::unique_lock lk(mtx_);
     cv_.wait(lk,
