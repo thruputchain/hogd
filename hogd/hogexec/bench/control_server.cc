@@ -365,6 +365,8 @@ private:
   std::string work_dir_;
 };
 
+static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
+
 class CIControlServer : public RpcServer<CIControlRpc> {
 public:
   CIControlServer(std::string const &work_dir)
