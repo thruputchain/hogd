@@ -30,10 +30,13 @@ BlockTX *
 RPCContext::get_block_tx_slow(BlockTXID bid)
 {
   BlockTX *tx;
+  // This lock should be held during the cache updates, not just the lookup.
+  // Otherwise, technically, close_block_tx() could be called in between when we get the 
+  // tx pointer from block_txes_ and when we insert it into the cache.
+  std::scoped_lock g(lock_);
 
   // retrieve the block tx (if it exists).
   {
-    std::scoped_lock g(lock_);
     auto it = block_txes_.find(bid);
     if (it == block_txes_.end()) {
       tx = nullptr;
@@ -47,7 +50,7 @@ RPCContext::get_block_tx_slow(BlockTXID bid)
 
   // then make sure it's in the cache so we can avoid this cost next time.
   BlockCache &cache = *block_tx_cache_;
-  std::scoped_lock g(cache.lock);
+  std::scoped_lock g2(cache.lock);
   cache.blocks.insert(std::make_pair(bid, tx));
   return tx;
 }
@@ -55,11 +58,7 @@ RPCContext::get_block_tx_slow(BlockTXID bid)
 void
 RPCContext::close_block_tx(BlockTXID bid)
 {
-  // remove the block tx.
   std::scoped_lock g(lock_);
-  // WARNING:
-  // Closing a block tx while it has open InvokeTXs causes a UAF.
-  block_txes_.erase(bid);
 
   // remove each copy of the block tx that was cached.
   std::unique_lock ul = block_tx_cache_.lock_threads();
@@ -67,6 +66,15 @@ RPCContext::close_block_tx(BlockTXID bid)
     std::scoped_lock g(cache.lock);
     cache.blocks.erase(bid);
   });
+
+  // remove the block tx.
+  //
+  // We make sure to delete the BlockTX _after_ 
+  // deleting the pointers to it in the threadlocal caches.
+  //
+  // WARNING:
+  // Closing a block tx while it has open InvokeTXs causes a UAF.
+  block_txes_.erase(bid);
 }
 
 HogDBStatus<void>

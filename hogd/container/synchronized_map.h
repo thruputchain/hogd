@@ -218,6 +218,12 @@ public:
   }
 
 private:
+
+  // Note: Per the c++ standard,
+  // [containers.requirements.unord.req.general],
+  // pointers and references to elements of an unordered_map are NOT invalidated
+  // when the map is rehashed.
+  // https://timsong-cpp.github.io/cppwp/n4950/unord.req#general-9
   using Map = std::unordered_map<Key, T, Hash, KeyEqual, Allocator>;
 
   Hash hash_fn_ = Hash();
