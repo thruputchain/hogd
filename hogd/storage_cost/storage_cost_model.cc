@@ -38,6 +38,8 @@ StorageCostModel::to_xdr() const
           ::hogd::to_xdr(kBaseContractDeploymentCost),
       .contract_deployment_cost_per_byte =
           ::hogd::to_xdr(kContractDeploymentCostPerByte),
+      .auth_per_key_cost = ::hogd::to_xdr(kAuthPerKeyCost),
+      .replay_cache_cost_per_entry = ::hogd::to_xdr(kReplayCacheCostPerEntry),
   };
 }
 
