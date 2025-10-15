@@ -73,6 +73,7 @@ public:
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
+    CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
   }
 

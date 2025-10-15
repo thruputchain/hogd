@@ -57,8 +57,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  RpcServer<MempoolCoordinatorRpc> coord;
-  db.impl_.register_scheduler(coord.impl_.scheduler());
+  RpcServer<MempoolCoordinatorRpc> coord(db.impl_);
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   while (!coord.impl_.ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

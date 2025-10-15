@@ -47,7 +47,7 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 10'000;
 
-  MempoolCoordinatorRpc() = default;
+  MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -173,6 +173,7 @@ private:
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
+    db_rpc_.register_scheduler(scheduler_);
 
     ready_.store(true, std::memory_order_release);
   }
@@ -200,6 +201,8 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
+  MempoolDbRpc &db_rpc_;
+
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
@@ -214,7 +217,5 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
-
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
 
 } // namespace hogd

@@ -94,10 +94,12 @@ class LoadgenClientManager {
 public:
   LoadgenClientManager(const std::string &loadgen_address,
                        MempoolCoordinatorRpc &mempool, size_t num_accounts)
-    : loadgen_client_(loadgen_address), mempool_(mempool),
-      worker_([this] { work(); })
+    : loadgen_client_(loadgen_address), mempool_(mempool)
   {
+    info("Initializing loadgen experiment...");
     init_block_db_tip_ = loadgen_client_.init_experiment(mempool, num_accounts);
+    info("Done initializing experiment. Now running.");
+    worker_ = std::make_optional<std::jthread>([this] { work(); });
   }
 
   ~LoadgenClientManager()
@@ -137,7 +139,7 @@ private:
   DbTip init_block_db_tip_;
 
   std::atomic<bool> shutdown_flag_ = false;
-  std::jthread worker_;
+  std::optional<std::jthread> worker_;
 };
 
 } // namespace hogd

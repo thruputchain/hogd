@@ -288,15 +288,16 @@ private:
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
-  CoordinatorSchedServer coordinator_sched_server_;
+  RpcServer<CoordinatorSchedRpc> coordinator_sched_server_;
 
   // The mempool servers.
   // We keep the [mempool_coord_server_] declaration below the various
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
-  MempoolCoordinatorServer mempool_coord_server_;
   RpcServer<MempoolDbRpc> sched_db_server_;
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_.impl_);
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };

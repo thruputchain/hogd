@@ -7,6 +7,7 @@ HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
+fake_coordinator_server="hog3"
 mempool_server="hog3"
 hogexec_servers=("hog4")
 event_server="hog4"
@@ -34,19 +35,20 @@ fi
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd
 CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
+FAKE_COORDINATOR_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/test/coordinator
 MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 
 # procs=("chuckd" "loadgen_server" "mempool_exec" "hogexec" "event_exec" "hogdb")
-procs=("loadgen_server" "mempool_exec" "hogexec" "event_exec" "hogdb")
+procs=("loadgen_server" "coordinator" "mempool_exec" "hogexec" "event_exec" "hogdb")
 
 # binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "EVENT_BINARY" "$HOGDB_BINARY")
-binaries=("$LOADGEN_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
+binaries=("$LOADGEN_BINARY" "$FAKE_COORDINATOR_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
 # all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "${event_server}"
 #   "${hogdb_servers[@]}")
-all_servers=("$loadgen_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
+all_servers=("$loadgen_server" "$fake_coordinator_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -249,16 +251,24 @@ for s in "${hogdb_servers[@]}"; do
     > $logdir/hogdb.log 2>&1 &"
 done
 
+# Start fake coordinator.
+ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server"        \
+  "$X23ENV;                                                   \
+  nohup \"$FAKE_COORDINATOR_BINARY\" \"$mempool_server\":8070 \
+  > $logdir/fake_coordinator.log 2>&1 &"
+
 # TODO(jhumphri): Launch the mempool.
 # Start mempool.
 echo "Start mempool..."
-ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
-  "$X23ENV; \
-  nohup \"$MEMPOOL_BINARY\"                   \
-  ${#hogdb_servers[@]}                        \
-  ${#hogexec_servers[@]}                      \
-  --loadgen-address \"$loadgen_server\":11222 \
-  > $logdir/mempool.log 2>&1 &"
+# ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
+#   "$X23ENV; \
+#   nohup \"$MEMPOOL_BINARY\"                   \
+#   ${#hogdb_servers[@]}                        \
+#   ${#hogexec_servers[@]}                      \
+#   --loadgen-address \"$loadgen_server\":11222 \
+#   > $logdir/mempool.log 2>&1 &"
+
+sleep 10000
 
 # Wait for hogexec (port 8070).
 for s in "${hogexec_servers[@]}"; do
