@@ -231,6 +231,11 @@ struct BlockValidationQueue {
     std::println("BlockValidationQueue: txs={} batch_size={}", txs.size(), batch_size);
   }
 
+  void reset_offset()
+  {
+    offset.store(0);
+  }
+
   const std::span<const SignedTransaction> txs;
   const size_t batch_size;
   std::atomic<uint64_t> offset{0};
@@ -437,25 +442,27 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto ts = x23::fastclock::get_ns();
     open_block(parent_block_number, current_block_number);
     worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
-      auto batch = job->next_batch();
-      if (batch.empty()) {
-        return;
-      }
-      x23::Vec<SignedTransaction> batch_vec;
-      batch_vec.reserve(batch.size());
-      for (auto const &tx : batch) {
-        batch_vec.push_back(tx);
-      }
-
-      auto res =
-          exec_clients[0].executorsched_propose_batch(current_block_number,
-                                                      batch_vec);
-      for (auto const &result : res) {
-        if (result.result() != ExecResult::ExecResultOK) {
-          throw std::runtime_error("Failed to propose batch");
+      while (true) {
+        auto batch = job->next_batch();
+        if (batch.empty()) {
+          return;
         }
+        x23::Vec<SignedTransaction> batch_vec;
+        batch_vec.reserve(batch.size());
+        for (auto const &tx : batch) {
+          batch_vec.push_back(tx);
+        }
+
+        auto res =
+            exec_clients[0].executorsched_propose_batch(current_block_number,
+                                                        batch_vec);
+        for (auto const &result : res) {
+          if (result.result() != ExecResult::ExecResultOK) {
+            throw std::runtime_error("Failed to propose batch");
+          }
+        }
+        assert(res.size() == batch.size());
       }
-      assert(res.size() == batch.size());
     });
 
     close_block(current_block_number);
