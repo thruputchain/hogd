@@ -365,6 +365,7 @@ private:
 
   std::string work_dir_;
 };
+static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
 
 static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
 

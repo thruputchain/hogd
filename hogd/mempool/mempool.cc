@@ -55,9 +55,11 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  RpcServer<MempoolCoordinatorRpc> coord;
-  db.impl_.register_scheduler(coord.impl_.scheduler());
+  RpcServer<MempoolCoordinatorRpc> coord(db.impl_);
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
+  while (!coord.impl_.ready()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
 
   // The mempool is initialized. Now block forever.
   info("mempool initialization complete.");
@@ -93,10 +95,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::println("[num_db_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
-  size_t num_exec_shards = std::stoul(argv[1], nullptr, 0);
+
+  size_t num_exec_shards = std::stoul(argv[2], nullptr, 0);
   if (num_exec_shards <= 0) {
     std::println("[num_exec_shards] must be greater than 0.");
     return EXIT_FAILURE;
   }
+
   return hogd::mempool_init(num_db_shards, num_exec_shards);
-};
+}

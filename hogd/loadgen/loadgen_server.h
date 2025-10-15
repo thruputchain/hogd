@@ -37,6 +37,4 @@ private:
 
 static_assert(is_LoadgenInterfaceV1<LoadgenRpc *, std::type_identity_t>);
 
-class LoadgenServer : public RpcServer<LoadgenRpc> {};
-
 } // namespace hogd

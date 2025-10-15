@@ -33,6 +33,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -52,7 +53,7 @@
 
 namespace hogd {
 
-constexpr static ContractAddress
+constexpr ContractAddress
 make_account_address(uint8_t i)
 {
   ContractAddress
@@ -152,21 +153,9 @@ private:
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
-  using sched_db_client_t =
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   static std::string address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
-  }
-
-  template<typename T>
-  static auto create_client(const std::string &host, uint16_t port)
-  {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
-    return x23::rpc_stream_logged(default_coropoll(), fd.release())
-        ->client(T{});
   }
 
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
@@ -299,15 +288,16 @@ private:
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
-  CoordinatorSchedServer coordinator_sched_server_;
+  RpcServer<CoordinatorSchedRpc> coordinator_sched_server_;
 
   // The mempool servers.
   // We keep the [mempool_coord_server_] declaration below the various
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
-  MempoolCoordinatorServer mempool_coord_server_;
   RpcServer<MempoolDbRpc> sched_db_server_;
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_.impl_);
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };

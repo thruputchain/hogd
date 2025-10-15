@@ -280,7 +280,8 @@ Scheduler::dump_runqueue() const
   for (const auto &[height, tx_infos] : age_to_tx_) {
     std::println("runqueue age {}:", height);
     for (const TxInfo *info : tx_infos) {
-      std::println("  - account {}", info->tx.tx.invocation.invoked_address[0]);
+      std::println("  - tx from account {}",
+                   info->tx.tx.invocation.invoked_address[0]);
     }
   }
   size_t num_stranded = 0;
@@ -608,7 +609,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
 
     if (info.size() <= num_remaining) {
-      // All of the txs in [info] in the block, so we add all of them. Note
+      // All of the txs in [info] fit in the block, so we add all of them. Note
       // that [get_txs_all()] removes the txs from [info], so it is important
       // that we add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();

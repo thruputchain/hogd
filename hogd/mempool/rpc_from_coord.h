@@ -22,7 +22,7 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/types.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
@@ -47,7 +47,7 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 10'000;
 
-  MempoolCoordinatorRpc() = default;
+  MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -115,10 +115,12 @@ public:
   x23::Async<void> schedulercoord_shutdown();
 
   x23::Async<DbSchedResult>
-  send_genesis_block(const GenesisBlock &genesis_block)
+  schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
   {
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
+
+  bool ready() const { return ready_.load(std::memory_order_acquire); }
 
   void dump_stats() { scheduler_->dump_runqueue(); }
 
@@ -171,6 +173,9 @@ private:
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
+    db_rpc_.register_scheduler(scheduler_);
+
+    ready_.store(true, std::memory_order_release);
   }
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
@@ -196,20 +201,21 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
+  MempoolDbRpc &db_rpc_;
+
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_;
+  BlockID current_block_id_ = 0;
   std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
+  std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
-
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
 
 } // namespace hogd

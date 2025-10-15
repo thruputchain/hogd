@@ -1,61 +1,90 @@
-#include "hogd/event/event.h"
+#include <cstdlib>
+#include <format>
+#include <future>
+#include <print>
+#include <stdexcept>
+#include <string>
 
-#include <cassert>
-#include <cstddef>
-#include <optional>
-#include <span>
-
-#include "event.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "types.hh"
-#include "x23/serialize.h"
-#include "x23/vec.h"
+#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/init.h"
+#include "hogd/mempool/shared.h"
+#include "hogd/version.h"
+#include "rpc_types.hh"
+#include "sched_event.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
-TxEmittedEvent
-make_tx_emitted_event(ContractAddress const &contract_address,
-                      SHA256Hash const *topic0, SHA256Hash const *topic1,
-                      SHA256Hash const *topic2,
-                      std::span<const std::byte> event)
+namespace {
+
+constexpr uint16_t kExecutorServerPort = 8090;
+constexpr uint16_t kSchedulerServerPort = 8091;
+
+std::string
+create_address(uint16_t port)
 {
-  EventData data{};
-  if (topic0) {
-    data.topics.push_back(*topic0);
-  }
-  if (topic1) {
-    assert(topic0);
-    data.topics.push_back(*topic1);
-  }
-  if (topic2) {
-    assert(topic0);
-    assert(topic1);
-    data.topics.push_back(*topic2);
-  }
-
-  assert(event.size() <= kMaxLogMessageLen);
-
-  data.event = x23::Vec<uint8_t, 0xffffffff>(
-      reinterpret_cast<uint8_t const *>(event.data()),
-      reinterpret_cast<uint8_t const *>(event.data() + event.size()));
-  return TxEmittedEvent{
-      .contract_address = contract_address,
-      .serialized_event = x23::serialize(data),
-  };
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return std::format("{}:{}", hostname, port);
 }
 
-std::optional<EventData>
-try_parse_event_data(TxEmittedEvent const &emitted_event)
+int
+event_init(const std::string &mempool_address)
 {
-  EventData data{};
-  try {
-    x23::deserialize(&data, x23::BufView{emitted_event.serialized_event});
-  } catch (const x23::XdrBadInput &e) {
-    warn("Failed to parse event data: {}", e.what());
-    return std::nullopt;
+  // Start the event servers.
+  TestEventAggregator event_aggregator;
+
+  RpcServer<TestEventAggregatorExecRpc> exec(event_aggregator);
+  CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
+
+  RpcServer<TestEventAggregatorSchedRpc> sched(event_aggregator);
+  CHECK_EQ(sched.start_server(kSchedulerServerPort), kSchedulerServerPort);
+
+  // Register with the mempool.
+  x23::HostPort host_port;
+  if (!host_port.parse(mempool_address)) {
+    throw std::runtime_error(
+        std::format("Invalid mempool address: {}", mempool_address));
   }
-  return data;
+  auto client = create_client<SchedEvent1>(host_port, /*retry=*/true);
+  std::string address_for_exec = create_address(kExecutorServerPort);
+  std::string address_for_sched = create_address(kSchedulerServerPort);
+  EventCard card{.protocol = version::kHogdProtocol,
+                 .upid = {},
+                 .address_for_exec = address_for_exec.c_str(),
+                 .address_for_sched = address_for_sched.c_str()};
+  CHECK_EQ(client.schedevent_intro_event(card)(), RPCError::kRPCNone);
+
+  // The event server is initialized. Now block forever.
+  info("event initialization complete.");
+  std::promise<void>().get_future().wait();
+
+  // TODO(jhumphri): Implement shutdown path.
+
+  return 0;
 }
+
+} // namespace
 
 } // namespace hogd
+
+int
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
+{
+  int ret = hogd::hogd_init(argc, argv);
+  if (ret)
+    return ret;
+  hogd::info("starting event server!");
+
+  if (argc != 2) {
+    std::println("usage: mempool_server_address");
+    return EXIT_FAILURE;
+  }
+
+  std::string mempool_address = argv[1];
+  return hogd::event_init(mempool_address);
+}

@@ -7,7 +7,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/types.h"
+#include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"

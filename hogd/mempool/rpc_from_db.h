@@ -10,13 +10,13 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_exec.hh"
 #include "scheduler.h"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
@@ -73,6 +73,7 @@ public:
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
+    CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
   }
 
