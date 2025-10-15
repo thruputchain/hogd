@@ -94,6 +94,7 @@ add_library(runtime_test_objects OBJECT
   revert_tests.cc
   runtime_test.cc
   serialize_roundtrip_test.cc
+  shutdown_test.cc
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc

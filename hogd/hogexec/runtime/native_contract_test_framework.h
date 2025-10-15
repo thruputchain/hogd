@@ -507,6 +507,13 @@ public:
     return bytestring;
   }
 
+  static auto make_bytestring_delta(std::string_view str)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
+    delta.bytestring() = make_bytestring(str);
+    return delta;
+  }
+
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount);
   void write_item(AddressAndKey const &addrkey,
