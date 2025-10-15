@@ -32,7 +32,7 @@ class CIControlRpc {
 public:
   using rpc_service = CIServer1;
 
-  CIControlRpc(std::string const& work_dir) : work_dir_(work_dir) {}
+  CIControlRpc(std::string const &work_dir) : work_dir_(work_dir) {}
 
   ~CIControlRpc()
   {
@@ -259,7 +259,8 @@ public:
     if (!check_hogd_git_hash(hogd_git_hash)) {
       error("version mismatch: received {}, expected {}", hogd_git_hash,
             version::kHogdGitHash);
-      return CIWorkDirStatus(CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
+      return CIWorkDirStatus(
+          CIServerErrorCode::kCIServerErrorCodeVersionMismatch);
     }
     CIWorkDirStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
     status.work_dir() = {work_dir_.begin(), work_dir_.end()};
@@ -277,15 +278,13 @@ public:
     try {
       std::filesystem::path dir_path(work_dir_);
       std::filesystem::remove_all(dir_path);
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
       error("Exception clearing work directory {}: {}", work_dir_, e.what());
       return CIServerErrorCode::kCIServerErrorCodeInternal;
     }
 
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
-
-
 
   void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
 
@@ -367,7 +366,9 @@ private:
 
 class CIControlServer : public RpcServer<CIControlRpc> {
 public:
-  CIControlServer(std::string const& work_dir) : RpcServer<CIControlRpc>(work_dir) {}
+  CIControlServer(std::string const &work_dir)
+    : RpcServer<CIControlRpc>(work_dir)
+  {}
 };
 
 } // namespace hogd
@@ -416,7 +417,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::filesystem::path p(work_dir);
   work_dir = std::filesystem::absolute(p).string();
-  
+
   hogd::info("using work directory: {}", work_dir);
 
   hogd::CIControlServer control_server(work_dir);
