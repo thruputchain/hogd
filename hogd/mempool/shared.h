@@ -59,24 +59,19 @@ create_client(const sockaddr_storage &ss, bool retry = false)
       return x23::rpc_stream_logged(default_coropoll(), fd.release())
           ->client(T{});
     } catch (std::system_error &e) {
-      std::println("CATCH 1");
       const std::string msg =
           std::format("Could not open RPC client: {}", e.what());
       if (!retry) {
-        std::println("went in here?");
         panic("{}", msg);
       }
       info("{}", msg);
-      std::println("Should retry now");
     } catch (...) {
-      std::println("CATCH 2");
       const std::string msg = std::format("Could not open RPC client");
       if (!retry) {
         panic("{}", msg);
       }
       info("{}", msg);
     }
-    std::println("Retrying...");
     // Common retry path.
     // Wait briefly and then try again on the next iteration...
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

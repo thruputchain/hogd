@@ -209,7 +209,7 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_;
+  BlockID current_block_id_ = 0;
   std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
