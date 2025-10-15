@@ -227,7 +227,9 @@ struct BlockValidationQueue {
 
   BlockValidationQueue(const auto &txs, size_t batch_size)
     : txs(txs), batch_size(batch_size)
-  {}
+  {
+    std::println("BlockValidationQueue: txs={} batch_size={}", txs.size(), batch_size);
+  }
 
   const std::span<const SignedTransaction> txs;
   const size_t batch_size;
@@ -236,6 +238,7 @@ struct BlockValidationQueue {
   std::span<const SignedTransaction> next_batch()
   {
     auto start = offset.fetch_add(batch_size);
+    std::println("BlockValidationQueue: start={} batch_size={}", start, batch_size);
     return {txs.begin() + std::min<size_t>(start, txs.size()),
             txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
   }
@@ -244,7 +247,7 @@ struct BlockValidationQueue {
 namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts, unsigned int num_concurrent_rpcs)
+                    unsigned int num_accounts, unsigned int num_concurrent_rpcs, unsigned int num_txs_per_block)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -417,11 +420,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   info("done initialization txs");
 
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
-                                            100'000, 1000000);
+                                            num_txs_per_block, 1000000);
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
+  assert(work_txs.success().work_txs.size() == num_txs_per_block);
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
@@ -429,6 +433,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
 
   for (size_t i = 0; i < 10; i++) {
+    std::println("bench rep {}", i);
     auto ts = x23::fastclock::get_ns();
     open_block(parent_block_number, current_block_number);
     worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
@@ -450,11 +455,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
           throw std::runtime_error("Failed to propose batch");
         }
       }
+      assert(res.size() == batch.size());
     });
 
     close_block(current_block_number);
     auto end_time = x23::fastclock::get_ns();
-    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={}", end_time - ts, work_txs.success().work_txs.size(), num_concurrent_rpcs, num_accounts, 1);
+    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={}", end_time - ts, num_txs_per_block, num_concurrent_rpcs, num_accounts, 1);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -504,7 +510,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 1000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
