@@ -52,17 +52,15 @@ coordinator_init(const std::string &mempool_address,
   CHECK_EQ(client.schedulercoord_intro_coord(card)(),
            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
 
-  std::optional<LoadgenClientManager> loadgen =
-      loadgen_address.empty()
-          ? std::nullopt
-          : // We are using loadgen to feed the mempool with traffic. Thus, we
-            // need to connect to the loadgen server.
-          std::make_optional<LoadgenClientManager>(loadgen_address, client,
-                                                   /*num_accounts=*/10000);
+  // We are using loadgen to feed the mempool with traffic. Thus, we need to
+  // connect to the loadgen server.
+  LoadgenClientManager loadgen(loadgen_address, client,
+                               /*num_accounts=*/100);
 
-  // The coordinator server is initialized. Now block forever.
   info("coordinator initialization complete.");
-  std::promise<void>().get_future().wait();
+
+  // Runs forever.
+  loadgen.work();
 
   // TODO(jhumphri): Implement shutdown path.
 

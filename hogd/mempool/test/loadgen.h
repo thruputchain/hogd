@@ -102,17 +102,7 @@ public:
     init_block_db_tip_ =
         loadgen_client_.init_experiment(sched_coord_client, num_accounts);
     info("Done initializing experiment. Now running.");
-    worker_ = std::make_optional<std::jthread>([this] { work(); });
   }
-
-  ~LoadgenClientManager()
-  {
-    shutdown_flag_.store(true, std::memory_order_release);
-  }
-
-private:
-  // The number of txs we request at a time from loadgen.
-  static constexpr size_t kLoadgenTxBatchSize = 10'000;
 
   void work()
   {
@@ -137,12 +127,20 @@ private:
     }
   }
 
+  ~LoadgenClientManager()
+  {
+    shutdown_flag_.store(true, std::memory_order_release);
+  }
+
+private:
+  // The number of txs we request at a time from loadgen.
+  static constexpr size_t kLoadgenTxBatchSize = 1'000;
+
   LoadgenClient loadgen_client_;
   sched_coord_client_t &sched_coord_client_;
   DbTip init_block_db_tip_;
 
   std::atomic<bool> shutdown_flag_ = false;
-  std::optional<std::jthread> worker_;
 };
 
 } // namespace hogd

@@ -258,17 +258,14 @@ ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
   \"$loadgen_server\":11222                                   \
   > $logdir/fake_coordinator.log 2>&1 &"
 
-# TODO(jhumphri): Launch the mempool.
 # Start mempool.
 echo "Start mempool..."
-# ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
-#   "$X23ENV; \
-#   nohup \"$MEMPOOL_BINARY\"                   \
-#   ${#hogdb_servers[@]}                        \
-#   ${#hogexec_servers[@]}                      \
-#   > $logdir/mempool.log 2>&1 &"
-
-sleep 10000
+ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
+  "$X23ENV; \
+  nohup \"$MEMPOOL_BINARY\"                   \
+  ${#hogdb_servers[@]}                        \
+  ${#hogexec_servers[@]}                      \
+  > $logdir/mempool.log 2>&1 &"
 
 # Wait for hogexec (port 8070).
 for s in "${hogexec_servers[@]}"; do
@@ -279,11 +276,10 @@ done
 wait_port "$event_server" 8090
 wait_port "$event_server" 8091
 
-# Wait for hogdb (ports 8080-8082).
+# Wait for hogdb (ports 8080-8081).
 for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8080
   wait_port "$s" 8081
-  wait_port "$s" 8082
 done
 
 # Wait for fake coordinator (port 7888).

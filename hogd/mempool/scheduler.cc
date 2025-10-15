@@ -609,7 +609,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
     auto &[average_age, info] = *age_to_tx_.begin();
 
     if (info.size() <= num_remaining) {
-      // All of the txs in [info] in the block, so we add all of them. Note
+      // All of the txs in [info] fit in the block, so we add all of them. Note
       // that [get_txs_all()] removes the txs from [info], so it is important
       // that we add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
