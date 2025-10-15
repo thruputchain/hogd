@@ -35,7 +35,6 @@ protected:
     base_data_ = ReplayCacheData{.uniquifiers = {
                                      u(height_ + 1, 100),
                                  }};
-    entry_cost_ = cost_model_.get_replay_cache_cost(1);
   }
 
   BlockHeight height_;
@@ -48,7 +47,6 @@ protected:
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
-  int128_t entry_cost_;
 };
 
 TEST_F(ItemChangeReplayCacheTest, DisallowDuplicateConsume)
@@ -212,7 +210,7 @@ TEST_F(ItemChangeReplayCacheTest, MergeCost)
     ItemChange c{std::move(ci)};
     // base_data_ contains one existing entry in simulated storage,
     // so simulate its snapshot cost.
-    c.set_snapshot_cost(entry_cost_);
+    c.set_snapshot_cost(cost_model_.get_replay_cache_cost(1));
     return c;
   };
 
@@ -235,7 +233,7 @@ TEST_F(ItemChangeReplayCacheTest, MergeCost)
   { // merging non-conflicting entry results adds cost
     auto r = c1.merge(make_change({101}), &cost_model_);
     ASSERT_TRUE(r);
-    EXPECT_EQ(entry_cost_, *r);
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *r);
     check_marginal_cost_ok(c1);
   }
 
@@ -243,7 +241,7 @@ TEST_F(ItemChangeReplayCacheTest, MergeCost)
     // one more entry worth of cost to be locked
     auto r = c1.merge(make_change({102}), &cost_model_);
     ASSERT_TRUE(r);
-    EXPECT_EQ(entry_cost_, *r);
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, *r);
     check_marginal_cost_ok(c1);
   }
 

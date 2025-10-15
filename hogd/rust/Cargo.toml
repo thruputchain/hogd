@@ -2,7 +2,8 @@
 members = [
     "crypto",
     "wasmi",
-    "unified"
+    "unified",
+    "contract_types"
 ]
 resolver = "2"
 

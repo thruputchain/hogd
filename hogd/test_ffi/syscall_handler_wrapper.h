@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <tuple>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -21,7 +22,6 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
-#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -136,14 +136,14 @@ ForeignHostFnResult constexpr from_status(
 }
 
 // Parse the arguments of a syscall and forward them to run_mock_func_inner
-template<SyscallNo Syscall, typename InputArg, typename OutputArg,
-         auto InnerSyscallFunc>
+template<typename SyscallMeta>
 ForeignHostFnResult
 mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
                     uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {
   auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
-  using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
+  using syscall_t =
+      SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
 
   auto *handler = SyscallHandlerContext::get_context();
   if (!handler) {
@@ -164,10 +164,10 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
                    typename syscall_t::template arg_i<Is>>(input_args)...};
 
     auto inner_res =
-        wrap_after_parse<Syscall, InnerSyscallFunc, InputArg, OutputArg>(
-            handler->to_handler(),
-            WrappedGasAmount{mock_runtime->get_available_gas()},
-            std::move(parsed_args));
+        wrap_after_parse<SyscallMeta>(handler->to_handler(),
+                                      WrappedGasAmount{
+                                          mock_runtime->get_available_gas()},
+                                      std::move(parsed_args));
 
     auto gas_consumed = inner_res.second;
     if (!mock_runtime->consume_gas(gas_consumed)) {

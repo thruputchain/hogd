@@ -258,8 +258,11 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     ASSERT_TRUE(r);
     // marginal storage cost should include two elements since
     // stored version has nothing in it.
-    EXPECT_EQ(2 * cost_model_.kReplayCacheCostPerEntry, *r);
-    EXPECT_EQ(2 * cost_model_.kReplayCacheCostPerEntry,
+    EXPECT_EQ(cost_model_.kBaseItemCost +
+                  (2 * cost_model_.kReplayCacheCostPerEntry),
+              *r);
+    EXPECT_EQ(cost_model_.kBaseItemCost +
+                  (2 * cost_model_.kReplayCacheCostPerEntry),
               c1.marginal_storage_cost(&cost_model_).value());
     // store updated cache in db
     ASSERT_TRUE(c1.commit(db_, trie_, rckey));

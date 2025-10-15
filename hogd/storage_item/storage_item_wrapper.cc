@@ -133,8 +133,7 @@ int128_t
 StorageItemWrapper::ReplayCacheWrapper::storage_cost(
     StorageCostModel const *cost_model) const
 {
-  return cost_model->kBaseItemCost +
-         cost_model->get_replay_cache_cost(cache_.committed_size());
+  return cost_model->get_replay_cache_cost(cache_.committed_size());
 }
 
 int128_t

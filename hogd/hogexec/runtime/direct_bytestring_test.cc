@@ -1,6 +1,6 @@
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <print>
 #include <string>
 #include <string_view>

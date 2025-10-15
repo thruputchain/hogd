@@ -32,8 +32,7 @@ make_syscall_array(std::index_sequence<Is...> /*unused*/)
 {
   return {std::pair<SyscallNo, SyscallFunc>{
       static_cast<SyscallNo>(Is),
-      &wrap_outer<static_cast<SyscallNo>(Is),
-                  SyscallMeta<static_cast<SyscallNo>(Is)>::kInnerFunc>}...};
+      &wrap_outer<SyscallMeta<static_cast<SyscallNo>(Is)>>}...};
 }
 
 constexpr auto kSyscallTable =

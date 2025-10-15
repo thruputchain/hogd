@@ -345,7 +345,7 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   arg->commit_insert(Uniquifier{.block_expiry_height = 1, .nonce = 3});
 
   EXPECT_EQ(variant.get_current_committed_cost(&cost_model, nullptr),
-            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(3));
+            cost_model.get_replay_cache_cost(3));
 
   auto item = variant.to_item(nullptr, &cost_model);
 
@@ -353,8 +353,7 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   auto const &cache = item->replay_cache();
   ASSERT_EQ(cache.data().uniquifiers.size(), 3);
 
-  EXPECT_EQ(item->storage_cost(),
-            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(3));
+  EXPECT_EQ(item->storage_cost(), cost_model.get_replay_cache_cost(3));
 
   RefcountedDeltaVariant variant2;
   auto *arg2 =
@@ -362,7 +361,7 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   ASSERT_TRUE(arg2);
 
   EXPECT_EQ(variant2.get_current_committed_cost(&cost_model, item.get()),
-            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(3));
+            cost_model.get_replay_cache_cost(3));
 
   ASSERT_TRUE(arg2->try_reserve_insert(
       Uniquifier{.block_expiry_height = 5, .nonce = 4}));
@@ -370,7 +369,7 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   arg2->commit_insert(Uniquifier{.block_expiry_height = 5, .nonce = 4});
 
   EXPECT_EQ(variant2.get_current_committed_cost(&cost_model, item.get()),
-            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(1));
+            cost_model.get_replay_cache_cost(1));
 }
 
 } // namespace hogd
