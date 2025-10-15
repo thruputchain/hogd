@@ -295,15 +295,21 @@ echo "Done with launch."
 
 if $results_only; then
   # Stream only the results.
-  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
-    sed "s/^/[${chuckd_server}\/chuckd] /" &
+  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+  #   "tail -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
+  #   sed "s/^/[${chuckd_server}\/chuckd] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
+    "tail -f $logdir/fake_coordinator.log" | \
+    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
 else
   # Stream the logs from each server.
   ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
     "tail -f $logdir/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
-  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+  #   "tail -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
+    "tail -f $logdir/fake_coordinator.log" | \
+    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
     "tail -f $logdir/mempool.log" | sed "s/^/[${mempool_server}\/mempool] /" &
