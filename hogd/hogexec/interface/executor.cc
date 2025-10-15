@@ -22,14 +22,15 @@ SchedExec1::client<x23::RefPtr<x23::SRpcStream<x23::RpcLogger>>>
 connect_to_coordinator(const sockaddr_storage &coordinator_sockaddr)
 {
   while (true) {
-
-    x23::UniqueFd fd = x23::tcpconnect(coordinator_sockaddr);
-    if (fd) {
+    try {
+      x23::UniqueFd fd = x23::tcpconnect(coordinator_sockaddr);
+      CHECK(static_cast<bool>(fd));
       return x23::srpc_stream_logged(fd.release())->client(SchedExec1{});
+    } catch (...) {
+      error("Failed to connect to coordinator");
+      // Wait briefly and then try again on the next iteration...
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    error("Failed to connect to coordinator");
-    // Wait briefly and then try again on the next iteration...
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
 
