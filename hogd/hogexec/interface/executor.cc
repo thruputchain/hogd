@@ -1,12 +1,18 @@
 #include "hogd/hogexec/interface/executor.h"
 
 #include <cassert>
+#include <chrono>
 #include <sys/socket.h>
+#include <thread>
 
-#include "hogd/mempool/shared.h"
+#include "hogd/base/log.h"
 #include "hogd/version.h"
 #include "sched_exec.hh"
+#include "x23/cleanup.h"
+#include "x23/refcnt.h"
+#include "x23/rpc_common.h"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
