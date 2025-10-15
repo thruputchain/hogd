@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "ci_server.hh"
@@ -32,7 +33,7 @@ class CIControlRpc {
 public:
   using rpc_service = CIServer1;
 
-  CIControlRpc(std::string const &work_dir) : work_dir_(work_dir) {}
+  CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
 
   ~CIControlRpc()
   {
