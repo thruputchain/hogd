@@ -53,6 +53,16 @@ public:
     return client_.ciserver_query_proc_status(version::kHogdGitHash);
   }
 
+  CIWorkDirStatus query_work_dir()
+  {
+    return client_.ciserver_query_work_dir(version::kHogdGitHash);
+  }
+
+  CIServerErrorCode clear_work_dir()
+  {
+    return client_.ciserver_clear_work_dir(version::kHogdGitHash);
+  }
+
 private:
   CIServer1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef> client_;
 };
