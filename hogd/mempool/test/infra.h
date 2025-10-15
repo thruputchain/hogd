@@ -53,7 +53,7 @@
 
 namespace hogd {
 
-constexpr inline ContractAddress
+constexpr ContractAddress
 make_account_address(uint8_t i)
 {
   ContractAddress

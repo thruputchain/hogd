@@ -1,25 +1,20 @@
-#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
+#include <stdexcept>
 #include <string>
-#include <thread>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
-#include "hogd/mempool/registration.h"
-#include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_db.h"
-#include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
-#include "hogd/mempool/test/loadgen.h"
+#include "hogd/version.h"
 #include "sched_coord.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 

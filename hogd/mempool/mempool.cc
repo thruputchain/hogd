@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <optional>
 #include <print>
 #include <string>
 #include <thread>

@@ -20,7 +20,7 @@ public:
   MempoolExecutorClient(x23::CoroPoll &cp) : cp_(cp) {}
 
   // Register this executor with the coordinator.
-  IntroExecResult
+  static IntroExecResult
   register_with_coordinator(x23::HostPort const &self_hostport,
                             const sockaddr_storage &coordinator_sockaddr);
 

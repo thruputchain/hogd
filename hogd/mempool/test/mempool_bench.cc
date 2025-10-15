@@ -1,15 +1,17 @@
 #include <benchmark/benchmark.h>
 
+#include <format>
 #include <memory>
 #include <print>
+#include <string>
 
 #include "account.hh"
 #include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/authentication.h"
@@ -17,14 +19,10 @@
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/loadgen.h"
 #include "hogd/mempool/test/txs.h"
-#include "loadgen.hh"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {

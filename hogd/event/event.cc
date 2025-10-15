@@ -1,10 +1,9 @@
-#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
+#include <stdexcept>
 #include <string>
-#include <thread>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -14,7 +13,9 @@
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
+#include "rpc_types.hh"
 #include "sched_event.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 

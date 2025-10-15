@@ -6,6 +6,7 @@
 #include <string>
 
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 
