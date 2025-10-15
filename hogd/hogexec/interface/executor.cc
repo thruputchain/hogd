@@ -10,8 +10,10 @@
 #include "hogd/version.h"
 #include "sched_exec.hh"
 #include "x23/cleanup.h"
+#include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 namespace {

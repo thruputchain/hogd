@@ -15,7 +15,6 @@
 #include <string>
 #include <thread>
 #include <type_traits>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -59,7 +58,14 @@ public:
 
   ControlClientWrapper ci_client;
 
-  ~ControlServerHandle() { ci_client.stop_server(); }
+  ~ControlServerHandle()
+  {
+    try {
+      ci_client.stop_server();
+    } catch (...) {
+      panic("Failed to stop control server");
+    }
+  }
 };
 
 class SchedExecTest {
