@@ -70,7 +70,7 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
 } // namespace
 
 struct IntTypeTestSyscallMeta {
-  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &int_type_test;
   constexpr static std::array<std::string_view, 3> kInputNames = {
@@ -81,7 +81,7 @@ struct IntTypeTestSyscallMeta {
 };
 
 struct SpanTypeTestSyscallMeta {
-  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &span_type_test;
   constexpr static std::array<std::string_view, 1> kInputNames = {"span_in"};
