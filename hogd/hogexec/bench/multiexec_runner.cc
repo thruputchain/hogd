@@ -281,6 +281,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to query work dir");
   }
 
+  control_server_handles[0].ci_client.clear_work_dir();
+
   std::string work_dir_str = std::format("{}", work_dir.work_dir());
   info("using work dir: {}", work_dir_str);
 
