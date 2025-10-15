@@ -56,7 +56,7 @@ jobs:
       run: |
         mkdir -p ci_work_dir/
     - name: run bench server
-      run: X23TRACE=1 X23SERVER_TRACE=1 ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir
+      run: X23TRACE=1 X23SERVER_TRACE=1 ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
 
   build:
     runs-on: metrics
