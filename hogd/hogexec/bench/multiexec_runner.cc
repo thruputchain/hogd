@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "ci_server.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_sched.hh"
@@ -52,7 +53,7 @@ namespace hogd {
 class ControlServerHandle {
 public:
   ControlServerHandle(std::string const &server_addr)
-    : ci_client(connect_to_control_server(default_coropoll(), server_addr,
+    : ci_client(connect_to_control_server(server_addr,
                                           std::to_string(kControlServerPort)))
   {}
 
@@ -276,9 +277,17 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       .address_for_sched =
           std::format("{}:{}", hostname, event_server_sched_port).c_str()});
 
+  auto work_dir = control_server_handles[0].ci_client.query_work_dir();
+  if (work_dir.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
+    throw std::runtime_error("Failed to query work dir");
+  }
+
+  std::string work_dir_str = std::format("{}", work_dir.work_dir());
+  info("using work dir: {}", work_dir_str);
+  
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
-      "hogd/hogdb/hogdb", {"hogdb_data/", "10000000000",
+      "hogd/hogdb/hogdb", {work_dir_str, "10000000000",
                            std::format("{}:{}", hostname, sched_db_port)});
   server_idx++;
 
