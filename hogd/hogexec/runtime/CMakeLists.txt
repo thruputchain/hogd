@@ -73,6 +73,7 @@ add_library(runtime_test_objects OBJECT
   error_handling_test.cc
   event_test.cc
   execution_mode_test.cc
+  ffi_helpers_tests.cc
   fibonacci_test.cc
   gas_api_test.cc
   interleaving_tests.cc
