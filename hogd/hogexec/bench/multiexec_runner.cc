@@ -234,7 +234,6 @@ struct BlockValidationQueue {
   }
 };
 
-
 namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
@@ -284,7 +283,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   std::string work_dir_str = std::format("{}", work_dir.work_dir());
   info("using work dir: {}", work_dir_str);
-  
+
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hogdb/hogdb", {work_dir_str, "10000000000",
@@ -389,13 +388,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
 
-  for (auto const& init_blocks : loadgen_result.success().initialization_txs) {
+  for (auto const &init_blocks : loadgen_result.success().initialization_txs) {
     open_block(parent_block_number, current_block_number);
 
-    for (auto const& tx : init_blocks) {
+    for (auto const &tx : init_blocks) {
 
-
-      auto res = exec_clients.at(0).executorsched_propose_transaction(current_block_number, tx);
+      auto res = exec_clients.at(0).executorsched_propose_transaction(
+          current_block_number, tx);
       if (res.result() != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to propose transaction");
       }
@@ -449,7 +448,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 }
 
-}
+} // namespace
 
 } // namespace hogd
 
