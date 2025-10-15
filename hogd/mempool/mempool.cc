@@ -2,7 +2,6 @@
 #include <cstdlib>
 #include <format>
 #include <future>
-#include <optional>
 #include <print>
 #include <string>
 #include <thread>
@@ -16,7 +15,6 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/test/loadgen.h"
 
 namespace hogd {
 
