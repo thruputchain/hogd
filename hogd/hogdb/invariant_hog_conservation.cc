@@ -184,8 +184,7 @@ HogConservationInvariant::handle_replay_cache_item_change(
       assert(false);
       return 0;
     }
-    return cost_model_.kBaseItemCost +
-           cost_model_.get_replay_cache_cost(cache_data.uniquifiers.size());
+    return cost_model_.get_replay_cache_cost(cache_data.uniquifiers.size());
   };
   auto before_storage_cost = get_storage_cost(before);
   auto after_storage_cost = get_storage_cost(after);

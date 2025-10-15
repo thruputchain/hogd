@@ -78,8 +78,7 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
   ASSERT_TRUE(r.has_value());
   EXPECT_NE(cost_model_->get_replay_cache_cost(1), 0);
   ASSERT_EQ(from_xdr(r.value().nnint()),
-            1'000'000'000 - cost_model_->kBaseItemCost -
-                cost_model_->get_replay_cache_cost(1));
+            1'000'000'000 - cost_model_->get_replay_cache_cost(1));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

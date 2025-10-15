@@ -467,7 +467,7 @@ int128_t
 ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
   size_t entries = base_replay_cache_.uniquifiers.size() + additions_.size();
-  return cost_model->kBaseItemCost + cost_model->get_replay_cache_cost(entries);
+  return cost_model->get_replay_cache_cost(entries);
 }
 
 bool
