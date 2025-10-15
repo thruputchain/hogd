@@ -16,15 +16,6 @@ def load_cpp_to_rust_map(spec: dict) -> dict[str, str]:
     return cpp_to_rust_typenames
 
 
-def load_cpp_to_xdr_map(spec: dict) -> dict[str, str]:
-    cpp_to_xdr_typenames = {}
-    for type_mapping in spec["type_mappings"]:
-        cpp_to_xdr_typenames[type_mapping["base_name"]] = (
-            type_mapping["xdr_name"]
-        )
-    return cpp_to_xdr_typenames
-
-
 def load_known_primitive_types(spec: dict) -> list[str]:
     return [
         type_mapping["base_name"]
@@ -282,11 +273,31 @@ def gen_syscall_meta(syscall: dict) -> str:
     read_only = "false"
     if "read_only" in syscall and syscall["read_only"]:
         read_only = "true"
+
+    syscall_input_names = []
+    syscall_output_names = []
+    if syscall["inputs"] is not None:
+        for arg in syscall["inputs"]:
+            syscall_input_names.append("\"" + arg["name"] + "\"")
+    if syscall["outputs"] is not None:
+        for arg in syscall["outputs"]:
+            syscall_output_names.append("\"" + arg["name"] + "\"")
+
     return f"""template<>
 struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static bool kIsReadOnlySyscall = {read_only};
     constexpr static auto kInnerFunc = &syscall_{name}_inner;
+    constexpr static SyscallNo kSyscallNo = SyscallNo::k{name};
+
+    constexpr static std::array<std::string_view, {len(syscall_input_names)}> kInputNames = {{
+        {", ".join(syscall_input_names)}
+    }};
+    constexpr static std::array<std::string_view, {len(syscall_output_names)}> kOutputNames = {{
+        {", ".join(syscall_output_names)}
+    }};
 }};
+static_assert(is_syscall_meta<SyscallMeta<SyscallNo::k{name}>>);
+
 """
 
 
@@ -298,8 +309,12 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
     return f"""// -*-C++-*-
 #pragma once
 
+#include <string_view>
+#include <array>
+
 #include "syscall.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogd/hogexec/runtime/syscall_meta_concept.h"
 
 namespace hogd {{
 
@@ -334,6 +349,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
+#include "hogd/rust/contract_types/bindings.h"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -349,106 +365,6 @@ class Runtime;
 
 }}// namespace hogd
 """
-
-
-# ===== generate syscall-related x files =====
-
-# One argument within a SyscallArgs structure.
-def gen_syscall_io_arg_decl(arg: dict) -> str:
-    end_decorator = ""
-    argtype = ""
-    if "xdr_typename" in arg:
-        argtype = arg["xdr_typename"]
-    elif "typename" in arg and arg["typename"] in cpp_to_xdr_typenames.keys():
-        argtype = cpp_to_xdr_typenames[arg["typename"]]
-    elif "span_argument" in arg and arg["span_argument"]:
-        argtype = "opaque"
-        end_decorator = "<>"
-    else:
-        argtype = arg["typename"]
-
-    pointerdecl = ""
-    if "optional" in arg and arg["optional"]:
-        pointerdecl = "*"
-    argname = arg["name"]
-    return f"  {argtype} {pointerdecl}{argname}{end_decorator};"
-
-
-def gen_syscall_input_arg_xdr(syscall: dict) -> tuple[str, str]:
-    name = syscall["name"]
-    decls = []
-
-    if syscall["inputs"] is not None:
-        for arg in syscall["inputs"]:
-            decl = gen_syscall_io_arg_decl(arg)
-            decls = decls + [decl]
-    if len(decls) == 0:
-        decls = ["  void;"]
-    decls_joined = "\n".join(decls)
-
-    return f"""struct {name}_input {{
-{decls_joined}
-}};
-
-""", f"""  case k{name}:
-    {name}_input {name};
-"""
-
-
-def gen_syscall_output_arg_xdr(syscall: dict) -> tuple[str, str]:
-    name = syscall["name"]
-    decls = []
-
-    if syscall["outputs"] is not None:
-        for arg in syscall["outputs"]:
-            decl = gen_syscall_io_arg_decl(arg)
-            decls = decls + [decl]
-    if len(decls) == 0:
-        decls = ["  void;"]
-    decls_joined = "\n".join(decls)
-
-    return f"""struct {name}_output {{
-{decls_joined}
-}};
-
-""", f"""  case k{name}:
-    {name}_output {name};
-"""
-
-
-def gen_syscall_arg_xdr(spec: dict) -> str:
-    structs = ""
-    decls_in = ""
-    decls_out = ""
-    for call in spec["syscalls"]:
-        struct, decl = gen_syscall_input_arg_xdr(call)
-        structs += struct
-        decls_in += decl
-        struct, decl = gen_syscall_output_arg_xdr(call)
-        structs += struct
-        decls_out += decl
-
-    return f"""// clang-format off
-%#include "types.hh"
-%#include "syscall.hh"
-%#include "transaction.hh"
-
-namespace hogd {{
-  // clang-format on
-{structs}
-
-union SyscallInput switch(SyscallNo syscall) {{
-{decls_in}
-}};
-
-union SyscallOutput switch(SyscallNo syscall) {{
-{decls_out}
-}};
-
-}}
-
-"""
-
 
 def gen_syscall_x(spec_full: dict) -> str:
     spec = spec_full["syscalls"]
@@ -529,10 +445,6 @@ parser.add_argument(
     action='store_true',
     help="gen syscall.x")
 parser.add_argument(
-    '--syscall_args_x',
-    action='store_true',
-    help="gen syscall_args.x")
-parser.add_argument(
     '--syscall_inner_h',
     action='store_true',
     help="gen syscall_inner.h")
@@ -565,7 +477,6 @@ spec = spec_full["syscalls"]
 validate_syscall_numbers_in_order(spec_full)
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
-cpp_to_xdr_typenames = load_cpp_to_xdr_map(spec_full)
 primitive_types = load_known_primitive_types(spec_full)
 
 os.makedirs(args.output_dir, exist_ok=True)
@@ -574,11 +485,6 @@ if args.syscall_x:
     filename = args.output_dir + "/syscall.x"
     with open(filename, "w") as f:
         f.write(gen_syscall_x(spec_full))
-
-if args.syscall_args_x:
-    filename = args.output_dir + "/syscall_args.x"
-    with open(filename, "w") as f:
-        f.write(gen_syscall_arg_xdr(spec_full))
 
 if args.syscall_inner_h:
     filename = args.output_dir + "/syscall_inner.h"

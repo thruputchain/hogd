@@ -700,6 +700,33 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
   ASSERT_TRUE(*commit_res);
 }
 
+namespace {
+template<typename Start, typename Intermediate>
+void
+check_rt(Start value)
+{
+  auto bytes = Serializer<SerializationFormat::kCxs>::serialize(value);
+  ASSERT_TRUE(bytes.has_value());
+  auto roundtrip_deserialize =
+      Serializer<SerializationFormat::kCxs>::deserialize<Intermediate>(
+          std::as_bytes(std::span(*bytes)));
+  ASSERT_TRUE(roundtrip_deserialize.has_value());
+  int64_t convert = roundtrip_deserialize.value();
+  ASSERT_EQ(convert, value);
+}
+} // namespace
+
+// We want to ensure that a boolean can be upgraded to a int32_t enum.
+TEST(FormatConversion, CxsSignToUnsignedRoundtrip)
+{
+  check_rt<int64_t, uint64_t>(0);
+  check_rt<int64_t, uint64_t>(1);
+  check_rt<int32_t, bool>(0);
+  check_rt<int32_t, bool>(1);
+
+  // Apparently the byte formats of uint32 and int32 are not the same, however.
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,

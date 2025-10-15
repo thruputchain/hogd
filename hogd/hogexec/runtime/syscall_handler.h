@@ -10,6 +10,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -112,6 +113,11 @@ public:
   // Incorrect to call method when no invocation is running.
   // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
+
+  AuthClaimData const &get_auth_claims() const
+  {
+    return signed_tx_.tx.auth_claims;
+  }
 
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
