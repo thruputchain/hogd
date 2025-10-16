@@ -9,7 +9,7 @@ jobs:
   bench_servers:
     strategy:
       matrix:
-        runner: [client, hog7, hog8] # client is hog11
+        runner: [client, hog7, hog8] # [client] is hog11
     runs-on: ${{ matrix.runner }}
     steps:
     - name: Clean up .gitconfig
@@ -60,7 +60,7 @@ jobs:
       run: ./release/hogd/hogexec/bench/control_server -p 11111 -w work_dir/
 
   build:
-    runs-on: metrics
+    runs-on: metrics # [metrics] is hog10
     steps:
     - name: Clean up .gitconfig
       run: |
