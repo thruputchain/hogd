@@ -159,9 +159,7 @@ public:
         double overall_throughput_sec =
             total_transactions_nominated / overall_duration_sec;
         info("Block duration (s), {:.2f}, Num txs in block, {}, Overall "
-             "duration "
-             "(s) "
-             "{:.2f}, Overall number of txs, {}",
+             "duration (s), {:.2f}, Overall number of txs, {}",
              block_duration_sec,
              nomination.nomination.transaction_hashes.size(),
              overall_duration_sec, total_transactions_nominated);
