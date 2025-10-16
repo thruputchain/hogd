@@ -7,6 +7,7 @@
 
 #include "ci_server.hh"
 #include "control_client.h"
+#include "hogd/base/log.h"
 #include "hogd/init.h"
 
 namespace {
@@ -31,17 +32,17 @@ handle_expect_running_command(std::string const &host, std::string const &port)
     auto status = client.query_proc_status();
     if (status.error_code() ==
         hogd::CIServerErrorCode::kCIServerErrorCodeAlreadyRunning) {
-      std::println("Process is running");
+      hogd::info("Process is running");
       return 0;
     }
     if (status.error_code() == hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
-      std::println("Process is not running: exit code {}", status.exit_code());
+      hogd::info("Process is not running: exit code {}", status.exit_code());
       return 1;
     }
-    std::println("Error: {}", status.error_code());
+    hogd::info("Error: {}", status.error_code());
     return 1;
   } catch (std::exception const &e) {
-    std::println(stderr, "Error: {}", e.what());
+    hogd::info("Error: {}", e.what());
     return 1;
   }
 }
@@ -54,13 +55,13 @@ handle_shutdown_command(std::string const &host, std::string const &port)
         hogd::connect_to_control_server(host, port,
                                         std::chrono::milliseconds(10000));
 
-    std::println("Sending shutdown command to {}:{}", host, port);
+    hogd::info("Sending shutdown command to {}:{}", host, port);
     client.shutdown_server();
-    std::println("Shutdown command sent successfully");
+    hogd::info("Shutdown command sent successfully");
 
     return 0;
   } catch (std::exception const &e) {
-    std::println(stderr, "Error: {}", e.what());
+    hogd::info("Error: {}", e.what());
     return 1;
   }
 }
@@ -76,13 +77,13 @@ handle_start_command(std::string const &host, std::string const &port,
     for (auto const &arg : args) {
       command += arg + " ";
     }
-    std::println("Starting server: {}", command);
+    hogd::info("Starting server: {}", command);
     client.start_server(args[0],
                         std::vector<std::string>(args.begin() + 1, args.end()));
-    std::println("Start command sent successfully");
+    hogd::info("Start command sent successfully");
     return 0;
   } catch (std::exception const &e) {
-    std::println(stderr, "Error: {}", e.what());
+    hogd::info("Error: {}", e.what());
     return 1;
   }
 }
@@ -95,7 +96,7 @@ handle_stop_command(std::string const &host, std::string const &port)
     client.stop_server();
     return 0;
   } catch (std::exception const &e) {
-    std::println(stderr, "Error: {}", e.what());
+    hogd::info("Error: {}", e.what());
     return 1;
   }
 }
@@ -132,7 +133,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return handle_expect_running_command(host, port);
   }
 
-  std::println(stderr, "Unknown command: {}", command);
+  hogd::info("Unknown command: {}", command);
   usage(argv);
 
   return 0;
