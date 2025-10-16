@@ -82,7 +82,7 @@ public:
   void set_log_level(LogLevel level) { max_level_ = level; }
 
   // get_log_level returns the maximum severity level to print at runtime
-  LogLevel get_max_log_level() const { return max_level_; }
+  LogLevel get_max_log_level() const override { return max_level_; }
 
 private:
   LogLevel max_level_;
