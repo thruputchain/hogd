@@ -7,6 +7,7 @@
 
 #include "ci_server.hh"
 #include "control_client.h"
+#include "hogd/base/log.h"
 #include "hogd/init.h"
 
 namespace {
