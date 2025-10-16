@@ -109,6 +109,8 @@ jobs:
         ./scripts/wait-port.sh hog11 11111
     - name: launch loadgen
       run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
+    - name: wait for loadgen
+      run: ./scripts/wait-port.sh hog7 11222
     - name: launch hogexec
       # the mempool runs on hog10
       run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
@@ -121,8 +123,6 @@ jobs:
       run: hogd/mempool/test/coordinator hog10:8070 hog7:11222
     - name: launch mempool
       run: hogd/mempool/mempool_exec 1 1
-    - name: wait for loadgen
-      run: ./scripts/wait-port.sh hog7 11222
     - name: wait for hogexec
       run: |
         ./scripts/wait-port.sh hog8 8070
