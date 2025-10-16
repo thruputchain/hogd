@@ -8,6 +8,7 @@
 
 #include <unistd.h>
 
+#include <x23/cleanup.h>
 #include <x23/utility.h>
 
 namespace x23 {
@@ -104,5 +105,16 @@ inline NullDebugFd debug;
 #else  // !NDEBUG
 inline DebugFd<"X23SERVER_TRACE"> debug;
 #endif // !NDEBUG
+
+// Dump the CPU time used between when this function is called and the
+// result is destroyed.  Usage:
+//
+//    int
+//    main(int argc, char **argv)
+//    {
+//       auto _rusage = dump_rusage(1);
+//       // ...
+//    }
+Defer<> dump_rusage(int fd = debug.fd());
 
 } // namespace x23
