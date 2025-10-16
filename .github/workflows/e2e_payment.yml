@@ -102,8 +102,6 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: build chuckd
-      run: go build -C groundhog-go/chuckd/chuckd
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  
@@ -112,39 +110,46 @@ jobs:
     - name: launch loadgen
       run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
     - name: launch hogexec
-      # coordinator runs on this machine
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:7888
+      # the mempool runs on hog10
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
+      # can't wait for hogexec: that's waiting on the coordinator
+    - name: launch event
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073
+    - name: launch hogdb
+      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
+    - name: launch fake coordinator
+      run: ./release/hogd/hogexec/bench/control_cli hog10 11111 start hogd/mempool/test/coordinator hog10:8070 hog7:11222
+    - name: launch mempool
+      run: ./release/hogd/hogexec/bench/control_cli hog10 11111 start hogd/mempool/mempool_exec 1 1
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
-      # can't wait for hogexec: that's waiting on the coordinator
-    - name: launch hogdb
-      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:7888
+    - name: wait for hogexec
+      run: |
+        ./scripts/wait-port.sh hog8 8070
+    - name: wait for event
+      run: |
+        ./scripts/wait-port.sh hog8 8090
+        ./scripts/wait-port.sh hog8 8091
     - name: wait for hogdb
       run: |
         ./scripts/wait-port.sh hog11 8080
         ./scripts/wait-port.sh hog11 8081
-        ./scripts/wait-port.sh hog11 8082
+    - name: wait for fake coordinator
+      run: |
+        ./scripts/wait-port.sh hog10 7888
+    - name: wait for mempool
+      run: |
+        ./scripts/wait-port.sh hog10 8070
+        ./scripts/wait-port.sh hog10 8071
+        ./scripts/wait-port.sh hog10 8072
+        ./scripts/wait-port.sh hog10 8073
     - name: make sure procs are running
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 expect_running
         ./release/hogd/hogexec/bench/control_cli hog8 11111 expect_running
         ./release/hogd/hogexec/bench/control_cli hog11 11111 expect_running
-    - name: run coordinator
-      run: |
-        groundhog-go/chuckd/chuckd/chuckd bench loadgen \
-          --stack \
-          --level info \
-          --in-addr :7888 \
-          --loadgen-addr hog7:11222 \
-          --num-accts 10000 \
-          --num-txs 20000 \
-          --num-blocks 10 \
-          --exec-batch 100 \
-          --exec-par 10 \
-          --max-msg-size 400000000 \
-          > coordinator_output.txt 2>&1
-    - name: log integration metrics
-      run: ./scripts/log_integration_metrics.sh coordinator_output.txt
+    # - name: log integration metrics
+    #   run: ./scripts/log_integration_metrics.sh coordinator_output.txt
 
     - name: cleanup control servers
       if: always()
