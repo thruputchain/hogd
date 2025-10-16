@@ -57,7 +57,9 @@ jobs:
         rm -r ./work_dir/ || true
         mkdir -p work_dir/
     - name: run bench server
-      run: ./release/hogd/hogexec/bench/control_server -p 11111 -w work_dir/
+      run: ./release/hogd/hogexec/bench/control_server -p 11111 -w work_dir/ &
+    - name: run another bench server
+      run: ./release/hogd/hogexec/bench/control_server -p 11112 -w work_dir/
 
   build:
     runs-on: metrics # [metrics] is hog10
@@ -104,9 +106,12 @@ jobs:
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: wait for bench servers
       run: |
-        ./scripts/wait-port.sh hog7 11111  
+        ./scripts/wait-port.sh hog7 11111
+        ./scripts/wait-port.sh hog7 11112
         ./scripts/wait-port.sh hog8 11111
+        ./scripts/wait-port.sh hog8 11112
         ./scripts/wait-port.sh hog11 11111
+        ./scripts/wait-port.sh hog11 11112
     - name: launch loadgen
       run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
     - name: wait for loadgen
@@ -116,7 +121,7 @@ jobs:
       run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
       # can't wait for hogexec: that's waiting on the coordinator
     - name: launch event
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073
+      run: ./release/hogd/hogexec/bench/control_cli hog8 11112 start hogd/event/event_exec hog10:8073
     - name: launch hogdb
       run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
     - name: launch fake coordinator
@@ -147,6 +152,7 @@ jobs:
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 expect_running
         ./release/hogd/hogexec/bench/control_cli hog8 11111 expect_running
+        ./release/hogd/hogexec/bench/control_cli hog8 11112 expect_running
         ./release/hogd/hogexec/bench/control_cli hog11 11111 expect_running
     # - name: log integration metrics
     #   run: ./scripts/log_integration_metrics.sh coordinator_output.txt
@@ -155,8 +161,11 @@ jobs:
       if: always()
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog7 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog8 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog11 11112 shutdown
 
 
 
