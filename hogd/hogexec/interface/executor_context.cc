@@ -88,7 +88,7 @@ ExecutorContext::propose_transaction_batch(
   assert(mode_ == ExecutionMode::kProposing);
   auto start = x23::fastclock::get_ns();
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
-  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
+  auto f = worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     auto start = x23::fastclock::get_ns();
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
@@ -100,6 +100,7 @@ ExecutorContext::propose_transaction_batch(
     cb(batch_res);
   });
   auto r = co_await async;
+  f.get();
   auto end = x23::fastclock::get_ns();
   std::println("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
   co_return r;

@@ -41,7 +41,7 @@ x23::Async<ExecProposeResult>
 ExecutorMempoolRpc::executorsched_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
-  auto ctx = try_get_context(block_id, ExecutionMode::kProposing);
+  auto* ctx = try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
@@ -53,7 +53,7 @@ x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
-  auto ctx = try_get_context(block_id, ExecutionMode::kValidating);
+  auto* ctx = try_get_context(block_id, ExecutionMode::kValidating);
   if (!ctx) {
     co_return ExecResult::ExecResultSystemError;
   }
@@ -65,7 +65,7 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
-  auto ctx = try_get_context(block_id, ExecutionMode::kProposing);
+  auto* ctx = try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
@@ -81,7 +81,7 @@ x23::Async<ExecValidateBatchResult>
 ExecutorMempoolRpc::executorsched_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
-  auto ctx = try_get_context(block_id, ExecutionMode::kValidating);
+  auto* ctx = try_get_context(block_id, ExecutionMode::kValidating);
   if (!ctx) {
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
