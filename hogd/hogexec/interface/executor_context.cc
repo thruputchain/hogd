@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
 #include <cassert>
+#include <print>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
@@ -14,6 +15,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -84,16 +86,23 @@ ExecutorContext::propose_transaction_batch(
     SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
+  auto start = x23::fastclock::get_ns();
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
   worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
+    auto start = x23::fastclock::get_ns();
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
       auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
       batch_res.push_back(res);
     }
+    auto end = x23::fastclock::get_ns();
+    std::println("ExecutorContext::propose_transaction_batch: time taken: {} ns for txs={}", end - start, signed_txs.size());
     cb(batch_res);
   });
-  co_return co_await async;
+  auto r = co_await async;
+  auto end = x23::fastclock::get_ns();
+  std::println("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
+  co_return r;
 }
 
 x23::Async<ExecValidateBatchResult>
