@@ -101,7 +101,7 @@ private:
     return executor_states_ != nullptr;
   }
 
-  std::shared_ptr<ExecutorContext> try_get_context(BlockID block_id,
+  ExecutorContext* try_get_context(BlockID block_id,
                                                    ExecutionMode mode);
 
   std::atomic<uint64_t> self_id_ = 0;

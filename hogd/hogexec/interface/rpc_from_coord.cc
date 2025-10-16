@@ -15,7 +15,7 @@
 
 namespace hogd {
 
-std::shared_ptr<ExecutorContext>
+ExecutorContext*
 ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 {
   if (!initialize_check()) [[unlikely]] {
@@ -23,7 +23,7 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
     return nullptr;
   }
 
-  auto ctx = executor_states_->get_executor_context(block_id);
+  auto* ctx = executor_states_->get_executor_context(block_id);
   if (!ctx) {
     return nullptr;
   }

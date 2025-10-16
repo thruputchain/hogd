@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <memory>
+#include <mutex>
 
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
@@ -11,16 +12,24 @@
 
 namespace hogd {
 
-std::shared_ptr<ExecutorContext>
-ExecutorStateManager::get_executor_context(
-    BlockID block_id) // NOLINT(misc-unused-parameters)
+ExecutorContext*
+ExecutorStateManager::get_executor_context_slow(
+    BlockID block_id)
 {
   auto active_blocks = active_blocks_.take();
 
+  ExecutorContext* ctx = nullptr;
+
   if (auto it = active_blocks->find(block_id); it != active_blocks->end()) {
-    return it->second.context;
+    ctx = it->second.context.get();
   }
-  return nullptr;
+  
+  // cache in threadlocal so we avoid contention on the active_blocks_ mvar
+  {
+    std::scoped_lock g(context_cache_->lock_);
+    context_cache_->contexts_.emplace(block_id, ctx);
+  }
+  return ctx;
 }
 
 ExecResult
@@ -69,6 +78,13 @@ ExecutorStateManager::remove_block(BlockID block_id)
   it->second.refcount--;
   if (it->second.refcount == 0) {
     active_blocks->erase(it);
+
+    // erase from threadlocal caches
+    std::unique_lock ul = context_cache_.lock_threads();
+    context_cache_.for_each(ul, [block_id](ThreadlocalState &state) {
+      std::scoped_lock g(state.lock_);
+      state.contexts_.erase(block_id);
+    });
   }
 }
 

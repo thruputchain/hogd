@@ -1,11 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 
 #include "exec_sched.hh"
 #include "hogd/base/os.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -26,7 +28,18 @@ public:
       event_server_proxy_(std::move(event_server_proxy)), worker_pool_(nthreads)
   {}
 
-  std::shared_ptr<ExecutorContext> get_executor_context(BlockID block_id);
+  ExecutorContext* get_executor_context_slow(BlockID block_id);
+
+  ExecutorContext* get_executor_context(BlockID block_id)
+  {
+    {
+      std::scoped_lock g(context_cache_->lock_);
+      if (auto it = context_cache_->contexts_.find(block_id); it != context_cache_->contexts_.end()) {
+        return it->second;
+      }
+    }
+    return get_executor_context_slow(block_id);
+  }
 
   // return ExecResultOk if successful, or ExecResultSystemError if
   // the block_id already exists and is of a different mode.
@@ -38,13 +51,22 @@ private:
   ExecResult open_block(BlockID block_id, ExecutionMode mode);
   struct ContextEntry {
     uint32_t refcount = 0;
-    std::shared_ptr<ExecutorContext> context = nullptr;
+    std::unique_ptr<ExecutorContext> context = nullptr;
   };
 
   x23::MVar<std::unordered_map<BlockID, ContextEntry>> active_blocks_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   WorkerPool worker_pool_;
+
+  struct ThreadlocalState {
+    std::mutex lock_;
+    std::unordered_map<BlockID, ExecutorContext*> contexts_;
+
+    ThreadlocalState() = default;
+    ThreadlocalState(ThreadlocalState &&state) noexcept : contexts_(std::move(state.contexts_)) {}
+  };
+  PerThread<ThreadlocalState> context_cache_;
 };
 
 } // namespace hogd
