@@ -49,8 +49,8 @@ fi
 
 # Log integration metrics
 
-./metrics_history/scripts/make_metric_file.sh nightly_integration $branch $commit $commit_time
-cat $COORDINATOR_OUTPUT_FILE >metrics_history/metrics/nightly_integration/$branch/${commit_time}_$commit
+./metrics_history/scripts/make_metric_file.sh nightly_integration_mempool $branch $commit $commit_time
+cat $COORDINATOR_OUTPUT_FILE >metrics_history/metrics/nightly_integration_mempool/$branch/${commit_time}_$commit
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/

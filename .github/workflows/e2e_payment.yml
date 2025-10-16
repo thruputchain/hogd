@@ -132,10 +132,10 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog11 11111 expect_running
     - name: launch fake coordinator and mempool
       run: |
-        ./release/hogd/mempool/test/coordinator hog10:8070 hog7:11222 &
-        timeout 1m ./release/hogd/mempool/mempool_exec 1 1
-    # - name: log integration metrics
-    #   run: ./scripts/log_integration_metrics.sh coordinator_output.txt
+        ./release/hogd/mempool/test/coordinator hog10:8070 hog7:11222 > coordinator_output.txt 2>&1 &
+        bash -c 'timeout 1m ./release/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+    - name: log integration metrics
+      run: ./scripts/log_integration_metrics.sh coordinator_output.txt
 
     - name: cleanup control servers
       if: always()
