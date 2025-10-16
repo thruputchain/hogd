@@ -428,7 +428,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
-  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 100);
+  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 200);
 
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
   std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
