@@ -7,6 +7,10 @@ on:
   schedule:
     - cron: '0 11 * * *'  # 4am Pacific Time (UTC-7)
 
+concurrency:
+  group: cluster
+  cancel-in-progress: false
+
 jobs:
   bench_servers:
     strategy:
