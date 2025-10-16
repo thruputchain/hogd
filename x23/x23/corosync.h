@@ -77,7 +77,7 @@ public:
     LockerState(LockerState &&) = delete;
 
   private:
-    atomic_coroutine_handle next{};
+    std::atomic<std::coroutine_handle<>> next_;
     friend CoroLock;
   };
 
@@ -88,7 +88,7 @@ public:
   [[nodiscard]] auto lock(this Self &self, LockerState *ls)
   {
     // LockerState can only be used for one lock at a time
-    assert(ls->next.load(std::memory_order_relaxed) == nullptr);
+    assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
 
     struct AwaitAcquire {
       Self &lk_;
@@ -103,7 +103,7 @@ public:
         corotrace.set_suspend(h, sloc, "CoroLock",
                               static_cast<const void *>(&lk_));
 #endif // X23_CORO_TRACE
-        prev_->next = h;
+        prev_->next_ = h;
       }
       void await_resume() {}
     };
@@ -168,7 +168,7 @@ private:
   // If last_ is NULL, the lock is free.  If last_ points to a
   // LockerState, then it belongs to the last coroutine in line to
   // acquire the lock, in which case a new coroutine can enqueue
-  // itself by putting its own atomic_coroutine_handle into the last
+  // itself by putting its own coroutine_handle into the last
   // LockerState and setting last_ to its own LockerState.
   std::atomic<LockerState *> last_{nullptr};
 
@@ -176,13 +176,13 @@ private:
   {
     LockerState *lscopy = ls;
     if (last_.compare_exchange_strong(lscopy, nullptr)) {
-      assert(ls->next.load(std::memory_order_relaxed) == nullptr);
+      assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
       return nullptr;
     }
     std::coroutine_handle<> h;
-    while (!(h = ls->next))
+    while (!(h = ls->next_))
       detail::pause_instruction();
-    ls->next.store(nullptr, std::memory_order_relaxed);
+    ls->next_.store(nullptr, std::memory_order_relaxed);
     return h;
   }
 };
