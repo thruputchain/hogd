@@ -118,9 +118,9 @@ jobs:
     - name: launch hogdb
       run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
     - name: launch fake coordinator
-      run: ./release/hogd/hogexec/bench/control_cli hog10 11111 start hogd/mempool/test/coordinator hog10:8070 hog7:11222
+      run: hogd/mempool/test/coordinator hog10:8070 hog7:11222
     - name: launch mempool
-      run: ./release/hogd/hogexec/bench/control_cli hog10 11111 start hogd/mempool/mempool_exec 1 1
+      run: hogd/mempool/mempool_exec 1 1
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
     - name: wait for hogexec
