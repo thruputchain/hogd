@@ -135,7 +135,7 @@ public:
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
         // NOLINTBEGIN(modernize-use-std-print)
-        fprintf(stderr, "dup2 failed: %s\n", strerror(errno));
+        info("dup2 failed: %s\n", strerror(errno));
         // NOLINTEND(modernize-use-std-print)
         _exit(EXIT_FAILURE);
       }
@@ -153,10 +153,10 @@ public:
       args.push_back(nullptr);
 
       // NOLINTBEGIN(modernize-use-std-print)
-      fprintf(stderr, "execvp: %s %s\n", program_name.c_str(),
-              x23::show(config.program_args).c_str());
+      info("execvp: %s %s\n", program_name.c_str(),
+           x23::show(config.program_args).c_str());
       execvp(program_name.c_str(), args.data());
-      fprintf(stderr, "execvp failed: %s\n", strerror(errno));
+      info("execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
     }
