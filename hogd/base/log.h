@@ -62,6 +62,8 @@ public:
                     const std::source_location &loc, std::format_args args) = 0;
   // flush forces writes to complete for any pending log messages.
   virtual void flush() = 0;
+
+  virtual LogLevel get_max_log_level() const { return kMaxLogLevel; }
 };
 
 // ConsoleLogger prints formatted log messages to stderr.
@@ -78,6 +80,9 @@ public:
 
   // set_log_level adjusts the maximum severity level to print at runtime
   void set_log_level(LogLevel level) { max_level_ = level; }
+
+  // get_log_level returns the maximum severity level to print at runtime
+  LogLevel get_max_log_level() const { return max_level_; }
 
 private:
   LogLevel max_level_;
@@ -329,6 +334,12 @@ inline void
 log_init(std::unique_ptr<Logger> logger)
 {
   detail::logger = std::move(logger);
+}
+
+inline bool
+runtime_log_level(LogLevel level)
+{
+  return level <= detail::logger->get_max_log_level();
 }
 
 // Replace the current logger with a new one.
