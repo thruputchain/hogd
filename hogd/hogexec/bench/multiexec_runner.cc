@@ -432,12 +432,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
   std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
+  // there's got to be a better way to do this
 
   for (size_t i = 0; i < 10; i++) {
     std::println("bench rep {}", i);
+    std::atomic<size_t> index = 0;
     auto ts = x23::fastclock::get_ns();
     open_block(parent_block_number, current_block_number);
     worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
+      auto idx = index.fetch_add(1, std::memory_order_relaxed);
       while (true) {
         auto batch = job->next_batch();
         if (batch.empty()) {
@@ -450,7 +453,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         }
 
         auto res =
-            exec_clients[0].executorsched_propose_batch(current_block_number,
+            exec_clients[idx % exec_clients.size()].executorsched_propose_batch(current_block_number,
                                                         batch_vec);
         for (auto const &result : res) {
           if (result.result() != ExecResult::ExecResultOK) {
@@ -465,7 +468,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={} tps={}", elapsed_time, num_txs_per_block, num_concurrent_rpcs, num_accounts, 1, tps);
+    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={} tps={}", elapsed_time, num_txs_per_block, num_concurrent_rpcs, num_accounts, exec_clients.size(), tps);
     parent_block_number = current_block_number;
     current_block_number++;
 
