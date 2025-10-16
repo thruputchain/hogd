@@ -433,6 +433,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
   std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
 
+  std::atomic<size_t> n_concurrent_rpcs = 0;
+
 
   for (size_t i = 0; i < 10; i++) {
     std::println("bench rep {}", i);
@@ -444,6 +446,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         if (batch.empty()) {
           return;
         }
+        auto r = n_concurrent_rpcs.fetch_add(1, std::memory_order_relaxed);
+        std::println("n_concurrent_rpcs: {}", r);
         x23::Vec<SignedTransaction> batch_vec;
         batch_vec.reserve(batch.size());
         for (auto const &tx : batch) {
@@ -459,6 +463,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
           }
         }
         assert(res.size() == batch.size());
+        n_concurrent_rpcs.fetch_sub(1, std::memory_order_relaxed);
       }
     });
 
