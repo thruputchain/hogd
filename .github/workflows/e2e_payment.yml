@@ -124,17 +124,6 @@ jobs:
       run: ./release/hogd/hogexec/bench/control_cli hog8 11112 start hogd/event/event_exec hog10:8073
     - name: launch hogdb
       run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
-    - name: wait for hogexec
-      run: |
-        ./scripts/wait-port.sh hog8 8070
-    - name: wait for event
-      run: |
-        ./scripts/wait-port.sh hog8 8090
-        ./scripts/wait-port.sh hog8 8091
-    - name: wait for hogdb
-      run: |
-        ./scripts/wait-port.sh hog11 8080
-        ./scripts/wait-port.sh hog11 8081
     - name: make sure procs are running
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 expect_running
