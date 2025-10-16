@@ -137,13 +137,13 @@ public:
         // Compute and print the throughputs.
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
-        long long block_duration_us =
+        int64_t block_duration_us =
             std::chrono::duration_cast<std::chrono::microseconds>(now -
                                                                   block_start)
                 .count();
         double block_duration_sec =
             block_duration_us / static_cast<double>(1'000'000);
-        long long overall_duration_us =
+        int64_t overall_duration_us =
             std::chrono::duration_cast<std::chrono::microseconds>(now - start)
                 .count();
         double overall_duration_sec =
