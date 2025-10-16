@@ -447,7 +447,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
           return;
         }
         auto r = n_concurrent_rpcs.fetch_add(1, std::memory_order_relaxed);
-        std::println("n_concurrent_rpcs: {}", r);
+        std::println("n_concurrent_rpcs: {}, {}", r, std::this_thread::get_id());
         x23::Vec<SignedTransaction> batch_vec;
         batch_vec.reserve(batch.size());
         for (auto const &tx : batch) {
