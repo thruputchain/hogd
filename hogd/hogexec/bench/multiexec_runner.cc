@@ -518,7 +518,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 2048, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 4096, 1'000'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
