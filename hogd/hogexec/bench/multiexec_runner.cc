@@ -428,7 +428,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
-  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 200);
+  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
   std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
@@ -521,7 +521,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 4096, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 8192, 1'000'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
