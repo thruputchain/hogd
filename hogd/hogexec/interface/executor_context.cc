@@ -98,9 +98,14 @@ ExecutorContext::propose_transaction_batch(
     auto end = x23::fastclock::get_ns();
     std::println("ExecutorContext::propose_transaction_batch: time taken: {} ns for txs={}", end - start, signed_txs.size());
     cb(batch_res);
+    //std::println("ExecutorContext::propose_transaction_batch: callback done");
+    //info("ExecutorContext::propose_transaction_batch: callback done");
+    //return;
   });
   auto r = co_await async;
-  f.get();
+  //info("ExecutorContext::propose_transaction_batch: waiting for future");
+  //f.get();
+  //info("ExecutorContext::propose_transaction_batch: future got");
   auto end = x23::fastclock::get_ns();
   std::println("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
   co_return r;

@@ -174,4 +174,32 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
             ExecResult::ExecResultSystemError);
 }
 
+//
+// Test open_proposal_block refcounting and finish_block behavior.
+//
+TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
+{
+  BlockID test_block_id = 789;
+
+  IntroExecResult exec_result;
+  exec_result.exec_id = 1;
+
+  exec_result.shards = x23::Vec<ShardCard>{make_shard_card()};
+  exec_result.event = make_event_card();
+
+  // Initialize the executor with a shard pointing to our mock database server
+  rpc_server_.impl_.init(std::move(exec_result));
+
+  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id), ExecResult::ExecResultOK);
+
+  SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{}, SignedTransaction{}};
+  auto result = client_.executorsched_propose_batch(test_block_id, txs);
+  ASSERT_EQ(result.size(), 3);
+  for (auto &res : result) {
+    ASSERT_NE(res.result(), ExecResult::ExecResultOK);
+  }
+
+  client_.executorsched_finish_block(test_block_id);
+}
+
 } // namespace hogd
