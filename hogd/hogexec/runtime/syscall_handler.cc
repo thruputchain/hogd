@@ -258,7 +258,6 @@ SystemCallHandler::try_commit_transaction()
     }
 
     transaction_committed_or_aborted_ = true;
-    // It's this one Claude:
     return false;
   }
 
