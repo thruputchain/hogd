@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -429,5 +430,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   control_server.start_server(*control_port);
   control_server.impl_.wait_for_shutdown();
+
+  // This is a temporary bandaid until issue #597 is resolved.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   return 0;
 }
