@@ -14,9 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
-#include <vector>
 
 #include "db_sched.hh"
 #include "hogd/base/perthread.h"
@@ -36,6 +34,20 @@ namespace hogd {
 
 // RPCContext contains all the state that needs to be shared across RPCs handled
 // by the database.
+//
+// The block txs are refcounted.
+// Each InvokeTX acquires a reference; when the invoke tx is closed, it releases
+// the reference to the PerThreadARC<BlockTX>. The PerThreadARC<BlockTX> lives
+// until both there are no references remaining to it, and the PerThreadARC has
+// been explicitly shutdown (via initiate_shutdown()). Closing the BlockTX
+// initiates shutdown of the PerThreadARC<BlockTX>. If the BlockTX is shutdown
+// and the reference closed is the last reference, the BlockTX is garbage
+// collected (that condition is checked when an InvokeTX is closed, and when the
+// BlockTX is committed or abandoned).  When a BlockTX is committed, all pending
+// InvokeTXs must have been closed (so the refcount must be zero). If the
+// blockTX is abandoned, it is allowed for there to be pending, outstanding
+// InvokeTXs. However, you should eventually close all pending InvokeTXs, or
+// else the BlockTX and InvokeTXs will never be garbage collected.
 class RPCContext {
 public:
   using sched_db_client_t =
@@ -76,6 +88,8 @@ public:
   // Returns nullptr if the bid is not open.
   InvokeTX *get_invoke_tx(BlockTXID bid, InvokeTXID iid);
   // removes an invoke transaction.
+  // If the blocktx is shutdown and the reference closed is the last reference,
+  // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
   HogDBStatus<void> update_dbtip(BlockTXID bid);
@@ -112,10 +126,6 @@ private:
   // releases the reference, and garbage collects the block tx if the blocktx is
   // shutdown and the reference closed is the last reference.
   std::unordered_map<BlockTXID, PerThreadARC<BlockTX>> block_txes_;
-  // The set of block txes that are open for new transactions.
-  // This is primarily relevant for refcounting; during shutdown, should the
-  // destructor release a reference to the PerThreadARC?
-  // std::unordered_set<BlockTXID> open_block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
