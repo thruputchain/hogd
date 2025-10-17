@@ -96,23 +96,4 @@ create_client(const std::string &host, uint16_t port, bool retry = false)
   return create_client<T>(host_port, retry);
 }
 
-inline void
-print_sorted_hashes(x23::Vec<SignedTransactionHash> hashes)
-{
-  std::sort(hashes.begin(), hashes.end());
-  for (const SignedTransactionHash &hash : hashes) {
-    std::println("{}", hash);
-  }
-}
-
-inline void
-print_tx_hashes(const SignedTransactionBatch &txs)
-{
-  x23::Vec<SignedTransactionHash> hashes;
-  for (const SignedTransaction &tx : txs) {
-    hashes.push_back(sha256(tx));
-  }
-  print_sorted_hashes(hashes);
-}
-
 } // namespace hogd

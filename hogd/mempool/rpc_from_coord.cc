@@ -42,7 +42,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       authenticated.push_back(tx);
     }
   }
+  scheduler_->global_lock_.lock();
   co_await scheduler_->add_txs(authenticated);
+  scheduler_->global_lock_.unlock();
   co_return co_await coord_client_->coordscheduler_notify_vetted(authenticated);
 }
 
@@ -50,11 +52,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  info("schedulercoord_submit_vetted start, scheduler size is {}",
-       scheduler_->size());
+  scheduler_->global_lock_.lock();
   co_await scheduler_->add_txs(batch);
-  info("schedulercoord_submit_vetted end, scheduler size is {}",
-       scheduler_->size());
+  scheduler_->global_lock_.unlock();
   co_return;
 }
 
@@ -191,7 +191,6 @@ MempoolCoordinatorRpc::propose_batch(
       ret.push_back(true);
       break;
     default:
-      info("hmm, tx failed with error {}", result.result());
       ret.push_back(false);
       break;
     }
@@ -210,7 +209,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  info("nominate start, scheduler_ size is {}", scheduler_->size());
+  std::lock_guard<std::mutex> lk(scheduler_->global_lock_);
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
@@ -253,16 +252,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // back
   for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
     if (statuses[i]) {
-      info("tx success! invoking address is {}",
-           txs[i].tx.invocation.invoked_address);
       co_await scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
                                              nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
       co_await scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
-      info("there was a tx failure, invoking address is {}",
-           txs[i].tx.invocation.invoked_address);
       co_await scheduler_->add_txs({txs[i]});
       nomination.transaction_hashes.erase(
           nomination.transaction_hashes.begin() + i);
@@ -282,11 +277,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
-
-  info("dump runqueue start");
-  scheduler_->dump_runqueue();
-  info("dump runqueue done");
-  info("scheduler size is {}", scheduler_->size());
 
   co_return result;
 }
@@ -319,6 +309,7 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
+  std::lock_guard<std::mutex> lk(scheduler_->global_lock_);
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   if (nomination.transaction_nominations.empty()) {

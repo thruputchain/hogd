@@ -279,10 +279,9 @@ void
 Scheduler::dump_runqueue() const
 {
   for (const auto &[height, tx_infos] : age_to_tx_) {
-    std::println("runqueue age {}:", height);
+    info("runqueue age {}:", height);
     for (const TxInfo *info : tx_infos) {
-      std::println("  - tx from account {}",
-                   info->tx.tx.invocation.invoked_address[0]);
+      info("  - tx from account {}", info->tx.tx.invocation.invoked_address[0]);
     }
   }
   size_t num_stranded = 0;
@@ -291,7 +290,7 @@ Scheduler::dump_runqueue() const
       num_stranded += txs.size();
     }
   }
-  std::println("num stranded: {}", num_stranded);
+  info("num stranded: {}", num_stranded);
 }
 
 x23::Async<void>
@@ -304,6 +303,7 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   }
 
   CHECK(co_await read_average_hog_age({account}, /*force=*/false));
+
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages = averages;
 

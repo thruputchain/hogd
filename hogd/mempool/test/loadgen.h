@@ -49,9 +49,6 @@ public:
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};
     for (const InitializationBlock &init_tx : init_txs) {
-      info("outer loop, will submit {} vetted txs", init_tx.size());
-      // std::println("printing init_tx, which holds {} txs", init_tx.size());
-      // print_tx_hashes(init_tx);
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
 
       // Now nominate and commit the initialization transactions with
@@ -59,7 +56,6 @@ public:
       size_t num_nominated_txs = 0;
       SchedulerNomination nomination{};
       while (num_nominated_txs < init_tx.size()) {
-        info("inner loop, num_nominated_txs {}", num_nominated_txs);
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
@@ -70,11 +66,6 @@ public:
         nomination = res_nominate.scheduler_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
-        info("successfully nominated {} txs",
-             nomination.nomination.transaction_hashes.size());
-        // std::println("these were nominated ({} txs):",
-        //              nomination.nomination.transaction_hashes.size());
-        // print_sorted_hashes(nomination.nomination.transaction_hashes);
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
 

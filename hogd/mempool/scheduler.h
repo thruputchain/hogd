@@ -143,6 +143,9 @@ public:
   // Debug.
   void dump_runqueue() const;
 
+  // TODO(jhumphri): Add multi-thread support to the scheduler.
+  std::mutex global_lock_;
+
 private:
   // We use this type to store information about a tx in the runqueue.
   struct TxInfo {

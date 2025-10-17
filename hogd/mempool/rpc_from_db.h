@@ -61,6 +61,7 @@ public:
       auto hog_delta_abs =
           static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
 
+      std::lock_guard<std::mutex> lk(scheduler_->global_lock_);
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
                                                    transfers.block);
