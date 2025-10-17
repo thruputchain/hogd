@@ -147,8 +147,11 @@ jobs:
       if: always()
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
+        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog7 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog8 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog11 11112 shutdown
