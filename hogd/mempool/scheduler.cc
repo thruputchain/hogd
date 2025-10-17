@@ -280,8 +280,8 @@ Scheduler::dump_runqueue() const
 {
   for (const auto &[height, tx_infos] : age_to_tx_) {
     info("runqueue age {}:", height);
-    for (const TxInfo *info : tx_infos) {
-      info("  - tx from account {}", info->tx.tx.invocation.invoked_address[0]);
+    for (const TxInfo *i : tx_infos) {
+      info("  - tx from account {}", i->tx.tx.invocation.invoked_address[0]);
     }
   }
   size_t num_stranded = 0;
@@ -303,7 +303,6 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   }
 
   CHECK(co_await read_average_hog_age({account}, /*force=*/false));
-
   const HogAge &averages = cached_hogs_[account];
   HogAge new_averages = averages;
 
