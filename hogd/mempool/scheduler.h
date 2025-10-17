@@ -15,8 +15,9 @@
 #include "hogd/mempool/shared.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 #include "x23/x23/async.h"
+#include "x23/x23/corosync.h"
+#include "x23/x23/vec.h"
 
 namespace hogd {
 
@@ -144,7 +145,7 @@ public:
   void dump_runqueue() const;
 
   // TODO(jhumphri): Add multi-thread support to the scheduler.
-  std::mutex global_lock_;
+  x23::CoroLock global_lock_;
 
 private:
   // We use this type to store information about a tx in the runqueue.

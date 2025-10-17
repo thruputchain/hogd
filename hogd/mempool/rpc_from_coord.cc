@@ -42,9 +42,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       authenticated.push_back(tx);
     }
   }
-  scheduler_->global_lock_.lock();
+  x23::CoroGuard cg;
+  co_await cg(scheduler_->global_lock_);
   co_await scheduler_->add_txs(authenticated);
-  scheduler_->global_lock_.unlock();
+  cg.reset();
   co_return co_await coord_client_->coordscheduler_notify_vetted(authenticated);
 }
 
@@ -52,9 +53,14 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  scheduler_->global_lock_.lock();
+  info("submit vetted, {}", gettid());
+  x23::CoroGuard cg;
+  co_await cg(scheduler_->global_lock_);
+  info("submit vetted got lock");
   co_await scheduler_->add_txs(batch);
-  scheduler_->global_lock_.unlock();
+  info("submit vetted will unlock");
+  cg.reset();
+  info("submit vetted done");
   co_return;
 }
 
@@ -209,7 +215,6 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  std::lock_guard<std::mutex> lk(scheduler_->global_lock_);
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
@@ -309,7 +314,6 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
-  std::lock_guard<std::mutex> lk(scheduler_->global_lock_);
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   if (nomination.transaction_nominations.empty()) {
