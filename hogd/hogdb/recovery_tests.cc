@@ -100,10 +100,13 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     itx->commit();
     ctx.close_invoke_tx(1, 1, itx);
 
-    auto *btx = ctx.get_block_tx(1);
+    auto *btx = ctx.get_block_tx(1, false);
     assert(btx != nullptr);
     ASSERT_TRUE((btx->get()).commit().has_value());
-    ctx.close_block_tx(1);
+
+    ASSERT_TRUE(btx->initiate_shutdown());
+
+    ctx.remove_shutdown_block_tx(1);
 
     ASSERT_TRUE(ctx.update_dbtip(1).has_value());
 

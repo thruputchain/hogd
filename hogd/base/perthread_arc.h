@@ -162,6 +162,7 @@ public:
 
       pending_count += prev_count - kInitializedValue;
     });
+    assert(pending_count >= 0);
 
     // Now pending_count stores the count of outstanding references
     // to the object.

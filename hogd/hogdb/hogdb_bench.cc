@@ -276,9 +276,6 @@ Benchmark::run()
     if (HogDBStatus<void> ret = tx.request_nnint128(p.dst, p.amount); !ret)
       fail(ret.error());
     tx.commit();
-    [[maybe_unused]]
-    auto r = tx.release_blocktx_reference();
-    assert(!r);
   };
 
   // run invoke_tx in parallel on the workers for all payment ops.

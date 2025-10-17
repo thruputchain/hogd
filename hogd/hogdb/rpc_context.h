@@ -14,7 +14,9 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_sched.hh"
 #include "hogd/base/perthread.h"
@@ -62,16 +64,13 @@ public:
   }
 
   // opens a new block transaction.
-  // DOES NOT acquire a reference to the blocktx.
-  HogDBStatus<void> open_block_tx(BlockTXID bid);
+  // Does not acquire a reference to the blocktx.
+  HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid);
   // retrieves an open block transaction.
   // If the returned value is not null, then
   // the caller has acquired a reference to the blocktx.
   PerThreadARC<BlockTX> *get_block_tx(BlockTXID bid,
                                       bool acquire_reference = true);
-  // closes a block transaction.
-  // There must be an active reference to the blocktx.
-  void close_block_tx(BlockTXID bid);
 
   // retrieves an invoke transaction (and creates it if it doesn't exist).
   // Returns nullptr if the bid is not open.
@@ -82,6 +81,10 @@ public:
   HogDBStatus<void> update_dbtip(BlockTXID bid);
 
   const auto &get_sched_db_client() { return sched_db_client_; }
+
+  // The block ID must have already been shut down and have no outstanding
+  // references.
+  void remove_shutdown_block_tx(BlockTXID bid);
 
 private:
   struct BlockCache {
@@ -104,7 +107,15 @@ private:
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
+  // The block txs are refcounted.
+  // Each InvokeTX acquires a reference;  when the InvokeTX is closed, it
+  // releases the reference, and garbage collects the block tx if the blocktx is
+  // shutdown and the reference closed is the last reference.
   std::unordered_map<BlockTXID, PerThreadARC<BlockTX>> block_txes_;
+  // The set of block txes that are open for new transactions.
+  // This is primarily relevant for refcounting; during shutdown, should the
+  // destructor release a reference to the PerThreadARC?
+  // std::unordered_set<BlockTXID> open_block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
@@ -117,7 +128,6 @@ private:
                                            bool acquire_reference);
 
   void release_block_tx_reference(BlockTXID bid);
-  void remove_shutdown_block_tx(BlockTXID bid);
 };
 
 inline PerThreadARC<BlockTX> *

@@ -14,7 +14,7 @@
 
 namespace hogd {
 
-HogDBStatus<void>
+HogDBStatus<PerThreadARC<BlockTX> *>
 RPCContext::open_block_tx(BlockTXID bid)
 {
   // create the block tx.
@@ -25,7 +25,8 @@ RPCContext::open_block_tx(BlockTXID bid)
                             sched_db_client_, get_tip().height));
   if (!inserted)
     return HogDBError(HogDBCode::kExists);
-  return {};
+
+  return &it->second;
 }
 
 PerThreadARC<BlockTX> *
@@ -33,8 +34,9 @@ RPCContext::get_block_tx_slow(BlockTXID bid, bool acquire_reference)
 {
   PerThreadARC<BlockTX> *tx;
   // This lock should be held during the cache updates, not just the lookup.
-  // Otherwise, technically, close_block_tx() could be called in between when we
-  // get the tx pointer from block_txes_ and when we insert it into the cache.
+  // Otherwise, technically, release_block_tx_reference() could be called in
+  // between when we get the tx pointer from block_txes_ and when we insert it
+  // into the cache.
   std::scoped_lock g(lock_);
 
   // retrieve the block tx (if it exists).
@@ -76,26 +78,6 @@ RPCContext::remove_shutdown_block_tx(BlockTXID bid)
   // We make sure to delete the BlockTX _after_
   // deleting the pointers to it in the threadlocal caches.
   block_txes_.erase(bid);
-}
-
-void
-RPCContext::close_block_tx(BlockTXID bid)
-{
-  {
-    std::scoped_lock g(lock_);
-    auto it = block_txes_.find(bid);
-    assert(it != block_txes_.end());
-    [[maybe_unused]]
-    auto r = it->second.release_reference();
-    // We should only shutdown once,
-    // and releasing a reference before we shutdown should not trigger
-    // a shutdown.
-    assert(!r);
-    if (!it->second.initiate_shutdown())
-      return;
-  }
-
-  remove_shutdown_block_tx(bid);
 }
 
 HogDBStatus<void>

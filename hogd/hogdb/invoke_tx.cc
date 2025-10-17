@@ -179,8 +179,6 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
 void
 InvokeTX::commit()
 {
-  assert(reference_tracker_.held_);
-  block_.get().log_closed_invoke_tx();
   assert_is_valid();
   // changes are already applied to BlockTX, but we still need to mark them all
   // as committed
@@ -203,12 +201,8 @@ InvokeTX::commit()
 }
 
 void
-InvokeTX::abort(bool release_reference)
+InvokeTX::abort()
 {
-  if (release_reference) {
-    assert(reference_tracker_.held_);
-    block_.get().log_closed_invoke_tx();
-  }
   assert_is_valid();
 
   for (auto &[key, vec] : changes_) {
