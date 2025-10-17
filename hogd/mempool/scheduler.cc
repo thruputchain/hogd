@@ -156,6 +156,7 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
           info.tx.tx.uniquifier.block_expiry_height;
       CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     }
+    size_++;
   }
 }
 
@@ -677,6 +678,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
       }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    size_--;
   }
   for (const ContractAddress &account : accounts) {
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
@@ -713,6 +715,7 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
       }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    size_--;
   }
   // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
   // for all accounts in [accounts], add any stranded txs to the runqueue if
@@ -779,6 +782,7 @@ Scheduler::find_and_remove_from_runqueue(
         CHECK_EQ(stranded_.erase(it->second.account), 1UL);
       }
     }
+    size_--;
   }
   return true;
 }

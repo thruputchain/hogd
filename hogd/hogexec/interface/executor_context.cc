@@ -170,6 +170,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     out.proposal_data() = syscall_handler.get_proposal_data();
     return out;
   }
+  info("hmm well we got here, commit_res.value() is {}", commit_res.value());
   return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
 }
 

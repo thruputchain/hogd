@@ -218,6 +218,7 @@ SystemCallHandler::try_commit_transaction()
       return st.error();
     }
 
+    info("try_commit_transaction ret");
     return false;
   }
   assert(last_frame_.has_value());
@@ -232,6 +233,7 @@ SystemCallHandler::try_commit_transaction()
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
     if (!res.has_value()) {
+      info("try_commit_transaction ret");
       return res.error();
     }
 
@@ -243,6 +245,7 @@ SystemCallHandler::try_commit_transaction()
                .value()
                .try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
+    info("try_commit_transaction ret");
     return r.error();
   }
 
@@ -254,10 +257,13 @@ SystemCallHandler::try_commit_transaction()
                                    get_block_execution_mode());
 
     if (!res.has_value()) {
+      info("try_commit_transaction ret");
       return res.error();
     }
 
     transaction_committed_or_aborted_ = true;
+    info("try_commit_transaction ret");
+    // It's this one Claude:
     return false;
   }
 
@@ -275,6 +281,7 @@ SystemCallHandler::try_commit_transaction()
 
   auto res = db_proxy_.commit_transaction(std::move(new_contracts));
   if (!res.has_value()) {
+    info("try_commit_transaction ret");
     return res.error();
   }
 
@@ -283,6 +290,7 @@ SystemCallHandler::try_commit_transaction()
   auto emit_events_status = emit_events();
   if (!emit_events_status.has_value()) {
     error("emit_events failed: {}", emit_events_status.error());
+    info("try_commit_transaction ret");
     return emit_events_status.error();
   }
 

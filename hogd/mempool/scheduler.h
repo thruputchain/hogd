@@ -136,6 +136,10 @@ public:
       const std::function<x23::Async<bool>(const SignedTransaction &tx)>
           &filter);
 
+  // The number of txs in the scheduler, including both those of the runqueue
+  // and those that are stranded.
+  size_t size() { return size_; }
+
   // Debug.
   void dump_runqueue() const;
 
@@ -258,6 +262,8 @@ private:
   // height, we want to discard all txs that expire at that block height,
   // regardless of whether they are on the runqueue or stranded.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
+
+  size_t size_ = 0;
 };
 
 } // namespace hogd

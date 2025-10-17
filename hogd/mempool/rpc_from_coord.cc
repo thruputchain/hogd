@@ -50,7 +50,12 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  co_return co_await scheduler_->add_txs(batch);
+  info("schedulercoord_submit_vetted start, scheduler size is {}",
+       scheduler_->size());
+  co_await scheduler_->add_txs(batch);
+  info("schedulercoord_submit_vetted end, scheduler size is {}",
+       scheduler_->size());
+  co_return;
 }
 
 x23::Async<bool>
@@ -186,6 +191,7 @@ MempoolCoordinatorRpc::propose_batch(
       ret.push_back(true);
       break;
     default:
+      info("hmm, tx failed with error {}", result.result());
       ret.push_back(false);
       break;
     }
@@ -204,6 +210,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  info("nominate start, scheduler_ size is {}", scheduler_->size());
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
@@ -242,16 +249,32 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   }
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
-  for (size_t i = 0; i < statuses.size(); i++) {
+  // We remove failed txs from [nomination.transaction_hashes], so we iterate
+  // back
+  for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
     if (statuses[i]) {
+      info("tx success! invoking address is {}",
+           txs[i].tx.invocation.invoked_address);
       co_await scheduler_->mark_txs_executed({nomination.transaction_hashes[i]},
                                              nomination.block_height);
     }
     else {
       // TODO(jhumphri): Need to do anything here?
       co_await scheduler_->mark_txs_failed({nomination.transaction_hashes[i]});
+      info("there was a tx failure, invoking address is {}",
+           txs[i].tx.invocation.invoked_address);
       co_await scheduler_->add_txs({txs[i]});
+      nomination.transaction_hashes.erase(
+          nomination.transaction_hashes.begin() + i);
     }
+  }
+  if (nomination.transaction_hashes.empty()) {
+    // It is possible that all txs failed to execute, in which case the block is
+    // empty. Thus, we fail the nomination.
+    co_await finish_block(block_id);
+    co_await abandon_snapshot(block_id);
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
@@ -259,6 +282,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
+
+  info("dump runqueue start");
+  scheduler_->dump_runqueue();
+  info("dump runqueue done");
+  info("scheduler size is {}", scheduler_->size());
 
   co_return result;
 }
