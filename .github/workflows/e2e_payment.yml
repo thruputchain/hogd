@@ -64,7 +64,6 @@ jobs:
         mkdir -p work_dir/
     - name: run bench servers
       run: |
-        export X23TRACE=1
         ./release/hogd/hogexec/bench/control_server -p 11111 -w work_dir/ &
         ./release/hogd/hogexec/bench/control_server -p 11112 -w work_dir/
 
@@ -147,13 +146,9 @@ jobs:
     - name: cleanup control servers
       if: always()
       run: |
-        export X23TRACE=1
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
-        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog7 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
-        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog8 11112 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
-        sleep 5
         ./release/hogd/hogexec/bench/control_cli hog11 11112 shutdown
