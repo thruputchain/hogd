@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <exception>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -203,7 +204,7 @@ InvokeTX::commit()
 }
 
 void
-InvokeTX::abort(bool release_reference) noexcept
+InvokeTX::abort(bool release_reference)
 {
   if (release_reference) {
     assert(reference_tracker_.held_);

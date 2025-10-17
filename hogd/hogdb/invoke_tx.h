@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -63,11 +64,15 @@ public:
   }
   ~InvokeTX()
   {
-    if (reference_tracker_.held_) {
-      reference_tracker_.release();
-      block_.release_reference();
+    try {
+      if (reference_tracker_.held_) {
+        reference_tracker_.release();
+        block_.release_reference();
+      }
+      abort(false);
+    } catch (...) {
+      panic("Exception in ~InvokeTX");
     }
-    abort(false);
   }
 
   InvokeTX(InvokeTX &&other) noexcept = default;
@@ -75,7 +80,7 @@ public:
   // commit commits pending changes to the BlockTX.
   void commit();
   // abort rolls back pending changes to the BlockTX.
-  void abort(bool release_reference = true) noexcept;
+  void abort(bool release_reference = true);
 
   // create_savepoint creates a savepoint of the current transaction state. It
   // returns a depth that can be used to restore to this state later.
