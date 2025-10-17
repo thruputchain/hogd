@@ -189,7 +189,7 @@ private:
   HogDBStatus<void> update_balance_lock(Address const &addr);
   HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr);
 
-  void assert_is_valid() const
+  void assert_is_valid() const noexcept
   {
     assert(tx_depth_ >= 0);
     std::unordered_map<Address, int128_t> balance_deltas;

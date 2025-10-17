@@ -66,8 +66,8 @@ public:
 
   void release_balance(const Address &addr, int128_t delta);
 
-  void log_new_invoke_tx() { pending_invoke_txes_.inc(1); }
-  void log_closed_invoke_tx() { pending_invoke_txes_.inc(-1); }
+  void log_new_invoke_tx() noexcept { pending_invoke_txes_.inc(1); }
+  void log_closed_invoke_tx() noexcept { pending_invoke_txes_.inc(-1); }
 
 private:
   struct ItemLock {
