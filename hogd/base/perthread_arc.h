@@ -52,7 +52,7 @@ public:
   // is currently being destroyed.
   bool try_acquire_reference()
   {
-    auto r = refcount_->count_->fetch_add(1, std::memory_order_relaxed);
+    auto r = refcount_->count_.fetch_add(1, std::memory_order_relaxed);
 
     // If this is the first access: make sure that if were were in the middle of
     // shutdown, our thread's refcount is tracked by initiate_shutdown().
@@ -61,13 +61,13 @@ public:
 
       if (is_shutdown_ready_) {
         // We're in shutdown mode, so we cannot acquire a reference.
-        refcount_->count_->store(kShutdownValue, std::memory_order_relaxed);
+        refcount_->count_.store(kShutdownValue, std::memory_order_relaxed);
         return false;
       }
 
       // We can acquire a reference, and we know that the next call to
       // initiate_shutdown() will track our thread's refcount.
-      refcount_->count_->store(kInitializedValue + 1,
+      refcount_->count_.store(kInitializedValue + 1,
                                std::memory_order_relaxed);
       return true;
     }
@@ -84,7 +84,7 @@ public:
     // If the threadlocal count is still positive, then shutdown has not yet
     // been initiated.
     int64_t previous_threadlocal_count =
-        refcount_->count_->fetch_sub(1, std::memory_order_relaxed);
+        refcount_->count_.fetch_sub(1, std::memory_order_relaxed);
 
     // This thread did not touch the refcount before; so, we must initialize the
     // refcount and try again
@@ -92,7 +92,7 @@ public:
       auto ul = refcount_.lock_threads();
 
       if (is_shutdown_ready_) {
-        refcount_->count_->store(kShutdownValue, std::memory_order_relaxed);
+        refcount_->count_.store(kShutdownValue, std::memory_order_relaxed);
         // now reduce the active refcount by 1, and check if there are any
         // references left
         auto prev =
@@ -103,7 +103,7 @@ public:
 
       // otherwise, initialize the refcount to -1; we're not in shutdown, so we
       // must return false.
-      refcount_->count_->store(kInitializedValue - 1,
+      refcount_->count_.store(kInitializedValue - 1,
                                std::memory_order_relaxed);
       return false;
     }
@@ -142,7 +142,7 @@ public:
 
     auto ul = refcount_.lock_threads();
     refcount_.for_each(ul, [&pending_count](Refcount &refcount) {
-      int64_t prev_count = refcount.count_->exchange(kShutdownValue);
+      int64_t prev_count = refcount.count_.exchange(kShutdownValue);
 
       // The value here could be: some value near kInitializedValue, or
       // kUninitializedValue +/- 1. We ignore the kUninitializedValue +/- 1
@@ -190,20 +190,38 @@ private:
   T value_;
 
   // Wrap atomic<int64_t> to force initialization to 0.
-  // Wrapped in a unique_ptr because PerThread<T> requires movable types.
+  // PerThread<T> requires movable types.
   struct Refcount {
     Refcount()
-      : count_(std::make_unique<std::atomic<int64_t>>(kUninitializedValue))
+      : count_((kUninitializedValue))
     {}
-    Refcount(Refcount &&) noexcept = default;
-    std::unique_ptr<std::atomic<int64_t>> count_;
+    // Why is this ok?
+    // The threadlocal vector inside PerThread<T> is only ever modified if the PerThread lock is held.
+    // That's the lock returned by PerThread<T>::lock_threads().
+    //
+    // This means that this function cannot ever be called concurrently with the shutdown loop in
+    // initiate_shutdown().
+    //
+    // Additionally, this cannot be called concurrently with a fetch_add op in try_acquire_reference() or release_reference(),
+    // as the get() call in PerThread<T> does not return until after this function has finished.
+    //
+    // This guarantees that we cannot lose references to the underlying object.
+    Refcount(Refcount && obj) noexcept {
+        count_ = obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+    }
+    Refcount &operator=(Refcount && obj) noexcept {
+        count_ = obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+        return *this;
+    }
+
+    std::atomic<int64_t> count_;
 
     ~Refcount()
     {
       // Assert that the references stored on this refcount were drained into
       // the main refcount. Or that the refcount was initialized to
       // kUninitializedValue = 0
-      assert(count_->load(std::memory_order_relaxed) <= 0);
+      assert(count_.load(std::memory_order_relaxed) <= 0);
     }
   };
 
@@ -214,7 +232,11 @@ private:
   // too small to ever become nonnegative by +1 ops,
   // too big to every overflow to INT64_MAX by -1 ops
   constexpr static int64_t kShutdownValue = INT64_MIN / 2;
+  // Too small to ever become nonnegative by +1 ops,
+  // Too big to ever overflow to INT64_MAX by -1 ops
   constexpr static int64_t kInitializedValue = INT64_MAX / 2;
+  // Too far away from both kInitializedValue and kShutdownValue
+  // to ever be confused for a valid refcount.
   constexpr static int64_t kUninitializedValue = 0;
 };
 
