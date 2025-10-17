@@ -111,9 +111,9 @@ public:
     if (previous_threadlocal_count > 0) {
       return false;
     }
-
-    // This would signal a double free, or a free before try_acquire
-    assert(previous_threadlocal_count != 0);
+    // refcount_ was negative -- meaning shutdown was initiated.  We might still
+    // be in the initiate_shutdown() for_each loop; so we wait for
+    // is_shutdown_ready_ to be true.
 
     // We must be in shutdown mode
     // Ensure that the thread that called initiate_shutdown() has finished
@@ -138,8 +138,10 @@ public:
       return false;
     }
 
+    int64_t pending_count = 0;
+
     auto ul = refcount_.lock_threads();
-    refcount_.for_each(ul, [this](Refcount &refcount) {
+    refcount_.for_each(ul, [this, &pending_count](Refcount &refcount) {
       int64_t prev_count = refcount.count_->exchange(kShutdownValue);
 
       // The value here could be: some value near kInitializedValue, or
@@ -161,15 +163,17 @@ public:
         return;
       }
 
-      shutdown_pending_refcount_.fetch_add(prev_count - kInitializedValue);
+      pending_count += prev_count - kInitializedValue;
     });
 
-    // Now shutdown_pendng_refcount_ stores the count of outstanding references
+    // Now pending_count stores the count of outstanding references
     // to the object.
+    shutdown_pending_refcount_.store(pending_count, std::memory_order_relaxed);
+
     is_shutdown_ready_.store(true, std::memory_order_release);
     is_shutdown_ready_.notify_all();
 
-    return shutdown_pending_refcount_ == 0;
+    return pending_count == 0;
   }
 
   ~PerThreadARC()
