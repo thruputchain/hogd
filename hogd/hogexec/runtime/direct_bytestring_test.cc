@@ -12,7 +12,6 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
-#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -34,19 +33,6 @@ public:
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
   {
     return make_contract_data_addrkey(contract_addr, key);
-  }
-
-  static auto make_bytestring_delta(std::string_view bstring)
-  {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
-    delta.bytestring() = make_bytestring(bstring);
-    return delta;
-  }
-
-  static auto make_delete_delta()
-  {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeDelete);
-    return delta;
   }
 
   // check that the two addresses have the same balance,

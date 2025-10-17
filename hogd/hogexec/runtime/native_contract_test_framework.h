@@ -514,6 +514,27 @@ public:
     return delta;
   }
 
+  static auto make_delete_delta()
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeDelete);
+    return delta;
+  }
+
+  static auto make_nnint_set_add_delta(int128_t set, int128_t add)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+    delta.nnint().set_value = to_xdr(set);
+    delta.nnint().add_value = to_xdr(add);
+    return delta;
+  }
+
+  static auto make_nnint_add_delta(int128_t add)
+  {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+    delta.nnint_add() = to_xdr(add);
+    return delta;
+  }
+
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount);
   void write_item(AddressAndKey const &addrkey,
