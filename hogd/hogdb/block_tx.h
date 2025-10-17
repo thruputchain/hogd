@@ -6,6 +6,7 @@
 #include <mutex>
 #include <utility>
 
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -46,13 +47,6 @@ public:
   // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
-  // abort drops all changes.
-  void abort()
-  {
-    addr_balance_locks_.clear();
-    item_locks_.clear();
-  }
-
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
@@ -72,6 +66,9 @@ public:
 
   void release_balance(const Address &addr, int128_t delta);
 
+  void log_new_invoke_tx() { pending_invoke_txes_.inc(1); }
+  void log_closed_invoke_tx() { pending_invoke_txes_.inc(-1); }
+
 private:
   struct ItemLock {
     ItemChange change;
@@ -85,6 +82,7 @@ private:
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
+  PerThreadCounter<int32_t> pending_invoke_txes_;
 
   // raw locking operations.
   static inline HogDBStatus<int128_t>

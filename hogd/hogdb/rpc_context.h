@@ -18,6 +18,7 @@
 
 #include "db_sched.hh"
 #include "hogd/base/perthread.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/block_tx.h"
@@ -43,6 +44,8 @@ public:
     : db_(db), trie_(trie), sched_db_client_(std::move(sched_db_client))
   {}
 
+  ~RPCContext();
+
   // getters.
   HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
@@ -59,10 +62,15 @@ public:
   }
 
   // opens a new block transaction.
-  HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
+  // DOES NOT acquire a reference to the blocktx.
+  HogDBStatus<void> open_block_tx(BlockTXID bid);
   // retrieves an open block transaction.
-  BlockTX *get_block_tx(BlockTXID bid);
+  // If the returned value is not null, then
+  // the caller has acquired a reference to the blocktx.
+  PerThreadARC<BlockTX> *get_block_tx(BlockTXID bid,
+                                      bool acquire_reference = true);
   // closes a block transaction.
+  // There must be an active reference to the blocktx.
   void close_block_tx(BlockTXID bid);
 
   // retrieves an invoke transaction (and creates it if it doesn't exist).
@@ -78,7 +86,7 @@ public:
 private:
   struct BlockCache {
     std::mutex lock;
-    std::unordered_map<BlockTXID, BlockTX *> blocks;
+    std::unordered_map<BlockTXID, PerThreadARC<BlockTX> *> blocks;
 
     BlockCache() = default;
     BlockCache(BlockCache &&cache) noexcept : blocks(std::move(cache.blocks)) {}
@@ -96,7 +104,7 @@ private:
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
-  std::unordered_map<BlockTXID, BlockTX> block_txes_;
+  std::unordered_map<BlockTXID, PerThreadARC<BlockTX>> block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
@@ -105,20 +113,29 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
 
   // slow path for get_block_tx().
-  BlockTX *get_block_tx_slow(BlockTXID bid);
+  PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,
+                                           bool acquire_reference);
+
+  void release_block_tx_reference(BlockTXID bid);
+  void remove_shutdown_block_tx(BlockTXID bid);
 };
 
-inline BlockTX *
-RPCContext::get_block_tx(BlockTXID bid)
+inline PerThreadARC<BlockTX> *
+RPCContext::get_block_tx(BlockTXID bid, bool acquire_reference)
 {
   {
     BlockCache &cache = *block_tx_cache_;
     std::scoped_lock g(cache.lock); // NOTE: very low contention
     auto it = cache.blocks.find(bid);
-    if (it != cache.blocks.end())
-      return it->second;
+    if (it != cache.blocks.end()) {
+      if (acquire_reference && !it->second->try_acquire_reference())
+          [[unlikely]]
+        return nullptr;
+      return (it->second);
+    }
   }
-  return get_block_tx_slow(bid);
+
+  return get_block_tx_slow(bid, acquire_reference);
 }
 
 inline InvokeTX *
@@ -127,9 +144,10 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
   auto key = std::make_pair(bid, iid);
   auto [tx, ul] = invoke_txes_.find(key);
   if (!tx) {
-    BlockTX *btx = get_block_tx(bid);
+    PerThreadARC<BlockTX> *btx = get_block_tx(bid);
     if (!btx) [[unlikely]]
       return nullptr;
+    // get_block_tx() acquires a reference to the blocktx.
     tx = invoke_txes_.insert(key, InvokeTX(*btx), ul);
     assert(tx != nullptr);
   }
@@ -139,7 +157,13 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 inline void
 RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid)
 {
-  invoke_txes_.remove(std::make_pair(bid, iid));
+  auto [tx, ul] = invoke_txes_.find(std::make_pair(bid, iid));
+  assert(tx != nullptr);
+  bool destroy_blocktx = tx->release_blocktx_reference();
+  invoke_txes_.remove(std::make_pair(bid, iid), ul);
+  if (destroy_blocktx) [[unlikely]] {
+    remove_shutdown_block_tx(bid);
+  }
 }
 
 } // namespace hogd

@@ -211,6 +211,13 @@ BlockTX::commit(WorkerPool &pool)
   std::mutex lock;
   HogDBStatus<void> ret;
 
+  auto pending_count = pending_invoke_txes_.get();
+  if (pending_count != 0) {
+    error("Committed a blocktx while there were {} outstanding InvokeTXs",
+          pending_count);
+    return HogDBError{HogDBCode::kInternal};
+  }
+
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLock &> v) {

@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -20,21 +21,61 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 
 namespace hogd {
+
+namespace detail {
+struct ReferenceTracker {
+  ReferenceTracker() = default;
+
+  void release()
+  {
+    assert(held_);
+    held_ = false;
+  }
+
+  ReferenceTracker(ReferenceTracker &&other) noexcept : held_(other.held_)
+  {
+    other.held_ = false;
+  }
+
+  ReferenceTracker &operator=(ReferenceTracker &&other) noexcept
+  {
+    held_ = other.held_;
+    other.held_ = false;
+    return *this;
+  }
+  ~ReferenceTracker() { assert(!held_); }
+
+  bool held_{true};
+};
+} // namespace detail
 
 // InvokeTX represents a transaction for a root contract invocation and its
 // child invocations. Rolling back nested transactions is supported through
 // savepoints. The caller must provide synchronization if needed.
 class InvokeTX {
 public:
-  InvokeTX(BlockTX &block) : block_(block) {}
-  ~InvokeTX() { abort(); }
+  InvokeTX(PerThreadARC<BlockTX> &block) : block_(block)
+  {
+    block_.get().log_new_invoke_tx();
+  }
+  ~InvokeTX()
+  {
+    if (reference_tracker_.held_) {
+      reference_tracker_.release();
+      block_.release_reference();
+    }
+    abort(false);
+  }
+
+  InvokeTX(InvokeTX &&other) noexcept = default;
 
   // commit commits pending changes to the BlockTX.
   void commit();
   // abort rolls back pending changes to the BlockTX.
-  void abort();
+  void abort(bool release_reference = true);
 
   // create_savepoint creates a savepoint of the current transaction state. It
   // returns a depth that can be used to restore to this state later.
@@ -99,6 +140,13 @@ public:
   HogDBStatus<void> request_consume_uniquifier(Address const &addr,
                                                Uniquifier uniquifier);
 
+  bool release_blocktx_reference()
+  {
+    assert(reference_tracker_.held_);
+    reference_tracker_.release();
+    return block_.release_reference();
+  }
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -117,7 +165,8 @@ private:
   };
 
   int tx_depth_{0};
-  BlockTX &block_;
+  PerThreadARC<BlockTX> &block_;
+  detail::ReferenceTracker reference_tracker_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
   // combine it with the latest balance delta for that address.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
@@ -260,16 +262,23 @@ Benchmark::run()
       .base_contract_deployment_cost = to_xdr(int128_t{12000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
   });
-  BlockTX block(db_, *trie_, cost_model, nullptr, 1);
+  PerThreadARC<BlockTX> block(db_, *trie_, cost_model, nullptr, 1);
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block](const Payment &p) {
+    [[maybe_unused]]
+    auto ref = block.try_acquire_reference();
+    assert(ref);
+
     InvokeTX tx(block);
     if (HogDBStatus<void> ret = tx.request_nnint128(p.src, -p.amount); !ret)
       fail(ret.error());
     if (HogDBStatus<void> ret = tx.request_nnint128(p.dst, p.amount); !ret)
       fail(ret.error());
     tx.commit();
+    [[maybe_unused]]
+    auto r = tx.release_blocktx_reference();
+    assert(!r);
   };
 
   // run invoke_tx in parallel on the workers for all payment ops.
@@ -278,7 +287,7 @@ Benchmark::run()
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
   // commit changes to the ramdb.
-  HogDBStatus<void> ret = block.commit(workers_).and_then([this] {
+  HogDBStatus<void> ret = block.get().commit(workers_).and_then([this] {
     // force merkle root generation so the cost is included.
     trie_->generate_top_level_hashes();
     std::ignore = trie_->get_root_hash();
@@ -288,6 +297,10 @@ Benchmark::run()
   });
   if (!ret)
     fail(ret.error());
+
+  [[maybe_unused]]
+  auto r = block.initiate_shutdown();
+  assert(r);
 }
 
 using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers);

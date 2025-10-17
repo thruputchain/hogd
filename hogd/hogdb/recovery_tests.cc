@@ -1,3 +1,4 @@
+#include <cassert>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -68,8 +69,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     }));
     ASSERT_TRUE(
         ctx.get_db().write_cost_model(ctx.get_cost_model()).has_value());
-    auto btx = ctx.open_block_tx(1);
-    ASSERT_TRUE(btx);
+    auto open_result = ctx.open_block_tx(1);
+    ASSERT_TRUE(open_result.has_value());
 
     auto *itx = ctx.get_invoke_tx(1, 1);
 
@@ -97,7 +98,11 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     cleanup.release();
 
     itx->commit();
-    ASSERT_TRUE((*btx)->commit().has_value());
+    ctx.close_invoke_tx(1, 1);
+
+    auto *btx = ctx.get_block_tx(1);
+    assert(btx != nullptr);
+    ASSERT_TRUE((btx->get()).commit().has_value());
     ctx.close_block_tx(1);
 
     ASSERT_TRUE(ctx.update_dbtip(1).has_value());

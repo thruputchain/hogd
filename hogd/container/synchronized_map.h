@@ -218,7 +218,6 @@ public:
   }
 
 private:
-
   // Note: Per the c++ standard,
   // [containers.requirements.unord.req.general],
   // pointers and references to elements of an unordered_map are NOT invalidated

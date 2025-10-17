@@ -126,10 +126,14 @@ HogDBSchedRpc::commit_block(BlockID id)
   }
 
   // write all the changes in the block TX.
-  BlockTX *btx = ctx_.get_block_tx(id);
-  HogDBStatus<void> ret = btx->commit();
-  if (!ret)
+  auto *btx = ctx_.get_block_tx(id);
+  assert(btx != nullptr);
+  HogDBStatus<void> ret = btx->get().commit();
+  if (!ret) {
+    // Cleanup the block tx if commit failed.
+    ctx_.close_block_tx(id);
     return ret.error();
+  }
 
   if (!ctx_.get_db().check_invariants()) {
     error("invariants check failed!!!");
@@ -139,6 +143,7 @@ HogDBSchedRpc::commit_block(BlockID id)
     return HogDBError(HogDBCode::kInternal);
   }
 
+  // Releases the reference to the blocktx acquried above
   // destroy the block TX.
   ctx_.close_block_tx(id);
 
@@ -177,9 +182,10 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id)
     block_id_state_manager_.log_block_commit(id);
     ctx_.get_db().enable_debug_invariants(ctx_.get_cost_model());
   }
-  BlockTX *btx = ctx_.get_block_tx(id);
-  if (!btx)
+
+  if (!ctx_.get_block_tx(id, false)) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+
   HogDBStatus<void> ret = commit_block(id);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
@@ -195,12 +201,12 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_abandon(id);
   }
-  BlockTX *ret = ctx_.get_block_tx(id);
+  auto *ret = ctx_.get_block_tx(id);
   if (!ret)
     co_return DbSchedResult::DbSchedResultError;
 
-  BlockTX &btx = *ret;
-  btx.abort();
+  // ret acquired a reference to the blocktx, which ctx_.close_block_tx() will
+  // release.
   ctx_.close_block_tx(id);
   co_return DbSchedResult::DbSchedResultOK;
 }

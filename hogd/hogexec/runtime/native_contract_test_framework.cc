@@ -78,7 +78,8 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   {
     auto r = coord_wrapper_->client().dbsched_abandon_snapshot(block_number_);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("advance_block: dbsched_abandon_snapshot failed");
+      throw std::runtime_error(
+          "advance_block: dbsched_abandon_snapshot failed");
     }
   }
 
