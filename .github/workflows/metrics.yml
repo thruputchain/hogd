@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+concurrency:
+  group: cluster
+  cancel-in-progress: false
 
 jobs:
   bench_server:

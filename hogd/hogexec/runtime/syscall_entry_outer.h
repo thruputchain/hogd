@@ -382,15 +382,14 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
       return kFaultResult;
     }
 
-    // Once the syscall inputs are parsed, we can print them in a formatted log
-    // message.
-    trace("Syscall {} Input: {}", kSyscall,
-          make_syscall_input_message<SyscallMeta>(std::tuple{
-              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(args))...}));
-    //    x23::show(make_syscall_input_struct<SyscallInput>(std::tuple{
-    //      SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-    //        std::get<Is>(args))...})));
+    if (runtime_log_level(LogLevel::kTrace)) {
+      // Once the syscall inputs are parsed, we can print them in a formatted
+      // log message.
+      trace("Syscall {} Input: {}", kSyscall,
+            make_syscall_input_message<SyscallMeta>(std::tuple{
+                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                    std::get<Is>(args))...}));
+    }
 
     auto extra_args = syscall_t::extra_args(handler, gas_remaining);
 
@@ -405,15 +404,17 @@ wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
                   std::get<Is>(args))...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
-    bool is_syscall_error =
-        !res.first.has_value() ||
-        res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
-    trace("Syscall {} Output: {}", kSyscall,
-          is_syscall_error
-              ? syscall_error_message(res.first)
-              : make_syscall_output_message<SyscallMeta>(std::tuple{
-                    SyscallArgParams<typename syscall_t::template arg_i<Is>>::
-                        deref(std::get<Is>(args))...}));
+    if (runtime_log_level(LogLevel::kTrace)) {
+      bool is_syscall_error =
+          !res.first.has_value() ||
+          res.first.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+      trace("Syscall {} Output: {}", kSyscall,
+            is_syscall_error
+                ? syscall_error_message(res.first)
+                : make_syscall_output_message<SyscallMeta>(std::tuple{
+                      SyscallArgParams<typename syscall_t::template arg_i<Is>>::
+                          deref(std::get<Is>(args))...}));
+    }
 
     return res;
   }(std::make_index_sequence<syscall_t::kNumArgs>{});

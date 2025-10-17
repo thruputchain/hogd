@@ -24,6 +24,11 @@ add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)
 add_dependencies(all_wasm_contracts all_wasm_headers)
 
+set(WASM_FLAGS "")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(WASM_FLAGS "-F logging")
+endif()
+
 function(add_wasm_build target_name)
 
   # If you update the contracts (i.e. add new contracts, or change dependencies)
@@ -42,6 +47,7 @@ function(add_wasm_build target_name)
         --release
         --locked
         --frozen
+        ${WASM_FLAGS}
         --offline
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 

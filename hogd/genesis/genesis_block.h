@@ -51,6 +51,7 @@ private:
   };
 
   std::vector<Entry> entries_;
+  int128_t allocated_hogs_ = 0;
 };
 
 class GenesisBlockLoader {

@@ -1,4 +1,5 @@
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -7,6 +8,7 @@
 
 #include <fcntl.h>
 #include <stdlib.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include "x23/debug.h"
@@ -84,6 +86,55 @@ make_debug_fd(const std::string &env_val)
     return fd;
 
   return -1;
+}
+
+namespace {
+inline std::chrono::microseconds
+to_duration(const timeval &ts)
+{
+  using namespace std::chrono;
+  return seconds(ts.tv_sec) + microseconds(ts.tv_usec);
+}
+
+template<typename R, typename P>
+inline double
+to_float(const std::chrono::duration<R, P> &d)
+{
+  return std::chrono::duration<double>(d).count();
+}
+} // namespace
+
+Defer<>
+dump_rusage(int fd)
+{
+  if (fd < 0)
+    return {};
+  using namespace std::chrono;
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage)) {
+    perror("getrusage");
+    return {};
+  }
+
+  return [fd, start_time = steady_clock::now(),
+          start_utime = to_duration(usage.ru_utime),
+          start_stime = to_duration(usage.ru_stime)] {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage)) {
+      perror("getrusage");
+      return;
+    }
+    auto time = steady_clock::now() - start_time;
+    auto utime = to_duration(usage.ru_utime) - start_utime;
+    auto stime = to_duration(usage.ru_stime) - start_stime;
+    auto msg = std::format("{} execution time:\n"
+                           "  real {:>9.3f}s\n"
+                           "  user {:>9.3f}s\n"
+                           "  sys  {:>9.3f}s\n",
+                           getprogname(), to_float(time), to_float(utime),
+                           to_float(stime));
+    ::write(fd, msg.data(), msg.size());
+  };
 }
 
 } // namespace x23

@@ -59,7 +59,7 @@ coordinator_init(const std::string &mempool_address,
   info("coordinator initialization complete.");
 
   // Runs forever.
-  loadgen.work();
+  loadgen.run(/*print_stats=*/true);
 
   // TODO(jhumphri): Implement shutdown path.
 
