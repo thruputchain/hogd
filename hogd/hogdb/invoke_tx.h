@@ -29,7 +29,7 @@ namespace detail {
 struct ReferenceTracker {
   ReferenceTracker() = default;
 
-  void release()
+  void release() noexcept
   {
     assert(held_);
     held_ = false;

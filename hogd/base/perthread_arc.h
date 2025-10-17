@@ -67,8 +67,7 @@ public:
 
       // We can acquire a reference, and we know that the next call to
       // initiate_shutdown() will track our thread's refcount.
-      refcount_->count_.store(kInitializedValue + 1,
-                               std::memory_order_relaxed);
+      refcount_->count_.store(kInitializedValue + 1, std::memory_order_relaxed);
       return true;
     }
 
@@ -78,7 +77,7 @@ public:
   }
 
   // Returns true if the value should be destroyed.
-  bool release_reference()
+  bool release_reference() noexcept
   {
     // The fast path: Decrease the current threadlocal count by 1.
     // If the threadlocal count is still positive, then shutdown has not yet
@@ -103,8 +102,7 @@ public:
 
       // otherwise, initialize the refcount to -1; we're not in shutdown, so we
       // must return false.
-      refcount_->count_.store(kInitializedValue - 1,
-                               std::memory_order_relaxed);
+      refcount_->count_.store(kInitializedValue - 1, std::memory_order_relaxed);
       return false;
     }
 
@@ -192,26 +190,30 @@ private:
   // Wrap atomic<int64_t> to force initialization to 0.
   // PerThread<T> requires movable types.
   struct Refcount {
-    Refcount()
-      : count_((kUninitializedValue))
-    {}
+    Refcount() : count_((kUninitializedValue)) {}
     // Why is this ok?
-    // The threadlocal vector inside PerThread<T> is only ever modified if the PerThread lock is held.
-    // That's the lock returned by PerThread<T>::lock_threads().
+    // The threadlocal vector inside PerThread<T> is only ever modified if the
+    // PerThread lock is held. That's the lock returned by
+    // PerThread<T>::lock_threads().
     //
-    // This means that this function cannot ever be called concurrently with the shutdown loop in
-    // initiate_shutdown().
+    // This means that this function cannot ever be called concurrently with the
+    // shutdown loop in initiate_shutdown().
     //
-    // Additionally, this cannot be called concurrently with a fetch_add op in try_acquire_reference() or release_reference(),
-    // as the get() call in PerThread<T> does not return until after this function has finished.
+    // Additionally, this cannot be called concurrently with a fetch_add op in
+    // try_acquire_reference() or release_reference(), as the get() call in
+    // PerThread<T> does not return until after this function has finished.
     //
     // This guarantees that we cannot lose references to the underlying object.
-    Refcount(Refcount && obj) noexcept {
-        count_ = obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+    Refcount(Refcount &&obj) noexcept
+    {
+      count_ =
+          obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
     }
-    Refcount &operator=(Refcount && obj) noexcept {
-        count_ = obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
-        return *this;
+    Refcount &operator=(Refcount &&obj) noexcept
+    {
+      count_ =
+          obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+      return *this;
     }
 
     std::atomic<int64_t> count_;
