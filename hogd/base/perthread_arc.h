@@ -119,7 +119,7 @@ public:
     // Ensure that the thread that called initiate_shutdown() has finished
     // iterating over all the threadlocal counts to produce the
     // shutdown_pending_refcount_
-    is_shutdown_ready_.wait(false);
+    is_shutdown_ready_.wait(false, std::memory_order_acquire);
 
     // Subtract the reference from the aggregated refcount
     auto prev =
@@ -141,7 +141,7 @@ public:
     int64_t pending_count = 0;
 
     auto ul = refcount_.lock_threads();
-    refcount_.for_each(ul, [this, &pending_count](Refcount &refcount) {
+    refcount_.for_each(ul, [&pending_count](Refcount &refcount) {
       int64_t prev_count = refcount.count_->exchange(kShutdownValue);
 
       // The value here could be: some value near kInitializedValue, or
