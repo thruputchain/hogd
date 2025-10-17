@@ -66,8 +66,8 @@ public:
 
   void release_balance(const Address &addr, int128_t delta);
 
-  void log_new_invoke_tx() {};// pending_invoke_txes_.inc(1); }
-  void log_closed_invoke_tx() {};// pending_invoke_txes_.inc(-1); }
+  void log_new_invoke_tx() {};    // pending_invoke_txes_.inc(1); }
+  void log_closed_invoke_tx() {}; // pending_invoke_txes_.inc(-1); }
 
 private:
   struct ItemLock {
@@ -82,7 +82,7 @@ private:
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
-  //PerThreadCounter<int32_t> pending_invoke_txes_;
+  // PerThreadCounter<int32_t> pending_invoke_txes_;
 
   // raw locking operations.
   static inline HogDBStatus<int128_t>

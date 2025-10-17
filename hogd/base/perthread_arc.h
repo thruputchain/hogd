@@ -5,7 +5,6 @@
 #include <concepts>
 #include <cstdint>
 #include <memory>
-#include <print>
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
@@ -62,13 +61,14 @@ public:
 
       if (is_shutdown_ready_) {
         // We're in shutdown mode, so we cannot acquire a reference.
-        refcount_->count_->store(kShutdownValue);
+        refcount_->count_->store(kShutdownValue, std::memory_order_relaxed);
         return false;
       }
 
       // We can acquire a reference, and we know that the next call to
       // initiate_shutdown() will track our thread's refcount.
-      refcount_->count_->store(kInitializedValue + 1);
+      refcount_->count_->store(kInitializedValue + 1,
+                               std::memory_order_relaxed);
       return true;
     }
 
@@ -92,7 +92,7 @@ public:
       auto ul = refcount_.lock_threads();
 
       if (is_shutdown_ready_) {
-        refcount_->count_->store(kShutdownValue);
+        refcount_->count_->store(kShutdownValue, std::memory_order_relaxed);
         // now reduce the active refcount by 1, and check if there are any
         // references left
         auto prev =
@@ -103,7 +103,8 @@ public:
 
       // otherwise, initialize the refcount to -1; we're not in shutdown, so we
       // must return false.
-      refcount_->count_->store(kInitializedValue - 1);
+      refcount_->count_->store(kInitializedValue - 1,
+                               std::memory_order_relaxed);
       return false;
     }
 
@@ -133,7 +134,7 @@ public:
   bool initiate_shutdown()
   {
     // already being shutdown
-    if (is_shutdown_ready_) {
+    if (is_shutdown_ready_.load(std::memory_order_acquire)) {
       return false;
     }
 
@@ -173,7 +174,7 @@ public:
 
   ~PerThreadARC()
   {
-    if (!is_shutdown_ready_) {
+    if (!is_shutdown_ready_.load(std::memory_order_acquire)) {
       [[maybe_unused]]
       auto r = initiate_shutdown();
       assert(r);
