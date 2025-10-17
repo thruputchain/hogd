@@ -323,7 +323,7 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
   }
 
   itx->commit();
-  ctx_.close_invoke_tx(kGenesisBlockID, 0);
+  ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   uint128_t initial_hog_token_supply =
       GenesisBlockLoader::initial_hog_token_supply();

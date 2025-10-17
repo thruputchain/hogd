@@ -4,7 +4,6 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
-#include <memory>
 
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"

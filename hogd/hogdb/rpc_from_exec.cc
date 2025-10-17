@@ -135,7 +135,7 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     }
   }
   itx->commit();
-  ctx_.close_invoke_tx(block, tx);
+  ctx_.close_invoke_tx(block, tx, itx);
 
   return RPCError::kRPCNone;
 }
@@ -147,7 +147,8 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
   if (!itx)
     return RPCError::kRPCBadBlockID;
   itx->abort();
-  ctx_.close_invoke_tx(block, tx);
+  ctx_.close_invoke_tx(block, tx, itx);
+
   return RPCError::kRPCNone;
 }
 

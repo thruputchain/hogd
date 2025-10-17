@@ -77,7 +77,7 @@ public:
   // Returns nullptr if the bid is not open.
   InvokeTX *get_invoke_tx(BlockTXID bid, InvokeTXID iid);
   // removes an invoke transaction.
-  void close_invoke_tx(BlockTXID bid, InvokeTXID iid);
+  void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
   HogDBStatus<void> update_dbtip(BlockTXID bid);
 
@@ -155,13 +155,11 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 }
 
 inline void
-RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid)
+RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx)
 {
-  auto [tx, ul] = invoke_txes_.find(std::make_pair(bid, iid));
-  assert(tx != nullptr);
-  bool destroy_blocktx = tx->release_blocktx_reference();
-  invoke_txes_.remove(std::make_pair(bid, iid), ul);
-  if (destroy_blocktx) [[unlikely]] {
+  bool destroy_blocktx = itx->release_blocktx_reference();
+  invoke_txes_.remove(std::make_pair(bid, iid));
+  if (destroy_blocktx) {
     remove_shutdown_block_tx(bid);
   }
 }

@@ -98,7 +98,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     cleanup.release();
 
     itx->commit();
-    ctx.close_invoke_tx(1, 1);
+    ctx.close_invoke_tx(1, 1, itx);
 
     auto *btx = ctx.get_block_tx(1);
     assert(btx != nullptr);
