@@ -75,7 +75,7 @@ public:
   // commit commits pending changes to the BlockTX.
   void commit();
   // abort rolls back pending changes to the BlockTX.
-  void abort(bool release_reference = true);
+  void abort(bool release_reference = true) noexcept;
 
   // create_savepoint creates a savepoint of the current transaction state. It
   // returns a depth that can be used to restore to this state later.

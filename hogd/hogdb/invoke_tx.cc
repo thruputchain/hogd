@@ -203,7 +203,7 @@ InvokeTX::commit()
 }
 
 void
-InvokeTX::abort(bool release_reference)
+InvokeTX::abort(bool release_reference) noexcept
 {
   if (release_reference) {
     assert(reference_tracker_.held_);
