@@ -39,7 +39,7 @@ struct ForeignRootInvokeResult {
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
 
 // Type of the function pointer used within a mock contract.
@@ -63,26 +63,26 @@ struct ForeignTryCommitResult {
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
 
 struct CreateDBResult {
   void *db;
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
 
-CreateDBResult create_db();
-TestFFIErrorCode free_db(void *ptr);
+struct CreateDBResult create_db();
+enum TestFFIErrorCode free_db(void *ptr);
 
-TestFFIErrorCode advance_new_block(void *db);
+enum TestFFIErrorCode advance_new_block(void *db);
 
 struct OpenRuntimeContextResult {
   void *context;
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
 
-OpenRuntimeContextResult open_runtime_context();
-TestFFIErrorCode close_runtime_context(void *context);
+struct OpenRuntimeContextResult open_runtime_context();
+enum TestFFIErrorCode close_runtime_context(void *context);
 
 // Returns 0 for success, nonzero for some error code
 // These errors should not be handled by a contract,
@@ -93,9 +93,10 @@ TestFFIErrorCode close_runtime_context(void *context);
 // Contract(ContractType::kMockTest, id) within the database.  If that creation
 // is performed without calling this method, instantiating the contract will
 // fail.
-TestFFIErrorCode register_new_contract(void *context, int32_t mock_contract_id,
-                                       ForeignEntryPoint entry_point,
-                                       void *foreign_context);
+enum TestFFIErrorCode register_new_contract(void *context,
+                                            int32_t mock_contract_id,
+                                            ForeignEntryPoint entry_point,
+                                            void *foreign_context);
 
 // Methods to assist in setup for a test.
 // Note that methods for implementing view isolation of one block from a
@@ -106,45 +107,46 @@ TestFFIErrorCode register_new_contract(void *context, int32_t mock_contract_id,
 //
 // setup_create_contract creates a contract that is _visible_ in the current
 // block.
-TestFFIErrorCode setup_create_contract(void *context, void *db,
-                                       uint8_t const *contract_bytes,
-                                       uint32_t contract_len);
+enum TestFFIErrorCode setup_create_contract(void *context, void *db,
+                                            uint8_t const *contract_bytes,
+                                            uint32_t contract_len);
 
 // setup_create_contract creates a contract that is _visible_ in the current
 // block.
 // contract_hash must be a pointer to a 32-byte SHA256Hash.
 // contract_size is the size of the contract in bytes.
-TestFFIErrorCode setup_deploy_contract(void *db, const uint8_t *deployment_addr,
-                                       const uint8_t *contract_hash,
-                                       uint32_t contract_size);
+enum TestFFIErrorCode setup_deploy_contract(void *db,
+                                            const uint8_t *deployment_addr,
+                                            const uint8_t *contract_hash,
+                                            uint32_t contract_size);
 
-TestFFIErrorCode
+enum TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens);
 
 struct OpenSyscallHandlerResult {
   void *syscall_handler;
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
 // db must have been returned by create_db()
 // rc must have been returned by open_runtime_context()
-OpenSyscallHandlerResult open_syscall_handler(void *db, void *rc,
-                                              const unsigned char *signed_tx,
-                                              unsigned int signed_tx_len);
-TestFFIErrorCode close_syscall_handler(void *syscall_handler);
+struct OpenSyscallHandlerResult
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
+                     unsigned int signed_tx_len);
+enum TestFFIErrorCode close_syscall_handler(void *syscall_handler);
 
 // Get the event log for the current transaction.
 // syscall_handler must have been returned by open_syscall_handler()
 // buffer must be of the proper size for the event log for the tx (query from
 // get_event_log_len)
-TestFFIErrorCode get_event_log(void *syscall_handler, unsigned char *buffer,
-                               uint32_t buffer_len);
+enum TestFFIErrorCode get_event_log(void *syscall_handler,
+                                    unsigned char *buffer, uint32_t buffer_len);
 
 struct GetEventLogLenResult {
   uint32_t len;
-  TestFFIErrorCode ffi_error_code;
+  enum TestFFIErrorCode ffi_error_code;
 };
-GetEventLogLenResult get_event_log_len(void *syscall_handler);
+struct GetEventLogLenResult get_event_log_len(void *syscall_handler);
 
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,
