@@ -81,7 +81,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "n:")) != -1) {
+  while ((opt = getopt(argc - 1, argv + 1, "n:")) != -1) {
     switch (opt) {
     case 'n':
       nthreads = std::stoi(optarg);
