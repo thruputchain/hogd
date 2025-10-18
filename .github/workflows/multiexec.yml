@@ -11,7 +11,7 @@ jobs:
   bench_servers:
     strategy:
       matrix:
-        runner: [client, hog7, hog8] # client is hog11
+        runner: [client, hog7, hog8, hog6] # client is hog11
     runs-on: ${{ matrix.runner }}
     steps:
     - name: Clean up .gitconfig
@@ -106,8 +106,9 @@ jobs:
         ./scripts/wait-port.sh hog7 11111  
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
+        ./scripts/wait-port.sh hog6 11111
     - name: launch multiexec runner
-      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100
+      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100
  
     - name: cleanup control servers
       if: always()
@@ -115,6 +116,7 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
 
 
 
