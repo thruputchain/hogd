@@ -336,6 +336,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       break;
     }
   };
+  for (auto &exec_card : exec_cards) {
+    await_ready(exec_card);
+  }
 
   using exec_client_t = ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
@@ -488,6 +491,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "num_executors={} tps={}",
                  elapsed_time, num_txs_per_block, num_concurrent_rpcs,
                  num_accounts, exec_clients.size(), tps);
+    block_validation_queue.reset_offset();
+    parent_block_number = current_block_number;
+    current_block_number++;
   }
   // there's got to be a better way to do this
 
