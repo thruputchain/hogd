@@ -375,30 +375,29 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context_cast =
-      static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
-  auto *db_cast = static_cast<hogd::DBContext *>(db);
+      static_cast<std::shared_ptr<MockRuntimeContext> *>(context);
+  auto *db_cast = static_cast<DBContext *>(db);
 
-  hogd::Contract contract;
+  Contract contract;
   try {
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
   } catch (x23::XdrException &e) {
-    hogd::log_error("error deserializing contract: {}", e);
+    log_error("error deserializing contract: {}", e);
     return kTestFFIErrorCodeDeserializeError;
   }
 
   // make sure the contract has already been registered with the instantiation
   // context
-  if (contract.contract_type() == hogd::ContractType::kMockTest) {
+  if (contract.contract_type() == ContractType::kMockTest) {
     if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
-      hogd::error(
-          "contract has not been registered with the instantiation context");
+      error("contract has not been registered with the instantiation context");
       return kTestFFIErrorCodeCreateNonexistentMockContract;
     }
   }
 
   auto h = sha256(contract);
 
-  db_cast->get_base_db().write_contract(h, std::make_shared<hogd::Contract>(
+  db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
                                                std::move(contract)));
   return kTestFFIErrorCodeNone;
 }
@@ -411,30 +410,29 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   if (db == nullptr || contract_hash == nullptr || deployment_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
-  auto *db_cast = static_cast<hogd::DBContext *>(db);
+  auto *db_cast = static_cast<DBContext *>(db);
 
-  hogd::SHA256Hash h;
+  SHA256Hash h;
   std::memcpy(h.data(), contract_hash, h.size());
-  hogd::ContractAddress addr;
+  ContractAddress addr;
   std::memcpy(addr.data(), deployment_addr, addr.size());
 
   // check that the contract hash has been created
   if (db_cast->get_base_db().get_post_block_contract(h) == nullptr) {
-    hogd::error(
+    error(
         "Attempt to deploy contract that has not been created in the database");
     return kTestFFIErrorCodeDeployNonexistentContract;
   }
 
-  std::shared_ptr<hogd::StorageItemWrapper> item =
-      std::make_shared<hogd::StorageItemWrapper>(
-          hogd::DeployedContractHash{.hash = h, .contract_size = contract_size},
-          &hogd::kCostModel);
+  std::shared_ptr<StorageItemWrapper> item =
+      std::make_shared<StorageItemWrapper>(
+          DeployedContractHash{.hash = h, .contract_size = contract_size},
+          &kCostModel);
 
   db_cast->get_base_db().write_item(
-      hogd::AddressAndKey{
-          .address = addr,
-          .key = hogd::StorageKey(
-              hogd::StorageKeyType::kStorageKeyTypeAddressMetadata)},
+      AddressAndKey{.address = addr,
+                    .key = StorageKey(
+                        StorageKeyType::kStorageKeyTypeAddressMetadata)},
       std::move(item));
   return kTestFFIErrorCodeNone;
 }
