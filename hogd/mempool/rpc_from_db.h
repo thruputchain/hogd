@@ -47,9 +47,13 @@ public:
     co_return;
   }
 
+  // We mark [transfers] as a const reference because we copy it when passing it
+  // to [handle_transfer] below. If we change this in the future, then we may
+  // want to remove the const reference.
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
     CHECK_PTR(scheduler_.get());
+    // See the comment above if you change this.
     handle_transfer(transfers);
     co_return;
   }
