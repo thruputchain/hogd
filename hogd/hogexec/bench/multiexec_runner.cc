@@ -252,7 +252,9 @@ struct BlockValidationQueue {
 namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts, unsigned int num_concurrent_rpcs,
+                    unsigned int num_accounts, unsigned int n_connections,
+                    unsigned int n_coros_per_connection,
+                    unsigned int batch_size,
                     unsigned int num_txs_per_block)
 {
   std::vector<ControlServerHandle> control_server_handles;
@@ -311,7 +313,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hogexec/hogexec",
-        {std::format("{}:{}", hostname, sched_exec_port)});
+        {std::format("{}:{}", hostname, sched_exec_port), "-n", "1024"});
   }
 
   auto db_cards = sched_db_test.impl_.await_shard_cards(1);
@@ -431,9 +433,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
-  const int n_coros_per_connection = 10;
-  const int n_connections = 10;
-
   std::vector<exec_client_t> coro_exec_clients;
   coro_exec_clients.reserve(n_connections);
   for (size_t i = 0; i < n_connections; i++) {
@@ -487,10 +486,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} threads={} nacc={} "
-                 "num_executors={} tps={}",
-                 elapsed_time, num_txs_per_block, num_concurrent_rpcs,
-                 num_accounts, exec_clients.size(), tps);
+    std::println("time taken: {} ns for txs={} nconnections={} ncoros_per_connection={} nacc={} "
+                 "batch_size={} tps={}",
+                 elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
+                 num_accounts, batch_size, tps);
     block_validation_queue.reset_offset();
     parent_block_number = current_block_number;
     current_block_number++;
@@ -597,7 +596,17 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 8192, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 20, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 2, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100, 1'000'000);
+
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 20, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 2, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100, 1'000'000);
+
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 10, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 1000, 1'000'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
