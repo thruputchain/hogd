@@ -299,7 +299,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to query work dir");
   }
 
-  control_server_handles[0].ci_client.clear_work_dir();
+  for (auto &control_server_handle : control_server_handles) {
+    control_server_handle.ci_client.clear_work_dir();
+  }
 
   std::string work_dir_str = std::format("{}", work_dir.work_dir());
   info("using work dir: {}", work_dir_str);
@@ -462,6 +464,11 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
         auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
         assert(r.size() == batch.size());
+        for (auto const &result : r) {
+          if (result.result() != ExecResult::ExecResultOK) {
+            throw std::runtime_error("Failed to propose batch");
+          }
+        }
       }
     };
 
@@ -487,6 +494,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
     std::println("time taken: {} ns for txs={} nconnections={} ncoros_per_connection={} nacc={} "
+                 "batch_size={} tps={}",
+                 elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
+                 num_accounts, batch_size, tps);
+    info("time taken: {} ns for txs={} nconnections={} ncoros_per_connection={} nacc={} "
                  "batch_size={} tps={}",
                  elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
                  num_accounts, batch_size, tps);
@@ -597,16 +608,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 20, 100, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 2, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 100, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 100, 1'000'000);
 
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 20, 100, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 2, 100, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100, 1'000'000);
-
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 10, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 10, 1000, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1000, 1'000'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
