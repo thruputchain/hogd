@@ -126,11 +126,11 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
                                         /*force=*/false));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
-    const TxInfo i{.age = age,
-                   .account = tx.tx.invocation.invoked_address,
-                   .tx_hash = tx_hash,
-                   .tx = tx};
-    const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, i});
+    const TxInfo info{.age = age,
+                      .account = tx.tx.invocation.invoked_address,
+                      .tx_hash = tx_hash,
+                      .tx = tx};
+    const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
     co_await cycle_if_needed(tx.tx.invocation.invoked_address,
@@ -142,17 +142,18 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
           to_xdr(from_xdr(cached_hogs_[tx.tx.invocation.invoked_address]
                               .num_hogs[kHogAgeGroupToSchedule]) -
                  tx.tx.invocation.gas_limit);
-      CHECK(account_to_tx_[i.account].insert(&it->second).second);
-      CHECK(age_to_tx_[i.age].insert(&it->second).second);
+      CHECK(account_to_tx_[info.account].insert(&it->second).second);
+      CHECK(age_to_tx_[info.age].insert(&it->second).second);
     }
     else {
       // Not enough hogs for this tx.
-      CHECK(stranded_[i.account][tx.tx.invocation.gas_limit]
+      CHECK(stranded_[info.account][tx.tx.invocation.gas_limit]
                 .insert(&it->second)
                 .second);
     }
     {
-      const BlockHeight expiry_height = i.tx.tx.uniquifier.block_expiry_height;
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
       CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     }
     size_++;
