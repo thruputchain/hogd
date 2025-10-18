@@ -87,27 +87,17 @@ ExecutorContext::propose_transaction_batch(
     SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
- // auto start = x23::fastclock::get_ns();
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
   worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
-  //  auto start = x23::fastclock::get_ns();
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
       auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
       batch_res.push_back(res);
     }
-  //  auto end = x23::fastclock::get_ns();
- //   info("ExecutorContext::propose_transaction_batch: time taken: {} ns for "
- //        "txs={}",
- //        end - start, signed_txs.size());
     cb(std::move(batch_res));
   });
   auto r = co_await async;
   assert(r.size() == signed_txs.size());
-  //auto end = x23::fastclock::get_ns();
-  //info("ExecutorContext::propose_transaction_batch (outside): time taken: {} "
- //      "ns for txs={}",
-  //     end - start, signed_txs.size());
   co_return r;
 }
 
