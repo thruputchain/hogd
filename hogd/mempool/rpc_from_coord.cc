@@ -236,6 +236,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  info("nominate keep going");
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.scheduler_nomination().block_id = block_id;
@@ -248,9 +249,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
+  info("nominate keep going");
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
+  info("nominate keep going");
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -259,8 +262,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  info("nominate keep going");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
+  info("nominate keep going");
   // We remove failed txs from [nomination.transaction_hashes], so we iterate
   // back
   for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
