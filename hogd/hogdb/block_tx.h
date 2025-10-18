@@ -46,13 +46,6 @@ public:
   // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
-  // abort drops all changes.
-  void abort()
-  {
-    addr_balance_locks_.clear();
-    item_locks_.clear();
-  }
-
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.

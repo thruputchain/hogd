@@ -104,11 +104,17 @@ public:
     info("Done initializing experiment. Now running.");
   }
 
-  void work()
+  void run(bool print_stats)
   {
     DbTip db_tip = init_block_db_tip_;
 
+    const std::chrono::steady_clock::time_point start =
+        std::chrono::steady_clock::now();
+    size_t total_transactions_nominated = 0;
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
+      const std::chrono::steady_clock::time_point block_start =
+          std::chrono::steady_clock::now();
+
       const SignedTransactionBatch txs =
           loadgen_client_.get_transactions(kLoadgenTxBatchSize);
 
@@ -124,6 +130,43 @@ public:
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
+      total_transactions_nominated +=
+          nomination.nomination.transaction_hashes.size();
+
+      if (print_stats) {
+        // Compute and print the throughputs.
+        const std::chrono::steady_clock::time_point now =
+            std::chrono::steady_clock::now();
+        int64_t block_duration_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(now -
+                                                                  block_start)
+                .count();
+        double block_duration_sec =
+            block_duration_us / static_cast<double>(1'000'000);
+        int64_t overall_duration_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(now - start)
+                .count();
+        double overall_duration_sec =
+            overall_duration_us / static_cast<double>(1'000'000);
+        CHECK_GT(block_duration_us, 0L);
+        CHECK_GT(block_duration_sec, 0.0);
+        CHECK_GT(overall_duration_us, 0L);
+        CHECK_GT(overall_duration_sec, 0.0);
+
+        double block_throughput_sec =
+            nomination.nomination.transaction_hashes.size() /
+            block_duration_sec;
+        double overall_throughput_sec =
+            total_transactions_nominated / overall_duration_sec;
+        info("Block duration (s), {:.2f}, Num txs in block, {}, Overall "
+             "duration (s), {:.2f}, Overall number of txs, {}",
+             block_duration_sec,
+             nomination.nomination.transaction_hashes.size(),
+             overall_duration_sec, total_transactions_nominated);
+        info("Block throughput (tx/s), {:.2f}, Overall throughput (tx/s), "
+             "{:.2f}",
+             block_throughput_sec, overall_throughput_sec);
+      }
     }
   }
 

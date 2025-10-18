@@ -20,6 +20,7 @@ add_library(base_test_objects OBJECT
   bits_test.cc
   cpputil_test.cc
   io_test.cc
+  perthread_arc_test.cc
   perthread_test.cc
   status_test.cc
   string_test.cc

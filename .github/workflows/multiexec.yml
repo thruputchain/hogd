@@ -3,6 +3,10 @@ name: MultiExec Interface Benchmark
 on:
   workflow_dispatch:
 
+concurrency:
+  group: cluster
+  cancel-in-progress: false
+
 jobs:
   bench_servers:
     strategy:

@@ -8,6 +8,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
@@ -114,7 +115,7 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockAfterInit)
   };
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_.impl_.init(std::move(exec_result));
+  rpc_server_.impl_.init(std::move(exec_result), available_parallelism());
 
   // Call open_proposal_block after init - should succeed
   auto result = client_.executorsched_open_proposal_block(test_block_id);
@@ -137,7 +138,7 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_.impl_.init(std::move(exec_result));
+  rpc_server_.impl_.init(std::move(exec_result), available_parallelism());
 
   // Call open_proposal_block multiple times - should all succeed
   auto result1 = client_.executorsched_open_proposal_block(test_block_id);
@@ -145,6 +146,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   auto result3 = client_.executorsched_open_proposal_block(test_block_id);
 
   // open corresponding db block
+  // Without this, the executor's calls to lookup deployed contracts will fail
+  // (with bad block id, instead of the expected "contract not found")
   auto db_res = db_client_.dbsched_create_snapshot(
       0, test_block_id, BlockExecutionMode::kBlockExecutionModeProposal);
   if (db_res != DbSchedResult::DbSchedResultOK) {
@@ -188,7 +191,7 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_.impl_.init(std::move(exec_result));
+  rpc_server_.impl_.init(std::move(exec_result), available_parallelism());
 
   EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id), ExecResult::ExecResultOK);
 

@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -20,6 +21,7 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
@@ -28,8 +30,10 @@ namespace hogd {
 // savepoints. The caller must provide synchronization if needed.
 class InvokeTX {
 public:
-  InvokeTX(BlockTX &block) : block_(block) {}
+  InvokeTX(PerThreadARC<BlockTX> &block) : block_(block) {}
   ~InvokeTX() { abort(); }
+
+  InvokeTX(InvokeTX &&other) noexcept = default;
 
   // commit commits pending changes to the BlockTX.
   void commit();
@@ -99,6 +103,8 @@ public:
   HogDBStatus<void> request_consume_uniquifier(Address const &addr,
                                                Uniquifier uniquifier);
 
+  bool release_blocktx_reference() { return block_.release_reference(); }
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -117,7 +123,7 @@ private:
   };
 
   int tx_depth_{0};
-  BlockTX &block_;
+  PerThreadARC<BlockTX> &block_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
   // combine it with the latest balance delta for that address.
@@ -140,7 +146,7 @@ private:
   HogDBStatus<void> update_balance_lock(Address const &addr);
   HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr);
 
-  void assert_is_valid() const
+  void assert_is_valid() const noexcept
   {
     assert(tx_depth_ >= 0);
     std::unordered_map<Address, int128_t> balance_deltas;

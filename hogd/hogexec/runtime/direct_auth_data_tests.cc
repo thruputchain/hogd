@@ -50,12 +50,6 @@ public:
     return delta;
   }
 
-  static auto make_delete_delta()
-  {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeDelete);
-    return delta;
-  }
-
   void check_balance(ContractAddress contract_addr, int128_t expected_balance)
   {
     auto bal = lookup_storage_item_from_db(

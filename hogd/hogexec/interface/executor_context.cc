@@ -1,10 +1,11 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
 #include <cassert>
-#include <print>
+#include <utility>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -88,7 +89,7 @@ ExecutorContext::propose_transaction_batch(
   assert(mode_ == ExecutionMode::kProposing);
   auto start = x23::fastclock::get_ns();
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
-  auto f = worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
+  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     auto start = x23::fastclock::get_ns();
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
@@ -96,18 +97,12 @@ ExecutorContext::propose_transaction_batch(
       batch_res.push_back(res);
     }
     auto end = x23::fastclock::get_ns();
-    std::println("ExecutorContext::propose_transaction_batch: time taken: {} ns for txs={}", end - start, signed_txs.size());
-    cb(batch_res);
-    //std::println("ExecutorContext::propose_transaction_batch: callback done");
-    //info("ExecutorContext::propose_transaction_batch: callback done");
-    //return;
+    info("ExecutorContext::propose_transaction_batch: time taken: {} ns for txs={}", end - start, signed_txs.size());
+    cb(std::move(batch_res));
   });
   auto r = co_await async;
-  //info("ExecutorContext::propose_transaction_batch: waiting for future");
-  //f.get();
-  //info("ExecutorContext::propose_transaction_batch: future got");
   auto end = x23::fastclock::get_ns();
-  std::println("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
+  info("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
   co_return r;
 }
 
@@ -123,7 +118,7 @@ ExecutorContext::validate_transaction_batch(
       auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
       batch_res.push_back(res);
     }
-    cb(batch_res);
+    cb(std::move(batch_res));
   });
   co_return co_await async;
 }

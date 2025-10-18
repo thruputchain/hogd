@@ -34,6 +34,9 @@ private:
 // coordinator.
 class Executor {
 public:
+  Executor(size_t n_exec_threads = available_parallelism())
+    : n_exec_threads_(n_exec_threads)
+  {}
   ~Executor() { await_shutdown_request(); }
 
   uint16_t start(std::string const &self_hostname, uint16_t self_port,
@@ -55,7 +58,7 @@ public:
             x23::HostPort(self_hostname, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
-    server_.impl_.init(std::move(exec_result));
+    server_.impl_.init(std::move(exec_result), n_exec_threads_);
 
     return executor_port;
   }
@@ -65,6 +68,8 @@ public:
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;
+
+  const int n_exec_threads_;
 };
 
 } // namespace hogd

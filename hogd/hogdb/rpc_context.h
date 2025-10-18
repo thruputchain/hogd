@@ -18,6 +18,7 @@
 
 #include "db_sched.hh"
 #include "hogd/base/perthread.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/block_tx.h"
@@ -33,6 +34,20 @@ namespace hogd {
 
 // RPCContext contains all the state that needs to be shared across RPCs handled
 // by the database.
+//
+// The block txs are refcounted.
+// Each InvokeTX acquires a reference; when the invoke tx is closed, it releases
+// the reference to the PerThreadARC<BlockTX>. The PerThreadARC<BlockTX> lives
+// until both there are no references remaining to it, and the PerThreadARC has
+// been explicitly shutdown (via initiate_shutdown()). Closing the BlockTX
+// initiates shutdown of the PerThreadARC<BlockTX>. If the BlockTX is shutdown
+// and the reference closed is the last reference, the BlockTX is garbage
+// collected (that condition is checked when an InvokeTX is closed, and when the
+// BlockTX is committed or abandoned).  When a BlockTX is committed, all pending
+// InvokeTXs must have been closed (so the refcount must be zero). If the
+// blockTX is abandoned, it is allowed for there to be pending, outstanding
+// InvokeTXs. However, you should eventually close all pending InvokeTXs, or
+// else the BlockTX and InvokeTXs will never be garbage collected.
 class RPCContext {
 public:
   using sched_db_client_t =
@@ -42,6 +57,8 @@ public:
              std::unique_ptr<sched_db_client_t> sched_db_client)
     : db_(db), trie_(trie), sched_db_client_(std::move(sched_db_client))
   {}
+
+  ~RPCContext();
 
   // getters.
   HogDBDAO &get_db() const { return db_; }
@@ -59,26 +76,34 @@ public:
   }
 
   // opens a new block transaction.
-  HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
+  // Does not acquire a reference to the blocktx.
+  HogDBStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid);
   // retrieves an open block transaction.
-  BlockTX *get_block_tx(BlockTXID bid);
-  // closes a block transaction.
-  void close_block_tx(BlockTXID bid);
+  // If the returned value is not null, then
+  // the caller has acquired a reference to the blocktx.
+  PerThreadARC<BlockTX> *get_block_tx(BlockTXID bid,
+                                      bool acquire_reference = true);
 
   // retrieves an invoke transaction (and creates it if it doesn't exist).
   // Returns nullptr if the bid is not open.
   InvokeTX *get_invoke_tx(BlockTXID bid, InvokeTXID iid);
   // removes an invoke transaction.
-  void close_invoke_tx(BlockTXID bid, InvokeTXID iid);
+  // If the blocktx is shutdown and the reference closed is the last reference,
+  // the blocktx is garbage collected.
+  void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
   HogDBStatus<void> update_dbtip(BlockTXID bid);
 
   const auto &get_sched_db_client() { return sched_db_client_; }
 
+  // The block ID must have already been shut down and have no outstanding
+  // references.
+  void remove_shutdown_block_tx(BlockTXID bid);
+
 private:
   struct BlockCache {
     std::mutex lock;
-    std::unordered_map<BlockTXID, BlockTX *> blocks;
+    std::unordered_map<BlockTXID, PerThreadARC<BlockTX> *> blocks;
 
     BlockCache() = default;
     BlockCache(BlockCache &&cache) noexcept : blocks(std::move(cache.blocks)) {}
@@ -96,7 +121,11 @@ private:
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
-  std::unordered_map<BlockTXID, BlockTX> block_txes_;
+  // The block txs are refcounted.
+  // Each InvokeTX acquires a reference;  when the InvokeTX is closed, it
+  // releases the reference, and garbage collects the block tx if the blocktx is
+  // shutdown and the reference closed is the last reference.
+  std::unordered_map<BlockTXID, PerThreadARC<BlockTX>> block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
   // pending invocation transactions.
@@ -105,20 +134,28 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
 
   // slow path for get_block_tx().
-  BlockTX *get_block_tx_slow(BlockTXID bid);
+  PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,
+                                           bool acquire_reference);
+
+  void release_block_tx_reference(BlockTXID bid);
 };
 
-inline BlockTX *
-RPCContext::get_block_tx(BlockTXID bid)
+inline PerThreadARC<BlockTX> *
+RPCContext::get_block_tx(BlockTXID bid, bool acquire_reference)
 {
   {
     BlockCache &cache = *block_tx_cache_;
     std::scoped_lock g(cache.lock); // NOTE: very low contention
     auto it = cache.blocks.find(bid);
-    if (it != cache.blocks.end())
-      return it->second;
+    if (it != cache.blocks.end()) {
+      if (acquire_reference && !it->second->try_acquire_reference())
+          [[unlikely]]
+        return nullptr;
+      return (it->second);
+    }
   }
-  return get_block_tx_slow(bid);
+
+  return get_block_tx_slow(bid, acquire_reference);
 }
 
 inline InvokeTX *
@@ -127,9 +164,10 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
   auto key = std::make_pair(bid, iid);
   auto [tx, ul] = invoke_txes_.find(key);
   if (!tx) {
-    BlockTX *btx = get_block_tx(bid);
+    PerThreadARC<BlockTX> *btx = get_block_tx(bid);
     if (!btx) [[unlikely]]
       return nullptr;
+    // get_block_tx() acquires a reference to the blocktx.
     tx = invoke_txes_.insert(key, InvokeTX(*btx), ul);
     assert(tx != nullptr);
   }
@@ -137,9 +175,13 @@ RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 }
 
 inline void
-RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid)
+RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx)
 {
+  bool destroy_blocktx = itx->release_blocktx_reference();
   invoke_txes_.remove(std::make_pair(bid, iid));
+  if (destroy_blocktx) {
+    remove_shutdown_block_tx(bid);
+  }
 }
 
 } // namespace hogd

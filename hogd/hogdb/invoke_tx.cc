@@ -29,7 +29,7 @@ InvokeTX::read_nnint128(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.get_db().read_nnint128(key);
+    return block_.get().get_db().read_nnint128(key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   std::optional ret = change->to_nnint128();
@@ -43,7 +43,7 @@ InvokeTX::read_bytes(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.get_db().read_bytes(key);
+    return block_.get().get_db().read_bytes(key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   OwningSpan<const std::byte> ret = change->to_bytes();
@@ -58,7 +58,7 @@ InvokeTX::get_storage_balance_change(Address const &addr)
   auto snapshot_base = [&] -> HogDBStatus<int128_t> {
     auto item_change = changes_[make_address_balance_item_key(addr)];
     if (item_change.empty()) {
-      auto val = block_.get_db().read_address_balance(addr);
+      auto val = block_.get().get_db().read_address_balance(addr);
       if (!val) {
         if (val.error() == HogDBCode::kNotFound) {
           return 0;
@@ -121,7 +121,7 @@ InvokeTX::update_balance_lock(Address const &addr)
   auto &change = changes_[key];
   if (change.empty()) {
 
-    auto status = block_.lock(key, new_item);
+    auto status = block_.get().lock(key, new_item);
     if (!status) {
       return status.error();
     }
@@ -135,7 +135,7 @@ InvokeTX::update_balance_lock(Address const &addr)
   assert(last.change.is_nnint128());
   new_item.narrow(last.change);
 
-  auto status = block_.modify_lock(key, last.change, new_item);
+  auto status = block_.get().modify_lock(key, last.change, new_item);
   if (!status) {
     return status.error();
   }
@@ -184,7 +184,7 @@ InvokeTX::commit()
   // as committed
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      auto cost_change = block_.commit_change(key, vec.back().change);
+      auto cost_change = block_.get().commit_change(key, vec.back().change);
       assert(cost_change <= vec.back().locked_storage_cost);
       // NONDETERMINISTIC:Compute the amount of storage tokens that can be
       // released after this transaction commits.
@@ -192,7 +192,7 @@ InvokeTX::commit()
       assert(released_cost >= 0);
 
       if (released_cost > 0) {
-        block_.release_balance(key.get_address(), released_cost);
+        block_.get().release_balance(key.get_address(), released_cost);
       }
     }
   }
@@ -207,7 +207,7 @@ InvokeTX::abort()
 
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      block_.unlock(key, vec.back().change);
+      block_.get().unlock(key, vec.back().change);
     }
   }
   changes_.clear();
@@ -231,12 +231,12 @@ InvokeTX::rollback_to_savepoint(int depth)
     if (!vec.empty()) {
       // can't fail because reservation <= than previous one.
       [[maybe_unused]] HogDBStatus<int128_t> ret =
-          block_.modify_lock(key, tmp, vec.back().change);
+          block_.get().modify_lock(key, tmp, vec.back().change);
       assert(ret);
       assert(vec.back().locked_storage_cost >= *ret);
       continue;
     }
-    block_.unlock(key, tmp);
+    block_.get().unlock(key, tmp);
   }
 
   for (auto &[addr, vec] : balance_deltas_) {
@@ -303,7 +303,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDBStatus<int128_t> ret = block_.lock(key, change);
+    HogDBStatus<int128_t> ret = block_.get().lock(key, change);
     if (!ret) {
       return ret.error();
     }
@@ -327,7 +327,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   // otherwise it is an existing change, so the item is already locked.
   ItemVersion &item = v.back();
   change.narrow(item.change);
-  HogDBStatus<int128_t> ret = block_.modify_lock(key, item.change, change);
+  HogDBStatus<int128_t> ret =
+      block_.get().modify_lock(key, item.change, change);
   if (!ret) {
     return ret.error();
   }
@@ -381,7 +382,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
   }
   assert(!key.is_address_balance());
 
-  HogDBStatus<int128_t> base = block_.get_db().read_nnint128(key);
+  HogDBStatus<int128_t> base = block_.get().get_db().read_nnint128(key);
   if (!base) {
     if (base.error() != HogDBCode::kNotFound)
       return base.error();
@@ -394,7 +395,8 @@ HogDBStatus<void>
 InvokeTX::request_auth_data(Address const &addr,
                             const AuthDataChangeArgs &auth_data_change)
 {
-  auto base_auth_data = block_.get_db().read_address_account_auth_data(addr);
+  auto base_auth_data =
+      block_.get().get_db().read_address_account_auth_data(addr);
   if (!base_auth_data) {
     if (base_auth_data.error() != HogDBCode::kNotFound) {
       return base_auth_data.error();
@@ -416,7 +418,8 @@ InvokeTX::request_auth_data(Address const &addr,
 HogDBStatus<void>
 InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
 {
-  auto base_replay_cache = block_.get_db().read_address_replay_cache(addr);
+  auto base_replay_cache =
+      block_.get().get_db().read_address_replay_cache(addr);
   if (!base_replay_cache) {
     if (base_replay_cache.error() != HogDBCode::kNotFound) {
       return base_replay_cache.error();
@@ -424,7 +427,7 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
     base_replay_cache = ReplayCacheData{};
   }
 
-  HogDBStatus<DbTip> tip = block_.get_db().read_dbtip();
+  HogDBStatus<DbTip> tip = block_.get().get_db().read_dbtip();
   if (!tip)
     return tip.error();
 
