@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "exec_sched.hh"
+#include "hogd/base/os.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/init.h"
 
@@ -8,7 +9,7 @@ namespace hogd {
 
 TEST(ExecutorStateManagerTest, TestRefcounting)
 {
-  ExecutorStateManager manager(nullptr, nullptr);
+  ExecutorStateManager manager(nullptr, nullptr, available_parallelism());
 
   ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);
   ASSERT_EQ(manager.open_proposal(1), ExecResult::ExecResultOK);

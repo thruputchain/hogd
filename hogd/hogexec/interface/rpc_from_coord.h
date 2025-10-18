@@ -30,7 +30,7 @@ public:
 
   ExecutorMempoolRpc() = default;
 
-  void init(IntroExecResult &&exec_result)
+  void init(IntroExecResult &&exec_result, size_t n_exec_threads)
   {
     self_executor_id_ = exec_result.exec_id;
 
@@ -40,7 +40,8 @@ public:
         EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
-                                               std::move(event_server_proxy));
+                                               std::move(event_server_proxy),
+                                               n_exec_threads);
     ready_flag_ = true;
   }
 
