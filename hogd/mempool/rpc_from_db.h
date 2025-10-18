@@ -49,15 +49,14 @@ public:
 
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
-    info("scheddb_hogs_transferred");
     CHECK_PTR(scheduler_.get());
     handle_transfer(transfers);
-    info("this should print before the handle transfer");
     co_return;
   }
 
   x23::Detached handle_transfer(HogsTransferred transfers)
   {
+    // TODO(jhumphri): Change to GetThreadPool().
     co_await default_threadpool().bg(); // Switch to thread pool
 
     for (const Delta &d : transfers.deltas) {
@@ -82,11 +81,8 @@ public:
       }
     }
 
-    info("set to true, scheduler pointer is {}", (void *)scheduler_.get());
     CHECK(!scheduler_->transfer_finished_);
     scheduler_->transfer_finished_ = true;
-
-    info("done here");
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)

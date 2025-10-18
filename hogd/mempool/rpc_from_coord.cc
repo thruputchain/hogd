@@ -211,32 +211,27 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  info("nominate start, num scheduler txs {}", scheduler_->size());
   // TODO(jhumphri): Wait for the [scheddb_hogs_transferred] messages to be
   // processed before responding.
   while (!scheduler_->transfer_finished_) {
     co_await default_coropoll().pool_.bg();
   }
   scheduler_->transfer_finished_ = false;
-  info("nominate done waiting for transfer_finished");
 
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
-    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
-    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  info("nominate keep going");
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.scheduler_nomination().block_id = block_id;
@@ -249,23 +244,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
-  info("nominate keep going");
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
-  info("nominate keep going");
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
-    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  info("nominate keep going");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
-  info("nominate keep going");
   // We remove failed txs from [nomination.transaction_hashes], so we iterate
   // back
   for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
@@ -286,7 +276,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // empty. Thus, we fail the nomination.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
-    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -297,7 +286,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
 
-  info("nominate SUCCEED");
   co_return result;
 }
 
