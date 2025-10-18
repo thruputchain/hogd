@@ -165,6 +165,7 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
 
   auto serialized_stx = x23::serialize(stx);
   auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
 
   auto result = root_invoke(syscall_handler);
   EXPECT_EQ(result.result.panic,
