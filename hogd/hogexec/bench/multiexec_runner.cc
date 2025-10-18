@@ -443,26 +443,30 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto connection_coro = [] (auto& exec_client, BlockValidationQueue* queue, x23::CoroCB<void>& cb, int ncoro, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
 
     auto coro = [] (auto& exec_client, x23::CoroCB<void>& cb, BlockValidationQueue* queue, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
-      auto batch = queue->next_batch();
-      if (batch.empty()) {
-        if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
-          cb();
+      co_await default_threadpool().bg();
+      while (true) {
+        auto batch = queue->next_batch();
+        if (batch.empty()) {
+          if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
+            cb();
+          }
+          co_return;
         }
-        co_return;
-      }
-      x23::Vec<SignedTransaction> batch_vec;
-      batch_vec.reserve(batch.size());
-      for (auto const &tx : batch) {
-        batch_vec.push_back(tx);
-      }
+        x23::Vec<SignedTransaction> batch_vec;
+        batch_vec.reserve(batch.size());
+        for (auto const &tx : batch) {
+          batch_vec.push_back(tx);
+        }
 
-      auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
-      assert(r.size() == batch.size());
+        auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
+        assert(r.size() == batch.size());
+      }
     };
 
     for (size_t i = 0; i < ncoro; i++) {
       coro(exec_client, cb, queue, block_number, n_total_coros);
     }
+    co_return;
   };
 
 
