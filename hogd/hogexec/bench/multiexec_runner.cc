@@ -44,6 +44,7 @@
 #include "x23/fastclock.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
+#include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -218,9 +219,14 @@ connect_to_exec_server(const ExecCard &card)
   if (!server_addr) {
     throw std::runtime_error("Failed to connect to exec server");
   }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+  auto fd = x23::tcpconnect(server_addr.value());
+  if (!fd) {
+    throw std::runtime_error("Failed to connect to exec server");
+  }
+  return x23::rpc_stream_logged(default_coropoll(), fd.release())
       ->client(ExecutorSched1{});
 }
+
 } // namespace
 
 struct BlockValidationQueue {
@@ -318,17 +324,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   assert(db_cards.size() == 1);
   auto db_sched_client = connect_to_db_server(db_cards[0]);
 
-  std::vector<ExecutorSched1::template client<
-      x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>>
-      exec_clients;
-  exec_clients.reserve(exec_cards.size());
-  for (const auto &exec_card : exec_cards) {
-    exec_clients.emplace_back(connect_to_exec_server(exec_card));
-  }
-
-  auto await_ready = [&](auto &exec_client) {
+  auto await_ready = [&](const ExecCard &exec_card) {
+    auto exec_client = connect_to_exec_server(exec_card);
     while (true) {
-      auto res = exec_client.executorsched_ready();
+      auto res = exec_client.executorsched_ready()();
       if (res != ExecResult::ExecResultOK) {
         warn_every_n_sec(1.0, "Executor is not ready, retrying...");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -338,8 +337,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     }
   };
 
-  for (auto &exec_client : exec_clients) {
-    await_ready(exec_client);
+  using exec_client_t = ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  x23::Vec<exec_client_t> exec_clients;
+  exec_clients.reserve(exec_cards.size());
+  for (auto &exec_card : exec_cards) {
+    exec_clients.push_back(connect_to_exec_server(exec_card));
   }
 
   auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
@@ -353,7 +356,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     }
 
     for (auto &exec_client : exec_clients) {
-      auto r = exec_client.executorsched_open_proposal_block(block_number);
+      auto r = exec_client.executorsched_open_proposal_block(block_number)();
       if (r != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to open proposal block");
       }
@@ -363,7 +366,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto close_block = [&](uint64_t block_number) {
     info("closing block {}", block_number);
     for (auto &exec_client : exec_clients) {
-      exec_client.executorsched_finish_block(block_number);
+      exec_client.executorsched_finish_block(block_number)();
     }
     event_sched_client.eventsched_close_block(block_number);
 
@@ -406,7 +409,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     for (auto const &tx : init_blocks) {
 
       auto res = exec_clients.at(0).executorsched_propose_transaction(
-          current_block_number, tx);
+          current_block_number, tx)();
       if (res.result() != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to propose transaction");
       }
@@ -428,11 +431,14 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
+
+  // there's got to be a better way to do this
+
+  #if 0
+
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
   std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs,
                                               &block_validation_queue};
-  // there's got to be a better way to do this
-
   for (size_t i = 0; i < 10; i++) {
     std::println("bench rep {}", i);
     std::atomic<size_t> index = 0;
@@ -481,6 +487,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     // at least generate them off the critical path
     block_validation_queue.reset_offset();
   }
+  #endif
 }
 
 } // namespace
