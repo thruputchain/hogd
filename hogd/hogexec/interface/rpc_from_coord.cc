@@ -66,20 +66,16 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
-  info("executorsched_propose_batch A");
   auto ctx = try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
-    info("executorsched_propose_batch ret A");
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
   }
 
-  info("executorsched_propose_batch down here");
   auto ret = co_await ctx->propose_transaction_batch(signed_txs,
                                                      allocate_tx_ids(
                                                          signed_txs.size()));
-  info("executorsched_propose_batch ret B");
   co_return ret;
 }
 
