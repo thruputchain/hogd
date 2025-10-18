@@ -105,7 +105,6 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     ASSERT_TRUE((btx->get()).commit().has_value());
 
     ASSERT_TRUE(btx->initiate_shutdown());
-
     ctx.remove_shutdown_block_tx(1);
 
     ASSERT_TRUE(ctx.update_dbtip(1).has_value());

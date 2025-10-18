@@ -145,6 +145,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   auto result3 = client_.executorsched_open_proposal_block(test_block_id);
 
   // open corresponding db block
+  // Without this, the executor's calls to lookup deployed contracts will fail
+  // (with bad block id, instead of the expected "contract not found")
   auto db_res = db_client_.dbsched_create_snapshot(
       0, test_block_id, BlockExecutionMode::kBlockExecutionModeProposal);
   if (db_res != DbSchedResult::DbSchedResultOK) {
