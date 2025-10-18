@@ -145,6 +145,7 @@ public:
   void dump_runqueue() const;
 
   // TODO(jhumphri): Add multi-thread support to the scheduler.
+  std::atomic<bool> transfer_finished_ = false;
   x23::CoroLock global_lock_;
 
 private:

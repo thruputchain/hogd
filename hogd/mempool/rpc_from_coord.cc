@@ -53,14 +53,10 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  info("submit vetted, {}", gettid());
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
-  info("submit vetted got lock");
   co_await scheduler_->add_txs(batch);
-  info("submit vetted will unlock");
   cg.reset();
-  info("submit vetted done");
   co_return;
 }
 
@@ -215,16 +211,27 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  info("nominate start, num scheduler txs {}", scheduler_->size());
+  // TODO(jhumphri): Wait for the [scheddb_hogs_transferred] messages to be
+  // processed before responding.
+  while (!scheduler_->transfer_finished_) {
+    co_await default_coropoll().pool_.bg();
+  }
+  scheduler_->transfer_finished_ = false;
+  info("nominate done waiting for transfer_finished");
+
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
+    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
+    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -248,6 +255,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -273,6 +281,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // empty. Thus, we fail the nomination.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    info("nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -283,6 +292,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
 
+  info("nominate SUCCEED");
   co_return result;
 }
 

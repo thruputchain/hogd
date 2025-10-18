@@ -59,9 +59,7 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     co_return true;
   }
 
-  info("read_average_hog_age");
   HogAgeResult res = co_await db_sched_client_->dbsched_get_hog_ages(to_send);
-  info("read_average_hog_age");
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     co_return false;
   }
@@ -124,10 +122,8 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
 
     // The mempool should not call [add_txs()] for txs that have an
     // invalid account.
-    info("add_txs");
     CHECK(co_await read_average_hog_age({tx.tx.invocation.invoked_address},
                                         /*force=*/false));
-    info("add_txs");
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo i{.age = age,
@@ -137,10 +133,8 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, i});
     CHECK(inserted);
 
-    info("add_txs");
     co_await cycle_if_needed(tx.tx.invocation.invoked_address,
                              tx.tx.invocation.gas_limit);
-    info("add_txs");
     if (tx.tx.invocation.gas_limit <=
         from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
       cached_hogs_[tx.tx.invocation.invoked_address]

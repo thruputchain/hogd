@@ -228,6 +228,7 @@ void
 loadgen_nominate(benchmark::State &state)
 {
   MempoolTestInfra server;
+  info("now starting the loadgen");
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
 

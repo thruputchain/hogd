@@ -52,12 +52,10 @@ to_db_result(HogDBStatus<T> ret)
 x23::Async<HogAgeResult>
 HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
 {
-  info("dbsched_get_hog_ages handle");
   HogDBDAO &db = ctx_.get_db();
   HogAgeResult ret(DbSchedResult::DbSchedResultOK);
   ret.hog_age_batch().reserve(addresses.size());
 
-  info("dbsched_get_hog_ages handle");
   for (const ContractAddress &address : addresses) {
     HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
     if (!status) {
@@ -66,7 +64,6 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
     // TODO(jhumphri): Include the address in each index.
     ret.hog_age_batch().push_back(status.value());
   }
-  info("dbsched_get_hog_ages handle");
   co_return ret;
 }
 

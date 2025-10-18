@@ -37,9 +37,11 @@ public:
     context_id_ = result.success().context_id;
 
     // Pass the genesis block to the db.
+    info("load the genesis block");
     CHECK_EQ(sched_coord_client.schedcoord_load_genesis_block(
                  result.success().genesis_block)(),
              DbSchedResult::DbSchedResultOK);
+    info("done loading the genesis block");
 
     // We need to nominate and commit the initialization transactions. So first,
     // we start by adding them to the mempool with

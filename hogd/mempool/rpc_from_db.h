@@ -47,38 +47,19 @@ public:
     co_return;
   }
 
-  // Careful! I marked [transfers] as a const reference because we copy to
-  // [pending_] and we do not access [transfers] after this method returns. If
-  // this ever changes, we need remove the const reference from [transfers]
-  // because it is destructed after this method returns and we do not want a
-  // detached coroutine to try access it and do a use-after-free.
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
-    info("scheddb_hogs_transferred start");
+    info("scheddb_hogs_transferred");
     CHECK_PTR(scheduler_.get());
-
-    {
-      // Careful! If we ever change this method such that it no longer just
-      // copies [transfers] to [pending)] and returns, then be sure to read the
-      // comment above this method first!
-      std::lock_guard<std::mutex> lk(pending_lock_);
-      pending_.push_back(transfers);
-    }
-    handle_transfer();
-    info("scheddb_hogs_transferred end");
+    handle_transfer(transfers);
+    info("this should print before the handle transfer");
     co_return;
   }
 
-  x23::Detached handle_transfer()
+  x23::Detached handle_transfer(HogsTransferred transfers)
   {
     co_await default_threadpool().bg(); // Switch to thread pool
-    {
-      std::lock_guard<std::mutex> lk(pending_lock_);
-      // We should never run this function if there is no pending word.
-      CHECK(!pending_.empty());
-    }
 
-    HogsTransferred &transfers = pending_[0];
     for (const Delta &d : transfers.deltas) {
       // std::println("scheddb_hogs_transferred, block height {}, account {},
       // num "
@@ -90,10 +71,8 @@ public:
       auto hog_delta_abs =
           static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
 
-      info("process received hogs {}", gettid());
       x23::CoroGuard cg;
       co_await cg(scheduler_->global_lock_);
-      info("process received hogs got lock");
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
                                                    transfers.block);
@@ -101,12 +80,13 @@ public:
       else {
         co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
       }
-      info("process received hogs unlock");
     }
-    info("process received hogs done");
 
-    std::lock_guard<std::mutex> lk(pending_lock_);
-    pending_.pop_front();
+    info("set to true, scheduler pointer is {}", (void *)scheduler_.get());
+    CHECK(!scheduler_->transfer_finished_);
+    scheduler_->transfer_finished_ = true;
+
+    info("done here");
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
@@ -142,10 +122,6 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
-
-  std::mutex pending_lock_;
-  std::deque<HogsTransferred> pending_;
-
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);

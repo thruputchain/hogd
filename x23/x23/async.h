@@ -550,6 +550,9 @@ template<typename R> struct [[nodiscard]] Async {
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
+    // If you see a segfault on the line below, it may be because you wrote a
+    // function that returns an [x23::Async<T>] and you forgot to include a
+    // return/co_return statement at the end of the function.
     co_return co_await self;
   }
   template<std::convertible_to<Callback<R>> CB>
