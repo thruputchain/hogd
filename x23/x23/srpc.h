@@ -44,6 +44,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <expected>
 #include <format>
@@ -51,13 +52,14 @@
 #include <print>
 #include <semaphore>
 #include <stop_token>
+#include <sys/socket.h>
 #include <thread>
-
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
+
 #include <x23/cleanup.h>
 #include <x23/cpumap.h>
 #include <x23/mvar.h>
