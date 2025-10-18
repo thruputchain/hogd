@@ -23,7 +23,7 @@ class ExecutorStateManager {
 public:
   ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
                        std::unique_ptr<EventServerProxy> event_server_proxy,
-                       size_t nthreads = available_parallelism())
+                       size_t nthreads)
     : db_proxy_(std::move(db_proxy)),
       event_server_proxy_(std::move(event_server_proxy)), worker_pool_(nthreads)
   {}
