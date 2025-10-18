@@ -428,10 +428,63 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
+  const int n_coros_per_connection = 10;
+  const int n_connections = 10;
+
+  std::vector<exec_client_t> coro_exec_clients;
+  coro_exec_clients.reserve(n_connections);
+  for (size_t i = 0; i < n_connections; i++) {
+    coro_exec_clients.push_back(connect_to_exec_server(exec_cards[0]));
+  }
+
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
+  auto connection_coro = [] (auto& exec_client, BlockValidationQueue* queue, x23::CoroCB<void>& cb, int ncoro, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
 
+    auto coro = [] (auto& exec_client, x23::CoroCB<void>& cb, BlockValidationQueue* queue, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
+      auto batch = queue->next_batch();
+      if (batch.empty()) {
+        if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
+          cb();
+        }
+        co_return;
+      }
+      x23::Vec<SignedTransaction> batch_vec;
+      batch_vec.reserve(batch.size());
+      for (auto const &tx : batch) {
+        batch_vec.push_back(tx);
+      }
+
+      auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
+      assert(r.size() == batch.size());
+    };
+
+    for (size_t i = 0; i < ncoro; i++) {
+      coro(exec_client, cb, queue, block_number, n_total_coros);
+    }
+  };
+
+
+  for (size_t i = 0; i < 10; i++) {
+    std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
+    auto ts = x23::fastclock::get_ns();
+    open_block(parent_block_number, current_block_number);
+
+    auto [async, cb] = x23::make_async<void>();
+    for (size_t i = 0; i < n_connections; i++) {
+      connection_coro(coro_exec_clients[i], &block_validation_queue, cb, n_coros_per_connection, current_block_number, n_total_coros);
+    }
+    async();
+    close_block(current_block_number);
+    auto end_time = x23::fastclock::get_ns();
+    double elapsed_time = end_time - ts;
+    auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
+    std::println("time taken: {} ns for txs={} threads={} nacc={} "
+                 "num_executors={} tps={}",
+                 elapsed_time, num_txs_per_block, num_concurrent_rpcs,
+                 num_accounts, exec_clients.size(), tps);
+  }
   // there's got to be a better way to do this
 
   #if 0
