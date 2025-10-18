@@ -73,10 +73,9 @@ ExecutorMempoolRpc::executorsched_propose_batch(
                                          ExecResult::ExecResultSystemError));
   }
 
-  auto ret = co_await ctx->propose_transaction_batch(signed_txs,
-                                                     allocate_tx_ids(
-                                                         signed_txs.size()));
-  co_return ret;
+  co_return co_await ctx->propose_transaction_batch(signed_txs,
+                                                    allocate_tx_ids(
+                                                        signed_txs.size()));
 }
 
 x23::Async<ExecValidateBatchResult>
