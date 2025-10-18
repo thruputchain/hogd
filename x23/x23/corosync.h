@@ -60,10 +60,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <queue>
 
 #include <x23/async.h>
 #include <x23/corotrace.h>
-#include <x23/mvar.h>
 #include <x23/threadpool.h>
 
 namespace x23 {
@@ -414,6 +414,74 @@ private:
   {
     return p ? CrashIfSuspended{} : CrashIfSuspended{nullptr};
   }
+};
+
+// Simple coroutine-based semaphore.
+//
+//    CoroSem sem(1);         // initial value of counter (defaults to 1)
+//
+//    co_await sem.acquire(); // returns counter times more than up
+//
+//    co_await sem.release(); // release semaphore
+//
+//    sem.release();          // can also release outside coroutine
+class CoroSem {
+public:
+  CoroSem(int count = 1) : count_(count) {}
+  ~CoroSem()
+  {
+    // If this fails you destroyed a CoroSem with waiters
+    assert(!next_);
+  }
+
+  [[nodiscard]] auto acquire() noexcept { return Downer{*this}; }
+
+  auto release()
+  {
+    std::unique_lock ul(lk_);
+    if (Downer *head = next_) {
+      if (!(next_ = head->next_))
+        last_ = &next_;
+      ul.unlock();
+      head->h_();
+    }
+    else
+      ++count_;
+    return std::suspend_never{};
+  }
+
+private:
+  struct Downer {
+    CoroSem &s_;
+    std::unique_lock<std::mutex> ul_;
+    std::coroutine_handle<> h_;
+    Downer *next_{};
+
+    Downer(CoroSem &s) : s_(s) {}
+    Downer(const Downer &) = delete;
+
+    bool await_ready() noexcept
+    {
+      ul_ = std::unique_lock(s_.lk_);
+      if (!s_.count_)
+        return false;
+      --s_.count_;
+      return true;
+    }
+    void await_suspend(std::coroutine_handle<> h) noexcept
+    {
+      h_ = h;
+      *s_.last_ = this;
+      s_.last_ = &next_;
+      ul_.unlock();
+    }
+    void await_resume() noexcept {}
+  };
+
+  std::mutex lk_;
+  unsigned count_;
+  Downer *next_{};
+  Downer **last_{&next_};
 };
 
 } // namespace x23

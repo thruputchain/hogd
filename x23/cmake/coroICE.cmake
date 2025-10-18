@@ -33,4 +33,4 @@ coroutine()
 {
   co_await Awaiter{};
 }
-]=] X23_CORO_SLOCK_OK)
+]=] X23_CORO_SLOC_OK)

@@ -5,7 +5,7 @@
 #include <x23/config.h>
 
 #ifndef X23_CORO_TRACE
-#if defined(NDEBUG) || !X23_CORO_SLOCK_OK
+#if defined(NDEBUG) || !X23_CORO_SLOC_OK
 #define X23_CORO_TRACE 0
 #else // !NDEBUG && X23_CORO_TRACE
 #define X23_CORO_TRACE 1
