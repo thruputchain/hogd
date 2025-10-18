@@ -2,7 +2,6 @@
 #include <gtest/gtest.h>
 #include <span>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "event.hh"
