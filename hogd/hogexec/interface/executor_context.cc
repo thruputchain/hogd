@@ -97,12 +97,16 @@ ExecutorContext::propose_transaction_batch(
       batch_res.push_back(res);
     }
     auto end = x23::fastclock::get_ns();
-    info("ExecutorContext::propose_transaction_batch: time taken: {} ns for txs={}", end - start, signed_txs.size());
+    info("ExecutorContext::propose_transaction_batch: time taken: {} ns for "
+         "txs={}",
+         end - start, signed_txs.size());
     cb(std::move(batch_res));
   });
   auto r = co_await async;
   auto end = x23::fastclock::get_ns();
-  info("ExecutorContext::propose_transaction_batch (outside): time taken: {} ns for txs={}", end - start, signed_txs.size());
+  info("ExecutorContext::propose_transaction_batch (outside): time taken: {} "
+       "ns for txs={}",
+       end - start, signed_txs.size());
   co_return r;
 }
 

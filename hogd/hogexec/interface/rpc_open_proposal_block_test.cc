@@ -193,9 +193,11 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   // Initialize the executor with a shard pointing to our mock database server
   rpc_server_.impl_.init(std::move(exec_result), available_parallelism());
 
-  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id), ExecResult::ExecResultOK);
+  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id),
+            ExecResult::ExecResultOK);
 
-  SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{}, SignedTransaction{}};
+  SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{},
+                                SignedTransaction{}};
   auto result = client_.executorsched_propose_batch(test_block_id, txs);
   ASSERT_EQ(result.size(), 3);
   for (auto &res : result) {

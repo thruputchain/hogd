@@ -41,12 +41,12 @@
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/fastclock.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
-#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -229,10 +229,7 @@ struct BlockValidationQueue {
     : txs(txs), batch_size(batch_size)
   {}
 
-  void reset_offset()
-  {
-    offset.store(0);
-  }
+  void reset_offset() { offset.store(0); }
 
   const std::span<const SignedTransaction> txs;
   const size_t batch_size;
@@ -249,7 +246,8 @@ struct BlockValidationQueue {
 namespace {
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts, unsigned int num_concurrent_rpcs, unsigned int num_txs_per_block)
+                    unsigned int num_accounts, unsigned int num_concurrent_rpcs,
+                    unsigned int num_txs_per_block)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -431,7 +429,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
   auto worker_pool = WorkerPool(num_concurrent_rpcs);
-  std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs, &block_validation_queue};
+  std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs,
+                                              &block_validation_queue};
   // there's got to be a better way to do this
 
   for (size_t i = 0; i < 10; i++) {
@@ -439,40 +438,47 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     std::atomic<size_t> index = 0;
     auto ts = x23::fastclock::get_ns();
     open_block(parent_block_number, current_block_number);
-    worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
-      auto idx = index.fetch_add(1, std::memory_order_relaxed);
-      while (true) {
-        auto batch = job->next_batch();
-        if (batch.empty()) {
-          return;
-        }
-        x23::Vec<SignedTransaction> batch_vec;
-        batch_vec.reserve(batch.size());
-        for (auto const &tx : batch) {
-          batch_vec.push_back(tx);
-        }
+    worker_pool.for_each_parallel(
+        jobs,
+        [&](BlockValidationQueue *job) {
+          auto idx = index.fetch_add(1, std::memory_order_relaxed);
+          while (true) {
+            auto batch = job->next_batch();
+            if (batch.empty()) {
+              return;
+            }
+            x23::Vec<SignedTransaction> batch_vec;
+            batch_vec.reserve(batch.size());
+            for (auto const &tx : batch) {
+              batch_vec.push_back(tx);
+            }
 
-        auto res =
-            exec_clients[idx % exec_clients.size()].executorsched_propose_batch(current_block_number,
+            auto res = exec_clients[idx % exec_clients.size()]
+                           .executorsched_propose_batch(current_block_number,
                                                         batch_vec);
-        for (auto const &result : res) {
-          if (result.result() != ExecResult::ExecResultOK) {
-            throw std::runtime_error("Failed to propose batch");
+            for (auto const &result : res) {
+              if (result.result() != ExecResult::ExecResultOK) {
+                throw std::runtime_error("Failed to propose batch");
+              }
+            }
+            assert(res.size() == batch.size());
           }
-        }
-        assert(res.size() == batch.size());
-      }
-    }, 1);
+        },
+        1);
 
     close_block(current_block_number);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} threads={} nacc={} num_executors={} tps={}", elapsed_time, num_txs_per_block, num_concurrent_rpcs, num_accounts, exec_clients.size(), tps);
+    std::println("time taken: {} ns for txs={} threads={} nacc={} "
+                 "num_executors={} tps={}",
+                 elapsed_time, num_txs_per_block, num_concurrent_rpcs,
+                 num_accounts, exec_clients.size(), tps);
     parent_block_number = current_block_number;
     current_block_number++;
 
-    // TODO(geoff): once we add uniquifiers, generate all the txs up front, or at least generate them off the critical path
+    // TODO(geoff): once we add uniquifiers, generate all the txs up front, or
+    // at least generate them off the critical path
     block_validation_queue.reset_offset();
   }
 }
