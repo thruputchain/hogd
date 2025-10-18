@@ -275,6 +275,18 @@ Scheduler::cycle_groups(const ContractAddress &account)
   update_accounts({account});
 }
 
+size_t
+Scheduler::num_stranded() const
+{
+  size_t num_stranded = 0;
+  for (const auto &[_, gas_map] : stranded_) {
+    for (const auto &[_, txs] : gas_map) {
+      num_stranded += txs.size();
+    }
+  }
+  return num_stranded;
+}
+
 void
 Scheduler::dump_runqueue() const
 {
@@ -284,13 +296,7 @@ Scheduler::dump_runqueue() const
       info("  - tx from account {}", i->tx.tx.invocation.invoked_address[0]);
     }
   }
-  size_t num_stranded = 0;
-  for (const auto &[_, gas_map] : stranded_) {
-    for (const auto &[_, txs] : gas_map) {
-      num_stranded += txs.size();
-    }
-  }
-  info("num stranded: {}", num_stranded);
+  info("num stranded: {}", num_stranded());
 }
 
 x23::Async<void>

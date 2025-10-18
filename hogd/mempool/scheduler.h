@@ -139,7 +139,14 @@ public:
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
-  size_t size() { return size_; }
+  size_t size() const { return size_; }
+  size_t num_stranded() const;
+  size_t num_on_runqueue() const
+  {
+    size_t n_stranded = num_stranded();
+    CHECK_LE(n_stranded, size());
+    return size() - n_stranded;
+  }
 
   // Debug.
   void dump_runqueue() const;

@@ -30,8 +30,8 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 1000;
-constexpr size_t kNumLoadgenTxs = 10'000;
-constexpr uint32_t kNumAccounts = 900;
+constexpr size_t kNumLoadgenTxs = 100'000;
+constexpr uint32_t kNumAccounts = 100;
 
 // Helper class to manage a loadgen server and client
 class LoadgenHelper {
