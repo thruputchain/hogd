@@ -8,6 +8,7 @@
 
 #include "exec_sched.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_context.h"
@@ -102,8 +103,9 @@ private:
     return executor_states_ != nullptr;
   }
 
-  std::shared_ptr<ExecutorContext> try_get_context(BlockID block_id,
-                                                   ExecutionMode mode);
+  PerThreadARC<ExecutorContext> *try_get_context(BlockID block_id,
+                                                 ExecutionMode mode);
+  void release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
