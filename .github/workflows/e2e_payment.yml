@@ -42,20 +42,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: set gcc-14 in check
-      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - uses: ./.github/actions/prepare_env
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: clear hogdb file directory
@@ -93,52 +80,14 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: set gcc-14 in check
-      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - uses: ./.github/actions/prepare_env
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: wait for bench servers
-      run: |
-        ./scripts/wait-port.sh hog7 11111
-        ./scripts/wait-port.sh hog8 11111
-        ./scripts/wait-port.sh hog11 11111
-    - name: launch loadgen
-      run: ./release/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
-    - name: wait for loadgen
-      run: ./scripts/wait-port.sh hog7 11222
-    - name: launch hogexec
-      # the mempool runs on hog10
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
-      # can't wait for hogexec: that's waiting on the coordinator
-    - name: check hogexec is running
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 expect_running
-    - name: launch event
-      run: ./release/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073
-    - name: launch hogdb
-      run: ./release/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
-    - name: make sure procs are running
-      run: |
-        ./release/hogd/hogexec/bench/control_cli hog7 11111 expect_running
-        ./release/hogd/hogexec/bench/control_cli hog8 11111 expect_running
-        ./release/hogd/hogexec/bench/control_cli hog11 11111 expect_running
-    - name: launch fake coordinator and mempool
-      run: |
-        ./release/hogd/mempool/test/coordinator hog10:8070 hog7:11222 > coordinator_output.txt 2>&1 &
-        bash -c 'timeout 1m ./release/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
-    - name: log integration metrics
-      run: ./scripts/log_integration_metrics.sh coordinator_output.txt
+    - uses: ./.github/actions/mempool_bench
+      with:
+        build-dir: release
+    - name: commit metrics
+      run: ./scripts/commit_metrics.sh
 
     - name: cleanup control servers
       if: always()
