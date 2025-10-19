@@ -1,4 +1,5 @@
 #include <atomic>
+#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -228,8 +229,11 @@ private:
   void wait_for_child_process(pid_t child_pid)
   {
     info("waiting for child process: {}", child_pid);
+    auto res = wait_for_child(child_pid);
+
     std::lock_guard lock(exit_code_mutex_);
-    exit_code_ = wait_for_child(child_pid);
+    CHECK(!exit_code_.has_value());
+    exit_code_ = res;
     if (exit_code_.has_value()) {
       info("child process: {} exited with code: {}", child_pid, *exit_code_);
     }
