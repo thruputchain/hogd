@@ -102,7 +102,8 @@ handle_stop_command(std::string const &host, std::string const &port)
   }
 }
 
-int handle_clear_work_dir_command(std::string const &host, std::string const &port)
+int
+handle_clear_work_dir_command(std::string const &host, std::string const &port)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port);
