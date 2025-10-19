@@ -6,8 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  bench_server:
-    runs-on: client
+  bench_servers:
+    strategy:
+      matrix:
+        runner: [client, hog7, hog8] # [client] is hog11
     steps:
     - name: clean up .gitconfig
       run: |
