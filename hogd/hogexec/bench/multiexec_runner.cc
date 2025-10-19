@@ -350,10 +350,6 @@ run_block(x23::Vec<SignedTransaction> const &txs,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number)
 {
-
-  open_block(db_sched_client, event_sched_client, exec_clients,
-             parent_block_number, current_block_number);
-
   BlockValidationQueue block_validation_queue(txs, batch_size);
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
@@ -499,7 +495,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
-
     run_block(init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number);
@@ -516,7 +511,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
-  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
   for (size_t i = 0; i < 10; i++) {
     auto ts = x23::fastclock::get_ns();
@@ -526,17 +520,17 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} nconnections={} "
+    std::println("time taken: {} ns for txs={} nexecutors={} nconnections={} "
                  "ncoros_per_connection={} nacc={} "
                  "batch_size={} tps={}",
-                 elapsed_time, num_txs_per_block, n_connections,
-                 n_coros_per_connection, num_accounts, batch_size, tps);
-    info("time taken: {} ns for txs={} nconnections={} "
+                 elapsed_time, num_txs_per_block, exec_cards.size(),
+                 n_connections, n_coros_per_connection, num_accounts,
+                 batch_size, tps);
+    info("time taken: {} ns for txs={} nexecutors={} nconnections={} "
          "ncoros_per_connection={} nacc={} "
          "batch_size={} tps={}",
-         elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
-         num_accounts, batch_size, tps);
-    block_validation_queue.reset_offset();
+         elapsed_time, num_txs_per_block, exec_cards.size(), n_connections,
+         n_coros_per_connection, num_accounts, batch_size, tps);
     parent_block_number = current_block_number;
     current_block_number++;
   }
