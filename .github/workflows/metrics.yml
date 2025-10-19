@@ -1,13 +1,7 @@
 name: Metrics
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
-
-concurrency:
-  group: cluster
-  cancel-in-progress: false
 
 jobs:
   bench_server:
@@ -37,20 +31,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: set gcc-14 in check
-      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - uses: ./.github/actions/prepare_env
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
     - name: run bench server
@@ -87,24 +68,17 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: set gcc-14 in check
-      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - uses: ./.github/actions/prepare_env
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: metrics
-      run: ./scripts/metrics.sh release
+    - name: clone metrics history
+      run: ./scripts/clone_metrics_history.sh
+    - name: run metrics
+      uses: ./.github/actions/metrics
+      with:
+        build-dir: release
+    - name: commit metrics
+      run: ./scripts/commit_metrics.sh
     - name: shut down bench server
       if: always()
       run: ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
