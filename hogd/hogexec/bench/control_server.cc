@@ -178,7 +178,7 @@ public:
 
       // NOLINTBEGIN(modernize-use-std-print)
       info("execvp: {} {}\n", full_program_name, join_args(program_args));
-      execvp(program_name.c_str(), args.data());
+      execvp(full_program_name.c_str(), args.data());
       info("execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
       _exit(EXIT_FAILURE);
