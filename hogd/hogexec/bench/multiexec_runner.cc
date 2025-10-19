@@ -250,6 +250,103 @@ struct BlockValidationQueue {
 };
 
 namespace {
+
+using exec_client_t = ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+using event_sched_client_t = decltype(connect_to_event_sched_server(0));
+using db_sched_client_t = decltype(connect_to_db_server(ShardCard{}));
+
+void open_block(db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, uint64_t parent_block_number, uint64_t block_number) {
+  info("opening block {}", block_number);
+  event_sched_client.eventsched_open_block(block_number);
+  auto res = db_sched_client.dbsched_create_snapshot(
+      parent_block_number, block_number,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  if (res != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to create snapshot");
+  }
+
+  for (auto &exec_client : exec_clients) {
+    auto r = exec_client.executorsched_open_proposal_block(block_number)();
+    if (r != ExecResult::ExecResultOK) {
+      throw std::runtime_error("Failed to open proposal block");
+    }
+  }
+};
+
+void close_block(db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, uint64_t block_number) {
+  info("closing block {}", block_number);
+  for (auto &exec_client : exec_clients) {
+    exec_client.executorsched_finish_block(block_number)();
+  }
+  event_sched_client.eventsched_close_block(block_number);
+
+  auto res = db_sched_client.dbsched_close_snapshot(block_number);
+  if (res.result() != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to close snapshot");
+  }
+  auto commit_res = db_sched_client.dbsched_commit_snapshot(block_number);
+  if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to commit snapshot");
+  }
+};
+
+x23::Detached
+connection_coro(exec_client_t& exec_client, BlockValidationQueue* queue, x23::CoroCB<void>& cb, int ncoro, BlockID block_number, std::atomic<size_t>& n_total_coros) {
+
+  auto coro = [] (exec_client_t& exec_client, x23::CoroCB<void>& cb, BlockValidationQueue* queue, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
+    co_await default_threadpool().bg();
+    while (true) {
+      auto batch = queue->next_batch();
+      if (batch.empty()) {
+        if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
+          cb();
+        }
+        co_return;
+      }
+      x23::Vec<SignedTransaction> batch_vec;
+      batch_vec.reserve(batch.size());
+      for (auto const &tx : batch) {
+        batch_vec.push_back(tx);
+      }
+
+      auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
+      assert(r.size() == batch.size());
+      for (auto const &result : r) {
+        if (result.result() != ExecResult::ExecResultOK) {
+          throw std::runtime_error("Failed to propose batch");
+        }
+      }
+    }
+  };
+
+  for (size_t i = 0; i < ncoro; i++) {
+    coro(exec_client, cb, queue, block_number, n_total_coros);
+  }
+  co_return;
+};
+
+void run_block(
+  x23::Vec<SignedTransaction> const &txs, 
+  db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, 
+  size_t n_coros_per_connection, size_t n_connections, size_t batch_size,
+  uint64_t parent_block_number, uint64_t current_block_number) {
+  
+  open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
+
+  BlockValidationQueue block_validation_queue(txs, batch_size);
+
+  std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
+  open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
+
+  auto [async, cb] = x23::make_async<void>();
+  for (auto& exec_client : exec_clients) {
+    connection_coro(exec_client, &block_validation_queue, cb, n_coros_per_connection, current_block_number, n_total_coros);
+  }
+  async();
+
+  close_block(db_sched_client, event_sched_client, exec_clients, current_block_number);
+}
+
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts, unsigned int n_connections_per_executor,
@@ -344,49 +441,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     await_ready(exec_card);
   }
 
-  using exec_client_t = ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  x23::Vec<exec_client_t> exec_clients;
-  exec_clients.reserve(exec_cards.size());
-  for (auto &exec_card : exec_cards) {
-    exec_clients.push_back(connect_to_exec_server(exec_card));
-  }
-
-  auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
-    info("opening block {}", block_number);
-    event_sched_client.eventsched_open_block(block_number);
-    auto res = db_sched_client.dbsched_create_snapshot(
-        parent_block_number, block_number,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    if (res != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to create snapshot");
-    }
-
-    for (auto &exec_client : exec_clients) {
-      auto r = exec_client.executorsched_open_proposal_block(block_number)();
-      if (r != ExecResult::ExecResultOK) {
-        throw std::runtime_error("Failed to open proposal block");
-      }
-    }
-  };
-
-  auto close_block = [&](uint64_t block_number) {
-    info("closing block {}", block_number);
-    for (auto &exec_client : exec_clients) {
-      exec_client.executorsched_finish_block(block_number)();
-    }
-    event_sched_client.eventsched_close_block(block_number);
-
-    auto res = db_sched_client.dbsched_close_snapshot(block_number);
-    if (res.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to close snapshot");
-    }
-    auto commit_res = db_sched_client.dbsched_commit_snapshot(block_number);
-    if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to commit snapshot");
-    }
-  };
-
   auto write_genesis_block = [&](const GenesisBlock &genesis_block) {
     auto res = db_sched_client.dbsched_load_genesis_block(genesis_block);
     if (res != DbSchedResult::DbSchedResultOK) {
@@ -410,19 +464,17 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
 
-  for (auto const &init_blocks : loadgen_result.success().initialization_txs) {
-    open_block(parent_block_number, current_block_number);
+  const size_t n_connections = n_connections_per_executor * exec_cards.size();
 
-    for (auto const &tx : init_blocks) {
+  std::vector<exec_client_t> coro_exec_clients;
+  coro_exec_clients.reserve(n_connections);
+  for (size_t i = 0; i < n_connections; i++) {
+    coro_exec_clients.push_back(connect_to_exec_server(exec_cards[i % exec_cards.size()]));
+  }
 
-      auto res = exec_clients.at(0).executorsched_propose_transaction(
-          current_block_number, tx)();
-      if (res.result() != ExecResult::ExecResultOK) {
-        throw std::runtime_error("Failed to propose transaction");
-      }
-    }
+  for (auto const &init_block : loadgen_result.success().initialization_txs) {
 
-    close_block(current_block_number);
+    run_block(init_block, db_sched_client, event_sched_client, coro_exec_clients, n_coros_per_connection, n_connections, batch_size, parent_block_number, current_block_number);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -435,63 +487,20 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
-  size_t n_connections = n_connections_per_executor * exec_cards.size();
-
-  std::vector<exec_client_t> coro_exec_clients;
-  coro_exec_clients.reserve(n_connections);
-  for (size_t i = 0; i < n_connections; i++) {
-    coro_exec_clients.push_back(connect_to_exec_server(exec_cards[i % exec_cards.size()]));
-  }
-
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
-
-  auto connection_coro = [] (auto& exec_client, BlockValidationQueue* queue, x23::CoroCB<void>& cb, int ncoro, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
-
-    auto coro = [] (auto& exec_client, x23::CoroCB<void>& cb, BlockValidationQueue* queue, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
-      co_await default_threadpool().bg();
-      while (true) {
-        auto batch = queue->next_batch();
-        if (batch.empty()) {
-          if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
-            cb();
-          }
-          co_return;
-        }
-        x23::Vec<SignedTransaction> batch_vec;
-        batch_vec.reserve(batch.size());
-        for (auto const &tx : batch) {
-          batch_vec.push_back(tx);
-        }
-
-        auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
-        assert(r.size() == batch.size());
-        for (auto const &result : r) {
-          if (result.result() != ExecResult::ExecResultOK) {
-            throw std::runtime_error("Failed to propose batch");
-          }
-        }
-      }
-    };
-
-    for (size_t i = 0; i < ncoro; i++) {
-      coro(exec_client, cb, queue, block_number, n_total_coros);
-    }
-    co_return;
-  };
-
 
   for (size_t i = 0; i < 10; i++) {
     std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
     auto ts = x23::fastclock::get_ns();
-    open_block(parent_block_number, current_block_number);
+    open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
 
     auto [async, cb] = x23::make_async<void>();
     for (auto& coro_exec_client : coro_exec_clients) {
       connection_coro(coro_exec_client, &block_validation_queue, cb, n_coros_per_connection, current_block_number, n_total_coros);
     }
     async();
-    close_block(current_block_number);
+    close_block(db_sched_client, event_sched_client, exec_clients, current_block_number);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
@@ -507,62 +516,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     parent_block_number = current_block_number;
     current_block_number++;
   }
-  // there's got to be a better way to do this
-
-  #if 0
-
-  auto worker_pool = WorkerPool(num_concurrent_rpcs);
-  std::vector<BlockValidationQueue *> jobs = {num_concurrent_rpcs,
-                                              &block_validation_queue};
-  for (size_t i = 0; i < 10; i++) {
-    std::println("bench rep {}", i);
-    std::atomic<size_t> index = 0;
-    auto ts = x23::fastclock::get_ns();
-    open_block(parent_block_number, current_block_number);
-    worker_pool.for_each_parallel(
-        jobs,
-        [&](BlockValidationQueue *job) {
-          auto idx = index.fetch_add(1, std::memory_order_relaxed);
-          while (true) {
-            auto batch = job->next_batch();
-            if (batch.empty()) {
-              return;
-            }
-            x23::Vec<SignedTransaction> batch_vec;
-            batch_vec.reserve(batch.size());
-            for (auto const &tx : batch) {
-              batch_vec.push_back(tx);
-            }
-
-            auto res = exec_clients[idx % exec_clients.size()]
-                           .executorsched_propose_batch(current_block_number,
-                                                        batch_vec);
-            for (auto const &result : res) {
-              if (result.result() != ExecResult::ExecResultOK) {
-                throw std::runtime_error("Failed to propose batch");
-              }
-            }
-            assert(res.size() == batch.size());
-          }
-        },
-        1);
-
-    close_block(current_block_number);
-    auto end_time = x23::fastclock::get_ns();
-    double elapsed_time = end_time - ts;
-    auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} threads={} nacc={} "
-                 "num_executors={} tps={}",
-                 elapsed_time, num_txs_per_block, num_concurrent_rpcs,
-                 num_accounts, exec_clients.size(), tps);
-    parent_block_number = current_block_number;
-    current_block_number++;
-
-    // TODO(geoff): once we add uniquifiers, generate all the txs up front, or
-    // at least generate them off the critical path
-    block_validation_queue.reset_offset();
-  }
-  #endif
 }
 
 } // namespace
