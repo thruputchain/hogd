@@ -356,6 +356,8 @@ run_block(x23::Vec<SignedTransaction> const &txs,
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
 
+  auto ts = x23::fastclock::get_ns();
+
   auto [async, cb] = x23::make_async<void>();
   for (auto &exec_client : exec_clients) {
     connection_coro(exec_client, &block_validation_queue, cb,
@@ -363,6 +365,11 @@ run_block(x23::Vec<SignedTransaction> const &txs,
                     n_total_coros);
   }
   async();
+
+  auto end_time = x23::fastclock::get_ns();
+  double elapsed_time = end_time - ts;
+  auto inner_tps = txs.size() * 1'000'000'000.0 / elapsed_time;
+  std::println("inner block time: {} inner tps: {}", elapsed_time, inner_tps);
 
   close_block(db_sched_client, event_sched_client, exec_clients,
               current_block_number);
