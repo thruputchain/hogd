@@ -1,4 +1,3 @@
-
 # Get current branch name
 if [[ -z ${GITHUB_HEAD_REF} ]]; then
   GIT_branch=$(git rev-parse --abbrev-ref HEAD)

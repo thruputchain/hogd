@@ -39,4 +39,3 @@ BUILD_DIR=$1
 ## payments_bench 10 accounts
 ./metrics_history/scripts/make_metric_file.sh payments-bench-10 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
