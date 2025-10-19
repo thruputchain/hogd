@@ -70,6 +70,15 @@ wait_for_child(pid_t child_pid)
 
   return exit_code;
 }
+
+std::string join_args(std::vector<std::string> const &args) {
+  std::string args_joined;
+  for (const auto &arg : args) {
+    args_joined += "\"" + arg + "\" ";
+  }
+  args_joined.pop_back(); // remove the last space
+  return args_joined;
+}
 } // namespace
 
 class Subprocess {
@@ -80,12 +89,7 @@ public:
   {
     std::string full_program_name =
         std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
-    std::string args_joined;
-    for (const auto &arg : program_args) {
-      args_joined += "\"" + arg + "\" ";
-    }
-    args_joined.pop_back(); // remove the last space
-    info("starting process: {} {}", full_program_name, args_joined);
+    info("starting process: {} {}", full_program_name, join_args(program_args));
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
@@ -169,7 +173,7 @@ public:
       args.push_back(nullptr);
 
       // NOLINTBEGIN(modernize-use-std-print)
-      info("execvp: {} {}\n", program_name, program_args);
+      info("execvp: {} {}\n", full_program_name, join_args(program_args));
       execvp(program_name.c_str(), args.data());
       info("execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
@@ -266,7 +270,7 @@ public:
     }
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
-    info("launching process: {} {}", program_name, program_args);
+    info("launching process: {} {}", program_name, join_args(program_args));
     auto pid = new_proc->launch_process(program_name, program_args);
     if (!pid) {
       error("failed to launch process: {}", Errno{});
