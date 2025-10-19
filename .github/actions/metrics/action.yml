@@ -8,6 +8,17 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: make sure bench servers are running
+      run: |
+        ./scripts/wait-port.sh hog11 11111
+      shell: bash
+    - name: clone metrics history # This is idempotent
+      run: ./scripts/clone_metrics_history.sh
+      shell: bash
     - name: run metrics
       run: ./scripts/metrics.sh ${{ inputs.build-dir }}
+      shell: bash
+    - name: stop any running processes
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop
       shell: bash

@@ -1,13 +1,7 @@
 name: Metrics
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
-
-concurrency:
-  group: cluster
-  cancel-in-progress: false
 
 jobs:
   bench_server:
