@@ -32,6 +32,7 @@ namespace hogd {
 
 namespace {
 
+// NOLINTBEGIN(misc-include-cleaner)
 std::optional<int>
 wait_for_child(pid_t child_pid)
 {
@@ -70,6 +71,7 @@ wait_for_child(pid_t child_pid)
 
   return exit_code;
 }
+// NOLINTEND(misc-include-cleaner)
 
 std::string
 join_args(std::vector<std::string> const &args)
@@ -394,11 +396,11 @@ private:
       // queried info about a proc that doesn't exist
       return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
     }
-    info("checking pid status: {}", pid);
     if (it->second->get_exit_code().has_value()) {
-      info("pid: {} exited with code: {}", pid, *it->second->get_exit_code());
+      // NOLINTBEGIN(bugprone-unchecked-optional-access)
       CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
       status.exit_code() = *it->second->get_exit_code();
+      // NOLINTEND(bugprone-unchecked-optional-access)
       return status;
     }
     info("pid: {} is still running", pid);
@@ -408,8 +410,10 @@ private:
   std::atomic<bool> waiting_for_shutdown_ = false;
 
   std::mutex running_pid_mutex_;
+  // NOLINTBEGIN(misc-include-cleaner)
   std::unordered_map<pid_t, std::unique_ptr<Subprocess>> subprocesses_;
   std::optional<pid_t> most_recent_pid_ = std::nullopt;
+  // NOLINTEND(misc-include-cleaner)
 
   std::string work_dir_;
 };
