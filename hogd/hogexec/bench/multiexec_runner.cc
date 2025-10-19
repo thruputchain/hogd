@@ -251,11 +251,17 @@ struct BlockValidationQueue {
 
 namespace {
 
-using exec_client_t = ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+using exec_client_t =
+    ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 using event_sched_client_t = decltype(connect_to_event_sched_server(0));
 using db_sched_client_t = decltype(connect_to_db_server(ShardCard{}));
 
-void open_block(db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, uint64_t parent_block_number, uint64_t block_number) {
+void
+open_block(db_sched_client_t &db_sched_client,
+           event_sched_client_t &event_sched_client,
+           std::vector<exec_client_t> &exec_clients,
+           uint64_t parent_block_number, uint64_t block_number)
+{
   info("opening block {}", block_number);
   event_sched_client.eventsched_open_block(block_number);
   auto res = db_sched_client.dbsched_create_snapshot(
@@ -273,7 +279,11 @@ void open_block(db_sched_client_t& db_sched_client, event_sched_client_t& event_
   }
 };
 
-void close_block(db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, uint64_t block_number) {
+void
+close_block(db_sched_client_t &db_sched_client,
+            event_sched_client_t &event_sched_client,
+            std::vector<exec_client_t> &exec_clients, uint64_t block_number)
+{
   info("closing block {}", block_number);
   for (auto &exec_client : exec_clients) {
     exec_client.executorsched_finish_block(block_number)();
@@ -291,9 +301,14 @@ void close_block(db_sched_client_t& db_sched_client, event_sched_client_t& event
 };
 
 x23::Detached
-connection_coro(exec_client_t& exec_client, BlockValidationQueue* queue, x23::CoroCB<void>& cb, int ncoro, BlockID block_number, std::atomic<size_t>& n_total_coros) {
+connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
+                x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
+                std::atomic<size_t> &n_total_coros)
+{
 
-  auto coro = [] (exec_client_t& exec_client, x23::CoroCB<void>& cb, BlockValidationQueue* queue, BlockID block_number, std::atomic<size_t>& n_total_coros) -> x23::Detached {
+  auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
+                 BlockValidationQueue *queue, BlockID block_number,
+                 std::atomic<size_t> &n_total_coros) -> x23::Detached {
     co_await default_threadpool().bg();
     while (true) {
       auto batch = queue->next_batch();
@@ -309,7 +324,8 @@ connection_coro(exec_client_t& exec_client, BlockValidationQueue* queue, x23::Co
         batch_vec.push_back(tx);
       }
 
-      auto r = co_await exec_client.executorsched_propose_batch(block_number, batch_vec);
+      auto r = co_await exec_client.executorsched_propose_batch(block_number,
+                                                                batch_vec);
       assert(r.size() == batch.size());
       for (auto const &result : r) {
         if (result.result() != ExecResult::ExecResultOK) {
@@ -325,34 +341,43 @@ connection_coro(exec_client_t& exec_client, BlockValidationQueue* queue, x23::Co
   co_return;
 };
 
-void run_block(
-  x23::Vec<SignedTransaction> const &txs, 
-  db_sched_client_t& db_sched_client, event_sched_client_t& event_sched_client, std::vector<exec_client_t>& exec_clients, 
-  size_t n_coros_per_connection, size_t n_connections, size_t batch_size,
-  uint64_t parent_block_number, uint64_t current_block_number) {
-  
-  open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
+void
+run_block(x23::Vec<SignedTransaction> const &txs,
+          db_sched_client_t &db_sched_client,
+          event_sched_client_t &event_sched_client,
+          std::vector<exec_client_t> &exec_clients,
+          size_t n_coros_per_connection, size_t n_connections,
+          size_t batch_size, uint64_t parent_block_number,
+          uint64_t current_block_number)
+{
+
+  open_block(db_sched_client, event_sched_client, exec_clients,
+             parent_block_number, current_block_number);
 
   BlockValidationQueue block_validation_queue(txs, batch_size);
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
-  open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
+  open_block(db_sched_client, event_sched_client, exec_clients,
+             parent_block_number, current_block_number);
 
   auto [async, cb] = x23::make_async<void>();
-  for (auto& exec_client : exec_clients) {
-    connection_coro(exec_client, &block_validation_queue, cb, n_coros_per_connection, current_block_number, n_total_coros);
+  for (auto &exec_client : exec_clients) {
+    connection_coro(exec_client, &block_validation_queue, cb,
+                    n_coros_per_connection, current_block_number,
+                    n_total_coros);
   }
   async();
 
-  close_block(db_sched_client, event_sched_client, exec_clients, current_block_number);
+  close_block(db_sched_client, event_sched_client, exec_clients,
+              current_block_number);
 }
 
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts, unsigned int n_connections_per_executor,
+                    unsigned int num_accounts,
+                    unsigned int n_connections_per_executor,
                     unsigned int n_coros_per_connection,
-                    unsigned int batch_size,
-                    unsigned int num_txs_per_block)
+                    unsigned int batch_size, unsigned int num_txs_per_block)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -469,12 +494,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   std::vector<exec_client_t> coro_exec_clients;
   coro_exec_clients.reserve(n_connections);
   for (size_t i = 0; i < n_connections; i++) {
-    coro_exec_clients.push_back(connect_to_exec_server(exec_cards[i % exec_cards.size()]));
+    coro_exec_clients.push_back(
+        connect_to_exec_server(exec_cards[i % exec_cards.size()]));
   }
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
 
-    run_block(init_block, db_sched_client, event_sched_client, coro_exec_clients, n_coros_per_connection, n_connections, batch_size, parent_block_number, current_block_number);
+    run_block(init_block, db_sched_client, event_sched_client,
+              coro_exec_clients, n_coros_per_connection, n_connections,
+              batch_size, parent_block_number, current_block_number);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -491,27 +519,23 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 10);
 
   for (size_t i = 0; i < 10; i++) {
-    std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
     auto ts = x23::fastclock::get_ns();
-    open_block(db_sched_client, event_sched_client, exec_clients, parent_block_number, current_block_number);
-
-    auto [async, cb] = x23::make_async<void>();
-    for (auto& coro_exec_client : coro_exec_clients) {
-      connection_coro(coro_exec_client, &block_validation_queue, cb, n_coros_per_connection, current_block_number, n_total_coros);
-    }
-    async();
-    close_block(db_sched_client, event_sched_client, exec_clients, current_block_number);
+    run_block(work_txs.success().work_txs, db_sched_client, event_sched_client,
+              coro_exec_clients, n_coros_per_connection, n_connections,
+              batch_size, parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
-    std::println("time taken: {} ns for txs={} nconnections={} ncoros_per_connection={} nacc={} "
+    std::println("time taken: {} ns for txs={} nconnections={} "
+                 "ncoros_per_connection={} nacc={} "
                  "batch_size={} tps={}",
-                 elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
-                 num_accounts, batch_size, tps);
-    info("time taken: {} ns for txs={} nconnections={} ncoros_per_connection={} nacc={} "
-                 "batch_size={} tps={}",
-                 elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
-                 num_accounts, batch_size, tps);
+                 elapsed_time, num_txs_per_block, n_connections,
+                 n_coros_per_connection, num_accounts, batch_size, tps);
+    info("time taken: {} ns for txs={} nconnections={} "
+         "ncoros_per_connection={} nacc={} "
+         "batch_size={} tps={}",
+         elapsed_time, num_txs_per_block, n_connections, n_coros_per_connection,
+         num_accounts, batch_size, tps);
     block_validation_queue.reset_offset();
     parent_block_number = current_block_number;
     current_block_number++;
@@ -562,16 +586,22 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 100, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 100,
+                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 100,
+                            1'000'000);
 
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1000, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10,
+                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1000,
+                            1'000'000);
 
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 10, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 1000, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 10,
+                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 200, 1000,
+                            1'000'000);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
