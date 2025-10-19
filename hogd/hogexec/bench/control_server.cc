@@ -6,6 +6,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <print>
@@ -15,6 +16,7 @@
 #include <thread>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -22,51 +24,63 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "x23/format.h"
 
 namespace hogd {
 
-class CIControlRpc {
-public:
-  using rpc_service = CIServer1;
+namespace {
 
-  CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
+std::optional<int>
+wait_for_child(pid_t child_pid)
+{
+  int status;
+  auto result = waitpid(child_pid, &status, 0);
 
-  ~CIControlRpc()
-  {
-    // Ensure waitpid thread is stopped
-    if (waitpid_thread_.joinable()) {
-      waitpid_thread_.request_stop();
-      waitpid_thread_.join();
-    }
+  if (result == -1) {
+    error("waitpid failed for child {}: {}", child_pid, Errno{});
+    return std::nullopt;
   }
 
-  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
-                                   ServerConfig const &config)
+  int exit_code = 0;
+
+  if (WIFEXITED(status)) {
+    exit_code = WEXITSTATUS(status);
+    if (exit_code == 0) {
+      info("Child process {} exited successfully with code {}", child_pid,
+           exit_code);
+    }
+    else {
+      error("Child process {} exited with error code {}", child_pid, exit_code);
+    }
+  }
+  else if (WIFSIGNALED(status)) {
+    int signal_num = WTERMSIG(status);
+    error("Child process {} terminated by signal {} ({})", child_pid,
+          signal_num, strsignal(signal_num));
+    // chatgpt says this matches the behavior of most shells
+    exit_code = 128 + signal_num;
+  }
+  else {
+    error("Child process {} terminated with unknown status {}", child_pid,
+          status);
+    exit_code = -1;
+  }
+
+  return exit_code;
+}
+} // namespace
+
+class Subprocess {
+public:
+  std::optional<pid_t>
+  launch_process(std::string const &program_name,
+                 std::vector<std::string> const &program_args)
   {
-    if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}", hogd_git_hash,
-            version::kHogdGitHash);
-      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
-    }
-
-    if (running_pid_) {
-      error("already running process: {}", *running_pid_);
-      return CIServerErrorCode::kCIServerErrorCodeAlreadyRunning;
-    }
-
-    std::string program_name =
-        std::string(CMAKE_ROOT_BINARY_DIR) + "/" +
-        std::string(config.program_name.begin(), config.program_name.end());
-    std::vector<std::string> program_args =
-        std::vector<std::string>(config.program_args.begin(),
-                                 config.program_args.end());
-    info("starting process: {} {}", x23::show(config.program_name),
-         x23::show(config.program_args));
+    std::string full_program_name =
+        std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
+    info("starting process: {} {}", full_program_name, program_args);
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
@@ -90,11 +104,8 @@ public:
         close(stdout_fd);
       if (stderr_fd != -1)
         close(stderr_fd);
-      return CIServerErrorCode::kCIServerErrorCodeInternal;
+      return std::nullopt;
     }
-
-    stdout_temp_path_ = stdout_template;
-    stderr_temp_path_ = stderr_template;
 
     // Save the parent's original stdout/stderr before fork
     int parent_stdout = dup(STDOUT_FILENO);
@@ -102,7 +113,7 @@ public:
       error("failed to save parent stdout: {}", Errno{});
       close(stdout_fd);
       close(stderr_fd);
-      return CIServerErrorCode::kCIServerErrorCodeInternal;
+      return std::nullopt;
     }
 
     int parent_stderr = dup(STDERR_FILENO);
@@ -110,13 +121,13 @@ public:
       error("failed to save parent stderr: {}", Errno{});
       close(stdout_fd);
       close(stderr_fd);
-      return CIServerErrorCode::kCIServerErrorCodeInternal;
+      return std::nullopt;
     }
 
     // Print temporary file paths BEFORE fork to ensure parent logging works
     info("Child process output will be logged to:");
-    info("  stdout: {}", stdout_temp_path_);
-    info("  stderr: {}", stderr_temp_path_);
+    info("  stdout: {}", stdout_template);
+    info("  stderr: {}", stderr_template);
 
     auto pid = fork();
     if (pid < 0) {
@@ -125,7 +136,7 @@ public:
       close(parent_stdout);
       close(stdout_fd);
       close(stderr_fd);
-      return CIServerErrorCode::kCIServerErrorCodeInternal;
+      return std::nullopt;
     }
 
     if (pid == 0) {
@@ -145,7 +156,7 @@ public:
       close(stderr_fd);
 
       std::vector<char *> args;
-      args.push_back(const_cast<char *>(config.program_name.data()));
+      args.push_back(const_cast<char *>(program_name.data()));
 
       for (const auto &arg : program_args) {
         args.push_back(const_cast<char *>(arg.c_str()));
@@ -153,8 +164,7 @@ public:
       args.push_back(nullptr);
 
       // NOLINTBEGIN(modernize-use-std-print)
-      info("execvp: %s %s\n", program_name.c_str(),
-           x23::show(config.program_args).c_str());
+      info("execvp: {} {}\n", program_name, program_args);
       execvp(program_name.c_str(), args.data());
       info("execvp failed: %s\n", strerror(errno));
       // NOLINTEND(modernize-use-std-print)
@@ -179,12 +189,86 @@ public:
     close(stdout_fd);
     close(stderr_fd);
 
-    std::lock_guard<std::mutex> lock(running_pid_mutex_);
-    running_pid_ = pid;
     // Start thread to wait for child process
-    waitpid_thread_ = std::jthread([pid, this]() { wait_for_child(pid); });
+    waitpid_thread_ =
+        std::jthread([pid, this]() { wait_for_child_process(pid); });
 
     info("forked process: {}", pid);
+    return pid;
+  }
+
+  std::optional<int> get_exit_code()
+  {
+    std::lock_guard lock(exit_code_mutex_);
+    return exit_code_;
+  }
+
+  void wait_for_shutdown()
+  {
+    if (waitpid_thread_.joinable()) {
+      waitpid_thread_.request_stop();
+      waitpid_thread_.join();
+    }
+  }
+
+private:
+  void wait_for_child_process(pid_t child_pid)
+  {
+    info("waiting for child process: {}", child_pid);
+    std::lock_guard lock(exit_code_mutex_);
+    exit_code_ = wait_for_child(child_pid);
+    if (exit_code_.has_value()) {
+      info("child process: {} exited with code: {}", child_pid, *exit_code_);
+    }
+    else {
+      error("failed to wait for child process: {}", child_pid);
+    }
+  }
+
+  std::mutex exit_code_mutex_;
+  std::optional<int> exit_code_ = std::nullopt;
+
+  std::jthread waitpid_thread_;
+};
+
+class CIControlRpc {
+public:
+  using rpc_service = CIServer1;
+
+  CIControlRpc(std::string work_dir) : work_dir_(std::move(work_dir)) {}
+
+  ~CIControlRpc()
+  {
+    // ensure all subprocesses are stopped
+    ciserver_stop(version::kHogdGitHash);
+  }
+
+  CIServerErrorCode ciserver_start(HogdGitHash const &hogd_git_hash,
+                                   ServerConfig const &config)
+  {
+    if (!check_hogd_git_hash(hogd_git_hash)) {
+      error("version mismatch: received {}, expected {}", hogd_git_hash,
+            version::kHogdGitHash);
+      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
+    }
+
+    std::lock_guard lock(running_pid_mutex_);
+
+    std::unique_ptr<Subprocess> new_proc = std::make_unique<Subprocess>();
+    std::vector<std::string> program_args;
+    for (auto const &arg : config.program_args) {
+      program_args.emplace_back(arg.begin(), arg.end());
+    }
+    std::string program_name =
+        std::string(config.program_name.begin(), config.program_name.end());
+    info("launching process: {} {}", program_name, program_args);
+    auto pid = new_proc->launch_process(program_name, program_args);
+    if (!pid) {
+      error("failed to launch process: {}", Errno{});
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
+    subprocesses_.emplace(*pid, std::move(new_proc));
+    most_recent_pid_ = pid;
 
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
@@ -197,23 +281,19 @@ public:
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
 
-    auto pid = [&]() {
-      std::lock_guard<std::mutex> lock(running_pid_mutex_);
-      return running_pid_;
-    }();
+    std::lock_guard lock(running_pid_mutex_);
 
-    if (pid) {
-      info("stopping running process: {}", *pid);
-      kill(*pid, SIGTERM); // NOLINT(misc-include-cleaner)
-
-      // Wait for waitpid thread to finish
-      if (waitpid_thread_.joinable()) {
-        waitpid_thread_.join();
+    for (auto &[pid, subprocess] : subprocesses_) {
+      if (!subprocess->get_exit_code().has_value()) {
+        info("stopping running process: {}", pid);
+        kill(pid, SIGTERM); // NOLINT(misc-include-cleaner)
       }
+
+      subprocess->wait_for_shutdown();
     }
-    else {
-      error("no running process to stop");
-    }
+
+    subprocesses_.clear();
+    most_recent_pid_.reset();
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
@@ -243,17 +323,11 @@ public:
     }
 
     std::lock_guard<std::mutex> lock(running_pid_mutex_);
-    if (!running_pid_) {
-
-      if (most_recent_exit_code_.has_value()) {
-        CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
-        status.exit_code() = *most_recent_exit_code_;
-        return status;
-      }
-      error("queried proc status before starting a process");
-      return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
+    if (most_recent_pid_.has_value()) {
+      return check_pid_status(*most_recent_pid_, lock);
     }
-    return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
+    error("queried proc status before starting a process");
+    return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
   }
 
   CIWorkDirStatus ciserver_query_work_dir(HogdGitHash const &hogd_git_hash)
@@ -295,77 +369,39 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-  void await_shutdown_request()
-  {
-    // TODO(jhumphri): Implement.
-  }
-
 private:
   static bool check_hogd_git_hash(HogdGitHash const &hogd_git_hash)
   {
     return std::string(hogd_git_hash) == version::kHogdGitHash;
   }
 
-  // Helper function to wait for child process and log exit status
-  // NOLINTBEGIN(misc-include-cleaner)
-  void wait_for_child(pid_t child_pid)
+  CIProcStatus check_pid_status(pid_t pid,
+                                std::lock_guard<std::mutex> & /*unused*/)
   {
-    int status;
-    auto result = waitpid(child_pid, &status, 0);
-
-    if (result == -1) {
-      error("waitpid failed for child {}: {}", child_pid, Errno{});
-      return;
+    auto it = subprocesses_.find(pid);
+    if (it == subprocesses_.end()) {
+      // queried info about a proc that doesn't exist
+      return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeInternal);
     }
-
-    int exit_code = 0;
-
-    if (WIFEXITED(status)) {
-      exit_code = WEXITSTATUS(status);
-      if (exit_code == 0) {
-        info("Child process {} exited successfully with code {}", child_pid,
-             exit_code);
-      }
-      else {
-        error("Child process {} exited with error code {}", child_pid,
-              exit_code);
-      }
+    info("checking pid status: {}", pid);
+    if (it->second->get_exit_code().has_value()) {
+      info("pid: {} exited with code: {}", pid, *it->second->get_exit_code());
+      CIProcStatus status(CIServerErrorCode::kCIServerErrorCodeOK);
+      status.exit_code() = *it->second->get_exit_code();
+      return status;
     }
-    else if (WIFSIGNALED(status)) {
-      int signal_num = WTERMSIG(status);
-      error("Child process {} terminated by signal {} ({})", child_pid,
-            signal_num, strsignal(signal_num));
-      // chatgpt says this matches the behavior of most shells
-      exit_code = 128 + signal_num;
-    }
-    else {
-      error("Child process {} terminated with unknown status {}", child_pid,
-            status);
-      exit_code = -1;
-    }
-
-    std::lock_guard<std::mutex> lock(running_pid_mutex_);
-    running_pid_.reset();
-    most_recent_exit_code_ = exit_code;
+    info("pid: {} is still running", pid);
+    return CIProcStatus(CIServerErrorCode::kCIServerErrorCodeAlreadyRunning);
   }
-  // NOLINTEND(misc-include-cleaner)
 
   std::atomic<bool> waiting_for_shutdown_ = false;
 
   std::mutex running_pid_mutex_;
-  std::optional<uint32_t> running_pid_;
-  std::optional<int> most_recent_exit_code_ = std::nullopt;
-
-  // For output logging
-  std::string stdout_temp_path_;
-  std::string stderr_temp_path_;
-
-  // For waiting on child process
-  std::jthread waitpid_thread_;
+  std::unordered_map<pid_t, std::unique_ptr<Subprocess>> subprocesses_;
+  std::optional<pid_t> most_recent_pid_ = std::nullopt;
 
   std::string work_dir_;
 };
-static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
 
 static_assert(is_CIServer1<CIControlRpc *, std::type_identity_t>);
 
