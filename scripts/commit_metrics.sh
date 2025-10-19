@@ -1,3 +1,9 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR=$(dirname $(readlink -f "$0"))
+source ${SCRIPT_DIR}/git_info.sh
+
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 
@@ -13,9 +19,11 @@ fi
 echo "Committer name: $committer_name"
 echo "Committer email: $committer_email"
 
+echo "Commit message: Add metrics for $GIT_branch $GIT_commit"
+
 git add metrics/
 GIT_COMMITTER_NAME="$committer_name" \
   GIT_COMMITTER_EMAIL="$committer_email" \
-  git commit -m "Add metrics for $branch $commit" --author "$committer_name <$committer_email>"
+  git commit -m "Add metrics for $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>"
 git push
 
