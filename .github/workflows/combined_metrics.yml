@@ -10,6 +10,7 @@ jobs:
     strategy:
       matrix:
         runner: [client, hog7, hog8] # [client] is hog11
+    runs-on: ${{ matrix.runner }}
     steps:
     - name: clean up .gitconfig
       run: |
