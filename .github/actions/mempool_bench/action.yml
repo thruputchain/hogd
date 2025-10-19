@@ -13,6 +13,7 @@ runs:
         ./scripts/wait-port.sh hog7 11111
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
+      shell: bash
     - name: launch loadgen
       run: ./{{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
       shell: bash
