@@ -103,8 +103,14 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc
-    - name: metrics
-      run: ./scripts/metrics.sh release
+    - name: clone metrics history
+      run: ./scripts/clone_metrics_history.sh
+    - name: run metrics
+      uses: ./.github/actions/metrics
+      with:
+        build-dir: release
+    - name: commit metrics
+      run: ./scripts/commit_metrics.sh
     - name: shut down bench server
       if: always()
       run: ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown

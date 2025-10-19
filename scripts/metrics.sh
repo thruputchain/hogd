@@ -12,8 +12,6 @@ source ${SCRIPT_DIR}/git_info.sh
 
 BUILD_DIR=$1
 
-./scripts/clone_metrics_history.sh
-
 # Put metrics to run here
 
 # Codesize metrics
@@ -42,6 +40,3 @@ BUILD_DIR=$1
 ./metrics_history/scripts/make_metric_file.sh payments-bench-10 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-
-# Commit the metrics to metrics_history/
-./scripts/commit_metrics.sh

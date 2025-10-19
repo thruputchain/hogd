@@ -1,0 +1,12 @@
+name: "Run Metrics"
+description: "Run the metrics.sh script with a single positional argument (string) passed as a parameter."
+inputs:
+  build-dir:
+    description: "Directory to pass as argument to metrics.sh (e.g., build type or path)"
+    required: true
+    type: string
+runs:
+  using: "composite"
+  steps:
+    - name: run metrics
+      run: ./scripts/metrics.sh ${{ inputs.build-dir }}
