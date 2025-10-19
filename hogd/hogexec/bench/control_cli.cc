@@ -21,6 +21,7 @@ usage(char *argv[])
   std::println("  start           - Start a process");
   std::println("  stop            - Stop a process");
   std::println("  expect_running  - Check if a process is running");
+  std::println("  clear_work_dir  - Clear the work directory");
   exit(EXIT_FAILURE);
 }
 
@@ -101,6 +102,18 @@ handle_stop_command(std::string const &host, std::string const &port)
   }
 }
 
+int handle_clear_work_dir_command(std::string const &host, std::string const &port)
+{
+  try {
+    auto client = hogd::connect_to_control_server(host, port);
+    client.clear_work_dir();
+    return 0;
+  } catch (std::exception const &e) {
+    hogd::info("Error: {}", e.what());
+    return 1;
+  }
+}
+
 } // namespace
 
 int
@@ -131,6 +144,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
   if (command == "expect_running") {
     return handle_expect_running_command(host, port);
+  }
+
+  if (command == "clear_work_dir") {
+    return handle_clear_work_dir_command(host, port);
   }
 
   hogd::info("Unknown command: {}", command);

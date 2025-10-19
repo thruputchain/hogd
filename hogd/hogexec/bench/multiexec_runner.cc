@@ -352,11 +352,13 @@ run_block(x23::Vec<SignedTransaction> const &txs,
 {
   BlockValidationQueue block_validation_queue(txs, batch_size);
 
+  auto start_time = x23::fastclock::get_ns();
+
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
 
-  auto ts = x23::fastclock::get_ns();
+  auto start_coros_time = x23::fastclock::get_ns();
 
   auto [async, cb] = x23::make_async<void>();
   for (auto &exec_client : exec_clients) {
@@ -366,13 +368,16 @@ run_block(x23::Vec<SignedTransaction> const &txs,
   }
   async();
 
-  auto end_time = x23::fastclock::get_ns();
-  double elapsed_time = end_time - ts;
+  auto end_coros_time = x23::fastclock::get_ns();
+  double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs.size() * 1'000'000'000.0 / elapsed_time;
-  std::println("inner block time: {} inner tps: {}", elapsed_time, inner_tps);
-
   close_block(db_sched_client, event_sched_client, exec_clients,
               current_block_number);
+
+  auto end_block_time = x23::fastclock::get_ns();
+  std::println("open_time {} middle_time {} close_time {} inner tps: {}",
+               start_coros_time - start_time, end_coros_time - start_coros_time,
+               end_block_time - end_coros_time, inner_tps);
 }
 
 void
@@ -520,6 +525,11 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
 
   for (size_t i = 0; i < 10; i++) {
+    std::println("Start trial {} with txs={} nexecutors={} nconnections={} "
+                 "ncoros_per_connection={} nacc={} "
+                 "batch_size={}",
+                 i, num_txs_per_block, exec_cards.size(), n_connections,
+                 n_coros_per_connection, num_accounts, batch_size);
     auto ts = x23::fastclock::get_ns();
     run_block(work_txs.success().work_txs, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
@@ -587,18 +597,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 1,
-                            1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 5,
-                            1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 10,
-                              1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1,
-                            1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 5,
-                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 5, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10,
-                              1'000'000);
+                            1'000'000);
 
   // NOLINTEND(bugprone-unchecked-optional-access)
 

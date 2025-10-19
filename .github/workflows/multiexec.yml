@@ -86,7 +86,7 @@ jobs:
     - name: prepare env
       uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c clang
+      run: ./scripts/build.sh -d release -t Release -c gcc
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  
