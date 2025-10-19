@@ -33,4 +33,10 @@ coroutine()
 {
   co_await Awaiter{};
 }
+
+int
+main()
+{
+  return 0;
+}
 ]=] X23_CORO_SLOC_OK)
