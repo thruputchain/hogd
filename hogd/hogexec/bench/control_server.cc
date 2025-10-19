@@ -71,7 +71,9 @@ wait_for_child(pid_t child_pid)
   return exit_code;
 }
 
-std::string join_args(std::vector<std::string> const &args) {
+std::string
+join_args(std::vector<std::string> const &args)
+{
   std::string args_joined;
   for (const auto &arg : args) {
     args_joined += "\"" + arg + "\" ";
