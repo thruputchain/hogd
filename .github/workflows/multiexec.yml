@@ -107,7 +107,11 @@ jobs:
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
         ./scripts/wait-port.sh hog6 11111
-    - name: launch multiexec runner
+    - name: launch multiexec runner one exec
+      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -a 100
+    - name: launch multiexec runner two exec
+      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100
+    - name: launch multiexec runner three exec
       run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100
  
     - name: cleanup control servers
