@@ -80,7 +80,12 @@ public:
   {
     std::string full_program_name =
         std::string(CMAKE_ROOT_BINARY_DIR) + "/" + program_name;
-    info("starting process: {} {}", full_program_name, program_args);
+    std::string args_joined;
+    for (const auto &arg : program_args) {
+      args_joined += "\"" + arg + "\" ";
+    }
+    args_joined.pop_back(); // remove the last space
+    info("starting process: {} {}", full_program_name, args_joined);
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
