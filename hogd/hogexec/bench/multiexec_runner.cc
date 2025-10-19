@@ -587,17 +587,17 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 1,
+                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 5,
+                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 50, 10,
+                              1'000'000);
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1,
                             1'000'000);
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 5,
                             1'000'000);
   hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10,
-                              1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 20, 100, 1,
-                            1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 20, 100, 5,
-                            1'000'000);
-  hogd::run_multiexec_bench(server_addrs, *num_accounts, 20, 100, 10,
                               1'000'000);
 
   // NOLINTEND(bugprone-unchecked-optional-access)
