@@ -10,3 +10,4 @@ runs:
   steps:
     - name: run metrics
       run: ./scripts/metrics.sh ${{ inputs.build-dir }}
+      shell: bash
