@@ -141,6 +141,9 @@ public:
   // and those that are stranded.
   size_t size() const { return size_; }
   size_t num_stranded() const;
+  // If you call [schedule()] and then call [num_on_runqueue()] *before* you
+  // call [mark_txs_executed()/mark_txs_failed()], this function will return a
+  // stale count.
   size_t num_on_runqueue() const
   {
     size_t n_stranded = num_stranded();
@@ -150,6 +153,7 @@ public:
 
   // Debug.
   void dump_runqueue() const;
+  void print_account_hogs(const ContractAddress &account);
 
   // TODO(jhumphri): Add multi-thread support to the scheduler.
 

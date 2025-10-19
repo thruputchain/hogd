@@ -208,6 +208,19 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
   co_return res == ExecResult::ExecResultOK;
 }
 
+void
+accounts_scheduled(const SignedTransactionBatch &txs)
+{
+  ;
+  std::map<ContractAddress, size_t> accounts;
+  for (const SignedTransaction &tx : txs) {
+    accounts[tx.tx.invocation.invoked_address]++;
+  }
+  for (const auto &[account, num_txs] : accounts) {
+    info("{} txs for account {}", num_txs, account);
+  }
+}
+
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
@@ -255,6 +268,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
        "scheduler, {} are runnable and {} are stranded",
        txs.size(), scheduler_->size(), scheduler_->num_on_runqueue(),
        scheduler_->num_stranded());
+  accounts_scheduled(txs);
+  info("dumping the runqueue");
+  scheduler_->dump_runqueue();
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);

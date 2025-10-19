@@ -31,7 +31,7 @@ namespace {
 
 constexpr size_t kNumTxs = 1000;
 constexpr size_t kNumLoadgenTxs = 100'000;
-constexpr uint32_t kNumAccounts = 100;
+constexpr uint32_t kNumAccounts = 5;
 
 // Helper class to manage a loadgen server and client
 class LoadgenHelper {
