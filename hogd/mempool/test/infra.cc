@@ -8,6 +8,7 @@
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
