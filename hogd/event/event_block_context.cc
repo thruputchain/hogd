@@ -3,17 +3,22 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/event/merkle.h"
+#include "types.hh"
 
 namespace hogd {
 
-void EventBlockContext::add_event(TxEventLog const& event) {
+void
+EventBlockContext::add_event(TxEventLog const &event)
+{
 
-    CHECK(EventTrieHelpers::add_event_in_trie(trie_, event.proposed_tx_hash, event.events));
-
+  CHECK(EventTrieHelpers::add_event_in_trie(trie_, event.proposed_tx_hash,
+                                            event.events));
 }
 
-SHA256Hash EventBlockContext::get_root_hash() {
-    return trie_.get_root_hash();
+SHA256Hash
+EventBlockContext::get_root_hash()
+{
+  return trie_.get_root_hash();
 }
 
-}
+} // namespace hogd

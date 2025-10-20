@@ -13,6 +13,7 @@ add_library(event STATIC $<TARGET_OBJECTS:event_objects>)
 target_link_libraries(
   event
   hogd
+  merkle
 )
 
 target_include_directories(
@@ -27,9 +28,9 @@ add_executable(
 )
 target_link_libraries(
   event_exec
-  event_objects
+  event
   hogd
-  runtime_test_util_objects
+  runtime_test_util
   storage_item
 )
 

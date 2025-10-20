@@ -7,12 +7,12 @@ namespace hogd {
 
 class EventBlockContext {
 public:
-    void add_event(TxEventLog const& event);
+  void add_event(TxEventLog const &event);
 
-    SHA256Hash get_root_hash();
+  SHA256Hash get_root_hash();
 
 private:
-    MerkleTriePrefix trie_;
+  MerkleTriePrefix trie_;
 };
 
-}
+} // namespace hogd
