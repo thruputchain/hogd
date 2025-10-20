@@ -124,7 +124,7 @@ build_all() {
     # ssh "${COMMON_SSH_OPTS[@]}" "$s" \
     #   "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc 'make -C \"$HOGD_BUILD_DIR\" -j\$(nproc)'" | sed "s/^/[$s] /" &
+      "bash -lc '\"$HOGD_PROJECT_DIR\"/scripts/build.sh -c gcc -d \"$HOGD_BUILD_DIR\" -t Release -x -DHAVE_CXX_STACKTRACE=1'" | sed "s/^/[$s] /" &
   done
   ssh_pids=($(jobs -pr))
   wait

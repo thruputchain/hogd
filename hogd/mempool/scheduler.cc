@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <functional>
 #include <map>
-#include <print>
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
@@ -156,6 +155,7 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
           info.tx.tx.uniquifier.block_expiry_height;
       CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     }
+    size_++;
   }
 }
 
@@ -274,23 +274,28 @@ Scheduler::cycle_groups(const ContractAddress &account)
   update_accounts({account});
 }
 
-void
-Scheduler::dump_runqueue() const
+size_t
+Scheduler::num_stranded() const
 {
-  for (const auto &[height, tx_infos] : age_to_tx_) {
-    std::println("runqueue age {}:", height);
-    for (const TxInfo *info : tx_infos) {
-      std::println("  - tx from account {}",
-                   info->tx.tx.invocation.invoked_address[0]);
-    }
-  }
   size_t num_stranded = 0;
   for (const auto &[_, gas_map] : stranded_) {
     for (const auto &[_, txs] : gas_map) {
       num_stranded += txs.size();
     }
   }
-  std::println("num stranded: {}", num_stranded);
+  return num_stranded;
+}
+
+void
+Scheduler::dump_runqueue() const
+{
+  for (const auto &[height, tx_infos] : age_to_tx_) {
+    info("runqueue age {}:", height);
+    for (const TxInfo *i : tx_infos) {
+      info("  - tx from account {}", i->tx.tx.invocation.invoked_address[0]);
+    }
+  }
+  info("num stranded: {}", num_stranded());
 }
 
 x23::Async<void>
@@ -369,7 +374,10 @@ Scheduler::process_deducted_hogs(const ContractAddress &account,
 
       // TODO(jhumphri): Optimize this. It would be nice if we could just remove
       // the account's lower priority txs until we recover enough hogs rather
-      // than removing all txs.
+      // than removing all txs. Note that if we do this, I need to make sure to
+      // [cached_hogs_] has the total number of hogs for the txs on the runqueue
+      // before I call [update_accounts()] but that function expects this as a
+      // precondition.
       for (TxInfo *info : account_to_tx_[account]) {
         CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
         if (age_to_tx_[info->age].empty()) {
@@ -509,8 +517,8 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 {
   while (num) {
     std::unordered_map<ContractAddress, TxInfo *> account_set;
-    for (TxInfo *i : info) {
-      account_set.insert({i->account, i});
+    for (TxInfo *info : info) {
+      account_set.insert({info->account, info});
     }
 
     std::vector<TxInfo *> to_schedule;
@@ -584,6 +592,14 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
   // for all accounts in [accounts], add any stranded txs to the runqueue if
   // possible.
   for (const ContractAddress &account : accounts) {
+    uint128_t reserved_hogs = 0;
+    for (const TxInfo *info : account_to_tx_[account]) {
+      reserved_hogs += info->tx.tx.invocation.gas_limit;
+    }
+    cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+        from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) +
+        reserved_hogs);
+
     update_accounts({account});
     if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
       co_await cycle_groups(account);
@@ -632,18 +648,15 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
 
 // TODO(jhumphri): We should remove the [block] parameter. We should know the
 // current block number based on the block number passed to [schedule()].
-x23::Async<void>
+void
 Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                              BlockHeight block)
 {
-  std::unordered_set<ContractAddress> accounts;
-
   for (const SignedTransactionHash &hash : hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
     HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
-    accounts.insert(info.account);
 
     const uint128_xdr to_schedule_hogs =
         to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
@@ -677,18 +690,13 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
       }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
-  }
-  for (const ContractAddress &account : accounts) {
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      co_await cycle_groups(account);
-    }
+    size_--;
   }
 }
 
-x23::Async<SignedTransactionBatch>
+SignedTransactionBatch
 Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
 {
-  std::unordered_set<ContractAddress> accounts;
   SignedTransactionBatch txs;
   txs.reserve(hashes.size());
 
@@ -696,7 +704,6 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
-    accounts.insert(info.account);
 
     cached_hogs_[info.tx.tx.invocation.invoked_address]
         .num_hogs[kHogAgeGroupToSchedule] =
@@ -713,17 +720,51 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
       }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    size_--;
   }
-  // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
-  // for all accounts in [accounts], add any stranded txs to the runqueue if
-  // possible.
-  for (const ContractAddress &account : accounts) {
-    update_accounts({account});
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      co_await cycle_groups(account);
+  return txs;
+}
+
+x23::Async<SignedTransactionBatch>
+Scheduler::mark_txs_finished(BlockHeight block_height,
+                             const x23::Vec<SignedTransactionHash> &succeeded,
+                             const x23::Vec<SignedTransactionHash> &failed)
+{
+  ContractAddress account;
+  if (!succeeded.empty()) {
+    const SignedTransactionHash &tx_hash = succeeded.front();
+    CHECK(hash_to_tx_.contains(tx_hash));
+    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
+  }
+  else {
+    CHECK(!failed.empty());
+    const SignedTransactionHash &tx_hash = failed.front();
+    CHECK(hash_to_tx_.contains(tx_hash));
+    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
+  }
+
+  mark_txs_executed(succeeded, block_height);
+  SignedTransactionBatch ret = mark_txs_failed(failed);
+
+  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+    co_await cycle_groups(account);
+  }
+  else if (!failed.empty()) {
+    // Since we refunded the hogs to the [kHogAgeGroupToSchedule] group due to
+    // the failed txs, add any stranded txs to the runqueue if possible.
+    //
+    // Note that we do this in an [else if] body rather than in its own if body
+    // because [cycle_groups()] above already calls [update_accounts()].
+    uint128_t reserved_hogs = 0;
+    for (const TxInfo *info : account_to_tx_[account]) {
+      reserved_hogs += info->tx.tx.invocation.gas_limit;
     }
+    cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+        from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) +
+        reserved_hogs);
+    update_accounts({account});
   }
-  co_return txs;
+  co_return ret;
 }
 
 bool
@@ -779,6 +820,7 @@ Scheduler::find_and_remove_from_runqueue(
         CHECK_EQ(stranded_.erase(it->second.account), 1UL);
       }
     }
+    size_--;
   }
   return true;
 }

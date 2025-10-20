@@ -363,8 +363,6 @@ TEST(Mempool, AuthInvalidated)
   ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
-  
-            info("final nomination start");
 
   // Now check that the last tx is not nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,

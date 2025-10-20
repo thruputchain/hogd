@@ -15,8 +15,9 @@
 #include "hogd/mempool/shared.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 #include "x23/x23/async.h"
+#include "x23/x23/corosync.h"
+#include "x23/x23/vec.h"
 
 namespace hogd {
 
@@ -69,24 +70,27 @@ public:
   schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
-  // that this node proposed*. This method just removes the remaining tx state
-  // from the scheduler, so we need to call this to prevent a memory leak.
-  x23::Async<void>
-  mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                    BlockHeight block);
-
-  // Call this method when txs failed to execute. This method adds the hogs
-  // consumed by the tx back to the account and removes the remaining tx state
-  // from the scheduler. The txs are then returned by the method.
+  // that this node proposed* and/or when txs failed to execute.
   //
-  // Note: I initially thought it made sense to have this method add the txs
-  // back to the runqueue. However, txs may have failed due to irrecoverable
-  // errors, such as sending too many hogs to another account. Thus, this method
-  // returns the failed txs and the caller can choose to what to do next,
-  // whether that is reenqueing the txs in the scheduler, dropping the txs, or
-  // doing something else.
+  // All of the txs pass to this method, whether in [succeeded] or [failed],
+  // must having the same invoking account!
+  //
+  // For the txs that succeeded, this method just removes the remaining tx state
+  // from the scheduler, so we need to call this to prevent a memory leak.
+  //
+  // For the txs that failed, this method adds the hogs consumed by the tx back
+  // to the account and removes the remaining tx state from the scheduler. The
+  // txs are then returned by the method.
+  //
+  // Note: I initially thought it made sense to have this method add the failed
+  // txs back to the runqueue. However, txs may have failed due to irrecoverable
+  // errors, such as sending too many hogs to another account. The caller must
+  // choose what to do next, whether that is reenqueing the txs in the
+  // scheduler, dropping the txs, or doing something else.
   x23::Async<SignedTransactionBatch>
-  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
+  mark_txs_finished(BlockHeight block_height,
+                    const x23::Vec<SignedTransactionHash> &succeeded,
+                    const x23::Vec<SignedTransactionHash> &failed);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -136,8 +140,28 @@ public:
       const std::function<x23::Async<bool>(const SignedTransaction &tx)>
           &filter);
 
+  // The number of txs in the scheduler, including both those of the runqueue
+  // and those that are stranded.
+  size_t size() const { return size_; }
+  size_t num_stranded() const;
+  // If you call [schedule()] and then call [num_on_runqueue()] *before* you
+  // call [mark_txs_finished()], this function will return a stale count.
+  size_t num_on_runqueue() const
+  {
+    size_t n_stranded = num_stranded();
+    CHECK_LE(n_stranded, size());
+    return size() - n_stranded;
+  }
+
   // Debug.
   void dump_runqueue() const;
+
+  // TODO(jhumphri): Add multi-thread support to the scheduler.
+
+  // TODO(jhumphri): Replace [transfer_finished_] with the coropoll semaphore
+  // that David aded on [dm/x23].
+  std::atomic<bool> transfer_finished_ = false;
+  x23::CoroLock global_lock_;
 
 private:
   // We use this type to store information about a tx in the runqueue.
@@ -205,6 +229,24 @@ private:
            account_to_tx_[info.account].contains(&info);
   }
 
+  // Call this method when txs are successfully executed *as part of a block
+  // that this node proposed*. This method just removes the remaining tx state
+  // from the scheduler, so we need to call this to prevent a memory leak.
+  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                         BlockHeight block);
+
+  // Call this method when txs failed to execute. This method adds the hogs
+  // consumed by the tx back to the account and removes the remaining tx state
+  // from the scheduler. The txs are then returned by the method.
+  //
+  // Note: I initially thought it made sense to have this method add the txs
+  // back to the runqueue. However, txs may have failed due to irrecoverable
+  // errors, such as sending too many hogs to another account. The caller must
+  // choose what to do next, whether that is reenqueing the txs in the
+  // scheduler, dropping the txs, or doing something else.
+  SignedTransactionBatch
+  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
+
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
@@ -258,6 +300,8 @@ private:
   // height, we want to discard all txs that expire at that block height,
   // regardless of whether they are on the runqueue or stranded.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
+
+  size_t size_ = 0;
 };
 
 } // namespace hogd

@@ -7,7 +7,9 @@
 #include "discovery.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
@@ -20,6 +22,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -46,21 +49,30 @@ public:
     co_return;
   }
 
-  x23::Async<void> scheddb_hogs_transferred(HogsTransferred transfers)
+  // We mark [transfers] as a const reference because we copy it when passing it
+  // to [handle_transfer] below. If we change this in the future, then we may
+  // want to remove the const reference.
+  x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
     CHECK_PTR(scheduler_.get());
+    // See the comment above if you change this.
+    handle_transfer(transfers);
+    co_return;
+  }
+
+  x23::Detached handle_transfer(HogsTransferred transfers)
+  {
+    co_await x23::ThreadPool::get_thread_pool()->bg();
 
     for (const Delta &d : transfers.deltas) {
-      // std::println("scheddb_hogs_transferred, block height {}, account {},
-      // num "
-      //              "hogs transferred {}",
-      //              transfers.block, d.address, from_xdr(d.hog_delta));
       int128_t hog_delta = from_xdr(d.hog_delta);
       CHECK_NE(hog_delta, 0L);
 
       auto hog_delta_abs =
           static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
 
+      x23::CoroGuard cg;
+      co_await cg(scheduler_->global_lock_);
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
                                                    transfers.block);
@@ -69,6 +81,9 @@ public:
         co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
       }
     }
+
+    CHECK(!scheduler_->transfer_finished_);
+    scheduler_->transfer_finished_ = true;
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
@@ -86,10 +101,10 @@ public:
     ret.reserve(cards.size());
 
     for (const ShardCard &card : cards) {
-      x23::UniqueFd fd =
-          x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
-                        ->client(DbSched1{}));
+      ret.push_back(create_client<DbSched1>(
+          server_address_to_sockaddr(card.address_for_sched),
+          /*retry=*/false,
+          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
     }
     return ret;
   }
@@ -104,7 +119,6 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
-
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);

@@ -3,15 +3,19 @@
 #include <memory>
 #include <utility>
 
+#include "db_sched.hh"
+#include "hogd/base/log.h"
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra()
+MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.
@@ -36,6 +40,7 @@ MempoolTestInfra::MempoolTestInfra()
   db_executor_server_->start_server(/*port=*/0);
   // [db_scheduler_server_] handles RPCs from the mempool.
   db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
+  db_scheduler_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   db_scheduler_server_->start_server(/*port=*/0);
 
   // Start the event RPC servers.
@@ -57,6 +62,13 @@ MempoolTestInfra::MempoolTestInfra()
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool();
+
+  if (!skip_genesis_block) {
+    GenesisBlockBuilder builder;
+    CHECK_EQ(mempool_coord_server_.impl_.schedcoord_load_genesis_block(
+                 builder.build())(),
+             DbSchedResult::DbSchedResultOK);
+  }
 }
 
 } // namespace hogd

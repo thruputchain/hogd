@@ -69,7 +69,7 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra();
+  MempoolTestInfra(bool skip_genesis_block = false);
 
   ~MempoolTestInfra()
   {
@@ -176,7 +176,6 @@ private:
 
     db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
     ctx_ = std::make_unique<RPCContext>(db_, trie_, std::move(sched_db_client));
-    set_dbtip({.height = 0, .hash = {}, .id = 0});
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),

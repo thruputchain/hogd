@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hogd/base/log.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 
 namespace hogd {
@@ -18,8 +19,10 @@ public:
     }
 
     // Connect to the loadgen server.
-    client_ = std::make_unique<loadgen_client_t>(
-        create_client<LoadgenInterfaceV1>(host_port, /*retry=*/true));
+    client_ =
+        std::make_unique<loadgen_client_t>(create_client<LoadgenInterfaceV1>(
+            host_port, /*retry=*/true,
+            /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
