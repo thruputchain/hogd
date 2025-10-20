@@ -126,11 +126,11 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
                                         /*force=*/false));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
-    const TxInfo i{.age = age,
-                   .account = tx.tx.invocation.invoked_address,
-                   .tx_hash = tx_hash,
-                   .tx = tx};
-    const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, i});
+    const TxInfo info{.age = age,
+                      .account = tx.tx.invocation.invoked_address,
+                      .tx_hash = tx_hash,
+                      .tx = tx};
+    const auto &[it, inserted] = hash_to_tx_.insert({tx_hash, info});
     CHECK(inserted);
 
     co_await cycle_if_needed(tx.tx.invocation.invoked_address,
@@ -142,17 +142,18 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
           to_xdr(from_xdr(cached_hogs_[tx.tx.invocation.invoked_address]
                               .num_hogs[kHogAgeGroupToSchedule]) -
                  tx.tx.invocation.gas_limit);
-      CHECK(account_to_tx_[i.account].insert(&it->second).second);
-      CHECK(age_to_tx_[i.age].insert(&it->second).second);
+      CHECK(account_to_tx_[info.account].insert(&it->second).second);
+      CHECK(age_to_tx_[info.age].insert(&it->second).second);
     }
     else {
       // Not enough hogs for this tx.
-      CHECK(stranded_[i.account][tx.tx.invocation.gas_limit]
+      CHECK(stranded_[info.account][tx.tx.invocation.gas_limit]
                 .insert(&it->second)
                 .second);
     }
     {
-      const BlockHeight expiry_height = i.tx.tx.uniquifier.block_expiry_height;
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
       CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     }
     size_++;
@@ -431,19 +432,19 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 
     // Handle existing txs in the runqueue.
     for (auto it = infos.begin(); it != infos.end();) {
-      TxInfo *i = *it;
+      TxInfo *info = *it;
       const HogAge &averages = cached_hogs_[account];
 
-      CHECK_EQ(age_to_tx_[i->age].erase(i), 1UL);
-      i->age = averages.average_ages[kHogAgeGroupToSchedule];
+      CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
+      info->age = averages.average_ages[kHogAgeGroupToSchedule];
       // The account must always have enough hogs to schedule the txs that are
       // already in the runqueue. Otherwise, something has gone wrong.
-      CHECK_LE(i->tx.tx.invocation.gas_limit,
+      CHECK_LE(info->tx.tx.invocation.gas_limit,
                from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
       cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
           from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) -
-          i->tx.tx.invocation.gas_limit);
-      CHECK(age_to_tx_[i->age].insert(i).second);
+          info->tx.tx.invocation.gas_limit);
+      CHECK(age_to_tx_[info->age].insert(info).second);
       it++;
     }
 
@@ -517,8 +518,8 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 {
   while (num) {
     std::unordered_map<ContractAddress, TxInfo *> account_set;
-    for (TxInfo *i : info) {
-      account_set.insert({i->account, i});
+    for (TxInfo *info : info) {
+      account_set.insert({info->account, info});
     }
 
     std::vector<TxInfo *> to_schedule;
@@ -552,8 +553,8 @@ Scheduler::discard_expired_txs(BlockHeight current_height)
       break;
     }
 
-    for (TxInfo *i : tx_infos) {
-      to_discard.push_back(i->tx_hash);
+    for (TxInfo *info : tx_infos) {
+      to_discard.push_back(info->tx_hash);
     }
   }
   co_await discard_txs(to_discard);
@@ -703,17 +704,18 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
   for (const SignedTransactionHash &hash : hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
-    TxInfo &i = it->second;
+    TxInfo &info = it->second;
 
-    cached_hogs_[i.tx.tx.invocation.invoked_address]
+    cached_hogs_[info.tx.tx.invocation.invoked_address]
         .num_hogs[kHogAgeGroupToSchedule] =
-        to_xdr(from_xdr(cached_hogs_[i.tx.tx.invocation.invoked_address]
+        to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
                             .num_hogs[kHogAgeGroupToSchedule]) +
-               i.tx.tx.invocation.gas_limit);
-    txs.push_back(i.tx);
+               info.tx.tx.invocation.gas_limit);
+    txs.push_back(info.tx);
     {
-      const BlockHeight expiry_height = i.tx.tx.uniquifier.block_expiry_height;
-      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&i), 1UL);
+      const BlockHeight expiry_height =
+          info.tx.tx.uniquifier.block_expiry_height;
+      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
       if (expiry_to_tx_[expiry_height].empty()) {
         CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
       }
