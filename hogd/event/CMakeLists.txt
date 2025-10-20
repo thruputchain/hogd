@@ -35,3 +35,24 @@ target_link_libraries(
 )
 
 set_property(TARGET event_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_library(event_test_objects OBJECT
+  event_block_context_test.cc
+)
+target_link_libraries(
+  event_test_objects
+  hogd_interface
+  GTest::gtest
+)
+
+add_executable(
+  event_test
+  $<TARGET_OBJECTS:event_test_objects>
+)
+target_link_libraries(
+  event_test
+  hogd
+  event
+  GTest::gtest
+)
+gtest_discover_tests(event_test)
