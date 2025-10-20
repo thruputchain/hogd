@@ -31,7 +31,7 @@ namespace {
 
 constexpr size_t kNumTxs = 1000;
 constexpr size_t kNumLoadgenTxs = 100'000;
-constexpr uint32_t kNumAccounts = 5;
+constexpr uint32_t kNumAccounts = 100;
 
 // Helper class to manage a loadgen server and client
 class LoadgenHelper {
@@ -232,6 +232,7 @@ loadgen_nominate(benchmark::State &state)
   DbTip db_tip = loadgen.init_experiment(server);
 
   for (auto _ : state) {
+    info("ITERATION");
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     // Submit unvetted transactions so there's something to nominate

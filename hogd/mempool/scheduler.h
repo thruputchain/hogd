@@ -70,23 +70,23 @@ public:
   schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
-  // that this node proposed*. This method just removes the remaining tx state
-  // from the scheduler, so we need to call this to prevent a memory leak.
-  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                         BlockHeight block);
-
-  // Call this method when txs failed to execute. This method adds the hogs
-  // consumed by the tx back to the account and removes the remaining tx state
-  // from the scheduler. The txs are then returned by the method.
+  // that this node proposed* and/or when txs failed to execute.
   //
-  // Note: I initially thought it made sense to have this method add the txs
-  // back to the runqueue. However, txs may have failed due to irrecoverable
+  // All of the txs pass to this method, whether in [succeeded] or [failed],
+  // must having the same invoking account!
+  //
+  // For the txs that succeeded, this method just removes the remaining tx state
+  // from the scheduler, so we need to call this to prevent a memory leak.
+  //
+  // For the txs that failed, this method adds the hogs consumed by the tx back
+  // to the account and removes the remaining tx state from the scheduler. The
+  // txs are then returned by the method.
+  //
+  // Note: I initially thought it made sense to have this method add the failed
+  // txs back to the runqueue. However, txs may have failed due to irrecoverable
   // errors, such as sending too many hogs to another account. The caller must
   // choose what to do next, whether that is reenqueing the txs in the
   // scheduler, dropping the txs, or doing something else.
-  SignedTransactionBatch
-  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
-
   x23::Async<SignedTransactionBatch>
   mark_txs_finished(BlockHeight block_height,
                     const x23::Vec<SignedTransactionHash> &succeeded,
@@ -145,8 +145,7 @@ public:
   size_t size() const { return size_; }
   size_t num_stranded() const;
   // If you call [schedule()] and then call [num_on_runqueue()] *before* you
-  // call [mark_txs_executed()/mark_txs_failed()], this function will return a
-  // stale count.
+  // call [mark_txs_finished()], this function will return a stale count.
   size_t num_on_runqueue() const
   {
     size_t n_stranded = num_stranded();
@@ -229,6 +228,24 @@ private:
     return account_to_tx_.contains(info.account) &&
            account_to_tx_[info.account].contains(&info);
   }
+
+  // Call this method when txs are successfully executed *as part of a block
+  // that this node proposed*. This method just removes the remaining tx state
+  // from the scheduler, so we need to call this to prevent a memory leak.
+  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                         BlockHeight block);
+
+  // Call this method when txs failed to execute. This method adds the hogs
+  // consumed by the tx back to the account and removes the remaining tx state
+  // from the scheduler. The txs are then returned by the method.
+  //
+  // Note: I initially thought it made sense to have this method add the txs
+  // back to the runqueue. However, txs may have failed due to irrecoverable
+  // errors, such as sending too many hogs to another account. The caller must
+  // choose what to do next, whether that is reenqueing the txs in the
+  // scheduler, dropping the txs, or doing something else.
+  SignedTransactionBatch
+  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

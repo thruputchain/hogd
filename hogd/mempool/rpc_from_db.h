@@ -21,6 +21,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -60,14 +61,10 @@ public:
 
   x23::Detached handle_transfer(HogsTransferred transfers)
   {
-    // TODO(jhumphri): Change to GetThreadPool().
-    co_await default_threadpool().bg(); // Switch to thread pool
+    info("HANDLE TRANSFER");
+    co_await x23::ThreadPool::get_thread_pool()->bg();
 
     for (const Delta &d : transfers.deltas) {
-      // std::println("scheddb_hogs_transferred, block height {}, account {},
-      // num "
-      //              "hogs transferred {}",
-      //              transfers.block, d.address, from_xdr(d.hog_delta));
       int128_t hog_delta = from_xdr(d.hog_delta);
       CHECK_NE(hog_delta, 0L);
 
@@ -87,6 +84,7 @@ public:
 
     CHECK(!scheduler_->transfer_finished_);
     scheduler_->transfer_finished_ = true;
+    info("SET TRANSFER TO TRUE");
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)

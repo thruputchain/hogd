@@ -215,8 +215,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  // TODO(jhumphri): Wait for the [scheddb_hogs_transferred] messages to be
-  // processed before responding.
+  // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
   while (!scheduler_->transfer_finished_) {
     co_await default_coropoll().pool_.bg();
   }

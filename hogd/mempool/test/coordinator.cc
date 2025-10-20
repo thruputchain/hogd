@@ -54,7 +54,7 @@ coordinator_init(const std::string &mempool_address,
   // We are using loadgen to feed the mempool with traffic. Thus, we need to
   // connect to the loadgen server.
   LoadgenClientManager loadgen(loadgen_address, client,
-                               /*num_accounts=*/900);
+                               /*num_accounts=*/10'000);
 
   info("coordinator initialization complete.");
 
