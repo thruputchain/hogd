@@ -228,7 +228,7 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
   }
 
   // Check that [mark_txs_finished()] does not change the number of hogs.
-  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[1])},
                                /*failed=*/{})();
   age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
