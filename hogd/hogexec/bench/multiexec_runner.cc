@@ -379,7 +379,7 @@ run_block(x23::Vec<SignedTransaction> const &txs,
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
-  
+
   BlockValidationQueue block_validation_queue(txs, batch_size);
 
   auto start_coros_time = x23::fastclock::get_ns();
@@ -557,11 +557,11 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "batch_size={}",
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
-    auto const& work = work_txs.success().work_txs;
+    auto const &work = work_txs.success().work_txs;
     auto ts = x23::fastclock::get_ns();
-    run_block(work, db_sched_client, event_sched_client,
-              coro_exec_clients, n_coros_per_connection, n_connections,
-              batch_size, parent_block_number, current_block_number);
+    run_block(work, db_sched_client, event_sched_client, coro_exec_clients,
+              n_coros_per_connection, n_connections, batch_size,
+              parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
