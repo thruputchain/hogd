@@ -63,10 +63,8 @@ public:
     CoordCard card;
     CHECK(Registration::registration().coordinator_registered(&card));
 
-    x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-    return x23::rpc_stream_logged(default_coropoll(), fd.release())
-        ->client(CoordScheduler1{});
+    return create_client<CoordScheduler1>(
+        server_address_to_sockaddr(card.address_for_sched));
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }

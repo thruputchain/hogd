@@ -62,10 +62,8 @@ public:
     ret.reserve(cards.size());
 
     for (const ExecCard &card : cards) {
-      x23::UniqueFd fd =
-          x23::tcpconnect(server_address_to_sockaddr(card.address));
-      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
-                        ->client(ExecutorSched1{}));
+      ret.push_back(create_client<ExecutorSched1>(
+          server_address_to_sockaddr(card.address)));
     }
     return ret;
   }

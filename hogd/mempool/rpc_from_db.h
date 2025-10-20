@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
@@ -100,10 +101,10 @@ public:
     ret.reserve(cards.size());
 
     for (const ShardCard &card : cards) {
-      x23::UniqueFd fd =
-          x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-      ret.push_back(x23::rpc_stream_logged(default_coropoll(), fd.release())
-                        ->client(DbSched1{}));
+      ret.push_back(create_client<DbSched1>(
+          server_address_to_sockaddr(card.address_for_sched),
+          /*retry=*/false,
+          /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
     }
     return ret;
   }
