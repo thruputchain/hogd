@@ -51,14 +51,16 @@ using sched_db_client_t =
 
 template<typename T>
 inline auto
-create_client(const sockaddr_storage &ss, bool retry = false)
+create_client(const sockaddr_storage &ss, bool retry = false,
+              size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
     try {
       x23::UniqueFd fd = x23::tcpconnect(ss);
       CHECK(static_cast<bool>(fd));
-      return x23::rpc_stream_logged(default_coropoll(), fd.release())
-          ->client(T{});
+      auto config = x23::rpc_stream_logged(default_coropoll(), fd.release());
+      config->max_message_size = max_message_size;
+      return config->client(T{});
     } catch (std::system_error &e) {
       const std::string msg =
           std::format("Could not open RPC client: {}", e.what());
@@ -81,19 +83,21 @@ create_client(const sockaddr_storage &ss, bool retry = false)
 
 template<typename T>
 inline auto
-create_client(x23::HostPort &host_port, bool retry = false)
+create_client(x23::HostPort &host_port, bool retry = false,
+              size_t max_message_size = x23::default_max_message_size)
 {
   auto ss_or_error = host_port.to_addr(/*dns=*/true);
   CHECK(ss_or_error.has_value());
-  return create_client<T>(*ss_or_error, retry);
+  return create_client<T>(*ss_or_error, retry, max_message_size);
 }
 
 template<typename T>
 inline auto
-create_client(const std::string &host, uint16_t port, bool retry = false)
+create_client(const std::string &host, uint16_t port, bool retry = false,
+              size_t max_message_size = x23::default_max_message_size)
 {
   x23::HostPort host_port{host.c_str(), port};
-  return create_client<T>(host_port, retry);
+  return create_client<T>(host_port, retry, max_message_size);
 }
 
 } // namespace hogd

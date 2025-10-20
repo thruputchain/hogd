@@ -3,6 +3,7 @@
 #include <memory>
 #include <utility>
 
+#include "db_sched.hh"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
