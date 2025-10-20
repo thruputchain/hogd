@@ -232,7 +232,6 @@ loadgen_nominate(benchmark::State &state)
   DbTip db_tip = loadgen.init_experiment(server);
 
   for (auto _ : state) {
-    info("ITERATION");
     state.PauseTiming();
     const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
     // Submit unvetted transactions so there's something to nominate

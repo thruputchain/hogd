@@ -61,7 +61,6 @@ public:
 
   x23::Detached handle_transfer(HogsTransferred transfers)
   {
-    info("HANDLE TRANSFER");
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
     for (const Delta &d : transfers.deltas) {
@@ -84,7 +83,6 @@ public:
 
     CHECK(!scheduler_->transfer_finished_);
     scheduler_->transfer_finished_ = true;
-    info("SET TRANSFER TO TRUE");
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)

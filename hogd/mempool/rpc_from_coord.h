@@ -117,6 +117,9 @@ public:
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
   {
+    // [dbsched_load_genesis_block()] triggers the [scheddb_hogs_transferred()]
+    // RPC, so we set [scheduler_->transfer_finished_] to false so that the RPC
+    // handler sees the expected value for it.
     CHECK_PTR(scheduler_.get());
     scheduler_->transfer_finished_ = false;
 

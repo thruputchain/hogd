@@ -57,6 +57,8 @@ MempoolTestInfra::MempoolTestInfra()
   // have registered!
   register_executor_with_mempool();
   register_coordinator_with_mempool();
+
+  mempool_coord_server_.impl_.scheduler()->transfer_finished_ = true;
 }
 
 } // namespace hogd
