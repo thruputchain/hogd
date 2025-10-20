@@ -50,8 +50,7 @@ EventBlockContext::sync_file(std::unique_lock<std::mutex> &ul)
   assert(ul.mutex() == &file_mutex_);
 
   assert(events_file_);
-  info("syncing events file: {}", events_file_.get());
-  if (!fsync(events_file_.get())) {
+  if (fsync(events_file_.get()) != 0) {
     panic("failed to fsync events file: {}", strerror(errno));
   }
 }
@@ -88,12 +87,12 @@ EventBlockContext::finish_file()
       event_count += context.event_count;
     });
 
-    if (auto r = x23::fullwrite(events_file_, x23::serialize(event_count)); !r) [[unlikely]] {
+    if (auto r = x23::fullwrite(events_file_, x23::serialize(event_count)); !r)
+        [[unlikely]] {
       panic("failed to write event count to file: {}", r.error());
     }
 
     buffers_.for_each(ul, [this](EventContext &context) {
-      info("writing events to file: {}", context.event_count);
       auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
       if (!r) [[unlikely]] {
         panic("failed to write events to file: {}", r.error());

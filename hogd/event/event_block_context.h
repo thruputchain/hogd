@@ -1,15 +1,17 @@
 #pragma once
 
+#include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <fcntl.h>
 #include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
-#include <fcntl.h>
 #include <sys/fcntl.h>
 
 #include "event.hh"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
@@ -19,8 +21,6 @@
 #include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
-#include "hogd/base/io.h"
-
 
 namespace hogd {
 
@@ -42,13 +42,11 @@ public:
   EventBlockContext(std::string_view work_directory, BlockID block_id)
     : work_directory_(work_directory), block_id_(block_id)
   {
-    info("opening work directory: {}", work_directory_);
     // Ensure the work_directory_ exists before creating the events file.
     auto dir = Directory::open(work_directory_);
     if (!dir) {
       panic("failed to open work directory: {}", dir.error());
     }
-
     auto filename = temp_events_filename(work_directory_, block_id_);
     auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
     if (fd == -1) {
