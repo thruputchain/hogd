@@ -355,7 +355,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
     }
   };
 
-  for (size_t i = 0; i < ncoro; i++) {
+  for (int i = 0; i < ncoro; i++) {
     coro(exec_client, cb, queue, block_number, n_total_coros);
   }
   co_return;
