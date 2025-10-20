@@ -28,7 +28,6 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"

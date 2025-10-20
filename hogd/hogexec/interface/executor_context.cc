@@ -5,7 +5,6 @@
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -16,7 +15,6 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
-#include "x23/fastclock.h"
 
 namespace hogd {
 

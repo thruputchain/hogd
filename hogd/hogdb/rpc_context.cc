@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogdb/block_tx.h"
