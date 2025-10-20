@@ -686,18 +686,15 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
 
 // TODO(jhumphri): We should remove the [block] parameter. We should know the
 // current block number based on the block number passed to [schedule()].
-x23::Async<void>
+void
 Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
                              BlockHeight block)
 {
-  std::unordered_set<ContractAddress> accounts;
-
   for (const SignedTransactionHash &hash : hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
     HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
-    accounts.insert(info.account);
 
     const uint128_xdr to_schedule_hogs =
         to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
@@ -733,21 +730,11 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
     size_--;
   }
-  for (const ContractAddress &account : accounts) {
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      info("cycle groups for account {}", account);
-      co_await cycle_groups(account);
-    }
-    else {
-      info("not cycling groups for account {}", account);
-    }
-  }
 }
 
-x23::Async<SignedTransactionBatch>
+SignedTransactionBatch
 Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
 {
-  std::unordered_set<ContractAddress> accounts;
   SignedTransactionBatch txs;
   txs.reserve(hashes.size());
 
@@ -755,7 +742,6 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
-    accounts.insert(info.account);
 
     cached_hogs_[info.tx.tx.invocation.invoked_address]
         .num_hogs[kHogAgeGroupToSchedule] =
@@ -774,16 +760,43 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
     size_--;
   }
-  // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
-  // for all accounts in [accounts], add any stranded txs to the runqueue if
-  // possible.
-  for (const ContractAddress &account : accounts) {
-    update_accounts({account});
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      co_await cycle_groups(account);
-    }
+  return txs;
+}
+
+x23::Async<SignedTransactionBatch>
+Scheduler::mark_txs_finished(BlockHeight block_height,
+                             const x23::Vec<SignedTransactionHash> &succeeded,
+                             const x23::Vec<SignedTransactionHash> &failed)
+{
+  ContractAddress account;
+  if (!succeeded.empty()) {
+    const SignedTransactionHash &tx_hash = succeeded.front();
+    CHECK(hash_to_tx_.contains(tx_hash));
+    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
   }
-  co_return txs;
+  else {
+    CHECK(!failed.empty());
+    const SignedTransactionHash &tx_hash = failed.front();
+    CHECK(hash_to_tx_.contains(tx_hash));
+    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
+  }
+
+  mark_txs_executed(succeeded, block_height);
+  SignedTransactionBatch ret = mark_txs_failed(failed);
+
+  if (!failed.empty()) {
+    // Since we refunded the hogs to the [kHogAgeGroupToSchedule] group due to
+    // the failed txs, add any stranded txs to the runqueue if possible.
+    update_accounts({account});
+  }
+  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+    info("cycle groups for account {}", account);
+    co_await cycle_groups(account);
+  }
+  else {
+    info("not cycling groups for account {}", account);
+  }
+  co_return ret;
 }
 
 bool

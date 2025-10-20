@@ -72,9 +72,8 @@ public:
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed*. This method just removes the remaining tx state
   // from the scheduler, so we need to call this to prevent a memory leak.
-  x23::Async<void>
-  mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                    BlockHeight block);
+  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
+                         BlockHeight block);
 
   // Call this method when txs failed to execute. This method adds the hogs
   // consumed by the tx back to the account and removes the remaining tx state
@@ -82,12 +81,16 @@ public:
   //
   // Note: I initially thought it made sense to have this method add the txs
   // back to the runqueue. However, txs may have failed due to irrecoverable
-  // errors, such as sending too many hogs to another account. Thus, this method
-  // returns the failed txs and the caller can choose to what to do next,
-  // whether that is reenqueing the txs in the scheduler, dropping the txs, or
-  // doing something else.
-  x23::Async<SignedTransactionBatch>
+  // errors, such as sending too many hogs to another account. The caller must
+  // choose what to do next, whether that is reenqueing the txs in the
+  // scheduler, dropping the txs, or doing something else.
+  SignedTransactionBatch
   mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
+
+  x23::Async<SignedTransactionBatch>
+  mark_txs_finished(BlockHeight block_height,
+                    const x23::Vec<SignedTransactionHash> &succeeded,
+                    const x23::Vec<SignedTransactionHash> &failed);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been

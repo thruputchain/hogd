@@ -117,7 +117,8 @@ TEST(Scheduler, Single)
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
 
-  scheduler->mark_txs_executed({sha256(txs[0])}, /*block=*/1)();
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+                               /*failed=*/{})();
   // Check that the correct number of hogs was deducted.
   const HogAge &age =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
@@ -158,7 +159,8 @@ TEST(Scheduler, TxFailed)
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 
   // Check that the correct number of hogs was added back.
-  scheduler->mark_txs_failed({sha256(txs[0])})();
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{},
+                               /*failed=*/{sha256(txs[0])})();
   age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
 
@@ -175,8 +177,9 @@ TEST(Scheduler, TxFailed)
               5'000'000'000 * 9);
   }
 
-  // Check that [mark_txs_executed()] does not change the number of hogs.
-  scheduler->mark_txs_executed({sha256(txs[0])}, /*block=*/1)();
+  // Check that [mark_txs_finished()] does not change the number of hogs.
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+                               /*failed=*/{})();
   age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
 }
@@ -212,7 +215,8 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
     EXPECT_TRUE(scheduled.empty());
   }
 
-  scheduler->mark_txs_failed({sha256(txs[0])})();
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{},
+                               /*failed=*/{sha256(txs[0])})();
   // Check that txs[1] is now enqueued.
   age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
@@ -223,8 +227,9 @@ TEST(Scheduler, TxFailedStrandedEnqueued)
     EXPECT_EQ(hashes[0], sha256(txs[1]));
   }
 
-  // Check that [mark_txs_executed()] does not change the number of hogs.
-  scheduler->mark_txs_executed({sha256(txs[1])}, /*block=*/1)();
+  // Check that [mark_txs_finished()] does not change the number of hogs.
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+                               /*failed=*/{})();
   age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
   {
@@ -576,7 +581,8 @@ TEST(Scheduler, ProcessReceivedHogsSchedule)
         scheduler->schedule(/*block_height=*/3, kBlockSize)();
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0], txs[0]);
-    scheduler->mark_txs_executed(scheduled_hashes, /*block=*/3)();
+    scheduler->mark_txs_finished(/*block=*/3, /*succeeded=*/scheduled_hashes,
+                                 /*failed=*/{})();
 
     EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
     EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
@@ -631,7 +637,8 @@ TEST(Scheduler, Fairness)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
-    scheduler->mark_txs_executed(scheduled_hashes, /*block=*/i)();
+    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
+                                 /*failed=*/{})();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -687,7 +694,8 @@ TEST(Scheduler, FairnessAcrossBlocks)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
-    scheduler->mark_txs_executed(scheduled_hashes, /*block=*/i)();
+    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
+                                 /*failed=*/{})();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -746,7 +754,8 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
-    scheduler->mark_txs_executed(scheduled_hashes, /*block=*/i)();
+    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
+                                 /*failed=*/{})();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -813,7 +822,8 @@ TEST(Scheduler, YoungHogStarvation)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
-    scheduler->mark_txs_executed(scheduled_hashes, /*block=*/i)();
+    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
+                                 /*failed=*/{})();
   }
   // All txs handled should have been submitted by account 0.
   EXPECT_EQ(tx_counts.size(), 1);
@@ -1423,7 +1433,8 @@ TEST(Scheduler, AlreadyScheduledRoundUp)
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
               MempoolTestInfra::kAccountAddresses[0]);
-    scheduler->mark_txs_executed({sha256(txs[0])}, /*block=*/11)();
+    scheduler->mark_txs_finished(/*block=*/11, /*succeeded=*/{sha256(txs[0])},
+                                 /*failed=*/{})();
   }
 
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
@@ -1557,7 +1568,8 @@ TEST(Scheduler, Filter)
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0], txs[0]);
   }
-  scheduler->mark_txs_executed({sha256(txs[0])}, /*block=*/1)();
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+                               /*failed=*/{})();
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
@@ -1623,7 +1635,8 @@ TEST(Scheduler, FilterStranded)
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0], txs[0]);
   }
-  scheduler->mark_txs_executed({sha256(txs[0])}, /*block=*/1)();
+  scheduler->mark_txs_finished(/*block=*/1, /*succeeded=*/{sha256(txs[0])},
+                               /*failed=*/{})();
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
