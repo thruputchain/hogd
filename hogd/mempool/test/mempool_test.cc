@@ -182,25 +182,20 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
 
-  info("test here");
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  info("test here");
   // Remove a transaction from the nomination.
   res_nominate.scheduler_nomination().nomination.transaction_hashes.pop_back();
   res_nominate.scheduler_nomination()
       .nomination.transaction_nominations.pop_back();
 
-  info("test here");
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-  info("test here");
   auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
-  info("test here");
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -368,8 +363,6 @@ TEST(Mempool, AuthInvalidated)
   ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
   EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
-  
-            info("final nomination start");
 
   // Now check that the last tx is not nominated.
   db_tip = {.height = res.scheduler_nomination().nomination.block_height,
