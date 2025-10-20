@@ -581,6 +581,9 @@ TEST(Scheduler, ProcessReceivedHogsSchedule)
         scheduler->schedule(/*block_height=*/3, kBlockSize)();
     ASSERT_EQ(scheduled.size(), 1);
     EXPECT_EQ(scheduled[0], txs[0]);
+    // If we ever change this test to schedule more than 1 tx at once, then
+    // remember that [mark_txs_finished()] below should only be called with the
+    // txs for a single account.
     scheduler->mark_txs_finished(/*block=*/3, /*succeeded=*/scheduled_hashes,
                                  /*failed=*/{})();
 
@@ -634,11 +637,17 @@ TEST(Scheduler, Fairness)
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] =
         scheduler->schedule(/*block_height=*/i, kBlockSize)();
-    for (const SignedTransaction &tx : scheduled) {
+    std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>> sorted;
+    for (size_t i = 0; i < scheduled.size(); i++) {
+      const SignedTransaction &tx = scheduled[i];
+      const SignedTransactionHash &h = scheduled_hashes[i];
       tx_counts[tx.tx.invocation.invoked_address]++;
+      sorted[tx.tx.invocation.invoked_address].push_back(h);
     }
-    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
-                                 /*failed=*/{})();
+    for (const auto &[account, tx_hashes] : sorted) {
+      scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/tx_hashes,
+                                   /*failed=*/{})();
+    }
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -668,7 +677,8 @@ TEST(Scheduler, FairnessAcrossBlocks)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  // Sets the age and hogs for all accounts. Each account has this age and
+  // hogs:
   //
   // Account 0: Age 0 and 5 billion hogs.  (Will get 10% of the throughput.)
   // Account 1: Age 0 and 10 billion hogs. (Will get 20% of the throughput.)
@@ -691,9 +701,10 @@ TEST(Scheduler, FairnessAcrossBlocks)
     const auto &[scheduled_hashes, scheduled] =
         scheduler->schedule(/*block_height=*/i, /*block_size=*/1)();
     EXPECT_EQ(scheduled.size(), 1UL);
-    for (const SignedTransaction &tx : scheduled) {
-      tx_counts[tx.tx.invocation.invoked_address]++;
-    }
+    tx_counts[scheduled.front().tx.invocation.invoked_address]++;
+    // If we ever change this test to schedule more than 1 tx at once, then
+    // remember that [mark_txs_finished()] below should only be called with the
+    // txs for a single account.
     scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
                                  /*failed=*/{})();
   }
@@ -728,7 +739,8 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  // Sets the age and hogs for all accounts. Each account has this age and
+  // hogs:
   //
   // Account 0: Age 0 and 5 billion hogs.  (Will get 10% of the throughput.)
   // Account 1: Age 0 and 10 billion hogs. (Will get 20% of the throughput.)
@@ -751,11 +763,17 @@ TEST(Scheduler, FairnessAcrossBlocksLargeBlocks)
     const auto &[scheduled_hashes, scheduled] =
         scheduler->schedule(/*block_height=*/i, kBlockSize)();
     EXPECT_LE(scheduled.size(), kBlockSize);
-    for (const SignedTransaction &tx : scheduled) {
+    std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>> sorted;
+    for (size_t i = 0; i < scheduled.size(); i++) {
+      const SignedTransaction &tx = scheduled[i];
+      const SignedTransactionHash &h = scheduled_hashes[i];
       tx_counts[tx.tx.invocation.invoked_address]++;
+      sorted[tx.tx.invocation.invoked_address].push_back(h);
     }
-    scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
-                                 /*failed=*/{})();
+    for (const auto &[account, tx_hashes] : sorted) {
+      scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/tx_hashes,
+                                   /*failed=*/{})();
+    }
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -786,7 +804,8 @@ TEST(Scheduler, YoungHogStarvation)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  // Sets the age and hogs for all accounts. Each account has this age and
+  // hogs:
   //
   // Account 0: Age 0 and (5 billion * kNumRounds) hogs.
   // Account 1: Age 1 and 5 billion hogs.
@@ -819,9 +838,10 @@ TEST(Scheduler, YoungHogStarvation)
     const auto &[scheduled_hashes, scheduled] =
         scheduler->schedule(/*block_height=*/i, /*block_size=*/1)();
     EXPECT_EQ(scheduled.size(), 1);
-    for (const SignedTransaction &tx : scheduled) {
-      tx_counts[tx.tx.invocation.invoked_address]++;
-    }
+    tx_counts[scheduled.front().tx.invocation.invoked_address]++;
+    // If we ever change this test to schedule more than 1 tx at once, then
+    // remember that [mark_txs_finished()] below should only be called with the
+    // txs for a single account.
     scheduler->mark_txs_finished(/*block=*/i, /*succeeded=*/scheduled_hashes,
                                  /*failed=*/{})();
   }

@@ -159,8 +159,9 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
     else {
       // Not enough hogs for this tx.
       // info("add tx for account {}, but have to strand it because not enough "
-      //      "hogs for tx that requires {} hogs",
-      //      tx.tx.invocation.invoked_address, tx.tx.invocation.gas_limit);
+      //      "hogs for tx that requires {} hogs, the account has {} hogs",
+      //      tx.tx.invocation.invoked_address, tx.tx.invocation.gas_limit,
+      //      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
       CHECK(stranded_[i.account][tx.tx.invocation.gas_limit]
                 .insert(&it->second)
                 .second);
@@ -816,9 +817,6 @@ Scheduler::mark_txs_finished(BlockHeight block_height,
         from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) +
         reserved_hogs);
     update_accounts({account});
-  }
-  else {
-    info("not cycling groups for account {}", account);
   }
   co_return ret;
 }
