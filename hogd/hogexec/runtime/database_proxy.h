@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "sched_db.hh"
 #include "sched_exec.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"

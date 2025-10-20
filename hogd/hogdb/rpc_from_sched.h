@@ -81,7 +81,9 @@ private:
 
   // commit_block is a helper function that performs all the steps necessary to
   // commit.
-  HogDBStatus<void> commit_block(BlockID id);
+  // There must be an active reference to the blocktx.  This active reference
+  // should be the last reference that is open for the btx..
+  HogDBStatus<void> commit_block(BlockID id, PerThreadARC<BlockTX> *btx);
 };
 static_assert(is_DbSched1<HogDBSchedRpc *, x23::Async>);
 

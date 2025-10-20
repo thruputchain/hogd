@@ -13,6 +13,7 @@
 #include "genesis.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -117,7 +118,7 @@ HogDBSchedRpc::dbsched_get_tip()
 }
 
 HogDBStatus<void>
-HogDBSchedRpc::commit_block(BlockID id)
+HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
 {
   // check if already committed.
   if (ctx_.get_tip().id == id) {
@@ -125,11 +126,20 @@ HogDBSchedRpc::commit_block(BlockID id)
     return HogDBError(HogDBCode::kExists);
   }
 
-  // write all the changes in the block TX.
-  BlockTX *btx = ctx_.get_block_tx(id);
-  HogDBStatus<void> ret = btx->commit();
-  if (!ret)
+  assert(btx != nullptr);
+
+  if (!btx->initiate_shutdown()) {
+    error("Started to commit block '{}' while there were still outstanding "
+          "references",
+          id);
+    return HogDBError(HogDBCode::kInternal);
+  }
+
+  HogDBStatus<void> ret = btx->get().commit();
+  if (!ret) {
+    // Cleanup the block tx if commit failed.
     return ret.error();
+  }
 
   if (!ctx_.get_db().check_invariants()) {
     error("invariants check failed!!!");
@@ -139,8 +149,9 @@ HogDBSchedRpc::commit_block(BlockID id)
     return HogDBError(HogDBCode::kInternal);
   }
 
+  // Releases the reference to the blocktx acquried above
   // destroy the block TX.
-  ctx_.close_block_tx(id);
+  ctx_.remove_shutdown_block_tx(id);
 
   // update the DbTip.
   ret = ctx_.update_dbtip(id);
@@ -165,6 +176,14 @@ HogDBSchedRpc::dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_open(parent_id, new_id);
   }
+  if (parent_id != ctx_.get_tip().id) {
+    error("parent_id {} is not the last committed block {}", parent_id,
+          ctx_.get_tip().id);
+    // TODO(jhumphri): This should be an error, but we need to fix the mempool
+    // tests first.
+    // See hogd issue #610
+    // co_return DbSchedResult::DbSchedResultError;
+  }
   // TODO(abelay): the parent_id must be last committed snapshot. We could
   // check that here if we had the block height rather than the ID.
   co_return to_db_result(ctx_.open_block_tx(new_id));
@@ -177,10 +196,12 @@ HogDBSchedRpc::dbsched_commit_snapshot(BlockID id)
     block_id_state_manager_.log_block_commit(id);
     ctx_.get_db().enable_debug_invariants(ctx_.get_cost_model());
   }
-  BlockTX *btx = ctx_.get_block_tx(id);
-  if (!btx)
+
+  auto *btx = ctx_.get_block_tx(id, false);
+  if (btx == nullptr) [[unlikely]]
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
-  HogDBStatus<void> ret = commit_block(id);
+
+  HogDBStatus<void> ret = commit_block(id, btx);
   if (!ret)
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
 
@@ -195,13 +216,14 @@ HogDBSchedRpc::dbsched_abandon_snapshot(BlockID id)
   if constexpr (is_debug_build()) {
     block_id_state_manager_.log_block_abandon(id);
   }
-  BlockTX *ret = ctx_.get_block_tx(id);
+  auto *ret = ctx_.get_block_tx(id, false);
   if (!ret)
     co_return DbSchedResult::DbSchedResultError;
 
-  BlockTX &btx = *ret;
-  btx.abort();
-  ctx_.close_block_tx(id);
+  if (ret->initiate_shutdown()) {
+    ctx_.remove_shutdown_block_tx(id);
+  }
+
   co_return DbSchedResult::DbSchedResultOK;
 }
 
@@ -317,7 +339,7 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
   }
 
   itx->commit();
-  ctx_.close_invoke_tx(kGenesisBlockID, 0);
+  ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   uint128_t initial_hog_token_supply =
       GenesisBlockLoader::initial_hog_token_supply();
@@ -333,7 +355,7 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
           })
           .has_value());
 
-  co_return to_db_result(commit_block(kGenesisBlockID));
+  co_return to_db_result(commit_block(kGenesisBlockID, r.value()));
 }
 
 x23::Async<DbShardResult>

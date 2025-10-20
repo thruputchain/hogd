@@ -18,15 +18,24 @@ target_link_libraries(
   precompiles
 )
 
-add_executable(
-  exec_interface_test
+add_library(exec_interface_test_objects OBJECT
   executor_state_manager_test.cc
   rpc_open_proposal_block_test.cc
 )
+target_link_libraries(
+  exec_interface_test_objects
+  hogd_interface
+  GTest::gtest
+)
 
+add_executable(
+  exec_interface_test
+  $<TARGET_OBJECTS:exec_interface_test_objects>
+)
 target_link_libraries(
   exec_interface_test
   exec_interface
   runtime_test_lib
   GTest::gtest
 )
+gtest_discover_tests(exec_interface_test)

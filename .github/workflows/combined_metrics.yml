@@ -1,0 +1,108 @@
+name: Combined Metrics
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  bench_servers:
+    strategy:
+      matrix:
+        runner: [client, hog7, hog8, hog6] # [client] is hog11
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+          ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+          ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+          ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: ./.github/actions/prepare_env
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run bench server
+      # local work dir on CI is on disk
+      run: |
+        mkdir -p ci_work_dir/
+        ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
+
+  build:
+    runs-on: metrics
+
+    steps:
+    - name: Clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+          ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+          ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+          ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+          ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+          ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: ./.github/actions/prepare_env
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: clone metrics history
+      run: ./scripts/clone_metrics_history.sh
+    - name: run multiexec interface benchmarks
+      uses: ./.github/actions/exec_scaling
+      with:
+        build-dir: release
+    - name: release hog6
+      if: always()
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
+    - name: run mempool benchmarks
+      uses: ./.github/actions/mempool_bench
+      with:
+        build-dir: release
+    - name: release hog7 and hog8
+      if: always()
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+    - name: run metrics
+      uses: ./.github/actions/metrics
+      with:
+        build-dir: release
+    - name: commit metrics
+      run: ./scripts/commit_metrics.sh
+    - name: shut down bench server
+      if: always()
+      run: |
+        ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+

@@ -215,6 +215,7 @@ GenesisBlockBuilder::add_initial_config(
       .amount = amount,
       .deployed_contract = contract,
   });
+  allocated_hogs_ += amount;
 }
 
 GenesisBlock
@@ -236,6 +237,11 @@ GenesisBlockBuilder::build() const
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .auth_per_key_cost = to_xdr(int128_t{1111}),
   };
+
+  if (allocated_hogs_ > GenesisBlockLoader::initial_hog_token_supply()) {
+    throw std::runtime_error("GenesisBlockBuilder::build: allocated hogs "
+                             "exceeds initial hog token supply");
+  }
   return block;
 }
 } // namespace hogd

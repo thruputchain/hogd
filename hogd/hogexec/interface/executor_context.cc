@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
 #include <cassert>
+#include <utility>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
@@ -91,9 +92,11 @@ ExecutorContext::propose_transaction_batch(
       auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
       batch_res.push_back(res);
     }
-    cb(batch_res);
+    cb(std::move(batch_res));
   });
-  co_return co_await async;
+  auto r = co_await async;
+  assert(r.size() == signed_txs.size());
+  co_return r;
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -108,7 +111,7 @@ ExecutorContext::validate_transaction_batch(
       auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
       batch_res.push_back(res);
     }
-    cb(batch_res);
+    cb(std::move(batch_res));
   });
   co_return co_await async;
 }

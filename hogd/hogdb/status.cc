@@ -51,8 +51,10 @@ HogDBCategory::message(int code) const
     return "Overflow";
   case kConflict:
     return "Conflict";
+  case kExists:
+    return "Exists";
   default:
-    return "Unknown Code";
+    return "Unknown Code (" + std::to_string(code) + ")";
   }
 }
 

@@ -28,7 +28,6 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
@@ -41,8 +40,10 @@
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/fastclock.h"
 #include "x23/format.h"
 #include "x23/refcnt.h"
+#include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -217,9 +218,14 @@ connect_to_exec_server(const ExecCard &card)
   if (!server_addr) {
     throw std::runtime_error("Failed to connect to exec server");
   }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+  auto fd = x23::tcpconnect(server_addr.value());
+  if (!fd) {
+    throw std::runtime_error("Failed to connect to exec server");
+  }
+  return x23::rpc_stream_logged(default_coropoll(), fd.release())
       ->client(ExecutorSched1{});
 }
+
 } // namespace
 
 struct BlockValidationQueue {
@@ -227,6 +233,8 @@ struct BlockValidationQueue {
   BlockValidationQueue(const auto &txs, size_t batch_size)
     : txs(txs), batch_size(batch_size)
   {}
+
+  void reset_offset() { offset.store(0); }
 
   const std::span<const SignedTransaction> txs;
   const size_t batch_size;
@@ -241,9 +249,162 @@ struct BlockValidationQueue {
 };
 
 namespace {
+
+using exec_client_t =
+    ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+using event_sched_client_t = decltype(connect_to_event_sched_server(0));
+using db_sched_client_t = decltype(connect_to_db_server(ShardCard{}));
+
+void
+open_block(db_sched_client_t &db_sched_client,
+           event_sched_client_t &event_sched_client,
+           std::vector<exec_client_t> &exec_clients,
+           uint64_t parent_block_number, uint64_t block_number)
+{
+  info("opening block {}", block_number);
+
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<size_t> n_remaining_execs = exec_clients.size();
+
+  for (auto &exec_client : exec_clients) {
+    [](auto &exec_client, uint64_t block_number,
+       std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
+      co_await exec_client.executorsched_open_proposal_block(block_number);
+      if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        cb();
+      }
+    }(exec_client, block_number, n_remaining_execs, cb);
+  }
+
+  event_sched_client.eventsched_open_block(block_number);
+  auto res = db_sched_client.dbsched_create_snapshot(
+      parent_block_number, block_number,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  if (res != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to create snapshot");
+  }
+
+  async();
+};
+
+void
+close_block(db_sched_client_t &db_sched_client,
+            event_sched_client_t &event_sched_client,
+            std::vector<exec_client_t> &exec_clients, uint64_t block_number)
+{
+  info("closing block {}", block_number);
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<size_t> n_remaining_execs = exec_clients.size();
+
+  for (auto &exec_client : exec_clients) {
+    [](auto &exec_client, uint64_t block_number,
+       std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
+      co_await exec_client.executorsched_finish_block(block_number);
+      if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        cb();
+      }
+    }(exec_client, block_number, n_remaining_execs, cb);
+  }
+  event_sched_client.eventsched_close_block(block_number);
+  auto res = db_sched_client.dbsched_close_snapshot(block_number);
+  if (res.result() != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to close snapshot");
+  }
+  auto commit_res = db_sched_client.dbsched_commit_snapshot(block_number);
+  if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
+    throw std::runtime_error("Failed to commit snapshot");
+  }
+  // It's ok for finish_block to overlap with db.close_block, because we already
+  // synchronized waiting for all pending txs on the block to finish.
+  async();
+};
+
+x23::Detached
+connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
+                x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
+                std::atomic<size_t> &n_total_coros)
+{
+
+  auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
+                 BlockValidationQueue *queue, BlockID block_number,
+                 std::atomic<size_t> &n_total_coros) -> x23::Detached {
+    co_await default_threadpool().bg();
+    while (true) {
+      auto batch = queue->next_batch();
+      if (batch.empty()) {
+        if (n_total_coros.fetch_sub(1, std::memory_order_relaxed) == 1) {
+          cb();
+        }
+        co_return;
+      }
+      x23::Vec<SignedTransaction> batch_vec;
+      batch_vec.reserve(batch.size());
+      for (auto const &tx : batch) {
+        batch_vec.push_back(tx);
+      }
+
+      auto r = co_await exec_client.executorsched_propose_batch(block_number,
+                                                                batch_vec);
+      assert(r.size() == batch.size());
+      for (auto const &result : r) {
+        if (result.result() != ExecResult::ExecResultOK) {
+          throw std::runtime_error("Failed to propose batch");
+        }
+      }
+    }
+  };
+
+  for (int i = 0; i < ncoro; i++) {
+    coro(exec_client, cb, queue, block_number, n_total_coros);
+  }
+  co_return;
+};
+
+void
+run_block(x23::Vec<SignedTransaction> const &txs,
+          db_sched_client_t &db_sched_client,
+          event_sched_client_t &event_sched_client,
+          std::vector<exec_client_t> &exec_clients,
+          size_t n_coros_per_connection, size_t n_connections,
+          size_t batch_size, uint64_t parent_block_number,
+          uint64_t current_block_number)
+{
+  BlockValidationQueue block_validation_queue(txs, batch_size);
+
+  auto start_time = x23::fastclock::get_ns();
+
+  std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
+  open_block(db_sched_client, event_sched_client, exec_clients,
+             parent_block_number, current_block_number);
+
+  auto start_coros_time = x23::fastclock::get_ns();
+
+  auto [async, cb] = x23::make_async<void>();
+  for (auto &exec_client : exec_clients) {
+    connection_coro(exec_client, &block_validation_queue, cb,
+                    n_coros_per_connection, current_block_number,
+                    n_total_coros);
+  }
+  async();
+
+  auto end_coros_time = x23::fastclock::get_ns();
+  double elapsed_time = end_coros_time - start_coros_time;
+  auto inner_tps = txs.size() * 1'000'000'000.0 / elapsed_time;
+  close_block(db_sched_client, event_sched_client, exec_clients,
+              current_block_number);
+
+  auto end_block_time = x23::fastclock::get_ns();
+  std::println("open_time {} middle_time {} close_time {} inner tps: {}",
+               start_coros_time - start_time, end_coros_time - start_coros_time,
+               end_block_time - end_coros_time, inner_tps);
+}
+
 void
 run_multiexec_bench(const std::vector<std::string> &server_addrs,
-                    unsigned int num_accounts)
+                    unsigned int num_accounts,
+                    unsigned int n_connections_per_executor,
+                    unsigned int n_coros_per_connection,
+                    unsigned int batch_size, unsigned int num_txs_per_block)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -287,7 +448,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     throw std::runtime_error("Failed to query work dir");
   }
 
-  control_server_handles[0].ci_client.clear_work_dir();
+  for (auto &control_server_handle : control_server_handles) {
+    control_server_handle.ci_client.clear_work_dir();
+  }
 
   std::string work_dir_str = std::format("{}", work_dir.work_dir());
   info("using work dir: {}", work_dir_str);
@@ -301,7 +464,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hogexec/hogexec",
-        {std::format("{}:{}", hostname, sched_exec_port)});
+        {std::format("{}:{}", hostname, sched_exec_port), "-n", "1024"});
   }
 
   auto db_cards = sched_db_test.impl_.await_shard_cards(1);
@@ -314,17 +477,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   assert(db_cards.size() == 1);
   auto db_sched_client = connect_to_db_server(db_cards[0]);
 
-  std::vector<ExecutorSched1::template client<
-      x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>>
-      exec_clients;
-  exec_clients.reserve(exec_cards.size());
-  for (const auto &exec_card : exec_cards) {
-    exec_clients.emplace_back(connect_to_exec_server(exec_card));
-  }
-
-  auto await_ready = [&](auto &exec_client) {
+  auto await_ready = [&](const ExecCard &exec_card) {
+    auto exec_client = connect_to_exec_server(exec_card);
     while (true) {
-      auto res = exec_client.executorsched_ready();
+      auto res = exec_client.executorsched_ready()();
       if (res != ExecResult::ExecResultOK) {
         warn_every_n_sec(1.0, "Executor is not ready, retrying...");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -333,45 +489,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       break;
     }
   };
-
-  for (auto &exec_client : exec_clients) {
-    await_ready(exec_client);
+  for (auto &exec_card : exec_cards) {
+    await_ready(exec_card);
   }
-
-  auto open_block = [&](uint64_t parent_block_number, uint64_t block_number) {
-    info("opening block {}", block_number);
-    event_sched_client.eventsched_open_block(block_number);
-    auto res = db_sched_client.dbsched_create_snapshot(
-        parent_block_number, block_number,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    if (res != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to create snapshot");
-    }
-
-    for (auto &exec_client : exec_clients) {
-      auto r = exec_client.executorsched_open_proposal_block(block_number);
-      if (r != ExecResult::ExecResultOK) {
-        throw std::runtime_error("Failed to open proposal block");
-      }
-    }
-  };
-
-  auto close_block = [&](uint64_t block_number) {
-    info("closing block {}", block_number);
-    for (auto &exec_client : exec_clients) {
-      exec_client.executorsched_finish_block(block_number);
-    }
-    event_sched_client.eventsched_close_block(block_number);
-
-    auto res = db_sched_client.dbsched_close_snapshot(block_number);
-    if (res.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to close snapshot");
-    }
-    auto commit_res = db_sched_client.dbsched_commit_snapshot(block_number);
-    if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to commit snapshot");
-    }
-  };
 
   auto write_genesis_block = [&](const GenesisBlock &genesis_block) {
     auto res = db_sched_client.dbsched_load_genesis_block(genesis_block);
@@ -396,19 +516,19 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto genesis_block = loadgen_result.success().genesis_block;
   write_genesis_block(genesis_block);
 
-  for (auto const &init_blocks : loadgen_result.success().initialization_txs) {
-    open_block(parent_block_number, current_block_number);
+  const size_t n_connections = n_connections_per_executor * exec_cards.size();
 
-    for (auto const &tx : init_blocks) {
+  std::vector<exec_client_t> coro_exec_clients;
+  coro_exec_clients.reserve(n_connections);
+  for (size_t i = 0; i < n_connections; i++) {
+    coro_exec_clients.push_back(
+        connect_to_exec_server(exec_cards[i % exec_cards.size()]));
+  }
 
-      auto res = exec_clients.at(0).executorsched_propose_transaction(
-          current_block_number, tx);
-      if (res.result() != ExecResult::ExecResultOK) {
-        throw std::runtime_error("Failed to propose transaction");
-      }
-    }
-
-    close_block(current_block_number);
+  for (auto const &init_block : loadgen_result.success().initialization_txs) {
+    run_block(init_block, db_sched_client, event_sched_client,
+              coro_exec_clients, n_coros_per_connection, n_connections,
+              batch_size, parent_block_number, current_block_number);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -416,41 +536,37 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   info("done initialization txs");
 
   auto work_txs = loadgen.extend_experiment(loadgen_result.success().context_id,
-                                            1'000, 1000000);
+                                            num_txs_per_block, 1000000);
   if (work_txs.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to extend loadgen experiment");
   }
 
-  BlockValidationQueue block_validation_queue(work_txs.success().work_txs, 100);
+  assert(work_txs.success().work_txs.size() == num_txs_per_block);
 
-  std::vector<BlockValidationQueue *> jobs = {1000, &block_validation_queue};
-
-  auto &worker_pool = WorkerPool::get_default_pool();
-
-  for (size_t i = 0; i < 100; i++) {
-    open_block(parent_block_number, current_block_number);
-    worker_pool.for_each_parallel(jobs, [&](BlockValidationQueue *job) {
-      auto batch = job->next_batch();
-      if (batch.empty()) {
-        return;
-      }
-      x23::Vec<SignedTransaction> batch_vec;
-      batch_vec.reserve(batch.size());
-      for (auto const &tx : batch) {
-        batch_vec.push_back(tx);
-      }
-
-      auto res =
-          exec_clients[0].executorsched_propose_batch(current_block_number,
-                                                      batch_vec);
-      for (auto const &result : res) {
-        if (result.result() != ExecResult::ExecResultOK) {
-          throw std::runtime_error("Failed to propose batch");
-        }
-      }
-    });
-
-    close_block(current_block_number);
+  for (size_t i = 0; i < 10; i++) {
+    std::println("Start trial {} with txs={} nexecutors={} nconnections={} "
+                 "ncoros_per_connection={} nacc={} "
+                 "batch_size={}",
+                 i, num_txs_per_block, exec_cards.size(), n_connections,
+                 n_coros_per_connection, num_accounts, batch_size);
+    auto ts = x23::fastclock::get_ns();
+    run_block(work_txs.success().work_txs, db_sched_client, event_sched_client,
+              coro_exec_clients, n_coros_per_connection, n_connections,
+              batch_size, parent_block_number, current_block_number);
+    auto end_time = x23::fastclock::get_ns();
+    double elapsed_time = end_time - ts;
+    auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
+    std::println("time taken: {} ns for txs={} nexecutors={} nconnections={} "
+                 "ncoros_per_connection={} nacc={} "
+                 "batch_size={} tps={}",
+                 elapsed_time, num_txs_per_block, exec_cards.size(),
+                 n_connections, n_coros_per_connection, num_accounts,
+                 batch_size, tps);
+    info("time taken: {} ns for txs={} nexecutors={} nconnections={} "
+         "ncoros_per_connection={} nacc={} "
+         "batch_size={} tps={}",
+         elapsed_time, num_txs_per_block, exec_cards.size(), n_connections,
+         n_coros_per_connection, num_accounts, batch_size, tps);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -500,7 +616,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_multiexec_bench(server_addrs, *num_accounts);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 5, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, *num_accounts, 10, 100, 10,
+                            1'000'000);
+
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);

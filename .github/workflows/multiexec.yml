@@ -3,15 +3,11 @@ name: MultiExec Interface Benchmark
 on:
   workflow_dispatch:
 
-concurrency:
-  group: cluster
-  cancel-in-progress: false
-
 jobs:
   bench_servers:
     strategy:
       matrix:
-        runner: [client, hog7, hog8] # client is hog11
+        runner: [client, hog7, hog8, hog6] # client is hog11
     runs-on: ${{ matrix.runner }}
     steps:
     - name: Clean up .gitconfig
@@ -58,7 +54,7 @@ jobs:
       run: |
         mkdir -p ci_work_dir/
     - name: run bench server
-      run: X23TRACE=1 X23SERVER_TRACE=1 ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
+      run: ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
 
   build:
     runs-on: metrics
@@ -87,27 +83,22 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
+    - name: prepare env
+      uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c clang
+      run: ./scripts/build.sh -d release -t Release -c gcc
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111  
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
-    - name: launch multiexec runner
+        ./scripts/wait-port.sh hog6 11111
+    - name: launch multiexec runner one exec
+      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -a 100
+    - name: launch multiexec runner two exec
       run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100
+    - name: launch multiexec runner three exec
+      run: ./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100
  
     - name: cleanup control servers
       if: always()
@@ -115,6 +106,7 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
 
 
 
