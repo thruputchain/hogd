@@ -373,23 +373,27 @@ run_block(x23::Vec<SignedTransaction> const &txs,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number)
 {
-  BlockValidationQueue block_validation_queue(txs, batch_size);
 
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
+  
+  BlockValidationQueue block_validation_queue(txs, batch_size);
 
   auto start_coros_time = x23::fastclock::get_ns();
 
-  auto [async, cb] = x23::make_async<void>();
-  for (auto &exec_client : exec_clients) {
-    connection_coro(exec_client, &block_validation_queue, cb,
-                    n_coros_per_connection, current_block_number,
-                    n_total_coros);
+  // make sure any destructors are run during the measured inner loop
+  {
+    auto [async, cb] = x23::make_async<void>();
+    for (auto &exec_client : exec_clients) {
+      connection_coro(exec_client, &block_validation_queue, cb,
+                      n_coros_per_connection, current_block_number,
+                      n_total_coros);
+    }
+    async();
   }
-  async();
 
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
@@ -553,8 +557,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "batch_size={}",
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
+    auto const& work = work_txs.success().work_txs;
     auto ts = x23::fastclock::get_ns();
-    run_block(work_txs.success().work_txs, db_sched_client, event_sched_client,
+    run_block(work, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();
