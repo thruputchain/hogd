@@ -188,7 +188,9 @@ connect_to_event_sched_server(uint16_t port)
   if (!server_addr) {
     throw std::runtime_error("Failed to connect to event server");
   }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+  auto fd = x23::tcpconnect(server_addr.value());
+
+  return x23::rpc_stream_logged(default_coropoll(), fd.release())
       ->client(EventSched1{});
 }
 
@@ -276,7 +278,7 @@ open_block(db_sched_client_t &db_sched_client,
     }(exec_client, block_number, n_remaining_execs, cb);
   }
 
-  event_sched_client.eventsched_open_block(block_number);
+  auto event_async = event_sched_client.eventsched_open_block(block_number);
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -285,6 +287,7 @@ open_block(db_sched_client_t &db_sched_client,
   }
 
   async();
+  event_async();
 };
 
 void
@@ -305,7 +308,7 @@ close_block(db_sched_client_t &db_sched_client,
       }
     }(exec_client, block_number, n_remaining_execs, cb);
   }
-  event_sched_client.eventsched_close_block(block_number);
+  auto event_async = event_sched_client.eventsched_close_block(block_number);
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
@@ -317,6 +320,7 @@ close_block(db_sched_client_t &db_sched_client,
   // It's ok for finish_block to overlap with db.close_block, because we already
   // synchronized waiting for all pending txs on the block to finish.
   async();
+  event_async();
 };
 
 x23::Detached
@@ -543,7 +547,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
 
-  for (size_t i = 0; i < 10; i++) {
+  for (size_t i = 0; i < 5; i++) {
     std::println("Start trial {} with txs={} nexecutors={} nconnections={} "
                  "ncoros_per_connection={} nacc={} "
                  "batch_size={}",
