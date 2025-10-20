@@ -69,7 +69,7 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra();
+  MempoolTestInfra(bool skip_genesis_block = false);
 
   ~MempoolTestInfra()
   {

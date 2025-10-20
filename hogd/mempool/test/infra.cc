@@ -3,6 +3,7 @@
 #include <memory>
 #include <utility>
 
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/mempool/registration.h"
@@ -11,7 +12,7 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra()
+MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration at the beginning of each test.
@@ -58,7 +59,12 @@ MempoolTestInfra::MempoolTestInfra()
   register_executor_with_mempool();
   register_coordinator_with_mempool();
 
-  mempool_coord_server_.impl_.scheduler()->transfer_finished_ = true;
+  if (!skip_genesis_block) {
+    GenesisBlockBuilder builder;
+    CHECK_EQ(mempool_coord_server_.impl_.schedcoord_load_genesis_block(
+                 builder.build())(),
+             DbSchedResult::DbSchedResultOK);
+  }
 }
 
 } // namespace hogd
