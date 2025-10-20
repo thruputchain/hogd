@@ -94,7 +94,9 @@ ExecutorContext::propose_transaction_batch(
     }
     cb(std::move(batch_res));
   });
-  co_return co_await async;
+  auto r = co_await async;
+  assert(r.size() == signed_txs.size());
+  co_return r;
 }
 
 x23::Async<ExecValidateBatchResult>

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogdb/block_tx.h"
@@ -23,8 +24,10 @@ RPCContext::open_block_tx(BlockTXID bid)
       std::piecewise_construct, std::forward_as_tuple(bid),
       std::forward_as_tuple(get_db(), get_trie(), get_cost_model(),
                             sched_db_client_, get_tip().height));
-  if (!inserted)
+  if (!inserted) {
+    warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);
+  }
 
   return &it->second;
 }

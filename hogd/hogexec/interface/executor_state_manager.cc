@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/executor_state_manager.h"
 
 #include <cassert>
+#include <memory>
 #include <mutex>
 #include <tuple>
 #include <utility>
@@ -36,7 +37,6 @@ ExecutorStateManager::get_executor_context_slow(BlockID block_id)
     std::scoped_lock g(context_cache_->lock_);
     context_cache_->contexts_.emplace(block_id, ctx);
   }
-
   return ctx;
 }
 

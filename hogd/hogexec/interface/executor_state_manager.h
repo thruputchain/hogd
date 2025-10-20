@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "exec_sched.hh"
-#include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"

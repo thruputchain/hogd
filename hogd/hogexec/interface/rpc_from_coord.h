@@ -3,13 +3,12 @@
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "exec_sched.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
@@ -42,6 +41,7 @@ public:
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
                                                std::move(event_server_proxy),
                                                n_exec_threads);
+    info("ExecutorMempoolRpc: initialized with {} threads", n_exec_threads);
     ready_flag_ = true;
   }
 
