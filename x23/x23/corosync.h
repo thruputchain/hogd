@@ -90,27 +90,9 @@ public:
     // LockerState can only be used for one lock at a time
     assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
 
-    struct AwaitAcquire {
-      Self &lk_;
-      LockerState *next_;
-      LockerState *prev_;
-
-      AwaitAcquire(Self &lk, LockerState *ls) : lk_(lk), next_(ls) {}
-      bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
-      void await_suspend(std::coroutine_handle<> h SLOC_PARM)
-      {
-#if X23_CORO_TRACE
-        corotrace.set_suspend(h, sloc, "CoroLock",
-                              static_cast<const void *>(&lk_));
-#endif // X23_CORO_TRACE
-        prev_->next_ = h;
-      }
-      void await_resume() {}
-    };
-
     if constexpr (requires { self.block_while_inhibited(); })
       // Self is a CoroSharedLock
-      return [](AwaitAcquire await) -> Async<void> {
+      return [](Self::AwaitAcquire await) -> Async<void> {
         co_await await;
         if (ThreadPool *pool = ThreadPool::get_thread_pool())
           co_await pool->async(&Self::block_while_inhibited, &await.lk_);
@@ -126,12 +108,8 @@ public:
   // lock before returning.
   void unlock(LockerState *ls)
   {
-    if (std::coroutine_handle<> h = next(ls)) {
-#if X23_CORO_TRACE
-      corotrace.clear_suspend(h);
-#endif // X23_CORO_TRACE
+    if (std::coroutine_handle<> h = next(ls))
       h();
-    }
   }
 
   Async<void> await_free()
@@ -146,6 +124,24 @@ public:
   }
 
 private:
+  struct AwaitAcquire {
+    CoroLock &lk_;
+    LockerState *next_;
+    LockerState *prev_;
+
+    AwaitAcquire(CoroLock &lk, LockerState *ls) : lk_(lk), next_(ls) {}
+    bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
+    void await_suspend(auto h SLOC_DECL)
+    {
+#if X23_CORO_TRACE
+      if (PromiseBase *base = PromiseBase::get(h))
+        base->suspension_ = sloc;
+#endif // X23_CORO_TRACE
+      prev_->next_ = h;
+    }
+    void await_resume() {}
+  };
+
   template<typename T> struct AwaitReleaseAndReturn;
 
 public:
@@ -468,8 +464,12 @@ private:
       --s_.count_;
       return true;
     }
-    void await_suspend(std::coroutine_handle<> h) noexcept
+    void await_suspend(auto h SLOC_DECL) noexcept
     {
+#if X23_CORO_TRACE
+      if (PromiseBase *base = PromiseBase::get(h))
+        base->suspension_ = sloc;
+#endif // X23_CORO_TRACE
       h_ = h;
       *s_.last_ = this;
       s_.last_ = &next_;

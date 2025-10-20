@@ -169,35 +169,40 @@ concept is_callback_of =
 // This is a mix-in class that somewhat abstracts the difference
 // between coroutines that return void and those that return a value,
 // by, in either case, calling a method do_return() in the subtype.
-template<typename T> struct CoroDoReturn {
+template<typename T> struct CoroDoReturn : PromiseBase {
   static constexpr size_t kReturnValue = 1;
+  using PromiseBase::PromiseBase;
   template<std::convertible_to<T> R>
   void return_value(this auto &self, R &&v) noexcept
   {
     self.do_return(std::forward<R>(v));
   }
 };
-template<> struct CoroDoReturn<void> {
+template<> struct CoroDoReturn<void> : PromiseBase {
   static constexpr size_t kReturnValue = 0;
+  using PromiseBase::PromiseBase;
   void return_void(this auto &self) noexcept { self.do_return(); }
 };
 
 // This type allows you to co_return from a function whose final
 // argument is a callback.
-template<is_callback_like CB>
-struct CallbackPromise : CoroDoReturn<CallbackArgType<CB>> {
+template<typename... Args> requires is_callback_like<LastType<Args...>>
+struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
+  using CB = LastType<Args...>;
   using argument_type = CallbackArgType<CB>;
-  using CoroDoReturn<argument_type>::kReturnValue;
+  using super = CoroDoReturn<argument_type>;
+  using super::kReturnValue;
   CB cb_;
 
   // Note the coroutine should not touch its final argument (the
   // callback), so we can move it into ourselves.  (The arguments to a
   // promise constructor are initialized from the already initialized
   // arguments of the coroutine.)
-  CallbackPromise(auto &&...args) requires (sizeof...(args) > 0)
-    : cb_(std::move(last_arg(std::forward<decltype(args)>(args)...)))
+  CallbackPromise(Args &...args SLOC_DECL)
+    : super(SLOC_VAR),
+      cb_(std::move(last_arg(std::forward<decltype(args)>(args)...)))
   {}
-  CallbackPromise(CallbackPromise &&) = delete;
+  CallbackPromise(const CallbackPromise &) = delete;
 
   void get_return_object() const noexcept {}
   std::suspend_never initial_suspend() const noexcept { return {}; }
@@ -215,7 +220,7 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<CB>> {
 template<typename... Args>
 requires x23::detail::is_callback_like<x23::LastType<Args...>>
 struct std::coroutine_traits<void, Args...> {
-  using promise_type = x23::detail::CallbackPromise<x23::LastType<Args...>>;
+  using promise_type = x23::detail::CallbackPromise<Args...>;
 };
 
 namespace x23 {
@@ -225,10 +230,11 @@ namespace x23 {
 template<typename R> class Awaitable : public detail::CoroDoReturn<R> {
 public:
   using resume_type = R;
-  using detail::CoroDoReturn<R>::kReturnValue;
+  using super = detail::CoroDoReturn<R>;
+  using super::kReturnValue;
 
-  Awaitable() noexcept {}
-  Awaitable(Awaitable &&) = delete;
+  Awaitable(source_location sloc = source_location::current()) : super(sloc) {}
+  Awaitable(const Awaitable &) = delete;
   ~Awaitable()
   {
     // You cannot discard an Awaitable without co_awaiting it, unless
@@ -285,15 +291,18 @@ public:
   {
     return flags_.load(std::memory_order_acquire) & kReturning;
   }
-  bool await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
+  bool await_suspend(auto h SLOC_DECL) noexcept
   {
+#if X23_CORO_TRACE
+    if (auto base = PromiseBase::get(h)) {
+      base->suspension_ = sloc;
+      this->waiter_ = base;
+    }
+#endif // X23_CORO_TRACE
     caller_ = h;
     unsigned oldflags = flags_.fetch_or(kAwaiting, std::memory_order_acq_rel);
     if (oldflags & kReturning)
       return false;
-#if X23_CORO_TRACE
-    corotrace.set_suspend(h, sloc, "Awaitable", type_name<R>());
-#endif // X23_CORO_TRACE
     // Once we set kAwaiting, the callee may resume us and destroy the
     // Awaitable at any time, so we must no longer touch *this.
     return true;
@@ -335,9 +344,6 @@ public:
     unsigned oldflags = flags_.fetch_or(kReturning, std::memory_order_acq_rel);
     assert(oldflags & (kResult | kException));
     if (oldflags & kAwaiting) {
-#if X23_CORO_TRACE
-      corotrace.clear_suspend(caller_);
-#endif // X23_CORO_TRACE
       return caller_;
     }
     // At this point no longer safe to touch this, as caller might
@@ -469,19 +475,9 @@ template<typename R> struct [[nodiscard]] Async {
   struct promise_type;
   using handle_type = std::coroutine_handle<promise_type>;
   struct promise_type : Awaitable<R> {
-#if X23_CORO_TRACE
-    promise_type(const auto &...args)
-    {
-      std::coroutine_handle<> h =
-          std::coroutine_handle<promise_type>::from_promise(*this);
-      corotrace.set_alloc(h, GetLoc{}(args...), type_name<Async>());
-    }
-    ~promise_type()
-    {
-      corotrace.clear_alloc(
-          std::coroutine_handle<promise_type>::from_promise(*this));
-    }
-#endif // X23_CORO_TRACE
+    promise_type(source_location sloc = source_location::current())
+      : Awaitable<R>(sloc)
+    {}
     Async get_return_object()
     {
       return Async{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -698,36 +694,25 @@ namespace x23 {
 // coroutines to co_await.
 template<typename R>
 std::pair<Async<R>, CoroCB<R>>
-make_async(SLOC_PARM0)
+make_async(source_location sloc = source_location::current())
 {
   CoroCB<R> cb;
-  Async<R> async = [&cb](SLOC_PARM0) -> Async<R> {
+  Async<R> async = [&cb](source_location) -> Async<R> {
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};
     std::unreachable();
-  }(SLOC_VAR);
+  }(sloc);
   return std::pair{std::move(async), cb};
 }
 
 // A funciton that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
-  struct promise_type {
-#if X23_CORO_TRACE
-    template<typename... Args> promise_type(const Args &...args)
-    {
-      std::coroutine_handle<> h =
-          std::coroutine_handle<promise_type>::from_promise(*this);
-      corotrace.set_alloc(h, GetLoc{}(args...), "Detached");
-    }
-    ~promise_type()
-    {
-      corotrace.clear_alloc(
-          std::coroutine_handle<promise_type>::from_promise(*this));
-    }
-#endif // X23_CORO_TRACE
-
+  struct promise_type : PromiseBase {
+    promise_type(source_location sloc = source_location::current())
+      : PromiseBase(sloc)
+    {}
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}
@@ -761,14 +746,14 @@ struct MapAwait {
     return a().await_ready();
   }
 
-  auto await_suspend(auto h SLOC_PARM) noexcept
+  auto await_suspend(auto h SLOC_DECL) noexcept
   {
 #if X23_CORO_TRACE
     if constexpr (requires { a().await_suspend(h, sloc); })
-      return a().await_suspend(h, sloc);
-    corotrace.set_suspend(h, sloc, "MapAwaiter", type_name<A>());
+      a().await_suspend(h, sloc);
+    else
 #endif // X23_CORO_TRACE
-    return a().await_suspend(h);
+      return a().await_suspend(h);
   }
 
   decltype(auto) await_resume()
