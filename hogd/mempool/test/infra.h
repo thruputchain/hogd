@@ -176,7 +176,6 @@ private:
 
     db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
     ctx_ = std::make_unique<RPCContext>(db_, trie_, std::move(sched_db_client));
-    set_dbtip({.height = 0, .hash = {}, .id = 0});
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
