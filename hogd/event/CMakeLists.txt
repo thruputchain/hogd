@@ -1,4 +1,5 @@
 add_library(event_objects OBJECT
+  event_block_context.cc
   utilities.cc
 )
 
@@ -11,11 +12,6 @@ add_library(event STATIC $<TARGET_OBJECTS:event_objects>)
 
 target_link_libraries(
   event
-  hogd
-)
-
-add_dependencies(
-  event_objects
   hogd
 )
 
