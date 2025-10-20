@@ -140,6 +140,7 @@ public:
   void set_dbtip(const DbTip &db_tip)
   {
     CHECK(db_.write_dbtip(db_tip).has_value());
+    ctx_->get_tip() = db_tip;
   }
 
   // This getter is used by [auth_test.cc].
