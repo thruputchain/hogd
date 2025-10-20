@@ -187,7 +187,7 @@ namespace detail {
 
 // If we are in a thread pool, resume the coroutine in another thread.
 // If not, resume it synchronously in this thread.
-void resume_in_another_thread(std::coroutine_handle<>);
+void resume_in_another_thread(CoroHandle);
 
 } // namespace detail
 
@@ -233,7 +233,7 @@ protected:
     // The normal behavior is to run the next locker as soon as you
     // release the lock (either explicitly or implicitly when a
     // CoroGuard is destroyed).
-    detail::resume_in_another_thread(next_coro);
+    detail::resume_in_another_thread(CoroHandle{next_coro, nullptr});
     return next_locker;
   }
 

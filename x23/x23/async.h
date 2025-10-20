@@ -437,11 +437,11 @@ template<typename R> struct CoroCB {
   // caller has not yet co_awaited the Awaitable, in which case it
   // will simply take the result without ever suspending itself.
   template<typename... T>
-  std::coroutine_handle<> set_result_without_resuming(T &&...t) const
+  CoroHandle set_result_without_resuming(T &&...t) const
       requires requires { resume_->set_result(std::forward<T>(t)...); }
   {
     resume_->do_return(std::forward<T>(t)...);
-    return resume_->caller();
+    return {resume_->caller(), resume_->waiter()};
   }
 };
 
@@ -771,7 +771,7 @@ namespace detail {
 // event that final_suspend().await_suspend() returns a
 // coroutine_handle to jump to, we also return this handle.
 template<typename Promise>
-auto // either void or coroutine_handle<>
+auto // either void or coroutine_handle<P>
 emulate_final_suspend(std::coroutine_handle<Promise> h)
 {
   auto a = get_awaiter(h.promise().final_suspend());

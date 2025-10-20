@@ -260,7 +260,7 @@ CoroPollImpl::check(int timeout)
       if (evs[i].events & epflags[write]) {
         if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
           --numcoro_;
-          if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+          if (CoroHandle h = wi->set_result_without_resuming(err))
             coroqueue.emplace_back(h, wi.cpuhint);
         }
       }
@@ -288,7 +288,7 @@ void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
   if (WorkItem wi = getfd(fd.get())->callbacks_[write].exchange({}))
-    if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+    if (CoroHandle h = wi->set_result_without_resuming(err))
       pool_.go({h, wi.cpuhint});
 }
 

@@ -2,6 +2,13 @@
 
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <concepts>
+#include <coroutine>
+#include <source_location>
+#include <type_traits>
+
 #include <x23/config.h>
 #include <x23/utility.h>
 
@@ -12,11 +19,6 @@
 #define X23_CORO_TRACE 1
 #endif // !NDEBUG && X23_CORO_TRACE
 #endif // !defined(X23_CORO_TRACE)
-
-#include <concepts>
-#include <coroutine>
-#include <source_location>
-#include <type_traits>
 
 namespace x23 {
 
@@ -47,6 +49,8 @@ struct PromiseBase {
 
   PromiseBase(source_location sloc) noexcept : creation_(sloc) {}
 
+  PromiseBase *waiter() const noexcept { return waiter_; }
+
   template<typename P> requires (!std::is_void_v<P>)
   static PromiseBase *get(std::coroutine_handle<P> h) noexcept
   {
@@ -57,13 +61,45 @@ struct PromiseBase {
 };
 
 struct CoroHandle : std::coroutine_handle<> {
-  PromiseBase *pb_;
+  using super = std::coroutine_handle<>;
+  PromiseBase *pb_{};
 
+  CoroHandle() noexcept = default;
   template<typename P> requires (!std::is_void_v<P>)
   CoroHandle(std::coroutine_handle<P> h) noexcept
     : std::coroutine_handle<>(h), pb_(PromiseBase::get(h))
   {}
+  CoroHandle(std::coroutine_handle<> h, PromiseBase *pb) : super(h), pb_(pb) {}
   PromiseBase *base() const { return pb_; }
+};
+
+class AtomicCoroHandle {
+public:
+  void put(const CoroHandle &ch)
+  {
+    pb_ = ch.pb_;
+#ifdef NDEBUG
+    h_.store(ch, std::memory_order_release);
+#else  // !NDEBUG
+    auto h = h_.exchange(ch, std::memory_order_release);
+    assert(!h);
+#endif // !NDEBUG
+  }
+  CoroHandle take()
+  {
+    PromiseBase *pb = std::exchange(pb_, nullptr);
+    auto h = h_.exchange(nullptr, std::memory_order_acquire);
+    return {h, pb};
+  }
+  explicit operator bool() const
+  {
+    return bool{h_.load(std::memory_order_relaxed)};
+  }
+  PromiseBase *base() const { return pb_; }
+
+private:
+  std::atomic<std::coroutine_handle<>> h_;
+  PromiseBase *pb_{};
 };
 
 #else // !X23_CORO_TRACE
@@ -80,7 +116,7 @@ struct CoroHandle : std::coroutine_handle<> {
 struct PromiseBase {
   PromiseBase() noexcept = default;
   PromiseBase(source_location) noexcept {}
-
+  PromiseBase *waiter() const noexcept { return nullptr; }
   template<typename P> requires (!std::is_void_v<P>)
   static PromiseBase *get(std::coroutine_handle<P>) noexcept
   {
@@ -88,7 +124,39 @@ struct PromiseBase {
   }
 };
 
-using CoroHandle = std::coroutine_handle<>;
+struct CoroHandle : std::coroutine_handle<> {
+  using super = std::coroutine_handle<>;
+
+  CoroHandle() noexcept = default;
+  template<typename P>
+  CoroHandle(std::coroutine_handle<P> h, PromiseBase * = nullptr) : super(h)
+  {}
+};
+
+class AtomicCoroHandle {
+public:
+  void put(const CoroHandle &ch)
+  {
+#ifdef NDEBUG
+    h_.store(ch, std::memory_order_relaxed);
+#else  // !NDEBUG
+    auto h = h_.exchange(ch, std::memory_order_relaxed);
+    assert(!h);
+#endif // !NDEBUG
+  }
+  CoroHandle take()
+  {
+    return {h_.exchange(nullptr, std::memory_order_relaxed), nullptr};
+  }
+  explicit operator bool() const
+  {
+    return bool{h_.load(std::memory_order_relaxed)};
+  }
+  PromiseBase *base() const { return nullptr; }
+
+private:
+  std::atomic<std::coroutine_handle<>> h_;
+};
 
 #endif // !X23_CORO_TRACE
 
