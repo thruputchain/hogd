@@ -367,6 +367,7 @@ public:
             version::kHogdGitHash);
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
+    info("clearing work directory: {}", work_dir_);
     // clear the work directory
     try {
       std::filesystem::path dir_path(work_dir_);
