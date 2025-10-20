@@ -263,6 +263,20 @@ open_block(db_sched_client_t &db_sched_client,
            uint64_t parent_block_number, uint64_t block_number)
 {
   info("opening block {}", block_number);
+
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<size_t> n_remaining_execs = exec_clients.size();
+
+  for (auto &exec_client : exec_clients) {
+    [](auto &exec_client, uint64_t block_number,
+       std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
+      co_await exec_client.executorsched_open_proposal_block(block_number);
+      if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        cb();
+      }
+    }(exec_client, block_number, n_remaining_execs, cb);
+  }
+
   event_sched_client.eventsched_open_block(block_number);
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
@@ -271,12 +285,7 @@ open_block(db_sched_client_t &db_sched_client,
     throw std::runtime_error("Failed to create snapshot");
   }
 
-  for (auto &exec_client : exec_clients) {
-    auto r = exec_client.executorsched_open_proposal_block(block_number)();
-    if (r != ExecResult::ExecResultOK) {
-      throw std::runtime_error("Failed to open proposal block");
-    }
-  }
+  async();
 };
 
 void
@@ -285,11 +294,19 @@ close_block(db_sched_client_t &db_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number)
 {
   info("closing block {}", block_number);
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<size_t> n_remaining_execs = exec_clients.size();
+
   for (auto &exec_client : exec_clients) {
-    exec_client.executorsched_finish_block(block_number)();
+    [](auto &exec_client, uint64_t block_number,
+       std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
+      co_await exec_client.executorsched_finish_block(block_number);
+      if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        cb();
+      }
+    }(exec_client, block_number, n_remaining_execs, cb);
   }
   event_sched_client.eventsched_close_block(block_number);
-
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
@@ -298,6 +315,9 @@ close_block(db_sched_client_t &db_sched_client,
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
+  // It's ok for finish_block to overlap with db.close_block, because we already
+  // synchronized waiting for all pending txs on the block to finish.
+  async();
 };
 
 x23::Detached
