@@ -188,7 +188,9 @@ connect_to_event_sched_server(uint16_t port)
   if (!server_addr) {
     throw std::runtime_error("Failed to connect to event server");
   }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+  auto fd = x23::tcpconnect(server_addr.value());
+
+  return x23::rpc_stream_logged(default_coropoll(), fd.release())
       ->client(EventSched1{});
 }
 
@@ -276,7 +278,7 @@ open_block(db_sched_client_t &db_sched_client,
     }(exec_client, block_number, n_remaining_execs, cb);
   }
 
-  event_sched_client.eventsched_open_block(block_number);
+  auto event_async = event_sched_client.eventsched_open_block(block_number);
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -285,6 +287,7 @@ open_block(db_sched_client_t &db_sched_client,
   }
 
   async();
+  event_async();
 };
 
 void
@@ -305,7 +308,7 @@ close_block(db_sched_client_t &db_sched_client,
       }
     }(exec_client, block_number, n_remaining_execs, cb);
   }
-  event_sched_client.eventsched_close_block(block_number);
+  auto event_async = event_sched_client.eventsched_close_block(block_number);
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
@@ -317,6 +320,7 @@ close_block(db_sched_client_t &db_sched_client,
   // It's ok for finish_block to overlap with db.close_block, because we already
   // synchronized waiting for all pending txs on the block to finish.
   async();
+  event_async();
 };
 
 x23::Detached
@@ -369,7 +373,6 @@ run_block(x23::Vec<SignedTransaction> const &txs,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number)
 {
-  BlockValidationQueue block_validation_queue(txs, batch_size);
 
   auto start_time = x23::fastclock::get_ns();
 
@@ -377,15 +380,20 @@ run_block(x23::Vec<SignedTransaction> const &txs,
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
 
+  BlockValidationQueue block_validation_queue(txs, batch_size);
+
   auto start_coros_time = x23::fastclock::get_ns();
 
-  auto [async, cb] = x23::make_async<void>();
-  for (auto &exec_client : exec_clients) {
-    connection_coro(exec_client, &block_validation_queue, cb,
-                    n_coros_per_connection, current_block_number,
-                    n_total_coros);
+  // make sure any destructors are run during the measured inner loop
+  {
+    auto [async, cb] = x23::make_async<void>();
+    for (auto &exec_client : exec_clients) {
+      connection_coro(exec_client, &block_validation_queue, cb,
+                      n_coros_per_connection, current_block_number,
+                      n_total_coros);
+    }
+    async();
   }
-  async();
 
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
@@ -543,16 +551,17 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   assert(work_txs.success().work_txs.size() == num_txs_per_block);
 
-  for (size_t i = 0; i < 10; i++) {
+  for (size_t i = 0; i < 5; i++) {
     std::println("Start trial {} with txs={} nexecutors={} nconnections={} "
                  "ncoros_per_connection={} nacc={} "
                  "batch_size={}",
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
+    auto const &work = work_txs.success().work_txs;
     auto ts = x23::fastclock::get_ns();
-    run_block(work_txs.success().work_txs, db_sched_client, event_sched_client,
-              coro_exec_clients, n_coros_per_connection, n_connections,
-              batch_size, parent_block_number, current_block_number);
+    run_block(work, db_sched_client, event_sched_client, coro_exec_clients,
+              n_coros_per_connection, n_connections, batch_size,
+              parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
