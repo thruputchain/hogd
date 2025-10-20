@@ -208,26 +208,9 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
   co_return res == ExecResult::ExecResultOK;
 }
 
-void
-accounts_scheduled(const SignedTransactionBatch &txs)
-{
-  ;
-  std::map<ContractAddress, size_t> accounts;
-  for (const SignedTransaction &tx : txs) {
-    accounts[tx.tx.invocation.invoked_address]++;
-  }
-  for (const auto &[account, num_txs] : accounts) {
-    info("{} txs for account {}", num_txs, account);
-  }
-}
-
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  info(
-      "nominate, the scheduler has {} txs, {} are runnable and {} are stranded",
-      scheduler_->size(), scheduler_->num_on_runqueue(),
-      scheduler_->num_stranded());
   // TODO(jhumphri): Wait for the [scheddb_hogs_transferred] messages to be
   // processed before responding.
   while (!scheduler_->transfer_finished_) {
@@ -242,14 +225,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  info("nominate here");
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  info("nominate here");
 
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
@@ -261,19 +242,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // [nomination.transaction_nominations] are filled in below.
   nomination.transaction_hashes.reserve(kMaxBlockSize);
   nomination.transaction_nominations.reserve(kMaxBlockSize);
-  info("nominate here");
 
   x23::Vec<SignedTransaction> txs;
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
-  info("nominate, got {} txs from the scheduler, {} txs remain in the "
-       "scheduler, {} are runnable and {} are stranded",
-       txs.size(), scheduler_->size(), scheduler_->num_on_runqueue(),
-       scheduler_->num_stranded());
-  accounts_scheduled(txs);
-  info("dumping the runqueue");
-  scheduler_->dump_runqueue();
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -282,7 +255,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  info("nominate here");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
@@ -313,7 +285,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     }
   }
 
-  info("nominate here");
   if (nomination.transaction_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
     // is empty. Thus, we fail the nomination.
@@ -322,8 +293,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-
-  info("nominate here");
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   co_await finish_block(block_id);

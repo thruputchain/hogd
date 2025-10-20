@@ -156,7 +156,6 @@ public:
 
   // Debug.
   void dump_runqueue() const;
-  void print_account_hogs(const ContractAddress &account);
 
   // TODO(jhumphri): Add multi-thread support to the scheduler.
 
