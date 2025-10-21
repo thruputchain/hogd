@@ -74,7 +74,7 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
 void
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
-  buffers_->buf.append(data.begin(), data.end());
+  buffers_->buf.append_range(data);
   buffers_->event_count++;
 }
 

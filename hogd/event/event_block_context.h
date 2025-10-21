@@ -69,7 +69,7 @@ private:
   BlockID block_id_;
 
   struct EventContext {
-    x23::Buf buf;
+    std::vector<uint8_t> buf;
     uint32_t event_count;
   };
 
