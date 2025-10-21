@@ -286,7 +286,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   hogd::RpcServer<hogd::TestSchedEvent> test_sched_event_server;
-  if (test_sched_event_server.start_server(8091) != 8091) {
+  if (test_sched_event_server.start_server(8095) != 8095) {
     std::println("Error: Failed to start test sched event server");
     return EXIT_FAILURE;
   }

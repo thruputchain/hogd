@@ -61,6 +61,7 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
 {
   assert(ul.owns_lock());
   assert(ul.mutex() == &file_mutex_);
+
   auto old_name = temp_events_filename(work_directory_, block_id_);
   auto new_name = final_events_filename(work_directory_, hash);
   int rc = std::rename(old_name.c_str(), new_name.c_str());
@@ -84,6 +85,7 @@ EventBlockContext::finish_file()
     auto ul = buffers_.lock_threads();
     uint32_t event_count = 0;
     buffers_.for_each(ul, [&event_count](EventContext &context) {
+      debug("event count: {} buffer size: {}", context.event_count, context.buf.size());
       event_count += context.event_count;
     });
 

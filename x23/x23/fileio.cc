@@ -1,8 +1,14 @@
+#include <x23/fileio.h>
 
+#include <cstdio>
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <expected>
+#include <filesystem>
 
-#include "x23/fileio.h"
+#include <x23/cleanup.h>
+#include <x23/err.h>
+#include <x23/vec.h>
 
 namespace x23 {
 
@@ -23,7 +29,7 @@ fullwrite(BorrowedFd fd, BufView buf)
 {
   for (;;) {
     ssize_t n = ::write(fd.get(), buf.data(), buf.size());
-    if (n <= 0)
+    if (n < 0)
       return Errno{};
     else if (size_t(n) == buf.size())
       return {};
@@ -38,7 +44,10 @@ writefile(const std::filesystem::path &p, BufView buf, bool sync, int mode)
   if (!fd)
     return Errno{};
   auto ret = fullwrite(fd, buf);
-  if (ret) {
+  if (!ret) {
+    return ret;
+  }
+  if (sync) {
     if (fsync(fd.get()) == -1)
       ret = Errno{};
   }

@@ -80,12 +80,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   int ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
-  hogd::info("starting event server!");
 
   if (argc != 3) {
     std::println("usage: <mempool_server_address> <work_directory>");
     return EXIT_FAILURE;
   }
+
+  hogd::info("starting event server!");
 
   std::string mempool_address = argv[1];
   std::string work_directory = argv[2];

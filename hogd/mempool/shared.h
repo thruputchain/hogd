@@ -11,20 +11,15 @@
 #include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/crypto/crypto.h"
 #include "loadgen.hh"
-#include "nomination.hh"
-#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
-#include "transaction.hh"
-#include "types.hh"
-#include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
