@@ -5,6 +5,10 @@ inputs:
     description: "Build directory to use"
     required: true
     type: string
+  work-dir:
+    description: "Work directory to use"
+    required: true
+    type: string
 runs:
   using: "composite"
   steps:
@@ -35,10 +39,10 @@ runs:
       run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
       shell: bash
     - name: launch event
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073 ${{ inputs.work-dir }}/
       shell: bash
     - name: launch hogdb
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb work_dir/ 10000000000 hog10:8072
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb ${{ inputs.work-dir }}/ 10000000000 hog10:8072
       shell: bash
     - name: make sure procs are running
       run: |

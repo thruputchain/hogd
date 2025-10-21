@@ -90,6 +90,7 @@ jobs:
       uses: ./.github/actions/mempool_bench
       with:
         build-dir: release
+        work-dir: ci_work_dir/
     - name: release hog7 and hog8
       if: always()
       run: |
