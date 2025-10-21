@@ -64,4 +64,14 @@ TEST_F(EventRpcTest, TestAbandonBlock)
   ctx.gc_context(1);
 }
 
+TEST_F(EventRpcTest, TestEmptyBlock)
+{
+  EventRPCContext ctx(temp_dir_);
+  EventExecRpc exec_rpc(ctx);
+  EventSchedRpc sched_rpc(ctx);
+
+  EXPECT_EQ(sched_rpc.eventsched_open_block(1), RPCError::kRPCNone);
+  EXPECT_EQ(sched_rpc.eventsched_close_block(1).error(), RPCError::kRPCNone);
+}
+
 } // namespace hogd
