@@ -19,7 +19,7 @@ struct Detached {
 };
 
 struct Awaiter {
-  bool await_ready() noexcept { return true; }
+  bool await_ready() noexcept { return false; }
   void
   await_suspend(std::coroutine_handle<> h,
                 std::source_location sloc = std::source_location::current())
@@ -33,4 +33,10 @@ coroutine()
 {
   co_await Awaiter{};
 }
-]=] X23_CORO_SLOCK_OK)
+
+int
+main()
+{
+  return 0;
+}
+]=] X23_CORO_SLOC_OK)

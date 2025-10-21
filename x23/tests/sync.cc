@@ -233,3 +233,52 @@ TEST(CoroSharedLock, TestLock)
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
+
+TEST(CoroSem, MutualExclusion)
+{
+  [] -> Async<void> {
+    std::atomic_bool ready{false};
+    int n = 0;
+    CoroSem sem;
+    [](std::atomic_bool &ready, int &n, CoroSem &sem) -> Detached {
+      co_await pool.bg();
+      co_await sem.acquire();
+      ready = true;
+      ready.notify_all();
+      usleep(50'000);
+      n = 1;
+      sem.release();
+    }(ready, n, sem);
+    ready.wait(false);
+    co_await sem.acquire();
+    EXPECT_EQ(n, 1);
+    sem.release();
+    co_return;
+  }()();
+}
+
+TEST(CoroSem, ManyWaiters)
+{
+  [] -> Async<void> {
+    CoroSem sem;
+    co_await sem.acquire();
+    std::atomic_int lastid = -1;
+
+    for (int i = 0; i < 64; ++i)
+      [](CoroSem &sem, std::atomic_int &lastid, int myid) -> Detached {
+        co_await pool.bg();
+        co_await sem.acquire();
+        EXPECT_GE(lastid, 0);
+        EXPECT_NE(lastid, myid);
+        lastid = myid;
+        usleep(2'000);
+        EXPECT_EQ(lastid, myid);
+        sem.release();
+      }(sem, lastid, i);
+
+    usleep(50'000);
+    lastid = 0x1'0000;
+    sem.release();
+    co_await pool.async(&ThreadPool::drain, &pool);
+  }()();
+}
