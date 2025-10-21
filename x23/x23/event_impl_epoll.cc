@@ -76,12 +76,15 @@ std::string
 CoroPollImpl::showfd(const FdPtr &fdp)
 {
   int fd = fdp.get() - state_;
-  auto ret = std::format("fd {}, mode {}, ready {}", fd, int(fdp->mode_.load()),
-                         fdp->ready_.load());
-  if (fdp->callbacks_[0].value.load())
-    uformat_to(&ret, ", reader (CPU {})", fdp->callbacks_[0].cpuhint.load());
-  if (fdp->callbacks_[1].value.load())
-    uformat_to(&ret, ", writer (CPU {})", fdp->callbacks_[1].cpuhint.load());
+  auto ret = std::format("  fd {}, mode {}, ready {}\n", fd,
+                         int(fdp->mode_.load()), fdp->ready_.load());
+  for (unsigned writer = 0; writer <= 1; ++writer) {
+    if (auto cb = fdp->callbacks_[writer].value.load()) {
+      uformat_to(&ret, "    {} (CPU {})\n", writer ? "writer" : "reader",
+                 fdp->callbacks_[0].cpuhint.load());
+      ret = trace(cb.resume_, 6, std::move(ret));
+    }
+  }
   return ret;
 }
 
@@ -93,12 +96,12 @@ CoroPollImpl::debug_dump()
   uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
              (void *)static_cast<CoroPoll *>(this), eventfd_.get());
   {
-    auto _lk = resize_lock_.hold_shared();
+    auto _lk = std::unique_lock(resize_lock_);
     for (unsigned i = 0; i < state_size_; ++i) {
       FdState *p = state_ + i;
       if (p->mode_ == kFree)
         continue;
-      uformat_to(&msg, "  {}\n", showfd(FdPtr{.p_ = p}));
+      msg += showfd(FdPtr{.p_ = p});
     }
   }
   int fd = debug.fd();

@@ -7,6 +7,7 @@
 #include <concepts>
 #include <coroutine>
 #include <source_location>
+#include <string>
 #include <type_traits>
 
 #include <x23/config.h>
@@ -47,7 +48,9 @@ struct PromiseBase {
   source_location suspension_{};
   PromiseBase *waiter_{}; // non-NULL if another coro is co_awaiting us
 
-  PromiseBase(source_location sloc) noexcept : creation_(sloc) {}
+  PromiseBase(source_location sloc) noexcept
+    : creation_(sloc), suspension_(creation_)
+  {}
 
   PromiseBase *waiter() const noexcept { return waiter_; }
 
@@ -122,6 +125,7 @@ struct PromiseBase {
   {
     return nullptr;
   }
+  std::string show() const { return {}; }
 };
 
 struct CoroHandle : std::coroutine_handle<> {
@@ -159,5 +163,8 @@ private:
 };
 
 #endif // !X23_CORO_TRACE
+
+std::string trace(const PromiseBase *pb, unsigned indent = 0,
+                  std::string ret = {});
 
 } // namespace x23
