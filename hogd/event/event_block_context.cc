@@ -14,10 +14,10 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
-#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -82,7 +82,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 void
 EventBlockContext::finish_file()
 {
-    auto ts = x23::fastclock::now();
+  auto ts = x23::fastclock::now();
   {
     auto ul = buffers_.lock_threads();
     uint32_t event_count = 0;

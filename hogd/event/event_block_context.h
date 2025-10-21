@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/io.h"
@@ -20,7 +21,6 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
-#include "x23/vec.h"
 
 namespace hogd {
 

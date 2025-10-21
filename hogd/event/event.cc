@@ -1,11 +1,14 @@
+#include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <thread>
 
-#include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
@@ -13,10 +16,10 @@
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "x23/cleanup.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 
