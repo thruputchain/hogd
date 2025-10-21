@@ -41,6 +41,7 @@ public:
   // getters
   HogDBDAO &get_db() const { return db_; }
   MerkleTriePrefix &get_trie() const { return trie_; }
+  BlockHeight get_height() const { return block_height_; }
 
   // commit applies all changes to the database. If this fails, nothing will be
   // written to disk, but the database may be left in an inconsistent state.
