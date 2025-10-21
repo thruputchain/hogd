@@ -458,14 +458,17 @@ private:
 
     bool await_ready() noexcept
     {
-      ul_ = std::unique_lock(s_.lk_);
+      if (!ul_)
+	ul_ = std::unique_lock(s_.lk_);
       if (!s_.count_)
         return false;
       --s_.count_;
+      ul_.unlock();
       return true;
     }
     void await_suspend(auto h SLOC_DECL) noexcept
     {
+      assert(ul_);
 #if X23_CORO_TRACE
       if (PromiseBase *base = PromiseBase::get(h))
         base->suspension_ = sloc;
