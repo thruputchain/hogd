@@ -1,5 +1,7 @@
 add_library(event_objects OBJECT
   event_block_context.cc
+  rpc_from_exec.cc
+  rpc_from_sched.cc
   status.cc
   utilities.cc
 )
