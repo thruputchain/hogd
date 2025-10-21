@@ -79,7 +79,9 @@ private:
 
   PerThread<EventContext> buffers_;
 
+  std::atomic<size_t> pending_writes_{0};
   std::mutex file_mutex_;
+  std::condition_variable file_cv_;
   x23::UniqueFd events_file_;
 };
 

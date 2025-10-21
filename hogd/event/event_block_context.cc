@@ -27,6 +27,8 @@
 
 namespace hogd {
 
+constexpr static size_t kBufferThreshold = 1;//  100_KiB;
+
 namespace {
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
 x23::Detached
@@ -101,12 +103,35 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   buffers_->buf.insert(buffers_->buf.end(), data.begin(), data.end());
 #endif
   buffers_->event_count++;
+
+/*
+  if (buffers_->buf.size() >= kBufferThreshold) {
+    pending_writes_++;
+    [] (std::vector<uint8_t> buf, EventBlockContext *self) -> x23::Detached {
+        info("start writing events to file: {}", buf.size());
+      co_await default_threadpool().bg();
+      std::lock_guard lock(self->file_mutex_);
+      auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
+      if (!r) [[unlikely]] {
+        panic("failed to write events to file: {}", r.error());
+      }
+      if (self->pending_writes_.fetch_sub(1) == 1) {
+        self->file_cv_.notify_all();
+      }
+      info("finished writing events to file: {}", buf.size());
+      co_return;
+    }(std::move(buffers_->buf), this);
+    buffers_->buf.clear();
+  }*/
 }
 
 void
 EventBlockContext::finish_file()
 {
   auto ts = x23::fastclock::now();
+
+  std::unique_lock<std::mutex> file_ul;
+
   {
     auto ul = buffers_.lock_threads();
     uint32_t event_count = 0;
@@ -116,14 +141,17 @@ EventBlockContext::finish_file()
       event_count += context.event_count;
     });
 
-    if (auto r = x23::fullwrite(events_file_, x23::serialize(event_count)); !r)
-        [[unlikely]] {
-      panic("failed to write event count to file: {}", r.error());
-    }
+   //if (auto r = x23::fullwrite(events_file_, x23::serialize(event_count)); !r)
+   //     [[unlikely]] {
+   //   panic("failed to write event count to file: {}", r.error());
+   // }
     auto ts2 = x23::fastclock::now();
     info("time to write event count: {} ns", ts2 - ts);
 
     size_t total_bytes = 0;
+
+    file_ul = std::unique_lock<std::mutex>(file_mutex_);
+    file_cv_.wait(file_ul, [this] { return pending_writes_ == 0; });
 
     buffers_.for_each(ul, [this, &total_bytes](EventContext &context) {
       total_bytes += context.buf.size();
@@ -137,17 +165,20 @@ EventBlockContext::finish_file()
   }
   auto ts3 = x23::fastclock::now();
 
-  std::unique_lock ul(file_mutex_);
-  sync_file(ul);
+  assert(file_ul.owns_lock());
+
+  sync_file(file_ul);
   auto hash = get_root_hash();
   auto ts4 = x23::fastclock::now();
-  rename_file(ul, hash);
+  rename_file(file_ul, hash);
   auto ts5 = x23::fastclock::now();
   info("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
 }
 
 EventBlockContext::~EventBlockContext()
 {
+  std::unique_lock ul(file_mutex_);
+  file_cv_.wait(ul, [this] { return pending_writes_ == 0; });
   async_free_trie(std::move(trie_));
 }
 
