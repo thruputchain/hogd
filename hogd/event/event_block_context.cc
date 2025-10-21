@@ -97,16 +97,17 @@ EventBlockContext::finish_file()
       panic("failed to write event count to file: {}", r.error());
     }
     auto ts2 = x23::fastclock::now();
-    debug("time to write event count: {} ns", ts2 - ts);
+    info("time to write event count: {} ns", ts2 - ts);
 
     buffers_.for_each(ul, [this](EventContext &context) {
+      info("writing events to file: {} bytes", context.buf.size());
       auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
       if (!r) [[unlikely]] {
         panic("failed to write events to file: {}", r.error());
       }
     });
     auto ts3 = x23::fastclock::now();
-    debug("time to write events: {} ns", ts3 - ts2);
+    info("time to write events: {} ns", ts3 - ts2);
   }
   auto ts3 = x23::fastclock::now();
 
@@ -116,7 +117,7 @@ EventBlockContext::finish_file()
   auto ts4 = x23::fastclock::now();
   rename_file(ul, hash);
   auto ts5 = x23::fastclock::now();
-  debug("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
+  info("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
 }
 
 } // namespace hogd
