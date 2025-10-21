@@ -9,6 +9,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/mempool/test/loadgen.h"
@@ -44,7 +45,9 @@ coordinator_init(const std::string &mempool_address,
     throw std::runtime_error(
         std::format("Invalid mempool address: {}", mempool_address));
   }
-  auto client = create_client<SchedulerCoord1>(host_port, /*retry=*/true);
+  auto client = create_client<SchedulerCoord1>(
+      host_port, /*retry=*/true,
+      /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
   std::string address_for_sched = create_address(kSchedulerServerPort);
   CoordCard card{.protocol = version::kHogdProtocol,
                  .address_for_sched = address_for_sched.c_str()};

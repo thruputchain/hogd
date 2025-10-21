@@ -18,6 +18,10 @@ class LoadgenRpc {
 public:
   using rpc_service = LoadgenInterfaceV1;
 
+  // We set the RPC max message size to a large value because the loadgen
+  // transfers a lot of data via individual RPC calls.
+  static constexpr size_t kRpcMaxMessageSize = 0x100'000'000;
+
   LoadgenResult generate_experiment(ExperimentConfig config);
   LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
                                            uint64_t num_txs,

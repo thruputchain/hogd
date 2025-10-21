@@ -30,10 +30,10 @@ namespace hogd {
 namespace {
 
 constexpr size_t kNumTxs = 1000;
-constexpr size_t kNumLoadgenTxs = 10'000;
+constexpr size_t kNumLoadgenTxs = 100'000;
 constexpr uint32_t kNumAccounts = 100;
 
-// Helper class to manage a loadgen server and client
+// Helper class to manage a loadgen server and client.
 class LoadgenHelper {
 public:
   LoadgenHelper()
@@ -191,7 +191,7 @@ BENCHMARK(validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 void
 loadgen_submit_unvetted(benchmark::State &state)
 {
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   loadgen.init_experiment(server);
 
@@ -208,7 +208,7 @@ BENCHMARK(loadgen_submit_unvetted)->Unit(benchmark::kMillisecond);
 void
 loadgen_submit_vetted(benchmark::State &state)
 {
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   loadgen.init_experiment(server);
 
@@ -227,7 +227,7 @@ BENCHMARK(loadgen_submit_vetted)->Unit(benchmark::kMicrosecond);
 void
 loadgen_nominate(benchmark::State &state)
 {
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
 
@@ -251,7 +251,7 @@ BENCHMARK(loadgen_nominate)->Unit(benchmark::kMillisecond);
 void
 loadgen_validate(benchmark::State &state)
 {
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
 
@@ -285,7 +285,7 @@ loadgen_nominate_throughput(benchmark::State &state)
 {
   constexpr size_t kTotalTxsToRun = 100000;
 
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
 
@@ -324,7 +324,7 @@ loadgen_validate_throughput(benchmark::State &state)
 {
   constexpr size_t kTotalTxsToRun = 100000;
 
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
 

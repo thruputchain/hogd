@@ -9,6 +9,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
@@ -48,10 +49,8 @@ public:
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));
 
-    x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-    return x23::rpc_stream_logged(default_coropoll(), fd.release())
-        ->client(EventSched1{});
+    return create_client<EventSched1>(
+        server_address_to_sockaddr(card.address_for_sched));
   }
 
   void shut_down()

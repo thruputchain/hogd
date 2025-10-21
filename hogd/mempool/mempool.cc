@@ -10,6 +10,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
@@ -56,6 +57,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   }
 
   RpcServer<MempoolCoordinatorRpc> coord(db.impl_);
+  coord.max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
   while (!coord.impl_.ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
