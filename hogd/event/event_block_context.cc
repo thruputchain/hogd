@@ -33,7 +33,7 @@ EventBlockContext::add_event(TxEventLog const &event)
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
 
-  write_event(data);
+  write_event(std::span(*serialize_buf));
  // CHECK(trie_.insert_or_update(key, value));
 }
 
@@ -72,9 +72,9 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
 }
 
 void
-EventBlockContext::write_event(std::span<const std::byte> data)
+EventBlockContext::write_event(std::span<const uint8_t> data)
 {
-  buffers_->buf.append_range(x23::BufView(data));
+  buffers_->buf.append(data.begin(), data.end());
   buffers_->event_count++;
 }
 

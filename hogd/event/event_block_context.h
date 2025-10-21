@@ -60,7 +60,7 @@ public:
   void finish_file();
 
 private:
-  void write_event(std::span<const std::byte> data);
+  void write_event(std::span<const uint8_t> data);
   void sync_file(std::unique_lock<std::mutex> &ul);
   void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
 

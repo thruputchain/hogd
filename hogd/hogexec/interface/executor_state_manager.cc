@@ -62,7 +62,8 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   }
 
   // Create a new block
-  auto [it, inserted] = active_blocks_.emplace(
+  [[maybe_unused]]
+  auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
                             *event_server_proxy_, worker_pool_));
