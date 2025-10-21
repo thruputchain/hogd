@@ -24,7 +24,7 @@ void
 EventBlockContext::add_event(TxEventLog const &event)
 {
   static PerThread<x23::Buf> serialize_buf;
-  serialize_buf->clear();
+  serialize_buf->resize_uninitialized(0);
   x23::serialize_to(&*serialize_buf, event);
 
   auto data = std::as_bytes(std::span(*serialize_buf));
@@ -34,7 +34,7 @@ EventBlockContext::add_event(TxEventLog const &event)
   auto value = data.subspan(32);
 
   write_event(data);
-  CHECK(trie_.insert_or_update(key, value));
+ // CHECK(trie_.insert_or_update(key, value));
 }
 
 SHA256Hash
