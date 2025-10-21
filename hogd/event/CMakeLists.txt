@@ -34,8 +34,6 @@ target_link_libraries(
   event_exec
   event
   hogd
-  runtime_test_util
-  storage_item
 )
 
 set_property(TARGET event_exec PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

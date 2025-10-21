@@ -9,6 +9,9 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/event/rpc_context.h"
+#include "hogd/event/rpc_from_exec.h"
+#include "hogd/event/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
@@ -33,16 +36,17 @@ create_address(uint16_t port)
 }
 
 int
-event_init(const std::string &mempool_address)
+event_init(const std::string &mempool_address,
+           const std::string &work_directory)
 {
   // Start the event servers.
-  TestEventAggregator event_aggregator;
+  EventRPCContext ctx(work_directory);
+  EventExecServer exec_server(ctx);
+  EventSchedServer sched_server(ctx);
 
-  RpcServer<TestEventAggregatorExecRpc> exec(event_aggregator);
-  CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
-
-  RpcServer<TestEventAggregatorSchedRpc> sched(event_aggregator);
-  CHECK_EQ(sched.start_server(kSchedulerServerPort), kSchedulerServerPort);
+  CHECK_EQ(exec_server.start_server(kExecutorServerPort), kExecutorServerPort);
+  CHECK_EQ(sched_server.start_server(kSchedulerServerPort),
+           kSchedulerServerPort);
 
   // Register with the mempool.
   x23::HostPort host_port;
@@ -80,11 +84,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return ret;
   hogd::info("starting event server!");
 
-  if (argc != 2) {
-    std::println("usage: mempool_server_address");
+  if (argc != 3) {
+    std::println("usage: <mempool_server_address> <work_directory>");
     return EXIT_FAILURE;
   }
 
   std::string mempool_address = argv[1];
-  return hogd::event_init(mempool_address);
+  std::string work_directory = argv[2];
+  return hogd::event_init(mempool_address, work_directory);
 }
