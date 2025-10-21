@@ -55,6 +55,8 @@ public:
     events_file_ = x23::UniqueFd(fd);
   }
 
+  ~EventBlockContext();
+
   void add_event(TxEventLog const &event);
   SHA256Hash get_root_hash();
   void finish_file();

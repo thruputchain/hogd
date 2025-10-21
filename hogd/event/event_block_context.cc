@@ -8,13 +8,17 @@
 #include <mutex>
 #include <span>
 #include <unistd.h>
+#include <utility>
 #include <version>
 
 #include "event.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
@@ -22,15 +26,28 @@
 
 namespace hogd {
 
+namespace {
+x23::Detached
+async_free_trie(MerkleTriePrefix &&trie)
+{
+  co_await default_threadpool().bg();
+  trie.clear();
+  co_return;
+}
+} // namespace
+
 void
 EventBlockContext::add_event(TxEventLog const &event)
 {
   static PerThread<x23::Buf> serialize_buf;
   serialize_buf->resize_uninitialized(0);
   x23::serialize_to(&*serialize_buf, event);
+  assert(serialize_buf->size() >= 32);
 
   auto data = std::as_bytes(std::span(*serialize_buf));
   // Serialization of TxEventLog is key || value
+
+  assert(data.size() >= 32);
 
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
@@ -125,6 +142,11 @@ EventBlockContext::finish_file()
   rename_file(ul, hash);
   auto ts5 = x23::fastclock::now();
   info("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
+}
+
+EventBlockContext::~EventBlockContext()
+{
+  async_free_trie(std::move(trie_));
 }
 
 } // namespace hogd
