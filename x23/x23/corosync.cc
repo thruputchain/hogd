@@ -7,7 +7,7 @@ namespace x23 {
 namespace detail {
 
 void
-resume_in_another_thread(std::coroutine_handle<> h)
+resume_in_another_thread(CoroHandle h)
 {
   if (ThreadPool *pool = ThreadPool::get_thread_pool())
     pool->go({h, cpuid()});

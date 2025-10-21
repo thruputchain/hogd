@@ -413,7 +413,7 @@ public:
   // flush any delayed writes when the read buffer is empty.
   Async<std::expected<size_t, Errno>> read(BorrowedFd fd, Buf *out, size_t len,
                                            bool full = true,
-                                           bool sync = false SLOC_PARM);
+                                           bool sync = false SLOC_DECL);
 
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
@@ -422,7 +422,7 @@ public:
   // this concurrently in two threads will likely lead to a mishmash
   // of data.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
-                                            BufView data SLOC_PARM);
+                                            BufView data SLOC_DECL);
 
   // Asynchronous write.  Writes data to fd, but returns immediately
   // if some or all of the data will continue to be written in the
@@ -443,7 +443,7 @@ public:
   template<typename Addr = std::nullptr_t>
   Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
                                           socklen_t *addrlen = nullptr,
-                                          bool close_on_exec = true SLOC_PARM)
+                                          bool close_on_exec = true SLOC_DECL)
   {
     while (!stop_requested()) {
       socklen_t ignoredlen;
@@ -484,18 +484,18 @@ public:
   }
 
   Async<std::expected<void, Errno>> connect(BorrowedFd fd, const sockaddr *sa,
-                                            socklen_t len SLOC_PARM);
+                                            socklen_t len SLOC_DECL);
   Async<std::expected<void, Errno>>
-  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
+  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_DECL)
   {
     return connect(fd, reinterpret_cast<const sockaddr *>(ss),
                    sockaddr_len(*ss) X23_IFTRACE(, sloc));
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
-                                              socklen_t len SLOC_PARM);
+                                              socklen_t len SLOC_DECL);
   Async<std::expected<int, Errno>>
-  tcpconnect(const sockaddr_storage *ss SLOC_PARM)
+  tcpconnect(const sockaddr_storage *ss SLOC_DECL)
   {
     return tcpconnect(reinterpret_cast<const sockaddr *>(ss),
                       sockaddr_len(*ss) X23_IFTRACE(, sloc));
@@ -503,7 +503,7 @@ public:
 
   // Connect and return a file descriptor or a system error.
   Async<std::expected<int, std::system_error>>
-  tcpconnect(std::string host, std::string port SLOC_PARM);
+  tcpconnect(std::string host, std::string port SLOC_DECL);
 
 protected:
   std::thread pollthread_;

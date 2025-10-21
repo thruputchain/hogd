@@ -402,7 +402,7 @@ struct BaseString {
    }
 };
 
-struct DerivedString {
+struct DerivedString : BaseString {
   //...
   using BaseString::BaseString;
 };
