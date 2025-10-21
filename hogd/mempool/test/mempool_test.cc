@@ -120,13 +120,18 @@ TEST(Mempool, Validate)
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           {txs[0]})();
-
+  // We nominate a block first and then reuse the returned [Nomination] struct
+  // for the validation below. The [Nomination] struct contains some data, such
+  // as the nondeterministic data, that I would prefer not to have to construct
+  // myself in this test.
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
   Nomination nomination = res_nominate.scheduler_nomination().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
