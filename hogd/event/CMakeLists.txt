@@ -1,5 +1,6 @@
 add_library(event_objects OBJECT
   event_block_context.cc
+  status.cc
   utilities.cc
 )
 
