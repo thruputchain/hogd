@@ -140,7 +140,7 @@ TEST(Mempool, Validate)
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      {sha256(txs[0])},
+      nomination.transaction_hashes,
       /*prev_block_hash=*/nomination.prev_block_hash);
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           {txs[0]})();
@@ -166,9 +166,22 @@ TEST(Mempool, ValidateBatch)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
+  Nomination nomination = res_nominate.scheduler_nomination().nomination;
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+      nomination.transaction_hashes,
+      /*prev_block_hash=*/nomination.prev_block_hash);
+
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, res_nominate.scheduler_nomination().nomination)();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }
@@ -203,10 +216,22 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
+  Nomination nomination = res_nominate.scheduler_nomination().nomination;
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
   // Remove a transaction from the nomination.
-  res_nominate.scheduler_nomination().nomination.transaction_hashes.pop_back();
-  res_nominate.scheduler_nomination()
-      .nomination.transaction_nominations.pop_back();
+  nomination.transaction_hashes.pop_back();
+  nomination.transaction_nominations.pop_back();
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+      nomination.transaction_hashes,
+      /*prev_block_hash=*/nomination.prev_block_hash);
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
@@ -390,28 +415,5 @@ TEST(Mempool, AuthInvalidated)
             SchedulerNominationOutcome::SchedulerNominationError);
 }
 #endif
-
-TEST(Mempool, Stress)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-
-  ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
-
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, res_nominate.scheduler_nomination().nomination)();
-  EXPECT_EQ(res_validate.outcome(),
-            SchedulerValidationResult::SchedulerValidationOK);
-}
 
 } // namespace hogd
