@@ -250,6 +250,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
+  info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable, "
+       "{} are stranded",
+       txs.size(), scheduler_->num_on_runqueue(), scheduler_->num_stranded());
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);

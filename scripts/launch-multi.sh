@@ -238,7 +238,7 @@ done
 echo "Start event..."
 ssh "${COMMON_SSH_OPTS[@]}" "$event_server" \
   "$X23ENV; \
-  nohup \"$EVENT_BINARY\" \"$mempool_server\":8073 > $logdir/event.log 2>&1 &"
+  nohup \"$EVENT_BINARY\" \"$mempool_server\":8073 $logdir/event > $logdir/event.log 2>&1 &"
 
 # Start hogdb.
 echo "Start hogdb..."
