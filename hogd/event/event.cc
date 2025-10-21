@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/types.h"
@@ -17,6 +18,7 @@
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -31,6 +33,35 @@ create_address(uint16_t port)
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
   return std::format("{}:{}", hostname, port);
+}
+
+auto
+connect_to_event_sched_server(std::string const &address)
+{
+  x23::HostPort host_port;
+  if (!host_port.parse(address)) {
+    throw std::runtime_error("Failed to parse db server address");
+  }
+  auto server_addr = host_port.to_addr(true);
+  if (!server_addr) {
+    throw std::runtime_error("Failed to connect to db server");
+  }
+
+  while (true) {
+    x23::UniqueFd fd;
+    try {
+      fd = x23::tcpconnect(server_addr.value());
+    } catch (const std::system_error &e) {
+      if (e.code() == std::errc::connection_refused) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        warn_every_n_sec(5.0F, "Failed to connect to db server: {}", address);
+        continue;
+      }
+      throw;
+    }
+    assert(fd);
+    return x23::srpc_stream_logged(fd.release())->client(SchedEvent1{});
+  }
 }
 
 int
@@ -52,14 +83,14 @@ event_init(const std::string &mempool_address,
     throw std::runtime_error(
         std::format("Invalid mempool address: {}", mempool_address));
   }
-  auto client = create_client<SchedEvent1>(host_port, /*retry=*/true);
+  auto client = connect_to_event_sched_server(mempool_address);
   std::string address_for_exec = create_address(kExecutorServerPort);
   std::string address_for_sched = create_address(kSchedulerServerPort);
   EventCard card{.protocol = version::kHogdProtocol,
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
                  .address_for_sched = address_for_sched.c_str()};
-  CHECK_EQ(client.schedevent_intro_event(card)(), RPCError::kRPCNone);
+  CHECK_EQ(client.schedevent_intro_event(card), RPCError::kRPCNone);
 
   // The event server is initialized. Now block forever.
   info("event initialization complete.");

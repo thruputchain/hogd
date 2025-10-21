@@ -38,7 +38,8 @@ namespace {
 struct TestSchedEvent {
   using rpc_service = SchedEvent1;
 
-  static RPCError schedevent_intro_event(const EventCard &card) {
+  static RPCError schedevent_intro_event(const EventCard &card)
+  {
     std::println("Intro event server: {}", x23::show(card));
     return RPCError::kRPCNone;
   }
@@ -57,7 +58,8 @@ connect_to_event_exec_server(const std::string &address)
   auto server_addr = host_port.to_addr(true);
   if (!server_addr) {
     throw std::runtime_error(
-        std::format("Failed to resolve event exec server address: {}", address));
+        std::format("Failed to resolve event exec server address: {}",
+                    address));
   }
   auto fd = x23::tcpconnect(server_addr.value());
   if (!fd) {
@@ -79,7 +81,8 @@ connect_to_event_sched_server(const std::string &address)
   auto server_addr = host_port.to_addr(true);
   if (!server_addr) {
     throw std::runtime_error(
-        std::format("Failed to resolve event sched server address: {}", address));
+        std::format("Failed to resolve event sched server address: {}",
+                    address));
   }
   auto fd = x23::tcpconnect(server_addr.value());
   if (!fd) {
@@ -102,7 +105,8 @@ const std::vector<std::byte> event_data = []() {
   return data;
 }();
 
-const ContractAddress contract_address = sha256(std::string_view{"contract_addr"});
+const ContractAddress contract_address =
+    sha256(std::string_view{"contract_addr"});
 
 // Create a fake TxEventLog with some events
 TxEventLog
@@ -111,12 +115,13 @@ create_fake_event_log(size_t tx_id)
   TxEventLog event_log{};
 
   auto size_span = std::as_bytes(std::span<const size_t, 1>{&tx_id, 1});
-  std::memcpy(event_log.proposed_tx_hash.data(), size_span.data(), size_span.size());
+  std::memcpy(event_log.proposed_tx_hash.data(), size_span.data(),
+              size_span.size());
 
   // Create some fake events (3 events per transaction)
   for (size_t i = 0; i < 3; i++) {
-    auto emitted_event = make_tx_emitted_event(
-        contract_address, &topic0, &topic1, &topic2, event_data);
+    auto emitted_event = make_tx_emitted_event(contract_address, &topic0,
+                                               &topic1, &topic2, event_data);
     event_log.events.emplace_back(std::move(emitted_event));
   }
 
@@ -131,11 +136,10 @@ constexpr size_t kCoroBatchSize = 100;
 x23::Detached
 event_sender_coro(event_exec_client_t &exec_client, x23::CoroCB<void> &cb,
                   std::atomic<size_t> &event_offset, size_t total_events,
-                  BlockID block_number,
-                  std::atomic<size_t> &n_remaining_coros)
+                  BlockID block_number, std::atomic<size_t> &n_remaining_coros)
 {
   co_await default_threadpool().bg();
-  
+
   while (true) {
     size_t start = event_offset.fetch_add(kCoroBatchSize);
     if (start >= total_events) {
@@ -144,26 +148,27 @@ event_sender_coro(event_exec_client_t &exec_client, x23::CoroCB<void> &cb,
       }
       co_return;
     }
-    
+
     size_t end = std::min(start + kCoroBatchSize, total_events);
-    
+
     for (size_t i = start; i < end; i++) {
       auto event_log = create_fake_event_log(i);
-      auto res = co_await exec_client.eventexecutor_emit_event(
-          block_number, i, event_log);
+      auto res = co_await exec_client.eventexecutor_emit_event(block_number, i,
+                                                               event_log);
       if (res != RPCError::kRPCNone) {
-        throw std::runtime_error(std::format(
-            "Failed to emit event {}: error code {}", i, static_cast<int>(res)));
+        throw std::runtime_error(
+            std::format("Failed to emit event {}: error code {}", i,
+                        static_cast<int>(res)));
       }
     }
   }
 }
 
 void
-run_event_bench(const std::string &exec_server_addr, 
-                const std::string &sched_server_addr,
-                size_t num_events, size_t n_connections, 
-                size_t n_coros_per_connection, BlockID block_number)
+run_event_bench(const std::string &exec_server_addr,
+                const std::string &sched_server_addr, size_t num_events,
+                size_t n_connections, size_t n_coros_per_connection,
+                BlockID block_number)
 {
   // Connect to the event server
   auto event_sched_client = connect_to_event_sched_server(sched_server_addr);
@@ -187,7 +192,7 @@ run_event_bench(const std::string &exec_server_addr,
 
   // Send events
   auto send_start = x23::fastclock::get_ns();
-  
+
   std::atomic<size_t> event_offset = 0;
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
 
@@ -196,7 +201,7 @@ run_event_bench(const std::string &exec_server_addr,
     for (auto &exec_client : exec_clients) {
       for (size_t i = 0; i < n_coros_per_connection; i++) {
         event_sender_coro(exec_client, cb, event_offset, num_events,
-                         block_number, n_total_coros);
+                          block_number, n_total_coros);
       }
     }
     async();
@@ -219,9 +224,11 @@ run_event_bench(const std::string &exec_server_addr,
   double total_time = total_end_time - total_start_time;
   double total_events_per_sec = num_events * 1'000'000'000.0 / total_time;
 
-  std::println("sent {} events in {} ns ({:.2f} inner events/sec) opened block in {} ns closed block in {} ns total time: {} ns ({:.2f} total events/sec)",
-               num_events, send_time, events_per_sec,
-               open_time, close_time, total_time, total_events_per_sec);
+  std::println(
+      "sent {} events in {} ns ({:.2f} inner events/sec) opened block in {} ns "
+      "closed block in {} ns total time: {} ns ({:.2f} total events/sec)",
+      num_events, send_time, events_per_sec, open_time, close_time, total_time,
+      total_events_per_sec);
 }
 
 } // namespace
@@ -232,7 +239,10 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <event_exec_server_addr> -s <event_sched_server_addr> [-n num_events] [-c num_connections] [-o coros_per_connection] [-b batch_size]", argv[0]);
+  std::println("Usage: {} -e <event_exec_server_addr> -s "
+               "<event_sched_server_addr> [-n num_events] [-c num_connections] "
+               "[-o coros_per_connection] [-b batch_size]",
+               argv[0]);
   std::println("  -e: Event executor server address (e.g., hostname:8090)");
   std::println("  -s: Event scheduler server address (e.g., hostname:8091)");
   std::println("  -n: Number of events (default: 1000000)");
@@ -292,11 +302,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   for (size_t i = 0; i < 5; i++) {
-    hogd::run_event_bench(exec_server_addr, sched_server_addr, num_events, 
+    hogd::run_event_bench(exec_server_addr, sched_server_addr, num_events,
                           num_connections, coros_per_connection, i);
   }
 
   std::fflush(stdout);
   return 0;
 }
-

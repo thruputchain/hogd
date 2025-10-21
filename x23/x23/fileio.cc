@@ -1,10 +1,10 @@
 #include <x23/fileio.h>
 
 #include <cstdio>
-#include <fcntl.h>
-#include <sys/socket.h>
 #include <expected>
+#include <fcntl.h>
 #include <filesystem>
+#include <sys/socket.h>
 
 #include <x23/cleanup.h>
 #include <x23/err.h>
