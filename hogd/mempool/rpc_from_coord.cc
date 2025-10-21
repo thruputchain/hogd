@@ -20,6 +20,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/mempool/authentication.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
@@ -129,7 +130,8 @@ MempoolCoordinatorRpc::finish_block(BlockID block_id)
 // of the trie and return it.
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
-    const x23::Vec<SignedTransactionHash> &hashes)
+    const x23::Vec<SignedTransactionHash> &hashes,
+    const BlockHash &prev_block_hash)
 {
   CHECK(!hashes.empty());
 
@@ -171,7 +173,10 @@ MempoolCoordinatorRpc::get_block_hash(
     future.get();
   }
   trie.generate_top_level_hashes();
-  return trie.get_root_hash();
+  SHA256Hash root_hash = trie.get_root_hash();
+  // Hash over the Merkle trie root hash and [prev_block_hash].
+  x23::Vec<SHA256Hash> all_hashes{root_hash, prev_block_hash};
+  return sha256(all_hashes);
 }
 
 x23::Async<x23::Vec<bool>>
@@ -300,7 +305,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  nomination.block_hash = get_block_hash(nomination.transaction_hashes);
+  nomination.block_hash = get_block_hash(nomination.transaction_hashes,
+                                         /*prev_block_hash=*/db_tip.hash);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
@@ -338,6 +344,10 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
   if (db_tip.height + 1 != nomination.block_height) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+  if (db_tip.hash != nomination.prev_block_hash) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -410,7 +420,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above
   // that all of these hashes correspond to vetted txs.
-  if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
+  if (get_block_hash(nomination.transaction_hashes,
+                     /*prev_block_hash=*/db_tip.hash) !=
+      nomination.block_hash) {
     SignedTransactionBatch reenqueue = co_await scheduler_->mark_txs_finished(
         nomination.block_height, /*succeeded=*/{},
         /*failed=*/nomination.transaction_hashes);

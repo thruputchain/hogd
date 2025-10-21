@@ -76,7 +76,7 @@ struct Listener : DestroyInhibit {
   }
 
 private:
-  Detached accept_loop(this RefPtr<Listener> self SLOC_PARM);
+  Detached accept_loop(this RefPtr<Listener> self SLOC_DECL);
 };
 
 struct Server {
@@ -319,10 +319,6 @@ main(int argc, char **argv)
     opt_connections = opt_threads;
 
   setlinebuf(stdout);
-#if X23_CORO_TRACE
-  if (getenv("COROTRACE"))
-    corotrace.enable_ = 2;
-#endif // !X23_CORO_TRACE
   if (getenv("RPCTRACE"))
     RpcLogger::default_logfd = 1;
 

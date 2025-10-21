@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <vector>
 
 #include "event.hh"
 #include "hogd/base/io.h"
@@ -20,7 +21,6 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -60,7 +60,7 @@ public:
   void finish_file();
 
 private:
-  void write_event(std::span<const std::byte> data);
+  void write_event(std::span<const uint8_t> data);
   void sync_file(std::unique_lock<std::mutex> &ul);
   void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
 
@@ -69,7 +69,7 @@ private:
   BlockID block_id_;
 
   struct EventContext {
-    x23::Buf buf;
+    std::vector<uint8_t> buf;
     uint32_t event_count;
   };
 

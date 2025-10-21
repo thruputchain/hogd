@@ -321,7 +321,7 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
-  Detached reader(SLOC_PARM0);
+  Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
 private:
@@ -336,8 +336,8 @@ private:
     cp_->awrite(fd_, make_record(msg, x...));
   }
 
-  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
-  Async<Errno> read_record(Buf *b SLOC_PARM);
+  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_DECL0);
+  Async<Errno> read_record(Buf *b SLOC_DECL);
 
   friend class RefCount;
 };

@@ -5,6 +5,7 @@ add_library(x23
   cleanup.h
   corosync.cc
   corosync.h
+  corotrace.cc
   corotrace.h
   cpumap.cc
   cpumap.h
