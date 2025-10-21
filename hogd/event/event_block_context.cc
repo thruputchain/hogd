@@ -99,15 +99,17 @@ EventBlockContext::finish_file()
     auto ts2 = x23::fastclock::now();
     info("time to write event count: {} ns", ts2 - ts);
 
-    buffers_.for_each(ul, [this](EventContext &context) {
-      info("writing events to file: {} bytes", context.buf.size());
+    size_t total_bytes = 0;
+
+    buffers_.for_each(ul, [this, &total_bytes](EventContext &context) {
+      total_bytes += context.buf.size();
       auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
       if (!r) [[unlikely]] {
         panic("failed to write events to file: {}", r.error());
       }
     });
     auto ts3 = x23::fastclock::now();
-    info("time to write events: {} ns", ts3 - ts2);
+    info("time to write events: {} ns total bytes: {}", ts3 - ts2, total_bytes);
   }
   auto ts3 = x23::fastclock::now();
 
