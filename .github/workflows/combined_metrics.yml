@@ -96,6 +96,11 @@ jobs:
       run: |
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
+    - name: run event server benchmarks
+      uses: ./.github/actions/event_bench
+      with:
+        build-dir: release
+        work-dir: ci_work_dir/
     - name: run metrics
       uses: ./.github/actions/metrics
       with:
