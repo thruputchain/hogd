@@ -107,9 +107,9 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.close_block(block_id);
   }
 
-  void eventsched_abandon_block(BlockID block_id)
+  RPCError eventsched_abandon_block(BlockID block_id)
   {
-    event_aggregator_.close_block(block_id);
+    return event_aggregator_.close_block(block_id).error();
   }
 
   void shut_down()
