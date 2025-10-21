@@ -34,7 +34,7 @@ EventBlockContext::add_event(TxEventLog const &event)
   auto value = data.subspan(32);
 
   write_event(std::span(*serialize_buf));
- // CHECK(trie_.insert_or_update(key, value));
+  CHECK(trie_.insert_or_update(key, value));
 }
 
 SHA256Hash
