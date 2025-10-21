@@ -119,7 +119,8 @@ public:
   }
 
   static SHA256Hash
-  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
+  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
+                 const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 

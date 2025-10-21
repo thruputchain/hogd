@@ -127,19 +127,20 @@ TEST(Mempool, Validate)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  Nomination nomination = res_nominate.scheduler_nomination().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
-  Nomination nomination = res_nominate.scheduler_nomination().nomination;
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
-  nomination.block_hash = MempoolCoordRpc::get_block_hash(
-      {txs[0]}, /*prev_block_hash=*/nomination.prev_block_hash);
+  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+      {sha256(txs[0])},
+      /*prev_block_hash=*/nomination.prev_block_hash);
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           {txs[0]})();
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, res_nominate.scheduler_nomination().nomination)();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }

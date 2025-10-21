@@ -174,7 +174,7 @@ MempoolCoordinatorRpc::get_block_hash(
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
   // Hash over the Merkle trie root hash and [prev_block_hash].
-  std::vector<SHA256Hash> all_hashes{root_hash, prev_block_hash};
+  x23::Vec<SHA256Hash> all_hashes{root_hash, prev_block_hash};
   return sha256(all_hashes);
 }
 
