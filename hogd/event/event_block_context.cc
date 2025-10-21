@@ -28,6 +28,7 @@
 namespace hogd {
 
 namespace {
+// TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
 x23::Detached
 async_free_trie(std::unique_ptr<MerkleTriePrefix> trie)
 {
@@ -54,13 +55,13 @@ EventBlockContext::add_event(TxEventLog const &event)
   auto value = data.subspan(32);
 
   write_event(std::span(*serialize_buf));
-  CHECK(trie_.insert_or_update(key, value));
+  CHECK(trie_->insert_or_update(key, value));
 }
 
 SHA256Hash
 EventBlockContext::get_root_hash()
 {
-  return trie_.get_root_hash();
+  return trie_->get_root_hash();
 }
 
 void
@@ -147,7 +148,7 @@ EventBlockContext::finish_file()
 
 EventBlockContext::~EventBlockContext()
 {
-  async_free_trie(std::move(trie_owner_));
+  async_free_trie(std::move(trie_));
 }
 
 } // namespace hogd
