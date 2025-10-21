@@ -21,7 +21,6 @@ public:
 
 TEST_F(EventRpcTest, BasicUsage)
 {
-
   EventRPCContext ctx(temp_dir_);
   EventExecRpc exec_rpc(ctx);
   EventSchedRpc sched_rpc(ctx);
@@ -41,6 +40,28 @@ TEST_F(EventRpcTest, BasicUsage)
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{}),
             RPCError::kRPCNone);
   EXPECT_NE(sched_rpc.eventsched_abandon_block(1), RPCError::kRPCNone);
+}
+
+TEST_F(EventRpcTest, TestAbandonBlock)
+{
+  EventRPCContext ctx(temp_dir_);
+  EventExecRpc exec_rpc(ctx);
+  EventSchedRpc sched_rpc(ctx);
+
+  EXPECT_EQ(sched_rpc.eventsched_open_block(1), RPCError::kRPCNone);
+
+  // the tx ctx should keep the block open, at least to keep the pointer alive
+  auto *tx_ctx = ctx.get_context(1);
+  EXPECT_NE(tx_ctx, nullptr);
+
+  EXPECT_EQ(sched_rpc.eventsched_abandon_block(1), RPCError::kRPCNone);
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{}),
+            RPCError::kRPCNone);
+
+  tx_ctx->get().add_event(TxEventLog{});
+
+  ASSERT_TRUE(tx_ctx->release_reference());
+  ctx.gc_context(1);
 }
 
 } // namespace hogd
