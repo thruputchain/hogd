@@ -223,6 +223,17 @@ struct std::coroutine_traits<void, Args...> {
   using promise_type = x23::detail::CallbackPromise<Args...>;
 };
 
+template<typename... Args>
+requires x23::has_location<Args...> &&
+         x23::detail::is_callback_like<
+             x23::TypeNum<sizeof...(Args) - 2, Args...>>
+struct std::coroutine_traits<void, Args...> {
+  using promise_type =
+      decltype([]<std::size_t... N>(std::index_sequence<N...>) {
+        return x23::detail::CallbackPromise<x23::TypeNum<N, Args...>...>{};
+      }(std::make_index_sequence<sizeof...(Args) - 1>{}));
+};
+
 namespace x23 {
 
 // Supertype of Awaitable so Awaitable can be specialized for void
@@ -475,6 +486,9 @@ template<typename R> struct [[nodiscard]] Async {
   struct promise_type;
   using handle_type = std::coroutine_handle<promise_type>;
   struct promise_type : Awaitable<R> {
+    template<typename... Args> requires has_location<Args...>
+    promise_type(Args &&...args) : Awaitable<R>(extract_location(args...))
+    {}
     promise_type(source_location sloc = source_location::current())
       : Awaitable<R>(sloc)
     {}
@@ -710,6 +724,9 @@ make_async(source_location sloc = source_location::current())
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
   struct promise_type : PromiseBase {
+    template<typename... Args> requires has_location<Args...>
+    promise_type(Args &&...args) : PromiseBase(extract_location(args...))
+    {}
     promise_type(source_location sloc = source_location::current())
       : PromiseBase(sloc)
     {}

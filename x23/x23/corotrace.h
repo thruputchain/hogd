@@ -167,4 +167,17 @@ private:
 std::string trace(const PromiseBase *pb, unsigned indent = 0,
                   std::string ret = {});
 
+// True if an argument list ends with a source_location following at
+// least one other argument.
+template<typename... Args>
+concept has_location =
+    (sizeof...(Args) > 1) && decays_to<LastType<Args...>, source_location>;
+
+template<typename... Args> requires has_location<Args...>
+inline source_location
+extract_location(const Args &...args)
+{
+  return last_arg(args...);
+}
+
 } // namespace x23
