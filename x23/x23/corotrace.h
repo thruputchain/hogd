@@ -177,7 +177,7 @@ template<typename... Args> requires has_location<Args...>
 inline source_location
 extract_location(const Args &...args)
 {
-  return last_arg(args...);
+  return detail::last_arg(args...);
 }
 
 } // namespace x23
