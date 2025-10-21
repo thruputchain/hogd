@@ -1,5 +1,6 @@
 #include "hogd/event/rpc_from_sched.h"
 
+#include "hogd/base/log.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
 
