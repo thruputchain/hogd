@@ -11,6 +11,7 @@
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -39,10 +40,15 @@ EventRPCContext::close_block(BlockID block_id)
   }
 
   auto &context = it->second;
+  auto ts = x23::fastclock::now();
 
   auto out_hash = context.get().get_root_hash();
+  auto ts2 = x23::fastclock::now();
   context.get().finish_file();
+  auto ts3 = x23::fastclock::now();
   gc_context_internal(it, ul);
+  auto ts4 = x23::fastclock::now();
+  info("time to get hash: {} ns, time to finish file: {} ns, time to gc context: {} ns", ts2 - ts, ts3 - ts2, ts4 - ts3);
   return out_hash;
 }
 

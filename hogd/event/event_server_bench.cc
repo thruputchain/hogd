@@ -170,6 +170,7 @@ run_event_bench(const std::string &exec_server_addr,
                 size_t n_connections, size_t n_coros_per_connection,
                 BlockID block_number)
 {
+  std::println("running event bench with {} events, {} connections, {} coros per connection, block number {}", num_events, n_connections, n_coros_per_connection, block_number);
   // Connect to the event server
   auto event_sched_client = connect_to_event_sched_server(sched_server_addr);
 
