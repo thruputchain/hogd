@@ -7,6 +7,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hogexec/interface/executor.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
@@ -63,7 +64,8 @@ public:
 
     for (const ExecCard &card : cards) {
       ret.push_back(create_client<ExecutorSched1>(
-          server_address_to_sockaddr(card.address)));
+          server_address_to_sockaddr(card.address), /*retry=*/false,
+          /*max_message_size=*/Executor::kMessageSize));
     }
     return ret;
   }

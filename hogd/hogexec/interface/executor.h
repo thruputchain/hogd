@@ -34,6 +34,8 @@ private:
 // coordinator.
 class Executor {
 public:
+  static constexpr size_t kMessageSize = 0x7fffffffff;
+
   Executor(size_t n_exec_threads = available_parallelism())
     : n_exec_threads_(n_exec_threads)
   {}
@@ -49,6 +51,7 @@ public:
     // Thus, we start the RPC server first, then below we register with the
     // coordinator, and finally we start handling incoming RPCs in
     // [start_rpc_service()].
+    server_.max_message_size_ = kMessageSize;
     uint16_t executor_port = server_.start_server(self_port);
     assert(executor_port == self_port || self_port == 0);
 
