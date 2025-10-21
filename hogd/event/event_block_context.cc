@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <unistd.h>
@@ -28,10 +29,10 @@ namespace hogd {
 
 namespace {
 x23::Detached
-async_free_trie(MerkleTriePrefix &&trie)
+async_free_trie(std::unique_ptr<MerkleTriePrefix> trie)
 {
   co_await default_threadpool().bg();
-  trie.clear();
+  trie.reset();
   co_return;
 }
 } // namespace
@@ -146,7 +147,7 @@ EventBlockContext::finish_file()
 
 EventBlockContext::~EventBlockContext()
 {
-  async_free_trie(std::move(trie_));
+  async_free_trie(std::move(trie_owner_));
 }
 
 } // namespace hogd

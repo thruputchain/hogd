@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <string>
@@ -40,7 +41,7 @@ public:
   }
 
   EventBlockContext(std::string_view work_directory, BlockID block_id)
-    : work_directory_(work_directory), block_id_(block_id)
+    : trie_owner_(std::make_unique<MerkleTriePrefix>()), trie_(*trie_owner_), work_directory_(work_directory), block_id_(block_id)
   {
     // Ensure the work_directory_ exists before creating the events file.
     auto dir = Directory::open(work_directory_);
@@ -66,7 +67,8 @@ private:
   void sync_file(std::unique_lock<std::mutex> &ul);
   void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
 
-  MerkleTriePrefix trie_;
+  std::unique_ptr<MerkleTriePrefix> trie_owner_;
+  MerkleTriePrefix& trie_;
   std::string work_directory_;
   BlockID block_id_;
 
