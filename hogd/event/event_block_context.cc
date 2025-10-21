@@ -8,6 +8,7 @@
 #include <mutex>
 #include <span>
 #include <unistd.h>
+#include <version>
 
 #include "event.hh"
 #include "hogd/base/log.h"
@@ -75,7 +76,11 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
 void
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
+  #if __cpp_lib_containers_ranges >= 202202L
   buffers_->buf.append_range(data);
+  #else
+  buffers_->insert(buffers_->end(), data.begin(), data.end());
+  #endif
   buffers_->event_count++;
 }
 
