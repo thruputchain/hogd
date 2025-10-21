@@ -2,7 +2,9 @@
 
 #include <cassert>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 
 #include "hogd/base/perthread_arc.h"
 #include "hogd/event/event_block_context.h"

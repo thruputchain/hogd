@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -16,6 +17,10 @@ namespace hogd {
 
 class EventRPCContext {
 public:
+  EventRPCContext(std::string_view work_directory)
+    : work_directory_(work_directory)
+  {}
+
   // Acquires a reference to the PerThreadARC<EventBlockContext> for the given
   // block id.
   // Returns nullptr if the block is not open.
