@@ -78,6 +78,7 @@ jobs:
     - uses: ./.github/actions/mempool_bench
       with:
         build-dir: release
+        work-dir: ci_work_dir/
     - name: commit metrics
       run: ./scripts/commit_metrics.sh
 
