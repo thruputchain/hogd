@@ -7,12 +7,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
-#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
