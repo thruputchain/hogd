@@ -118,6 +118,9 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
+  static SHA256Hash
+  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
+
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
   void dump_stats() { scheduler_->dump_runqueue(); }
@@ -182,9 +185,6 @@ private:
   x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
-
-  static SHA256Hash
-  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
 
   x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
