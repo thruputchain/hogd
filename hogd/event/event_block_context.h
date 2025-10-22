@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
