@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -107,8 +108,9 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
   buffers_->event_count++;
 
   if (buffers_->buf.size() >= kBufferThreshold) {
+    using buf_t = std::decay_t<decltype(buffers_->buf)>;
     pending_writes_++;
-    [](std::vector<uint8_t> buf, EventBlockContext *self) -> x23::Detached {
+    [](buf_t buf, EventBlockContext *self) -> x23::Detached {
       co_await default_threadpool().bg();
       // make sure the vector free is out of the critical section holding the
       // lock
