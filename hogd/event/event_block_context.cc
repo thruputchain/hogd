@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -99,12 +100,17 @@ EventBlockContext::rename_file(std::unique_lock<std::mutex> &ul,
 void
 EventBlockContext::write_event(std::span<const uint8_t> data)
 {
-  buffers_->buf.append_range(data);
+  #if __cpp_lib_containers_ranges >= 202202L
+    buffers_->buf.append_range(data);
+  #else
+    buffers_->buf.insert(buffers_->buf.end(), data.begin(), data.end());
+  #endif
   buffers_->event_count++;
 
   if (buffers_->buf.size() >= kBufferThreshold) {
+    using buf_t = std::decay_t<decltype(buffers_->buf)>;
     pending_writes_++;
-    [](x23::Buf buf, EventBlockContext *self) -> x23::Detached {
+    [](buf_t buf, EventBlockContext *self) -> x23::Detached {
       co_await default_threadpool().bg();
       // make sure the vector free is out of the critical section holding the
       // lock
