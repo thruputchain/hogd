@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
