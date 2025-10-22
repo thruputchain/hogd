@@ -13,6 +13,7 @@
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fastclock.h"
 
 namespace hogd {
