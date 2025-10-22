@@ -1,7 +1,10 @@
 
+#include <vector>
+
 #include <x23/async.h>
 #include <x23/event.h>
 #include <x23/serialize.h>
+#include <x23/vec.h>
 
 #include <benchmark/benchmark.h>
 
@@ -115,5 +118,20 @@ time_maybesync_return_async(benchmark::State &state)
     x23::MaybeAsync<int>{x23::async_return(0)}(dummy);
 }
 BENCHMARK(time_maybesync_return_async);
+
+template<typename T>
+void
+time_append_range(benchmark::State &state)
+{
+  const std::vector<std::uint8_t> bytes(51, 0xc5);
+  T target;
+  for (auto _ : state)
+    if constexpr (requires { target.append_range(bytes); })
+      target.append_range(bytes);
+    else
+      target.insert(target.end(), bytes.begin(), bytes.end());
+}
+BENCHMARK(time_append_range<std::vector<std::uint8_t>>);
+BENCHMARK(time_append_range<x23::Buf>);
 
 BENCHMARK_MAIN();
