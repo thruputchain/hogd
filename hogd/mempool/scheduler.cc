@@ -646,13 +646,19 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   co_return ret;
 }
 
-// TODO(jhumphri): We should remove the [block] parameter. We should know the
-// current block number based on the block number passed to [schedule()].
-void
-Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                             BlockHeight block)
+// TODO(jhumphri): We should remove the [block_height] parameter. We should know
+// the current block number based on the block number passed to [schedule()].
+x23::Async<void>
+Scheduler::mark_txs_finished(BlockHeight block_height,
+                             const x23::Vec<SignedTransactionHash> &tx_hashes)
 {
-  for (const SignedTransactionHash &hash : hashes) {
+  CHECK(!tx_hashes.empty());
+  const SignedTransactionHash &tx_hash = tx_hashes.front();
+  CHECK(hash_to_tx_.contains(tx_hash));
+  ContractAddress account =
+      hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
+
+  for (const SignedTransactionHash &hash : tx_hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
@@ -660,7 +666,7 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
 
     const uint128_xdr to_schedule_hogs =
         to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
-    const BlockHeight to_schedule_age = block;
+    const BlockHeight to_schedule_age = block_height;
 
     const uint128_xdr already_scheduled_hogs =
         age.num_hogs[kHogAgeGroupAlreadyScheduled];
@@ -692,79 +698,10 @@ Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
     size_--;
   }
-}
-
-SignedTransactionBatch
-Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
-{
-  SignedTransactionBatch txs;
-  txs.reserve(hashes.size());
-
-  for (const SignedTransactionHash &hash : hashes) {
-    auto it = hash_to_tx_.find(hash);
-    CHECK(it != hash_to_tx_.end());
-    TxInfo &info = it->second;
-
-    cached_hogs_[info.tx.tx.invocation.invoked_address]
-        .num_hogs[kHogAgeGroupToSchedule] =
-        to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
-                            .num_hogs[kHogAgeGroupToSchedule]) +
-               info.tx.tx.invocation.gas_limit);
-    txs.push_back(info.tx);
-    {
-      const BlockHeight expiry_height =
-          info.tx.tx.uniquifier.block_expiry_height;
-      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
-      if (expiry_to_tx_[expiry_height].empty()) {
-        CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
-      }
-    }
-    CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
-    size_--;
-  }
-  return txs;
-}
-
-x23::Async<SignedTransactionBatch>
-Scheduler::mark_txs_finished(BlockHeight block_height,
-                             const x23::Vec<SignedTransactionHash> &succeeded,
-                             const x23::Vec<SignedTransactionHash> &failed)
-{
-  ContractAddress account;
-  if (!succeeded.empty()) {
-    const SignedTransactionHash &tx_hash = succeeded.front();
-    CHECK(hash_to_tx_.contains(tx_hash));
-    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
-  }
-  else {
-    CHECK(!failed.empty());
-    const SignedTransactionHash &tx_hash = failed.front();
-    CHECK(hash_to_tx_.contains(tx_hash));
-    account = hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
-  }
-
-  mark_txs_executed(succeeded, block_height);
-  SignedTransactionBatch ret = mark_txs_failed(failed);
 
   if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
     co_await cycle_groups(account);
   }
-  else if (!failed.empty()) {
-    // Since we refunded the hogs to the [kHogAgeGroupToSchedule] group due to
-    // the failed txs, add any stranded txs to the runqueue if possible.
-    //
-    // Note that we do this in an [else if] body rather than in its own if body
-    // because [cycle_groups()] above already calls [update_accounts()].
-    uint128_t reserved_hogs = 0;
-    for (const TxInfo *info : account_to_tx_[account]) {
-      reserved_hogs += info->tx.tx.invocation.gas_limit;
-    }
-    cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
-        from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) +
-        reserved_hogs);
-    update_accounts({account});
-  }
-  co_return ret;
 }
 
 bool
