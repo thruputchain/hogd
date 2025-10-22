@@ -188,16 +188,4 @@ struct ParseFailure {
   int value;
 };
 
-typedef opaque ContractAddress[32];
-typedef opaque SHA256Hash[32];
-
-struct TxEmittedEvent {
-  ContractAddress contract_address;
-  opaque serialized_event<>;  // serialized EventData
-};
-
-struct TxEventLog {
-  SHA256Hash proposed_tx_hash; // sha256(ProposedTransaction)
-  TxEmittedEvent events<>;
-};
 
