@@ -63,13 +63,14 @@ public:
 };
 
 namespace {
-void finish_file(EventBlockContext &context)
+void
+finish_file(EventBlockContext &context)
 {
   context.finish_file_write();
   context.finish_file(context.get_root_hash());
 }
 
-}
+} // namespace
 
 TEST_F(EventBlockContextTest, Test)
 {
