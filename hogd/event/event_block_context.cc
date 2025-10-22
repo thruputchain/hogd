@@ -63,6 +63,7 @@ EventBlockContext::add_event(TxEventLog const &event)
 SHA256Hash
 EventBlockContext::get_root_hash()
 {
+  trie_->generate_top_level_hashes();
   return trie_->get_root_hash();
 }
 
