@@ -165,48 +165,14 @@ struct WriteBuffer : RefCount {
       }
     return write(cp, fd, std::move(buf));
   }
-  Errno flush(CoroPoll &cp, BorrowedFd fd)
-  {
-    return Service{*this, cp, fd}.go();
-  }
+  inline Errno flush(CoroPoll &cp, BorrowedFd fd);
 
 private:
   std::atomic_bool want_write_{false};
   std::mutex service_lock_;
   MVar<BufVec> writer_;
 
-  class Service {
-  public:
-    [[nodiscard]]
-    Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
-      : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
-    {}
-
-    Errno go();
-
-  private:
-    WriteBuffer *wb_;
-    CoroPoll *cp_;
-    BorrowedFd fd_;
-    std::unique_lock<std::mutex> lk_;
-    bool got_eagain_{false};
-
-    Service(Service &&) noexcept = default;
-    bool work_needed()
-    {
-      if (wb_->want_write_)
-        return true;
-      lk_.unlock();
-      return wb_->want_write_ && lk_.try_lock();
-    }
-    BufVec get_work()
-    {
-      wb_->want_write_ = false;
-      return wb_->writer_.exchange({});
-    }
-    Errno write(BufVec &work);
-    static Detached worker(Service self, BufVec work);
-  };
+  class Service;
 };
 
 struct BufHolder {
@@ -227,29 +193,52 @@ public:
   using WorkItem = CpuHinted<CoroCB<Errno>>;
   ThreadPool &pool_;
 
+  template<bool Write> class WaitToken : private BorrowedFd {
+  public:
+    WaitToken() noexcept : BorrowedFd(kInvalidFd) {}
+    using BorrowedFd::get;
+    explicit operator bool() const noexcept { return get() != kInvalidFd; }
+    void reset() noexcept { *this = WaitToken{}; }
+
+  private:
+    using BorrowedFd::BorrowedFd;
+    WaitToken(const BorrowedFd &fd) : BorrowedFd(fd) {}
+    friend class CoroPollImpl;
+  };
+  using ReadToken = WaitToken<false>;
+  using WriteToken = WaitToken<true>;
+
   CoroPollImpl(ThreadPool &pool);
   ~CoroPollImpl();
 
-  void read_clear(BorrowedFd fd) { clear(fd, false); }
+  ReadToken read_clear(BorrowedFd fd)
+  {
+    clear(fd, false);
+    return fd;
+  }
 
-  // Do a read_clear(fd) before a read operation on an fd that might
-  // return EAGAIN.  If it does return EAGAIN, then co_await
-  // read_wait(fd) to wait for the file descriptor to be readable
+  // Do a tok = read_clear(fd) before a read operation on an fd that
+  // might return EAGAIN.  If it does return EAGAIN, then co_await
+  // read_wait(tok) to wait for the file descriptor to be readable
   // again.
-  Async<Errno> read_wait(BorrowedFd fd)
+  Async<Errno> read_wait(ReadToken fd)
   {
     auto [async, cb] = make_async<Errno>();
     setcb(fd, false, {cb, cpuid()});
     return std::move(async);
   }
 
-  void write_clear(BorrowedFd fd) { clear(fd, true); }
+  WriteToken write_clear(BorrowedFd fd)
+  {
+    clear(fd, true);
+    return fd;
+  }
 
-  // Do a write_clear(fd) before a write operation on an fd that might
-  // return EAGAIN.  If it does return EAGAIN, then co_await
-  // write_wait(fd) to wait for the file descriptor to be writable
+  // Do a tok = write_clear(fd) before a write operation on an fd that
+  // might return EAGAIN.  If it does return EAGAIN, then co_await
+  // write_wait(tok) to wait for the file descriptor to be writable
   // again.
-  Async<Errno> write_wait(BorrowedFd fd)
+  Async<Errno> write_wait(WriteToken fd)
   {
     auto [async, cb] = make_async<Errno>();
     setcb(fd, true, {cb, cpuid()});
@@ -264,6 +253,13 @@ public:
   // poison(), the file descriptor number could still be poisoned when
   // it is recycled by another socket.
   void reset(BorrowedFd fd);
+
+  // Reset and close a file descriptor
+  void close(BorrowedFd fd)
+  {
+    reset(fd);
+    ::close(fd.get());
+  }
 
   // Make any pending and future callbacks return with EBADF untill
   // reset() is called.  Pending callbacks are made asynchronously, so
@@ -452,7 +448,7 @@ public:
           addrlen = &ignoredlen;
         *addrlen = sizeof(*addr);
       }
-      read_clear(lfd);
+      auto tok = read_clear(lfd);
 #if HAVE_ACCEPT4
       int fd =
           accept4(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen,
@@ -477,7 +473,7 @@ public:
       }
       if (Errno err{}; err != EAGAIN)
         co_return err;
-      if (auto err = co_await read_wait(lfd))
+      if (auto err = co_await read_wait(tok))
         co_return err;
     }
     co_return Errno{EBADF};
@@ -514,4 +510,45 @@ protected:
   void loop();
 };
 
+namespace detail {
+class WriteBuffer::Service {
+public:
+  [[nodiscard]]
+  Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
+    : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+  {}
+
+  Errno go();
+
+private:
+  WriteBuffer *wb_;
+  CoroPoll *cp_;
+  BorrowedFd fd_;
+  std::unique_lock<std::mutex> lk_;
+  CoroPoll::WriteToken tok_;
+
+  Service(Service &&) noexcept = default;
+  bool work_needed()
+  {
+    if (wb_->want_write_)
+      return true;
+    lk_.unlock();
+    return wb_->want_write_ && lk_.try_lock();
+  }
+  BufVec get_work()
+  {
+    wb_->want_write_ = false;
+    return wb_->writer_.exchange({});
+  }
+  Errno write(BufVec &work);
+  static Detached worker(Service self, BufVec work);
+};
+
+inline Errno
+WriteBuffer::flush(CoroPoll &cp, BorrowedFd fd)
+{
+  return Service{*this, cp, fd}.go();
+}
+
+} // namespace detail
 } // namespace x23
