@@ -24,6 +24,7 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -83,7 +84,7 @@ private:
   BlockID block_id_;
 
   struct EventContext {
-    std::vector<uint8_t> buf;
+    x23::Buf buf;
     uint32_t event_count;
   };
 
