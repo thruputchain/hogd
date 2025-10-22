@@ -29,8 +29,57 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(WASM_FLAGS "-F logging")
 endif()
 
-function(add_wasm_build target_name)
+# Tell CMake to clean cargo build directories
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/spec_build"
+  "${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown"
+  "${CMAKE_CURRENT_BINARY_DIR}/release"
+  "${CMAKE_CURRENT_BINARY_DIR}/debug"
+  "${CMAKE_CURRENT_BINARY_DIR}/.fingerprint"
+  "${CMAKE_CURRENT_BINARY_DIR}/incremental"
+)
 
+set(generated_rs_files)
+
+add_xdr_rs(
+	cxs_roundtrip_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
+	./integration_test_contracts/xdr/roundtrip.x)
+list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src/roundtrip.rs)
+
+add_xdr_rs(
+	txs_roundtrip_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src
+	./integration_test_contracts/xdr/roundtrip.x)
+list(APPEND generated_rs_files ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src/roundtrip.rs)
+
+add_xdr(roundtrip_hh
+  ./integration_test_contracts/xdr/roundtrip.x
+)
+
+# Build multiple WASM targets in a single cargo invocation
+function(add_wasm_builds)
+  # ARGN contains all the target names passed to the function
+  set(all_outputs "")
+  set(all_depends "")
+  set(all_packages "")
+  
+  # Build lists for outputs, dependencies, and package flags
+  foreach(target_name ${ARGN})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm)
+    list(APPEND all_depends 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(APPEND all_packages "-p" ${target_name})
+  endforeach()
+
+  list(APPEND all_depends ${generated_rs_files})
+  
+  # Add common dependencies
+  list(APPEND all_depends 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
+  
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
   # run cargo update to update the lockfile manually.
@@ -39,72 +88,122 @@ function(add_wasm_build target_name)
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
   add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
+    OUTPUT ${all_outputs}
     COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
         cargo build
-        -p ${target_name}
+        ${all_packages}
         --target wasm32-unknown-unknown
         --release
         --locked
         --frozen
         ${WASM_FLAGS}
         --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
-        -Zbuild-std-features=std/optimize_for_size &&
-        cp 
-          ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm 
-          ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
-    DEPENDS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
-    COMMENT "Building ${target_name}.wasm_unoptimized"
-    WORKING_DIRECTORY
-      ${CMAKE_CURRENT_SOURCE_DIR}
+        -Zbuild-std-features=std/optimize_for_size
+    DEPENDS ${all_depends}
+    COMMENT "Building all WASM contracts in one cargo invocation"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  
+  # Create individual targets for each contract
+  foreach(target_name ${ARGN})
+    wasmopt_target(
+      ${target_name}_optimized 
+      ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
+      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
+      -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
 
-  wasmopt_target(
-    ${target_name}_optimized 
-    ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized 
-    ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
-    -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
+    add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
 
-  add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
-
-  add_dependencies(all_wasm_contracts ${target_name}_wasm)
+    add_dependencies(all_wasm_contracts ${target_name}_wasm)
+  endforeach()
 endfunction()
 
-function(add_spec_json target_name)
+# Build all spec-related binaries (spec JSONs and types XDR) in one cargo invocation
+# Uses a separate target directory to avoid conflicts with WASM builds
+# Usage: add_spec_and_types_generation(
+#   SPEC_TARGETS target1 target2 ...
+#   TYPES_TARGETS target3 target4 ...
+# )
+function(add_spec_and_types_generation)
+  # Parse named arguments
+  cmake_parse_arguments(ARG "" "" "SPEC_TARGETS;TYPES_TARGETS" ${ARGN})
+  
+  set(all_outputs "")
+  set(all_depends "")
+  set(all_bins "")
+  
+  # Build lists for spec targets
+  foreach(target_name ${ARG_SPEC_TARGETS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+    list(APPEND all_depends 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(APPEND all_bins "--bin" "generate_spec_${target_name}")
+  endforeach()
+  
+  # Build lists for types targets
+  foreach(target_name ${ARG_TYPES_TARGETS})
+    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x)
+    list(APPEND all_depends 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(APPEND all_bins "--bin" "generate_types_${target_name}")
+  endforeach()
+  
+  list(APPEND all_depends ${generated_rs_files})
+  
+  # Add common dependencies
+  list(APPEND all_depends 
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
+  
+  # Build commands to run each binary
+  set(run_commands "")
+  foreach(target_name ${ARG_SPEC_TARGETS})
+    list(APPEND run_commands 
+      "COMMAND" "${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_spec_${target_name}" 
+      "${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json")
+  endforeach()
+  
+  foreach(target_name ${ARG_TYPES_TARGETS})
+    list(APPEND run_commands 
+      "COMMAND" "${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_types_${target_name}"
+      "${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x"
+      "${target_name}")
+  endforeach()
+  
   add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+    OUTPUT ${all_outputs}
+    # First, build all spec/types binaries in one cargo invocation
+    # Use separate target-dir to avoid conflicts with WASM builds
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        cargo run
+        cargo build
         --features spec
         --locked
         --release
         --frozen
         --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-        --target-dir ${CMAKE_CURRENT_BINARY_DIR}
-        --bin generate_spec
-        -- ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
-    DEPENDS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
-    COMMENT "Generating ${target_name}_spec.json"
-    WORKING_DIRECTORY
-      ${CMAKE_CURRENT_SOURCE_DIR}
+        --target-dir ${CMAKE_CURRENT_BINARY_DIR}/spec_build
+        ${all_bins}
+    # Then run each binary to generate its output
+    ${run_commands}
+    DEPENDS ${all_depends}
+    COMMENT "Building all spec/types binaries and generating outputs"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
-
-  add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
-  # not strictly necessary as a dependency, but this should prevent concurrent invocations of cargo
-  # on the same crate
-  add_dependencies(${target_name}_spec_json ${target_name}_wasm)
+  
+  # Create individual targets for each spec JSON
+  foreach(target_name ${ARG_SPEC_TARGETS})
+    add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+  endforeach()
+  
+  # Create individual targets for each types XDR
+  foreach(target_name ${ARG_TYPES_TARGETS})
+    add_xdr(${target_name}_hh ./${target_name}.x)
+    add_custom_target(${target_name}_types_xdr ALL DEPENDS ${target_name}_hh)
+  endforeach()
 endfunction()
 
 function(add_contract_header target_name)
@@ -137,83 +236,28 @@ function(add_contract_header target_name)
   add_dependencies(all_wasm_headers ${target_name}_header)
 endfunction()
 
-function(add_types_xdr target_name)
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
-    COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
-        cargo run
-        --features spec
-        --locked
-        --frozen
-        --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-        --target-dir ${CMAKE_CURRENT_BINARY_DIR}
-        --bin generate_types
-        -- ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
-        ${target_name}
-    DEPENDS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
-        ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
-    COMMENT "Generating ${target_name}.x"
-    WORKING_DIRECTORY
-      ${CMAKE_CURRENT_SOURCE_DIR}
-  )
+# Build all WASMs in one cargo invocation
+add_wasm_builds(fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20)
 
-  add_xdr(${target_name}_hh ./${target_name}.x)
-
-  add_custom_target(${target_name}_types_xdr ALL DEPENDS ${target_name}_hh)
-endfunction()
-
-function(add_wasm_contract target_name)
-  add_wasm_build(${target_name})
-  add_spec_json(${target_name})
-  add_contract_header(${target_name} ${ARGN})
-endfunction()
-
-add_wasm_contract(fibonacci)
-add_wasm_contract(fibonacci_call)
-add_wasm_contract(cxs_roundtrip)
-add_wasm_contract(txs_roundtrip)
-add_wasm_contract(read_only_test)
-add_wasm_contract(manual_revert_test)
-add_wasm_contract(manual_revert_caller)
-add_wasm_contract(simple_wallet)
-add_wasm_contract(initial_token_claim)
-
-# TODO(geoff): make a cleaner way to automate dependency tracking on these headers
-add_types_xdr(itc_erc20)
-add_wasm_contract(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
-add_dependencies(itc_erc20_header itc_erc20_types_xdr)
-
-
-# If we make all of the wasms depend on the first one, then the first one builds first
-# (and builds any and all dependencies that are shared) and then the rest can build safely in parallel
-# without weird errors
-add_dependencies(fibonacci_call_wasm fibonacci_wasm)
-add_dependencies(cxs_roundtrip_wasm fibonacci_wasm)
-add_dependencies(txs_roundtrip_wasm fibonacci_wasm)
-add_dependencies(read_only_test_wasm fibonacci_wasm)
-add_dependencies(manual_revert_test_wasm fibonacci_wasm)
-add_dependencies(manual_revert_caller_wasm fibonacci_wasm)
-add_dependencies(simple_wallet_wasm fibonacci_wasm)
-add_dependencies(initial_token_claim_wasm fibonacci_wasm)
-add_dependencies(itc_erc20_wasm fibonacci_wasm)
-
-add_xdr_rs(
-	cxs_roundtrip_rs 
-	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
-	./integration_test_contracts/xdr/roundtrip.x)
-
-add_xdr_rs(
-	txs_roundtrip_rs 
-	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/txs_roundtrip/src
-	./integration_test_contracts/xdr/roundtrip.x)
-
-add_xdr(roundtrip_hh
-  ./integration_test_contracts/xdr/roundtrip.x
+# Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
+add_spec_and_types_generation(
+  SPEC_TARGETS fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20
+  TYPES_TARGETS itc_erc20
 )
+
+# Generate contract headers
+add_contract_header(fibonacci)
+add_contract_header(fibonacci_call)
+add_contract_header(cxs_roundtrip)
+add_contract_header(txs_roundtrip)
+add_contract_header(read_only_test)
+add_contract_header(manual_revert_test)
+add_contract_header(manual_revert_caller)
+add_contract_header(simple_wallet)
+add_contract_header(initial_token_claim)
+add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+
+add_dependencies(itc_erc20_header itc_erc20_types_xdr)
 
 add_dependencies(cxs_roundtrip_wasm cxs_roundtrip_rs)
 add_dependencies(cxs_roundtrip_spec_json cxs_roundtrip_rs)
@@ -221,4 +265,3 @@ add_dependencies(cxs_roundtrip_spec_json cxs_roundtrip_rs)
 add_dependencies(txs_roundtrip_wasm txs_roundtrip_rs)
 add_dependencies(txs_roundtrip_spec_json txs_roundtrip_rs)
 
-add_dependencies(all_wasm_contracts roundtrip_hh)
