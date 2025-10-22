@@ -176,7 +176,7 @@ MempoolCoordinatorRpc::get_block_hash(
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
 
-  BlockHashPreimage preimage{.txs_merkle_trie_root_hash = trie.get_root_hash(),
+  BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
                              .prev_block_hash = prev_block_hash};
   return sha256(preimage);
 }
