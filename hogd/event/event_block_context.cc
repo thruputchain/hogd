@@ -28,7 +28,7 @@
 
 namespace hogd {
 
-constexpr static size_t kBufferThreshold = 1_MiB;
+constexpr static size_t kBufferThreshold = 500_KiB;
 
 namespace {
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
@@ -110,13 +110,17 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
     pending_writes_++;
     [](std::vector<uint8_t> buf, EventBlockContext *self) -> x23::Detached {
       co_await default_threadpool().bg();
-      std::lock_guard lock(self->file_mutex_);
-      auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
-      if (!r) [[unlikely]] {
-        panic("failed to write events to file: {}", r.error());
-      }
-      if (self->pending_writes_.fetch_sub(1) == 1) {
-        self->file_cv_.notify_one();
+      // make sure the vector free is out of the critical section holding the
+      // lock
+      {
+        std::lock_guard lock(self->file_mutex_);
+        auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
+        if (!r) [[unlikely]] {
+          panic("failed to write events to file: {}", r.error());
+        }
+        if (self->pending_writes_.fetch_sub(1) == 1) {
+          self->file_cv_.notify_one();
+        }
       }
       co_return;
     }(std::move(buffers_->buf), this);
@@ -125,7 +129,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 }
 
 void
-EventBlockContext::finish_file()
+EventBlockContext::finish_file_write()
 {
   auto ts = x23::fastclock::now();
 
@@ -153,11 +157,18 @@ EventBlockContext::finish_file()
   assert(file_ul.owns_lock());
 
   sync_file(file_ul);
-  auto hash = get_root_hash();
+  auto ts4 = x23::fastclock::now();
+  info("time to sync {} ns,", ts4 - ts3);
+}
+
+void
+EventBlockContext::finish_file(SHA256Hash const &hash)
+{
+  std::unique_lock<std::mutex> file_ul(file_mutex_);
   auto ts4 = x23::fastclock::now();
   rename_file(file_ul, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
+  info("time to rename file: {} ns", ts5 - ts4);
 }
 
 EventBlockContext::~EventBlockContext()

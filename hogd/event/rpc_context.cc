@@ -6,12 +6,14 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/event/event_block_context.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/fastclock.h"
 
 namespace hogd {
@@ -43,14 +45,21 @@ EventRPCContext::close_block(BlockID block_id)
   auto &context = it->second;
   auto ts = x23::fastclock::now();
 
+  auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    context.finish_file_write();
+    co_return;
+  }(context.get());
+
   auto out_hash = context.get().get_root_hash();
   auto ts2 = x23::fastclock::now();
-  context.get().finish_file();
+  file_wait();
   auto ts3 = x23::fastclock::now();
+  context.get().finish_file(out_hash);
   gc_context_internal(it, ul);
   auto ts4 = x23::fastclock::now();
   info("time to get hash: {} ns, time to finish file: {} ns, time to gc "
-       "context: {} ns",
+       "context + rename: {} ns",
        ts2 - ts, ts3 - ts2, ts4 - ts3);
   return out_hash;
 }

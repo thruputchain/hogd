@@ -62,6 +62,16 @@ public:
   std::string temp_dir_;
 };
 
+namespace {
+void
+finish_file(EventBlockContext &context)
+{
+  context.finish_file_write();
+  context.finish_file(context.get_root_hash());
+}
+
+} // namespace
+
 TEST_F(EventBlockContextTest, Test)
 {
   EventBlockContext context(temp_dir_, 1);
@@ -72,7 +82,7 @@ TEST_F(EventBlockContextTest, Test)
                      .serialized_event = {1, 2, 3},
                  }}});
 
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -97,7 +107,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -114,7 +124,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context2.finish_file();
+  finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
   auto event_logs2 = parse_event_logs(
@@ -139,7 +149,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -156,7 +166,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context2.finish_file();
+  finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
   auto event_logs2 = parse_event_logs(
