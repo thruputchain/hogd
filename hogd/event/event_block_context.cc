@@ -115,7 +115,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
         panic("failed to write events to file: {}", r.error());
       }
       if (self->pending_writes_.fetch_sub(1) == 1) {
-        //info("doing the final notify all");
+        // info("doing the final notify all");
         self->file_cv_.notify_one();
       }
       co_return;
