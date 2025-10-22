@@ -104,7 +104,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 
   if (buffers_->buf.size() >= kBufferThreshold) {
     pending_writes_++;
-    [](std::vector<uint8_t> buf, EventBlockContext *self) -> x23::Detached {
+    [](x23::Buf buf, EventBlockContext *self) -> x23::Detached {
       co_await default_threadpool().bg();
       // make sure the vector free is out of the critical section holding the
       // lock
