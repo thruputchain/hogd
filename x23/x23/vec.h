@@ -448,8 +448,10 @@ public:
   }
   constexpr void reserve(size_type cap)
   {
-    if (cap > capacity())
+    if (cap > capacity()) {
+      cap = std::max(cap, std::min(2 * capacity(), max_size()));
       realloc(cap);
+    }
   }
   constexpr size_type capacity() const noexcept { return b_.bufend - b_.begin; }
   constexpr void shrink_to_fit() { realloc(size()); }
@@ -534,8 +536,8 @@ public:
       requires requires { value_type(*first); }
   {
     if (const difference_type num = last - first; num > 0) {
-      if (capacity() - size() < size_t(num))
-        realloc(size() + num);
+      if (capacity() - size() < size_type(num))
+        reserve(size() + num);
       if !consteval {
         std::uninitialized_copy(first, last, b_.end);
         b_.end += num;
