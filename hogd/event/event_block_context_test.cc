@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
@@ -34,20 +35,26 @@ public:
   {
     std::unordered_map<SHA256Hash, TxEventLog> event_logs;
     auto buf = x23::readfile(filename);
+    if (!buf) {
+      panic("failed to read file: {}", filename);
+    }
 
-    x23::Vec<TxEventLog, 0xffffffff> serialized_logs;
-    x23::deserialize(&serialized_logs, x23::BufView(*buf));
+    size_t offset = 0;
+    TxEventLog log;
+    auto data = std::span(*buf);
 
-    for (auto &serialized_log : serialized_logs) {
-      auto it =
-          event_logs.insert({serialized_log.proposed_tx_hash, serialized_log});
+    while (offset < buf->size()) {
+      size_t n =
+          x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
+      offset += n;
+      auto it = event_logs.insert({log.proposed_tx_hash, log});
       EXPECT_TRUE(it.second);
       if (!it.second) {
         error("duplicate event log for proposed tx hash: {}",
-              encode_hex(
-                  std::as_bytes(std::span(serialized_log.proposed_tx_hash))));
+              encode_hex(std::as_bytes(std::span(log.proposed_tx_hash))));
       }
     }
+    EXPECT_EQ(offset, buf->size());
 
     return event_logs;
   }
