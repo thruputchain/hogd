@@ -129,7 +129,7 @@ time_append_range(benchmark::State &state)
     if constexpr (requires { target.append_range(bytes); })
       target.append_range(bytes);
     else
-      target.append(bytes.begin(), bytes.end());
+      target.insert(target.end(), bytes.begin(), bytes.end());
 }
 BENCHMARK(time_append_range<std::vector<std::uint8_t>>);
 BENCHMARK(time_append_range<x23::Buf>);
