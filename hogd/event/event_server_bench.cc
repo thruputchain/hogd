@@ -170,6 +170,9 @@ run_event_bench(const std::string &exec_server_addr,
                 size_t n_connections, size_t n_coros_per_connection,
                 BlockID block_number)
 {
+  std::println("running event bench with {} events, {} connections, {} coros "
+               "per connection, block number {}",
+               num_events, n_connections, n_coros_per_connection, block_number);
   // Connect to the event server
   auto event_sched_client = connect_to_event_sched_server(sched_server_addr);
 
@@ -262,7 +265,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string exec_server_addr;
   std::string sched_server_addr;
   size_t num_events = 1'000'000;
-  size_t num_connections = 10;
+  size_t num_connections = 20;
   size_t coros_per_connection = 100;
 
   int opt;
@@ -301,7 +304,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return EXIT_FAILURE;
   }
 
-  for (size_t i = 0; i < 5; i++) {
+  for (size_t i = 0; i < 20; i++) {
     hogd::run_event_bench(exec_server_addr, sched_server_addr, num_events,
                           num_connections, coros_per_connection, i);
   }

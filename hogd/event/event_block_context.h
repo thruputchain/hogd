@@ -1,9 +1,12 @@
 #pragma once
 
+#include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <fcntl.h>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <string>
@@ -40,7 +43,8 @@ public:
   }
 
   EventBlockContext(std::string_view work_directory, BlockID block_id)
-    : work_directory_(work_directory), block_id_(block_id)
+    : trie_(std::make_unique<MerkleTriePrefix>()),
+      work_directory_(work_directory), block_id_(block_id)
   {
     // Ensure the work_directory_ exists before creating the events file.
     auto dir = Directory::open(work_directory_);
@@ -55,16 +59,26 @@ public:
     events_file_ = x23::UniqueFd(fd);
   }
 
+  ~EventBlockContext();
+
   void add_event(TxEventLog const &event);
   SHA256Hash get_root_hash();
-  void finish_file();
+  void finish_file_write();
+  void finish_file(SHA256Hash const &hash);
 
 private:
   void write_event(std::span<const uint8_t> data);
   void sync_file(std::unique_lock<std::mutex> &ul);
+  // The rename is slow if there's already a file of the same hash.
+  // (the time to delete the previous file).
+  // In actual practice, it should be impossible for this to occur,
+  // as the output files contain transaction hashes (which are uniquified)
+  // unless multiple replicas make the exact same nomination.  We could deal
+  // with this edge case if this becomes a problem, but I suspect this will not
+  // matter significantly.
   void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
 
-  MerkleTriePrefix trie_;
+  std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;
   BlockID block_id_;
 
@@ -75,7 +89,9 @@ private:
 
   PerThread<EventContext> buffers_;
 
+  std::atomic<size_t> pending_writes_{0};
   std::mutex file_mutex_;
+  std::condition_variable file_cv_;
   x23::UniqueFd events_file_;
 };
 

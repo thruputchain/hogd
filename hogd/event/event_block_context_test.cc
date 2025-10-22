@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
@@ -34,26 +35,42 @@ public:
   {
     std::unordered_map<SHA256Hash, TxEventLog> event_logs;
     auto buf = x23::readfile(filename);
+    if (!buf) {
+      panic("failed to read file: {}", filename);
+    }
 
-    x23::Vec<TxEventLog, 0xffffffff> serialized_logs;
-    x23::deserialize(&serialized_logs, x23::BufView(*buf));
+    size_t offset = 0;
+    TxEventLog log;
+    auto data = std::span(*buf);
 
-    for (auto &serialized_log : serialized_logs) {
-      auto it =
-          event_logs.insert({serialized_log.proposed_tx_hash, serialized_log});
+    while (offset < buf->size()) {
+      size_t n =
+          x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
+      offset += n;
+      auto it = event_logs.insert({log.proposed_tx_hash, log});
       EXPECT_TRUE(it.second);
       if (!it.second) {
         error("duplicate event log for proposed tx hash: {}",
-              encode_hex(
-                  std::as_bytes(std::span(serialized_log.proposed_tx_hash))));
+              encode_hex(std::as_bytes(std::span(log.proposed_tx_hash))));
       }
     }
+    EXPECT_EQ(offset, buf->size());
 
     return event_logs;
   }
 
   std::string temp_dir_;
 };
+
+namespace {
+void
+finish_file(EventBlockContext &context)
+{
+  context.finish_file_write();
+  context.finish_file(context.get_root_hash());
+}
+
+} // namespace
 
 TEST_F(EventBlockContextTest, Test)
 {
@@ -65,7 +82,7 @@ TEST_F(EventBlockContextTest, Test)
                      .serialized_event = {1, 2, 3},
                  }}});
 
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -90,7 +107,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -107,7 +124,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context2.finish_file();
+  finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_EQ(hash, hash2);
   auto event_logs2 = parse_event_logs(
@@ -132,7 +149,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context.finish_file();
+  finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir_, hash)));
@@ -149,7 +166,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
                  }}});
-  context2.finish_file();
+  finish_file(context2);
   auto hash2 = context2.get_root_hash();
   EXPECT_NE(hash, hash2);
   auto event_logs2 = parse_event_logs(
