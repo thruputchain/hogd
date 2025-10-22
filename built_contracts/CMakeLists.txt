@@ -87,8 +87,11 @@ function(add_wasm_builds)
   # This will not fetch crates during the build process; you need to run the fetch script
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
+  
+  # Use a stamp file to ensure cargo only runs once
+  set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/wasm_build.stamp)
   add_custom_command(
-    OUTPUT ${all_outputs}
+    OUTPUT ${stamp_file}
     COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
         cargo build
         ${all_packages}
@@ -101,6 +104,7 @@ function(add_wasm_builds)
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
         -Zbuild-std-features=std/optimize_for_size
+    COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
     DEPENDS ${all_depends}
     COMMENT "Building all WASM contracts in one cargo invocation"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -108,6 +112,14 @@ function(add_wasm_builds)
   
   # Create individual targets for each contract
   foreach(target_name ${ARGN})
+    # Make the unoptimized WASM depend on the stamp file
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
+      DEPENDS ${stamp_file}
+      COMMAND ${CMAKE_COMMAND} -E true
+      COMMENT "WASM built: ${target_name}"
+    )
+    
     wasmopt_target(
       ${target_name}_optimized 
       ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
@@ -159,23 +171,11 @@ function(add_spec_and_types_generation)
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
   
-  # Build commands to run each binary
-  set(run_commands "")
-  foreach(target_name ${ARG_SPEC_TARGETS})
-    list(APPEND run_commands 
-      "COMMAND" "${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_spec_${target_name}" 
-      "${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json")
-  endforeach()
-  
-  foreach(target_name ${ARG_TYPES_TARGETS})
-    list(APPEND run_commands 
-      "COMMAND" "${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_types_${target_name}"
-      "${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x"
-      "${target_name}")
-  endforeach()
+  # Use a stamp file to ensure cargo only runs once, then generate all outputs
+  set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/spec_build.stamp)
   
   add_custom_command(
-    OUTPUT ${all_outputs}
+    OUTPUT ${stamp_file}
     # First, build all spec/types binaries in one cargo invocation
     # Use separate target-dir to avoid conflicts with WASM builds
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -187,20 +187,34 @@ function(add_spec_and_types_generation)
         --offline
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}/spec_build
         ${all_bins}
-    # Then run each binary to generate its output
-    ${run_commands}
+    COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
     DEPENDS ${all_depends}
-    COMMENT "Building all spec/types binaries and generating outputs"
+    COMMENT "Building all spec/types binaries in one cargo invocation"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
   
-  # Create individual targets for each spec JSON
+  # Generate each spec JSON by running its binary
   foreach(target_name ${ARG_SPEC_TARGETS})
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+      COMMAND ${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_spec_${target_name}
+              ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+      DEPENDS ${stamp_file}
+      COMMENT "Generating ${target_name}_spec.json"
+    )
     add_custom_target(${target_name}_spec_json ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
   endforeach()
   
-  # Create individual targets for each types XDR
+  # Generate each types XDR by running its binary
   foreach(target_name ${ARG_TYPES_TARGETS})
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
+      COMMAND ${CMAKE_CURRENT_BINARY_DIR}/spec_build/release/generate_types_${target_name}
+              ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
+              ${target_name}
+      DEPENDS ${stamp_file}
+      COMMENT "Generating ${target_name}.x"
+    )
     add_xdr(${target_name}_hh ./${target_name}.x)
     add_custom_target(${target_name}_types_xdr ALL DEPENDS ${target_name}_hh)
   endforeach()
