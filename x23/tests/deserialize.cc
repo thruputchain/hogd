@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
+#include "tests/xdrtest.hh"
 #include <x23/serialize.h>
 #include <x23/vec.h>
-#include "tests/xdrtest.hh"
 
 namespace x23 {
 
@@ -22,7 +22,7 @@ TEST(Deserialize, Vector)
       0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x02, 0x03, 0x00,
   };
 
-  deserialize(&vec, BufView(buf));
+  EXPECT_THROW(deserialize(&vec, BufView(buf)), x23::XdrBadInput);
 }
 
 } // namespace x23
