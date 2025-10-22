@@ -10,6 +10,7 @@
 #include <span>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 #include <version>
 
 #include "event.hh"
