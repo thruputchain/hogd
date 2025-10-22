@@ -183,7 +183,7 @@ first_unsafe_field(size_t nbytes, size_t cur_field = 0)
 {
   while (cur_field < kMaxFieldSize<X>.size()) {
     if (size_t n = kMaxFieldSize<X>[cur_field]; n <= nbytes)
-      nbytes = -n;
+      nbytes -= n;
     else
       break;
     cur_field++;
