@@ -39,7 +39,7 @@ function(add_wasm_build target_name)
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
   add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
     COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
         cargo build
         -p ${target_name}
@@ -49,13 +49,9 @@ function(add_wasm_build target_name)
         --frozen
         ${WASM_FLAGS}
         --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
-        -Zbuild-std-features=std/optimize_for_size &&
-        cp 
-          ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm 
-          ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
+        -Zbuild-std-features=std/optimize_for_size
     DEPENDS 
         ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
         ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
@@ -68,7 +64,7 @@ function(add_wasm_build target_name)
 
   wasmopt_target(
     ${target_name}_optimized 
-    ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized 
+    ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
     ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
     -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
 
@@ -87,9 +83,8 @@ function(add_spec_json target_name)
         --release
         --frozen
         --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
-        --bin generate_spec
+        --bin generate_spec_${target_name}
         -- ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
     DEPENDS 
         ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
@@ -146,9 +141,8 @@ function(add_types_xdr target_name)
         --locked
         --frozen
         --offline
-        --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR}
-        --bin generate_types
+        --bin generate_types_${target_name}
         -- ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x
         ${target_name}
     DEPENDS 
@@ -191,15 +185,25 @@ add_dependencies(itc_erc20_header itc_erc20_types_xdr)
 # If we make all of the wasms depend on the first one, then the first one builds first
 # (and builds any and all dependencies that are shared) and then the rest can build safely in parallel
 # without weird errors
-add_dependencies(fibonacci_call_wasm fibonacci_wasm)
-add_dependencies(cxs_roundtrip_wasm fibonacci_wasm)
-add_dependencies(txs_roundtrip_wasm fibonacci_wasm)
-add_dependencies(read_only_test_wasm fibonacci_wasm)
-add_dependencies(manual_revert_test_wasm fibonacci_wasm)
-add_dependencies(manual_revert_caller_wasm fibonacci_wasm)
-add_dependencies(simple_wallet_wasm fibonacci_wasm)
-add_dependencies(initial_token_claim_wasm fibonacci_wasm)
-add_dependencies(itc_erc20_wasm fibonacci_wasm)
+add_dependencies(fibonacci_wasm initial_token_claim_wasm)
+add_dependencies(fibonacci_call_wasm initial_token_claim_wasm)
+add_dependencies(cxs_roundtrip_wasm initial_token_claim_wasm)
+add_dependencies(txs_roundtrip_wasm initial_token_claim_wasm)
+add_dependencies(read_only_test_wasm initial_token_claim_wasm)
+add_dependencies(manual_revert_test_wasm initial_token_claim_wasm)
+add_dependencies(manual_revert_caller_wasm initial_token_claim_wasm)
+add_dependencies(simple_wallet_wasm initial_token_claim_wasm)
+add_dependencies(itc_erc20_wasm initial_token_claim_wasm)
+
+add_dependencies(fibonacci_header initial_token_claim_header)
+add_dependencies(fibonacci_call_header initial_token_claim_header)
+add_dependencies(cxs_roundtrip_header initial_token_claim_header)
+add_dependencies(txs_roundtrip_header initial_token_claim_header)
+add_dependencies(read_only_test_header initial_token_claim_header)
+add_dependencies(manual_revert_test_header initial_token_claim_header)
+add_dependencies(manual_revert_caller_header initial_token_claim_header)
+add_dependencies(simple_wallet_header initial_token_claim_header)
+add_dependencies(itc_erc20_header initial_token_claim_header)
 
 add_xdr_rs(
 	cxs_roundtrip_rs 
@@ -222,3 +226,10 @@ add_dependencies(txs_roundtrip_wasm txs_roundtrip_rs)
 add_dependencies(txs_roundtrip_spec_json txs_roundtrip_rs)
 
 add_dependencies(all_wasm_contracts roundtrip_hh)
+
+# The wasms and headers that are required for building the groundhog binaries themselves,
+# not just the groundhog tests
+add_custom_target(release_wasm_headers ALL DEPENDS initial_token_claim_header itc_erc20_header)
+add_custom_target(release_wasm_contracts ALL DEPENDS initial_token_claim_wasm itc_erc20_wasm)
+
+
