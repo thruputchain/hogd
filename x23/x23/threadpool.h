@@ -122,6 +122,7 @@
 #include <x23/cpumap.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
+#include <x23/signal.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -382,6 +383,7 @@ private:
   };
 
   std::unique_ptr<RunQueue[]> runqueues_;
+  AutoSignalCbHandle sigcb_;
 
   // Return which queue a QPtr references, or -1 if none
   int qno(const QPtr &ptr) const
@@ -456,6 +458,7 @@ private:
   }
 
   void qselect(QPtr *lq, unsigned cpuhint);
+  void debug_dump();
 };
 
 } // namespace x23

@@ -92,7 +92,7 @@ void
 CoroPollImpl::debug_dump()
 {
   using enum FdState::Mode;
-  std::string msg = pool_.show();
+  std::string msg;
   uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
              (void *)static_cast<CoroPoll *>(this), eventfd_.get());
   {
