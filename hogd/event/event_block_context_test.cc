@@ -35,6 +35,9 @@ public:
     std::unordered_map<SHA256Hash, TxEventLog> event_logs;
     auto buf = x23::readfile(filename);
     std::println("read file: {}", encode_hex(std::as_bytes(std::span(*buf))));
+    for (auto b : *buf) {
+      std::println("0x{:02x}, ", b);
+    }
 
     x23::Vec<TxEventLog, 0xffffffff> serialized_logs;
     x23::deserialize(&serialized_logs, x23::BufView(*buf));
