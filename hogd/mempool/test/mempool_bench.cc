@@ -174,13 +174,27 @@ validate(benchmark::State &state)
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
 
+    // We reuse the [Nomination] struct and make some adjustments for the
+    // validation.
+    Nomination nomination = res_nominate.scheduler_nomination().nomination;
+    db_tip.height++;
+    db_tip.hash = nomination.block_hash;
+    db_tip.id++;
+
+    nomination.block_height++;
+    nomination.prev_block_hash = nomination.block_hash;
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        nomination.transaction_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
     state.ResumeTiming();
 
-    auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-        db_tip, res_nominate.scheduler_nomination().nomination)();
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate(db_tip,
+                                                           nomination)();
     CHECK_EQ(res_validate.outcome(),
              SchedulerValidationResult::SchedulerValidationOK);
   }
@@ -268,12 +282,26 @@ loadgen_validate(benchmark::State &state)
     CHECK_EQ(res_nominate.outcome(),
              SchedulerNominationOutcome::SchedulerNominationOK);
 
+    // We reuse the [Nomination] struct and make some adjustments for the
+    // validation.
+    Nomination nomination = res_nominate.scheduler_nomination().nomination;
+    db_tip.height++;
+    db_tip.hash = nomination.block_hash;
+    db_tip.id++;
+
+    nomination.block_height++;
+    nomination.prev_block_hash = nomination.block_hash;
+    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+        nomination.transaction_hashes,
+        /*prev_block_hash=*/nomination.prev_block_hash);
+
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
     state.ResumeTiming();
 
-    auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-        db_tip, res_nominate.scheduler_nomination().nomination)();
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate(db_tip,
+                                                           nomination)();
     CHECK_EQ(res_validate.outcome(),
              SchedulerValidationResult::SchedulerValidationOK);
   }
@@ -341,15 +369,30 @@ loadgen_validate_throughput(benchmark::State &state)
   for (auto _ : state) {
     size_t txs_so_far = 0;
 
+    Nomination nomination = res_nominate.scheduler_nomination().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
+
+      // We reuse the [Nomination] struct and make some adjustments for the
+      // validation.
+      db_tip.height++;
+      db_tip.hash = nomination.block_hash;
+      db_tip.id++;
+
+      nomination.block_height++;
+      nomination.prev_block_hash = nomination.block_hash;
+      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+          nomination.transaction_hashes,
+          /*prev_block_hash=*/nomination.prev_block_hash);
+
       ValidatorID validator_id{};
       server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                               txs)();
 
-      auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-          db_tip, res_nominate.scheduler_nomination().nomination)();
+      auto res_validate =
+          server.mempool_coord_rpc().schedulercoord_validate(db_tip,
+                                                             nomination)();
       CHECK_EQ(res_validate.outcome(),
                SchedulerValidationResult::SchedulerValidationOK);
       txs_so_far += res_nominate.scheduler_nomination()
