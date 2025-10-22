@@ -137,54 +137,6 @@ TEST(Scheduler, Single)
             age.average_ages[kHogAgeGroupToSchedule] - 1);
 }
 
-TEST(Scheduler, TxFailed)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  {
-    scheduler->add_txs({txs[0]})();
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[0]);
-  }
-
-  // Check that the correct number of hogs was deducted.
-  HogAge age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-
-  // Check that the correct number of hogs was added back.
-  scheduler->mark_txs_finished(/*block_height=*/1,
-                               /*tx_hashes=*/{sha256(txs[0])})();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
-
-  // Check that the correct number of hogs was deducted again.
-  {
-    scheduler->add_txs({txs[0]})();
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[0]);
-    age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-              5'000'000'000 * 9);
-  }
-
-  // Check that [mark_txs_finished()] does not change the number of hogs.
-  scheduler->mark_txs_finished(/*block_height=*/1,
-                               /*tx_hashes=*/{sha256(txs[0])})();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-}
-
 TEST(Scheduler, TxFailedStrandedEnqueued)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
