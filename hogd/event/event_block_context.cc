@@ -125,7 +125,7 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
 }
 
 void
-EventBlockContext::finish_file()
+EventBlockContext::finish_file_write()
 {
   auto ts = x23::fastclock::now();
 
@@ -153,11 +153,18 @@ EventBlockContext::finish_file()
   assert(file_ul.owns_lock());
 
   sync_file(file_ul);
-  auto hash = get_root_hash();
+  auto ts4 = x23::fastclock::now();
+  info("time to sync {} ns,", ts4 - ts3);
+}
+
+void
+EventBlockContext::finish_file(SHA256Hash const &hash)
+{
+  std::unique_lock<std::mutex> file_ul(file_mutex_);
   auto ts4 = x23::fastclock::now();
   rename_file(file_ul, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to sync {} ns, time to rename file: {} ns", ts4 - ts3, ts5 - ts4);
+  info("time to rename file: {} ns", ts5 - ts4);
 }
 
 EventBlockContext::~EventBlockContext()

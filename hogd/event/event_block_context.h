@@ -63,11 +63,18 @@ public:
 
   void add_event(TxEventLog const &event);
   SHA256Hash get_root_hash();
-  void finish_file();
+  void finish_file_write();
+  void finish_file(SHA256Hash const &hash);
 
 private:
   void write_event(std::span<const uint8_t> data);
   void sync_file(std::unique_lock<std::mutex> &ul);
+  // The rename is slow if there's already a file of the same hash.
+  // (the time to delete the previous file).
+  // In actual practice, it should be impossible for this to occur,
+  // as the output files contain transaction hashes (which are uniquified)
+  // unless multiple replicas make the exact same nomination.  We could deal with this edge case 
+  // if this becomes a problem, but I suspect this will not matter significantly.
   void rename_file(std::unique_lock<std::mutex> &ul, SHA256Hash const &hash);
 
   std::unique_ptr<MerkleTriePrefix> trie_;
