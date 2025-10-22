@@ -58,7 +58,7 @@ EventRPCContext::close_block(BlockID block_id)
   gc_context_internal(it, ul);
   auto ts4 = x23::fastclock::now();
   info("time to get hash: {} ns, time to finish file: {} ns, time to gc "
-       "context: {} ns",
+       "context + rename: {} ns",
        ts2 - ts, ts3 - ts2, ts4 - ts3);
   return out_hash;
 }

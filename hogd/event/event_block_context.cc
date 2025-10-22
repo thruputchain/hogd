@@ -110,13 +110,19 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
     pending_writes_++;
     [](std::vector<uint8_t> buf, EventBlockContext *self) -> x23::Detached {
       co_await default_threadpool().bg();
-      std::lock_guard lock(self->file_mutex_);
-      auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
-      if (!r) [[unlikely]] {
-        panic("failed to write events to file: {}", r.error());
-      }
-      if (self->pending_writes_.fetch_sub(1) == 1) {
-        self->file_cv_.notify_one();
+      {
+        std::lock_guard lock(self->file_mutex_);
+        auto ts = x23::fastclock::now();
+        auto r = x23::fullwrite(self->events_file_, x23::BufView(buf));
+        if (!r) [[unlikely]] {
+            panic("failed to write events to file: {}", r.error());
+        }
+        if (self->pending_writes_.fetch_sub(1) == 1) {
+            self->file_cv_.notify_one();
+        }
+      
+        auto ts2 = x23::fastclock::now();
+        info("time to write events: {} ns bytes={}", ts2 - ts, buf.size());
       }
       co_return;
     }(std::move(buffers_->buf), this);
