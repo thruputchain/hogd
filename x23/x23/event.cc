@@ -23,10 +23,13 @@ namespace detail {
 Errno
 WriteBuffer::Service::write(BufVec &work)
 {
-  cp_->write_clear(fd_);
+  tok_ = cp_->write_clear(fd_);
   auto res = work.write(fd_);
-  got_eagain_ = res && *res == IoResult::kAgain;
-  if (!res)
+  if (res) {
+    if (*res != IoResult::kAgain)
+      tok_.reset();
+  }
+  else
     cp_->poison(fd_);
   return 0;
 }
@@ -54,8 +57,8 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
-      if (self.got_eagain_)
-        co_await self.cp_->write_wait(self.fd_);
+      if (self.tok_)
+        co_await self.cp_->write_wait(self.tok_);
       if (self.write(work))
         co_return;
     }
@@ -107,7 +110,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
     co_return Errno{EBADF};
   size_t startsize = out->size();
   while (len > 0) {
-    read_clear(fd);
+    auto tok = read_clear(fd);
     RefPtr<detail::ReadBuffer> r{nullptr};
     RefPtr<detail::WriteBuffer> w{nullptr};
     if (sync)
@@ -130,7 +133,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
         // flush now before going to sleep
         flush.reset([&w] { w->waiting_for_read_ = false; });
       }
-      if (Errno err = co_await read_wait(fd))
+      if (Errno err = co_await read_wait(tok))
         co_return err;
     }
     else
@@ -190,7 +193,7 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
 
   int err = 0;
   reset(fd);
-  write_clear(fd);
+  auto tok = write_clear(fd);
   if (::connect(fd.get(), sa, len) == -1)
     err = errno;
 
@@ -202,8 +205,8 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
       co_return Errno{err};
     }
 
-    co_await write_wait(fd);
-    write_clear(fd);
+    co_await write_wait(tok);
+    tok = write_clear(fd);
 
     len = sizeof(err);
     if (getsockopt(fd.get(), SOL_SOCKET, SO_ERROR, &err, &len) == -1)

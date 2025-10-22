@@ -3,6 +3,9 @@
 #include <atomic>
 #include <memory>
 
+#include <signal.h>
+
+#include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
@@ -22,6 +25,7 @@ ThreadPool::ThreadPool(size_t nthreads)
     workers_.push_back(std::make_unique<Worker>(this, i));
     threads_.emplace_back(&ThreadPool::Worker::work, workers_.back().get());
   }
+  sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
 }
 
 ThreadPool::~ThreadPool()
@@ -175,6 +179,16 @@ ThreadPool::show()
     ret += '\n';
   }
   return ret;
+}
+
+void
+ThreadPool::debug_dump()
+{
+  std::string msg = show();
+  int fd = debug.fd();
+  if (fd < 0)
+    fd = 2;
+  ::write(fd, msg.data(), msg.size());
 }
 
 ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
