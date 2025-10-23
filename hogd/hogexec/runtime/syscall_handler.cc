@@ -530,7 +530,8 @@ SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
   }
 
   auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), num_topics, std::as_bytes(std::span(buf)));
+      invocation_frame_stack_.get_active_frame().address(), num_topics,
+      std::as_bytes(std::span(buf)));
 
   invocation_frame_stack_.get_active_frame().log_event(std::move(message));
   return {};
