@@ -180,7 +180,7 @@ public:
 
 private:
   // The number of txs we request at a time from loadgen.
-  static constexpr size_t kLoadgenTxBatchSize = 1'000;
+  static constexpr size_t kLoadgenTxBatchSize = 10'000;
 
   LoadgenClient loadgen_client_;
   sched_coord_client_t &sched_coord_client_;
