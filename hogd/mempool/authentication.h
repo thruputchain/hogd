@@ -110,15 +110,15 @@ public:
       DecoratedSignatureList sigs;
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
-        sigs.push_back(make_sig(account_private_keys.at(
-                                    auth_claim.invoked_address_signature_id()),
-                                auth_claim.invoked_address_signature_id()));
+        sigs.list.push_back(make_sig(
+            account_private_keys.at(auth_claim.invoked_address_signature_id()),
+            auth_claim.invoked_address_signature_id()));
         break;
       case AuthClaimType::kInvokedAddressSignedWeight:
         throw std::runtime_error("kInvokedAddressSignedWeight not implemented");
         break;
       case AuthClaimType::kOtherAddressSignature:
-        sigs.push_back(
+        sigs.list.push_back(
             make_sig(auxiliary_private_keys
                          .at(auth_claim.other_address_signature_id().address)
                          .at(auth_claim.other_address_signature_id().key_id),
