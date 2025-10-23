@@ -21,7 +21,6 @@
 #include "x23/async.h"
 #include "x23/vec.h"
 
-
 namespace hogd {
 
 // TODO(jhumphri): Handle [block_expiry_height].
@@ -112,9 +111,9 @@ public:
       DecoratedSignatureList sigs;
       switch (auth_claim.claim_type()) {
       case AuthClaimType::kInvokedAddressSignature:
-        sigs.list.push_back(make_sig(account_private_keys.at(
-                                    auth_claim.invoked_address_signature_id()),
-                                auth_claim.invoked_address_signature_id()));
+        sigs.list.push_back(make_sig(
+            account_private_keys.at(auth_claim.invoked_address_signature_id()),
+            auth_claim.invoked_address_signature_id()));
         break;
       case AuthClaimType::kInvokedAddressSignedWeight:
         throw std::runtime_error("kInvokedAddressSignedWeight not implemented");

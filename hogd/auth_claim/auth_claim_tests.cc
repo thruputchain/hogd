@@ -84,7 +84,8 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
   auto sig = make_signature(sk, tx, 0);
 
   SignedTransaction stx =
-      SignedTransaction{.tx = make_transaction({claim}), .signatures = {DecoratedSignatureList{.list = {sig}}}};
+      SignedTransaction{.tx = make_transaction({claim}),
+                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -132,7 +133,9 @@ TEST_F(AuthClaimTests, GasAllSponsored)
 
   auto sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx =
+      SignedTransaction{.tx = tx,
+                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -176,7 +179,9 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
 
   auto sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {DecoratedSignatureList{.list = {sig}}}};
+  SignedTransaction stx =
+      SignedTransaction{.tx = tx,
+                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
