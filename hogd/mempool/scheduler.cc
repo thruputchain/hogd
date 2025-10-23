@@ -624,12 +624,14 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
 
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
     if (age_to_tx_.empty()) {
+      info("schedule() is cycling the accounts");
       for (const ContractAddress &account : scheduled_accounts) {
         if (!stranded_.contains(account)) {
           continue;
         }
         CHECK(!stranded_[account].empty());
         GasAmount min_gas_amount = stranded_[account].begin()->first;
+        info("cycle_if_needed account {}", account);
         co_await cycle_if_needed(account, min_gas_amount);
       }
 
