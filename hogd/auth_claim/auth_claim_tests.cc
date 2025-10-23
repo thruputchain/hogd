@@ -81,10 +81,10 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
 
   auto [pk, sk] = make_key_pair();
   auto tx = make_transaction({claim});
-  auto sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx =
-      SignedTransaction{.tx = make_transaction({claim}), .signatures = {{sig}}};
+  SignedTransaction stx = SignedTransaction{.tx = make_transaction({claim}),
+                                            .signatures = {{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -130,9 +130,10 @@ TEST_F(AuthClaimTests, GasAllSponsored)
       GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   tx.invocation.gas_limit = 100;
 
-  auto sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
+  SignedTransaction stx =
+      SignedTransaction{.tx = tx, .signatures = {{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 
@@ -174,9 +175,10 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
       GasClaim{.sponsored_contract = aux_contract, .amount = 100});
   tx.invocation.gas_limit = 200;
 
-  auto sig = make_signature(sk, tx, 0);
+  DecoratedSignature sig = make_signature(sk, tx, 0);
 
-  SignedTransaction stx = SignedTransaction{.tx = tx, .signatures = {{sig}}};
+  SignedTransaction stx =
+      SignedTransaction{.tx = tx, .signatures = {{.list = {sig}}}};
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
 

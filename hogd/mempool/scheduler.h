@@ -72,25 +72,18 @@ public:
   // Call this method when txs are successfully executed *as part of a block
   // that this node proposed* and/or when txs failed to execute.
   //
-  // All of the txs pass to this method, whether in [succeeded] or [failed],
-  // must having the same invoking account!
+  // All of the txs pass to this method must having the same invoking account!
   //
-  // For the txs that succeeded, this method just removes the remaining tx state
-  // from the scheduler, so we need to call this to prevent a memory leak.
-  //
-  // For the txs that failed, this method adds the hogs consumed by the tx back
-  // to the account and removes the remaining tx state from the scheduler. The
-  // txs are then returned by the method.
+  // This method removes the remaining tx state from the scheduler, so we need
+  // to call this to prevent a memory leak.
   //
   // Note: I initially thought it made sense to have this method add the failed
   // txs back to the runqueue. However, txs may have failed due to irrecoverable
   // errors, such as sending too many hogs to another account. The caller must
   // choose what to do next, whether that is reenqueing the txs in the
   // scheduler, dropping the txs, or doing something else.
-  x23::Async<SignedTransactionBatch>
-  mark_txs_finished(BlockHeight block_height,
-                    const x23::Vec<SignedTransactionHash> &succeeded,
-                    const x23::Vec<SignedTransactionHash> &failed);
+  x23::Async<void>
+  mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -103,9 +96,9 @@ public:
   // Note that this method removes the txs from the runqueue, but it does not
   // remove their state entirely from the scheduler. Specifically, information
   // about the txs is still held in [hash_to_tx_]. The caller needs to
-  // ultimately call [mark_txs_executed()] to remove this state.
+  // ultimately call [mark_txs_finished()] to remove this state.
   // TODO(jhumphri): We should pass a set instead of a vector, both here and in
-  // [mark_txs_executed()] and the other functions. Otherwise, a malicious
+  // [mark_txs_finished()] and the other functions. Otherwise, a malicious
   // nomination could crash a node by including the same hash twice and
   // triggering a CHECK failure.
   bool
@@ -215,6 +208,8 @@ private:
                       x23::Vec<SignedTransactionHash> &hashes,
                       x23::Vec<SignedTransaction> &txs);
 
+  void return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height);
+
   // Discards all txs that have expired before [current_height]. In other words,
   // if [current_height] is the height of the current block being scheduled,
   // then all txs that expire at heights [current_height - 1] and smaller are
@@ -228,24 +223,6 @@ private:
     return account_to_tx_.contains(info.account) &&
            account_to_tx_[info.account].contains(&info);
   }
-
-  // Call this method when txs are successfully executed *as part of a block
-  // that this node proposed*. This method just removes the remaining tx state
-  // from the scheduler, so we need to call this to prevent a memory leak.
-  void mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                         BlockHeight block);
-
-  // Call this method when txs failed to execute. This method adds the hogs
-  // consumed by the tx back to the account and removes the remaining tx state
-  // from the scheduler. The txs are then returned by the method.
-  //
-  // Note: I initially thought it made sense to have this method add the txs
-  // back to the runqueue. However, txs may have failed due to irrecoverable
-  // errors, such as sending too many hogs to another account. The caller must
-  // choose what to do next, whether that is reenqueing the txs in the
-  // scheduler, dropping the txs, or doing something else.
-  SignedTransactionBatch
-  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for

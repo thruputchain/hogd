@@ -108,10 +108,10 @@ verify_individual_key_claim_internal(uint32_t key_id,
                                      DecoratedSignatureList const &sigs,
                                      SHA256Hash const &tx_hash)
 {
-  if (sigs.size() != 1) {
+  if (sigs.list.size() != 1) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (sigs[0].public_key_id != key_id) {
+  if (sigs.list[0].public_key_id != key_id) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
@@ -124,7 +124,7 @@ verify_individual_key_claim_internal(uint32_t key_id,
 
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
-    return verify_decorated_signature(sigs[0], *auth_data, tx_hash);
+    return verify_decorated_signature(sigs.list[0], *auth_data, tx_hash);
   }
   return {};
 }
@@ -140,7 +140,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
-  for (const DecoratedSignature &sig : sigs) {
+  for (const DecoratedSignature &sig : sigs.list) {
     if (!bitmap_accepts_key(accepted_keys, sig.public_key_id)) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
@@ -149,7 +149,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     size_t w = 0;
-    for (const DecoratedSignature &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs.list) {
       if (!has_public_key(*auth_data, sig.public_key_id)) {
         return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
@@ -163,7 +163,7 @@ verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
 
-    for (const DecoratedSignature &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs.list) {
       if (auto r = verify_decorated_signature(sig, *auth_data, tx_hash); !r) {
         return r;
       }
@@ -226,7 +226,7 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
     case AuthClaimType::kInvokedAddressSignedWeight:
-      for (const DecoratedSignature &sig : sigs) {
+      for (const DecoratedSignature &sig : sigs.list) {
         if (!bitmap_accepts_key(nonce_config.accepted_keys,
                                 sig.public_key_id)) {
           return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
@@ -278,7 +278,7 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     if (claim_addr != gas_claim.sponsored_contract) {
       continue;
     }
-    for (const DecoratedSignature &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs.list) {
       for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
         if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
                                 sig.public_key_id)) {

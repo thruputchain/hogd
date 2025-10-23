@@ -3,6 +3,7 @@ add_xdr(
   ../../protocol/account.x
   ../../protocol/auth_claim.x
   ../../protocol/batch.x
+  ../../protocol/block.x
   ../../protocol/catchup.x
   ../../protocol/ci_server.x
   ../../protocol/contract.x

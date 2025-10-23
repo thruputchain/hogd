@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "block.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
@@ -174,9 +175,10 @@ MempoolCoordinatorRpc::get_block_hash(
   }
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
-  // Hash over the Merkle trie root hash and [prev_block_hash].
-  x23::Vec<SHA256Hash> all_hashes{root_hash, prev_block_hash};
-  return sha256(all_hashes);
+
+  BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
+                             .prev_block_hash = prev_block_hash};
+  return sha256(preimage);
 }
 
 x23::Async<x23::Vec<bool>>
@@ -269,8 +271,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
-      succeeded;
-  std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>> failed;
+      tx_hashes;
   // We need to track the failed txs themselves (not just the hashes) because we
   // re-enqueue these txs in the scheduler.
   std::unordered_map<ContractAddress, SignedTransactionBatch> failed_txs;
@@ -280,18 +281,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
     const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     all_accounts.insert(address);
-    if (statuses[i]) {
-      succeeded[address].push_back(nomination.transaction_hashes[i]);
-    }
-    else {
-      failed[address].push_back(nomination.transaction_hashes[i]);
+    tx_hashes[address].push_back(nomination.transaction_hashes[i]);
+    if (!statuses[i]) {
       failed_txs[address].push_back(txs[i]);
     }
   }
   for (const ContractAddress &account : all_accounts) {
-    co_await scheduler_->mark_txs_finished(nomination.block_height,
-                                           succeeded[account], failed[account]);
-    if (!failed[account].empty()) {
+    co_await scheduler_->mark_txs_finished(tx_hashes[account]);
+    if (!failed_txs[account].empty()) {
       co_await scheduler_->add_txs(failed_txs[account]);
     }
   }
@@ -385,8 +382,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
+  x23::Vec<SignedTransaction> signed_txs;
   {
-    x23::Vec<SignedTransaction> signed_txs;
     if (!scheduler_->find_and_remove_from_runqueue(
             nomination.transaction_hashes, &signed_txs)) {
       co_await finish_block(block_id);
@@ -403,30 +400,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
   }
   CHECK(!txs.empty());
+
   // Now execute the txs on the executor.
-  if (!co_await validate_batch(block_id, txs)) {
-    SignedTransactionBatch reenqueue = co_await scheduler_->mark_txs_finished(
-        nomination.block_height,
-        /*succeeded=*/{},
-        /*failed=*/nomination.transaction_hashes);
-    co_await scheduler_->add_txs(reenqueue);
+  bool validated = co_await validate_batch(block_id, txs);
+  co_await scheduler_->mark_txs_finished(nomination.transaction_hashes);
 
-    co_await finish_block(block_id);
-    co_await abandon_snapshot(block_id);
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationInvalid);
-  }
-
-  // Verify the block hash. It is safe to directly use
+  // Check [validated] and verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above
   // that all of these hashes correspond to vetted txs.
-  if (get_block_hash(nomination.transaction_hashes,
-                     /*prev_block_hash=*/db_tip.hash) !=
-      nomination.block_hash) {
-    SignedTransactionBatch reenqueue = co_await scheduler_->mark_txs_finished(
-        nomination.block_height, /*succeeded=*/{},
-        /*failed=*/nomination.transaction_hashes);
-    co_await scheduler_->add_txs(reenqueue);
+  if (!validated || get_block_hash(nomination.transaction_hashes,
+                                   /*prev_block_hash=*/db_tip.hash) !=
+                        nomination.block_hash) {
+    co_await scheduler_->add_txs(signed_txs);
 
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -434,9 +419,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  co_await scheduler_->mark_txs_finished(
-      nomination.block_height, /*succeeded=*/{},
-      /*failed=*/nomination.transaction_hashes);
   co_await finish_block(block_id);
   co_await close_snapshot(block_id);
   co_await commit_snapshot(block_id);
