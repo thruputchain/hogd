@@ -196,10 +196,10 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 
     // We should cycle if either of the following is true:
     // 1. Cycling will increase the average age of the
-    // [kHogAgeGroupToSchedule]
-    //    group.
+    //    [kHogAgeGroupToSchedule] group.
+    //
     // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
-    //    schedule tx that requires [gas_limit] hogs, but cycling will add
+    //    schedule a tx that requires [gas_limit] hogs, but cycling will add
     //    enough hogs to the group to schedule it.
     if (already_scheduled_average_older || combined_averages_older ||
         (account_to_tx_[account].empty() && gas_limit > to_schedule)) {
@@ -620,9 +620,29 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   co_await discard_expired_txs(block_height);
 
   size_t num_scheduled = 0;
+  std::unordered_set<ContractAddress> scheduled_accounts;
+
   while (num_scheduled < block_size && !age_to_tx_.empty()) {
+    if (age_to_tx_.empty()) {
+      for (const ContractAddress &account : scheduled_accounts) {
+        if (!stranded_.contains(account)) {
+          continue;
+        }
+        CHECK(!stranded_[account].empty());
+        GasAmount min_gas_amount = stranded_[account].begin()->first;
+        co_await cycle_if_needed(account, min_gas_amount);
+      }
+
+      // Check if there are now txs on the runqueue. If there are still no txs
+      // on the runqueue, then break.
+      if (age_to_tx_.empty()) {
+        break;
+      }
+    }
+
     const size_t num_remaining = block_size - num_scheduled;
     auto &[average_age, info] = *age_to_tx_.begin();
+    size_t num_added_this_iteration = std::min(info.size(), num_remaining);
 
     if (info.size() <= num_remaining) {
       // All of the txs in [info] fit in the block, so we add all of them. Note
@@ -639,6 +659,13 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
+    }
+
+    for (size_t i = 0; i < num_added_this_iteration; i++) {
+      size_t idx = txs.size() - i - 1;
+      CHECK_LT(idx, txs.size());
+      const SignedTransaction &tx = txs.at(idx);
+      scheduled_accounts.insert(tx.tx.invocation.invoked_address);
     }
   }
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
