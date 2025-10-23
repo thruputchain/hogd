@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "account.hh"
 #include "contract.hh"
@@ -497,7 +498,7 @@ SystemCallHandler::emit_events()
   });
 }
 
-void
+SyscallStatus<void>
 SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
                              SHA256Hash const *topic2,
                              std::span<const std::byte> data)
@@ -506,11 +507,32 @@ SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
   assert(!is_read_only());
   assert(data.size() <= kMaxLogMessageLen);
 
+  std::vector<std::byte> buf;
+  uint32_t num_topics = 0;
+  if (topic0) {
+    buf.append_range(std::as_bytes(std::span(*topic0)));
+    num_topics++;
+  }
+  if (topic1) {
+    buf.append_range(std::as_bytes(std::span(*topic1)));
+    num_topics++;
+  }
+  if (topic2) {
+    buf.append_range(std::as_bytes(std::span(*topic2)));
+    num_topics++;
+  }
+
+  buf.append_range(data);
+
+  if (buf.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), topic0, topic1,
-      topic2, data);
+      invocation_frame_stack_.get_active_frame().address(), num_topics, buf);
 
   invocation_frame_stack_.get_active_frame().log_event(std::move(message));
+  return {};
 }
 
 ContractAddress

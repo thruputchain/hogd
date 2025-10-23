@@ -105,7 +105,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_individual_key_claim_internal(uint32_t key_id,
                                      const AccountAuthData *auth_data,
-                                     DecoratedSignatureList const &sigs,
+                                     x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
                                      SHA256Hash const &tx_hash)
 {
   if (sigs.size() != 1) {
@@ -133,7 +133,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_weight_key_claim_internal(BitMap accepted_keys, Weight required_weight,
                                  const AccountAuthData *auth_data,
-                                 DecoratedSignatureList const &sigs,
+                                 x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
                                  SHA256Hash const &tx_hash)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
@@ -189,19 +189,19 @@ verify_auth_claim_internal(AuthClaim const &claim,
   switch (claim.claim_type()) {
   case AuthClaimType::kInvokedAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
-        claim.invoked_address_signature_id(), auth_data, sigs, tx_hash);
+        claim.invoked_address_signature_id(), auth_data, sigs.list, tx_hash);
   case AuthClaimType::kInvokedAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.invoked_address_signed_weight().accepted_keys,
-        claim.invoked_address_signed_weight().required_weight, auth_data, sigs,
+        claim.invoked_address_signed_weight().required_weight, auth_data, sigs.list,
         tx_hash);
   case AuthClaimType::kOtherAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
-        claim.other_address_signature_id().key_id, auth_data, sigs, tx_hash);
+        claim.other_address_signature_id().key_id, auth_data, sigs.list, tx_hash);
   case AuthClaimType::kOtherAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.other_address_signed_weight().accepted_keys,
-        claim.other_address_signed_weight().required_weight, auth_data, sigs,
+        claim.other_address_signed_weight().required_weight, auth_data, sigs.list,
         tx_hash);
   default:
     // This kind of claim should not have been parseable
@@ -221,7 +221,7 @@ validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
   Weight total_weight = 0;
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
-    const DecoratedSignatureList &sigs = stx.signatures[i];
+    const x23::Vec<DecoratedSignature, 0xffffffff> &sigs = stx.signatures[i].list;
     const AuthClaim &auth_claim = stx.tx.auth_claims[i];
     switch (auth_claim.claim_type()) {
     case AuthClaimType::kInvokedAddressSignature:
@@ -278,7 +278,7 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
     if (claim_addr != gas_claim.sponsored_contract) {
       continue;
     }
-    for (const DecoratedSignature &sig : sigs) {
+    for (const DecoratedSignature &sig : sigs.list) {
       for (size_t i = 0; i < auth_data.gas_permissions.size(); i++) {
         if (!bitmap_accepts_key(auth_data.gas_permissions[i].accepted_keys,
                                 sig.public_key_id)) {
