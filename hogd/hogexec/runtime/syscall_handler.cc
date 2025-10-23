@@ -40,6 +40,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -507,29 +508,29 @@ SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
   assert(!is_read_only());
   assert(data.size() <= kMaxLogMessageLen);
 
-  std::vector<std::byte> buf;
+  x23::Buf buf;
   uint32_t num_topics = 0;
   if (topic0) {
-    buf.append_range(std::as_bytes(std::span(*topic0)));
+    buf.append_range(*topic0);
     num_topics++;
   }
   if (topic1) {
-    buf.append_range(std::as_bytes(std::span(*topic1)));
+    buf.append_range(*topic1);
     num_topics++;
   }
   if (topic2) {
-    buf.append_range(std::as_bytes(std::span(*topic2)));
+    buf.append_range(*topic2);
     num_topics++;
   }
 
-  buf.append_range(data);
+  buf.append(reinterpret_cast<const uint8_t *>(data.data()), data.size());
 
   if (buf.size() > kMaxEventLength) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), num_topics, buf);
+      invocation_frame_stack_.get_active_frame().address(), num_topics, std::as_bytes(std::span(buf)));
 
   invocation_frame_stack_.get_active_frame().log_event(std::move(message));
   return {};
