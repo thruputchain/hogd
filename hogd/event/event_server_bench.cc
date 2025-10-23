@@ -29,7 +29,9 @@
 #include "x23/fastclock.h"
 #include "x23/format.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -97,10 +99,10 @@ const SHA256Hash topic0 = sha256(std::string_view{"topic0"});
 const SHA256Hash topic1 = sha256(std::string_view{"topic1"});
 const SHA256Hash topic2 = sha256(std::string_view{"topic2"});
 
-const std::vector<std::byte> event_data = []() {
-  std::vector<std::byte> data(64);
+const std::vector<uint8_t> event_data = []() {
+  std::vector<uint8_t> data(64);
   for (size_t i = 0; i < data.size(); i++) {
-    data[i] = static_cast<std::byte>(i);
+    data[i] = i;
   }
   return data;
 }();
@@ -120,8 +122,14 @@ create_fake_event_log(size_t tx_id)
 
   // Create some fake events (3 events per transaction)
   for (size_t i = 0; i < 3; i++) {
-    auto emitted_event = make_tx_emitted_event(contract_address, &topic0,
-                                               &topic1, &topic2, event_data);
+    x23::Buf serialized_event;
+    serialized_event.append_range(topic0);
+    serialized_event.append_range(topic1);
+    serialized_event.append_range(topic2);
+    serialized_event.append_range(event_data);
+    auto emitted_event =
+        make_tx_emitted_event(contract_address, 3,
+                              std::as_bytes(std::span(serialized_event)));
     event_log.events.emplace_back(std::move(emitted_event));
   }
 
@@ -170,9 +178,13 @@ run_event_bench(const std::string &exec_server_addr,
                 size_t n_connections, size_t n_coros_per_connection,
                 BlockID block_number)
 {
+  auto representative_event = create_fake_event_log(0);
+  auto event_size = x23::serialize(representative_event).size();
+
   std::println("running event bench with {} events, {} connections, {} coros "
-               "per connection, block number {}",
-               num_events, n_connections, n_coros_per_connection, block_number);
+               "per connection, block number {}, event size {}",
+               num_events, n_connections, n_coros_per_connection, block_number,
+               event_size);
   // Connect to the event server
   auto event_sched_client = connect_to_event_sched_server(sched_server_addr);
 

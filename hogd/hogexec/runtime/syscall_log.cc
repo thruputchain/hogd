@@ -41,7 +41,10 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler,
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
-  syscall_handler.log_event(topic0, topic1, topic2, data);
+  auto r = syscall_handler.log_event(topic0, topic1, topic2, data);
+  if (!r.has_value()) {
+    return {r.error().code(), 0};
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
