@@ -5,6 +5,7 @@
 
 #include <limits>
 #include <memory>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -54,7 +55,7 @@ template<> struct DeserializeBranch<uint32_t> {
   }
 };
 
-template<uint32_t MS> struct DeserializeBranch<x23::Vec<uint8_t, MS>> {
+template<size_t MS> struct DeserializeBranch<x23::Vec<uint8_t, MS>> {
 
   static x23::Buf branch(model::RunnableActionSet &set, bool &exists_failure)
   {
