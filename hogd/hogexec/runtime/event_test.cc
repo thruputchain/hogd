@@ -571,26 +571,21 @@ TEST_F(EventTest, EventWithRevertingFrames)
     ASSERT_EQ(event.contract_address, contract_0_addr);
   }
 
-  #if 0
   // Verify the event data matches what we expect
-  auto event_data0 = try_parse_event_data(tx_event_log.value().events[0]);
-  ASSERT_TRUE(event_data0.has_value());
-  ASSERT_EQ(event_data0.value().topics.size(), 0);
-  ASSERT_EQ(event_data0.value().event, make_vec("first_event"));
+  auto event_data0 = tx_event_log.value().events[0];
+  ASSERT_EQ(event_data0.num_topics, 0);
+  ASSERT_EQ(event_data0.serialized_event, make_vec<kMaxEventLength>("first_event"));
 
-  auto event_data1 = try_parse_event_data(tx_event_log.value().events[1]);
-  ASSERT_TRUE(event_data1.has_value());
-  ASSERT_EQ(event_data1.value().topics.size(), 0);
-  ASSERT_EQ(event_data1.value().event, make_vec("second_event"));
+  auto event_data1 =tx_event_log.value().events[1];
+  ASSERT_EQ(event_data1.num_topics, 0);
+  ASSERT_EQ(event_data1.serialized_event, make_vec<kMaxEventLength>("second_event"));
 
-  auto event_data2 = try_parse_event_data(tx_event_log.value().events[2]);
-  ASSERT_TRUE(event_data2.has_value());
-  ASSERT_EQ(event_data2.value().topics.size(), 0);
-  ASSERT_EQ(event_data2.value().event, make_vec("third_event"));
+  auto event_data2 = tx_event_log.value().events[2];
+  ASSERT_EQ(event_data2.num_topics, 0);
+  ASSERT_EQ(event_data2.serialized_event, make_vec<kMaxEventLength>("third_event"));
 
   auto tx_event_log_2 = get_tx_event_log(tx_id_2);
   ASSERT_FALSE(tx_event_log_2.has_value());
-  #endif
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
