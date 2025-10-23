@@ -338,7 +338,7 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   // hogs into the other groups and then potentially add stranded txs to the
   // runqueue. We need to call [cycle_groups()] twice to get the
   // [kHogAgeGroupReceived] hogs into the [kHogAgeGroupToSchedule] group.
-  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+  if (account_to_tx_[account].empty() && stranded_.contains(account)) {
     co_await cycle_groups(account);
     co_await cycle_groups(account);
   }
@@ -450,37 +450,39 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     // Handle txs that are currently stranded. We may now have enough hogs to
     // add some or all of them to the runqueue.
     HogAge &averages = cached_hogs_[account];
-    for (auto gas_it = stranded_[account].begin();
-         gas_it != stranded_[account].end();) {
-      GasAmount gas_limit = gas_it->first;
-      std::unordered_set<TxInfo *> &infos = gas_it->second;
+    if (stranded_.contains(account)) {
+      for (auto gas_it = stranded_[account].begin();
+           gas_it != stranded_[account].end();) {
+        GasAmount gas_limit = gas_it->first;
+        std::unordered_set<TxInfo *> &infos = gas_it->second;
 
-      for (auto it = infos.begin(); it != infos.end();) {
-        TxInfo *info = *it;
-        CHECK_EQ(gas_limit, info->tx.tx.invocation.gas_limit);
+        for (auto it = infos.begin(); it != infos.end();) {
+          TxInfo *info = *it;
+          CHECK_EQ(gas_limit, info->tx.tx.invocation.gas_limit);
 
-        if (gas_limit > from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-          break;
+          if (gas_limit > from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+            break;
+          }
+
+          it = stranded_[account][gas_limit].erase(it);
+          averages.num_hogs[kHogAgeGroupToSchedule] =
+              to_xdr(from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) -
+                     info->tx.tx.invocation.gas_limit);
+          info->age = averages.average_ages[kHogAgeGroupToSchedule];
+          CHECK(account_to_tx_[account].insert(info).second);
+          CHECK(age_to_tx_[info->age].insert(info).second);
         }
 
-        it = stranded_[account][gas_limit].erase(it);
-        averages.num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) -
-                   info->tx.tx.invocation.gas_limit);
-        info->age = averages.average_ages[kHogAgeGroupToSchedule];
-        CHECK(account_to_tx_[account].insert(info).second);
-        CHECK(age_to_tx_[info->age].insert(info).second);
+        if (infos.empty()) {
+          gas_it = stranded_[account].erase(gas_it);
+        }
+        else {
+          gas_it++;
+        }
       }
-
-      if (infos.empty()) {
-        gas_it = stranded_[account].erase(gas_it);
+      if (stranded_[account].empty()) {
+        CHECK_EQ(stranded_.erase(account), 1UL);
       }
-      else {
-        gas_it++;
-      }
-    }
-    if (stranded_[account].empty()) {
-      CHECK_EQ(stranded_.erase(account), 1UL);
     }
   }
 }
@@ -601,7 +603,7 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
         reserved_hogs);
 
     update_accounts({account});
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+    if (account_to_tx_[account].empty() && stranded_.contains(account)) {
       co_await cycle_groups(account);
     }
   }
@@ -622,7 +624,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> scheduled_accounts;
 
-  while (num_scheduled < block_size && !age_to_tx_.empty()) {
+  while (num_scheduled < block_size) {
     if (age_to_tx_.empty()) {
       info("schedule() is cycling the accounts");
       for (const ContractAddress &account : scheduled_accounts) {
@@ -638,6 +640,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       // Check if there are now txs on the runqueue. If there are still no txs
       // on the runqueue, then break.
       if (age_to_tx_.empty()) {
+        info("breaking out");
         break;
       }
     }
@@ -728,7 +731,7 @@ Scheduler::mark_txs_finished(BlockHeight block_height,
     size_--;
   }
 
-  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+  if (account_to_tx_[account].empty() && stranded_.contains(account)) {
     co_await cycle_groups(account);
   }
 }
