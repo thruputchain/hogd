@@ -6,17 +6,19 @@
 #include <cstring>
 #include <expected>
 #include <functional>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <ranges>
 #include <string>
 #include <string_view>
-#include <sys/fcntl.h>
-#include <sys/socket.h>
 #include <system_error>
 
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/fcntl.h>
+#include <sys/socket.h>
+
 #include "x23/cleanup.h"
+#include "x23/debug.h"
 #include "x23/err.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -57,6 +59,26 @@ set_nonblock(BorrowedFd fd, bool on)
     n &= ~O_NONBLOCK;
   if (fcntl(fd.get(), F_SETFL, n) == -1)
     Errno{}.raise("F_SETFL");
+#ifndef NDEBUG
+  if (ignore_debug_env)
+    return;
+  auto env2int = [](const char *var) {
+    char *s = getenv(var);
+    if (!s || !*s)
+      return -1;
+    return atoi(s);
+  };
+  // For an async-IO torture test set the X23_SNDBUF and X23_RCVBUF
+  // variables to something small.
+  static const int sndsize = env2int("X23_SNDBUF"),
+                   rcvsize = env2int("X23_RCVBUF");
+  if (on) {
+    if (sndsize > 0)
+      setsockopt(fd.get(), SOL_SOCKET, SO_SNDBUF, &sndsize, sizeof(sndsize));
+    if (rcvsize > 0)
+      setsockopt(fd.get(), SOL_SOCKET, SO_RCVBUF, &rcvsize, sizeof(rcvsize));
+  }
+#endif // NDEBUG
 }
 
 void
