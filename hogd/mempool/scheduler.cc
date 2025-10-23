@@ -426,6 +426,7 @@ Scheduler::process_deducted_hogs(const ContractAddress &account,
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
+  info("update accounts");
   for (const auto &account : accounts) {
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
@@ -451,6 +452,7 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     // add some or all of them to the runqueue.
     HogAge &averages = cached_hogs_[account];
     if (stranded_.contains(account)) {
+      info("update accounts, adding stranded txs to the runqueue");
       for (auto gas_it = stranded_[account].begin();
            gas_it != stranded_[account].end();) {
         GasAmount gas_limit = gas_it->first;
@@ -640,7 +642,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       // Check if there are now txs on the runqueue. If there are still no txs
       // on the runqueue, then break.
       if (age_to_tx_.empty()) {
-        info("breaking out");
+        info("breaking out... but num stranded is {}", num_stranded());
         break;
       }
     }
@@ -671,6 +673,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       CHECK_LT(idx, txs.size());
       const SignedTransaction &tx = txs.at(idx);
       scheduled_accounts.insert(tx.tx.invocation.invoked_address);
+      return_tx_hogs(tx, block_height);
     }
   }
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
@@ -678,11 +681,38 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   co_return ret;
 }
 
-// TODO(jhumphri): We should remove the [block_height] parameter. We should know
-// the current block number based on the block number passed to [schedule()].
+void
+Scheduler::return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height)
+{
+  HogAge &age = cached_hogs_[tx.tx.invocation.invoked_address];
+
+  const uint128_xdr to_schedule_hogs =
+      to_xdr(static_cast<uint128_t>(tx.tx.invocation.gas_limit));
+  const BlockHeight to_schedule_age = block_height;
+
+  const uint128_xdr already_scheduled_hogs =
+      age.num_hogs[kHogAgeGroupAlreadyScheduled];
+  const BlockHeight already_scheduled_age =
+      age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
+  bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
+  if (empty) {
+    age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
+  }
+  else {
+    // See comment above for [compute_average_age()].
+    age.average_ages[kHogAgeGroupAlreadyScheduled] =
+        compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
+                            from_xdr(already_scheduled_hogs),
+                            already_scheduled_age);
+  }
+}
+
 x23::Async<void>
-Scheduler::mark_txs_finished(BlockHeight block_height,
-                             const x23::Vec<SignedTransactionHash> &tx_hashes)
+Scheduler::mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes)
 {
   CHECK(!tx_hashes.empty());
   const SignedTransactionHash &tx_hash = tx_hashes.front();
@@ -694,31 +724,6 @@ Scheduler::mark_txs_finished(BlockHeight block_height,
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
-    HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
-
-    const uint128_xdr to_schedule_hogs =
-        to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
-    const BlockHeight to_schedule_age = block_height;
-
-    const uint128_xdr already_scheduled_hogs =
-        age.num_hogs[kHogAgeGroupAlreadyScheduled];
-    const BlockHeight already_scheduled_age =
-        age.average_ages[kHogAgeGroupAlreadyScheduled];
-
-    // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
-    bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
-    age.num_hogs[kHogAgeGroupAlreadyScheduled] =
-        to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
-    if (empty) {
-      age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
-    }
-    else {
-      // See comment above for [compute_average_age()].
-      age.average_ages[kHogAgeGroupAlreadyScheduled] =
-          compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
-                              from_xdr(already_scheduled_hogs),
-                              already_scheduled_age);
-    }
     {
       const BlockHeight expiry_height =
           info.tx.tx.uniquifier.block_expiry_height;

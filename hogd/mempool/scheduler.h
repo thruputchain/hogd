@@ -83,8 +83,7 @@ public:
   // choose what to do next, whether that is reenqueing the txs in the
   // scheduler, dropping the txs, or doing something else.
   x23::Async<void>
-  mark_txs_finished(BlockHeight block_height,
-                    const x23::Vec<SignedTransactionHash> &tx_hashes);
+  mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -208,6 +207,8 @@ private:
   void get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
                       x23::Vec<SignedTransactionHash> &hashes,
                       x23::Vec<SignedTransaction> &txs);
+
+  void return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height);
 
   // Discards all txs that have expired before [current_height]. In other words,
   // if [current_height] is the height of the current block being scheduled,

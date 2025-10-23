@@ -287,8 +287,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     }
   }
   for (const ContractAddress &account : all_accounts) {
-    co_await scheduler_->mark_txs_finished(nomination.block_height,
-                                           tx_hashes[account]);
+    co_await scheduler_->mark_txs_finished(tx_hashes[account]);
     if (!failed_txs[account].empty()) {
       co_await scheduler_->add_txs(failed_txs[account]);
     }
@@ -404,8 +403,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   // Now execute the txs on the executor.
   bool validated = co_await validate_batch(block_id, txs);
-  co_await scheduler_->mark_txs_finished(nomination.block_height,
-                                         nomination.transaction_hashes);
+  co_await scheduler_->mark_txs_finished(nomination.transaction_hashes);
 
   // Check [validated] and verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above
