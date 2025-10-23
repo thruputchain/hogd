@@ -211,7 +211,8 @@ loadgen_submit_unvetted(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
+    const SignedTransactionBatch txs =
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -228,7 +229,8 @@ loadgen_submit_vetted(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
+    const SignedTransactionBatch txs =
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -247,8 +249,9 @@ loadgen_nominate(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
-    // Submit unvetted transactions so there's something to nominate
+    const SignedTransactionBatch txs =
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
+
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
@@ -271,7 +274,8 @@ loadgen_validate(benchmark::State &state)
 
   for (auto _ : state) {
     state.PauseTiming();
-    const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
+    const SignedTransactionBatch txs =
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -311,25 +315,25 @@ BENCHMARK(loadgen_validate)->Unit(benchmark::kMillisecond)->Iterations(3);
 void
 loadgen_nominate_throughput(benchmark::State &state)
 {
-  constexpr size_t kTotalTxsToRun = 100000;
+  constexpr size_t kTotalTxsToRun = 100'000;
 
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
+  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
 
   for (auto _ : state) {
-    size_t txs_so_far = 0;
+    state.PauseTiming();
 
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
+    state.ResumeTiming();
+
+    size_t txs_so_far = 0;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
-      // TODO(jhumphri): Get txs from loadgen in a separate thread.
-      const SignedTransactionBatch txs =
-          loadgen.get_transactions(kNumLoadgenTxs);
-
-      ValidatorID validator_id{};
-      server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                              txs)();
 
       auto res_nominate =
           server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -350,25 +354,28 @@ BENCHMARK(loadgen_nominate_throughput)->Unit(benchmark::kSecond)->Iterations(1);
 void
 loadgen_validate_throughput(benchmark::State &state)
 {
-  constexpr size_t kTotalTxsToRun = 100000;
+  constexpr size_t kTotalTxsToRun = 100'000;
 
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
-
-  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
-
-  ValidatorID validator_id{};
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-
-  auto res_nominate =
-      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  CHECK_EQ(res_nominate.outcome(),
-           SchedulerNominationOutcome::SchedulerNominationOK);
+  const SignedTransactionBatch txs = loadgen.get_transactions(kTotalTxsToRun);
 
   for (auto _ : state) {
-    size_t txs_so_far = 0;
+    state.PauseTiming();
 
+    ValidatorID validator_id{};
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                            txs)();
+
+    auto res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
+
+    state.ResumeTiming();
+
+    size_t txs_so_far = 0;
     Nomination nomination = res_nominate.scheduler_nomination().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,

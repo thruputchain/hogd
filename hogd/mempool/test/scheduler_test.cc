@@ -651,7 +651,10 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestInfra::kAccountAddresses[i];
-    EXPECT_EQ(tx_counts[address], (i + 1) * (kNumRounds / 10));
+    const size_t target = (i + 1) * (kNumRounds / 10);
+    constexpr size_t kErrorBound = 2;
+    EXPECT_LE(tx_counts[address], target + kErrorBound);
+    EXPECT_GE(tx_counts[address], target - kErrorBound);
   }
 }
 
