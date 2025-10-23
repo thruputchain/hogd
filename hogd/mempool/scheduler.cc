@@ -426,7 +426,6 @@ Scheduler::process_deducted_hogs(const ContractAddress &account,
 void
 Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
 {
-  info("update accounts");
   for (const auto &account : accounts) {
     std::unordered_set<TxInfo *> &infos = account_to_tx_[account];
 
@@ -452,7 +451,6 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     // add some or all of them to the runqueue.
     HogAge &averages = cached_hogs_[account];
     if (stranded_.contains(account)) {
-      info("update accounts, adding stranded txs to the runqueue");
       for (auto gas_it = stranded_[account].begin();
            gas_it != stranded_[account].end();) {
         GasAmount gas_limit = gas_it->first;
@@ -628,21 +626,18 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
 
   while (num_scheduled < block_size) {
     if (age_to_tx_.empty()) {
-      info("schedule() is cycling the accounts");
       for (const ContractAddress &account : scheduled_accounts) {
         if (!stranded_.contains(account)) {
           continue;
         }
         CHECK(!stranded_[account].empty());
         GasAmount min_gas_amount = stranded_[account].begin()->first;
-        info("cycle_if_needed account {}", account);
         co_await cycle_if_needed(account, min_gas_amount);
       }
 
       // Check if there are now txs on the runqueue. If there are still no txs
       // on the runqueue, then break.
       if (age_to_tx_.empty()) {
-        info("breaking out... but num stranded is {}", num_stranded());
         break;
       }
     }
