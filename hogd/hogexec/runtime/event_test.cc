@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -7,10 +8,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/event/utilities.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -34,11 +35,19 @@ public:
 
   void SetUp() override {}
 
-  static x23::Vec<uint8_t, 0xffffffff> make_vec(std::string_view data)
+  template<size_t MS = 0xffffffff>
+  static x23::Vec<uint8_t, MS> make_vec(std::string_view data)
   {
-    return x23::Vec<uint8_t, 0xffffffff>(
-        reinterpret_cast<uint8_t const *>(data.data()),
-        reinterpret_cast<uint8_t const *>(data.data() + data.size()));
+    return x23::Vec<uint8_t, MS>(reinterpret_cast<uint8_t const *>(data.data()),
+                                 reinterpret_cast<uint8_t const *>(
+                                     data.data() + data.size()));
+  }
+  template<size_t MS = 0xffffffff>
+  static x23::Vec<uint8_t, MS> make_vec(std::span<const std::byte> data)
+  {
+    return x23::Vec<uint8_t, MS>(reinterpret_cast<uint8_t const *>(data.data()),
+                                 reinterpret_cast<uint8_t const *>(
+                                     data.data() + data.size()));
   }
 };
 
@@ -167,16 +176,18 @@ TEST_F(EventTest, EventSuccess)
   ASSERT_EQ(tx_event_log.value().events[0].contract_address, contract_0_addr);
   ASSERT_EQ(tx_event_log.value().events[1].contract_address, contract_0_addr);
 
-  auto event_data0 = try_parse_event_data(tx_event_log.value().events[0]);
-  ASSERT_TRUE(event_data0.has_value());
-  ASSERT_EQ(event_data0.value().topics.size(), 0);
-  ASSERT_EQ(event_data0.value().event, make_vec("test 0 topics"));
+  auto event_data0 = tx_event_log.value().events[0];
+  ASSERT_EQ(event_data0.num_topics, 0);
+  ASSERT_EQ(event_data0.serialized_event,
+            make_vec<kMaxEventLength>("test 0 topics"));
 
-  auto event_data1 = try_parse_event_data(tx_event_log.value().events[1]);
-  ASSERT_TRUE(event_data1.has_value());
-  ASSERT_EQ(event_data1.value().topics.size(), 1);
-  ASSERT_EQ(event_data1.value().topics[0], sha256(std::string("topic")));
-  ASSERT_EQ(event_data1.value().event, make_vec("test 1 topic"));
+  auto event_data1 = tx_event_log.value().events[1];
+  ASSERT_EQ(event_data1.num_topics, 1);
+  auto topic = sha256(std::string("topic"));
+  auto expected_event_data1 =
+      make_vec<kMaxEventLength>(std::as_bytes(std::span(topic)));
+  expected_event_data1.append_range(make_vec("test 1 topic"));
+  ASSERT_EQ(event_data1.serialized_event, expected_event_data1);
 }
 
 TEST_F(EventTest, BadEventInputs)
@@ -562,20 +573,20 @@ TEST_F(EventTest, EventWithRevertingFrames)
   }
 
   // Verify the event data matches what we expect
-  auto event_data0 = try_parse_event_data(tx_event_log.value().events[0]);
-  ASSERT_TRUE(event_data0.has_value());
-  ASSERT_EQ(event_data0.value().topics.size(), 0);
-  ASSERT_EQ(event_data0.value().event, make_vec("first_event"));
+  auto event_data0 = tx_event_log.value().events[0];
+  ASSERT_EQ(event_data0.num_topics, 0);
+  ASSERT_EQ(event_data0.serialized_event,
+            make_vec<kMaxEventLength>("first_event"));
 
-  auto event_data1 = try_parse_event_data(tx_event_log.value().events[1]);
-  ASSERT_TRUE(event_data1.has_value());
-  ASSERT_EQ(event_data1.value().topics.size(), 0);
-  ASSERT_EQ(event_data1.value().event, make_vec("second_event"));
+  auto event_data1 = tx_event_log.value().events[1];
+  ASSERT_EQ(event_data1.num_topics, 0);
+  ASSERT_EQ(event_data1.serialized_event,
+            make_vec<kMaxEventLength>("second_event"));
 
-  auto event_data2 = try_parse_event_data(tx_event_log.value().events[2]);
-  ASSERT_TRUE(event_data2.has_value());
-  ASSERT_EQ(event_data2.value().topics.size(), 0);
-  ASSERT_EQ(event_data2.value().event, make_vec("third_event"));
+  auto event_data2 = tx_event_log.value().events[2];
+  ASSERT_EQ(event_data2.num_topics, 0);
+  ASSERT_EQ(event_data2.serialized_event,
+            make_vec<kMaxEventLength>("third_event"));
 
   auto tx_event_log_2 = get_tx_event_log(tx_id_2);
   ASSERT_FALSE(tx_event_log_2.has_value());
