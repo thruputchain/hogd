@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
@@ -119,15 +120,24 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
+      auto timer = std::make_unique<ElapsedTimer>();
       const SignedTransactionBatch txs =
           loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+      double get_tx_duration = timer->elapsed();
 
+      timer = std::make_unique<ElapsedTimer>();
       ValidatorID validator_id{};
       sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs)();
+      double submit_vetted_duration = timer->elapsed();
 
+      timer = std::make_unique<ElapsedTimer>();
       auto res_nominate = sched_coord_client_.schedulercoord_nominate(db_tip)();
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
+      double nominate_duration = timer->elapsed();
+      info(
+          "get_tx_duration {}, submit_vetted_duration {}, nominate_duration {}",
+          get_tx_duration, submit_vetted_duration, nominate_duration);
 
       const SchedulerNomination nomination =
           res_nominate.scheduler_nomination();

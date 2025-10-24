@@ -136,13 +136,6 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  // To compute the block hash, we insert tx hashes into a Merkle Trie. We
-  // make insertion faster with multiple threads. Using a lot of threads could
-  // cause worse performance if each thread has few hashes to insert. Thus, to
-  // calculate a reasonable number of threads to use, we ensure that each
-  // thread has at least [kMinHashesPerThread] hashes to insert.
-  static constexpr size_t kMinHashesPerThread = 16'384;
-
   const std::function<x23::Async<bool>(const SignedTransaction &tx)>
       auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
     co_return co_await authentication_->authenticate(tx);
