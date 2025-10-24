@@ -58,7 +58,7 @@ public:
     DbTip ret{};
     info("init_experiment");
     for (const InitializationBlock &init_tx : init_txs) {
-      info("init_experiment");
+      info("init_experiment, submit vetted {} txs", init_txs.size());
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
 
       info("init_experiment");
