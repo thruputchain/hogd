@@ -352,6 +352,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await scheduler_->add_txs(failed_txs[account]);
     }
   }
+  double mark_txs_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   if (nomination.transaction_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
