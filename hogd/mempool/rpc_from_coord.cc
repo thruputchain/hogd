@@ -96,13 +96,17 @@ MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 x23::Async<void>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
+  info("close_snapshot");
   DbBlockResult res =
       co_await db_sched_client_->dbsched_close_snapshot(block_id);
+  info("close_snapshot");
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
   auto r = co_await event_sched_client_->eventsched_close_block(block_id);
+  info("close_snapshot");
   CHECK_EQ(r.error(), RPCError::kRPCNone);
+  info("close_snapshot");
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
