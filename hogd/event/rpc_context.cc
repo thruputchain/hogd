@@ -33,7 +33,7 @@ EventRPCContext::open_block(BlockID block_id)
   return {};
 }
 
-EventStatus<SHA256Hash>
+x23::Async<EventStatus<SHA256Hash>>
 EventRPCContext::close_block(BlockID block_id)
 {
   std::unique_lock ul(mtx_);

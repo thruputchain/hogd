@@ -50,7 +50,7 @@ EventBlockResult
 EventSchedRpc::eventsched_close_block(BlockID block_id)
 {
   info("eventsched_close_block");
-  auto r = ctx_.close_block(block_id);
+  auto r = co_await ctx_.close_block(block_id);
   info("eventsched_close_block");
   if (!r) {
     info("eventsched_close_block");
