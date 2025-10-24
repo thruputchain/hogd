@@ -31,18 +31,23 @@ public:
   DbTip init_experiment(SchedCoordClient &sched_coord_client,
                         uint32_t num_accounts)
   {
+    info("init_experiment {}", num_accounts);
     // Initialize the experiment.
     ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
     config.erc20_payments().num_accounts = num_accounts;
 
+    info("init_experiment");
     LoadgenResult result = client_->generate_experiment(config)();
+    info("init_experiment");
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
     context_id_ = result.success().context_id;
 
+    info("init_experiment");
     // Pass the genesis block to the db.
     CHECK_EQ(sched_coord_client.schedcoord_load_genesis_block(
                  result.success().genesis_block)(),
              DbSchedResult::DbSchedResultOK);
+    info("init_experiment");
 
     // We need to nominate and commit the initialization transactions. So first,
     // we start by adding them to the mempool with
@@ -51,30 +56,39 @@ public:
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};
+    info("init_experiment");
     for (const InitializationBlock &init_tx : init_txs) {
+      info("init_experiment");
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
 
+      info("init_experiment");
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
       size_t num_nominated_txs = 0;
       SchedulerNomination nomination{};
+      info("init_experiment");
       while (num_nominated_txs < init_tx.size()) {
+        info("init_experiment");
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
                      .id = nomination.block_id};
         auto res_nominate =
             sched_coord_client.schedulercoord_nominate(db_tip)();
+        info("init_experiment");
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
         nomination = res_nominate.scheduler_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
+        info("init_experiment");
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
 
+      info("init_experiment");
       ret = {.height = nomination.nomination.block_height,
              .hash = nomination.nomination.block_hash,
              .id = nomination.block_id};
+      info("init_experiment");
     }
 
     info("Initialized loadgen experiment with context_id {}", context_id_);
