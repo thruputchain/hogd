@@ -45,7 +45,7 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 30'000;
+  static constexpr size_t kMaxBlockSize = 60'000;
   static constexpr size_t kChunkSize = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}

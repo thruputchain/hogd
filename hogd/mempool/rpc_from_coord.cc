@@ -352,8 +352,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await scheduler_->add_txs(failed_txs[account]);
     }
   }
-  double mark_txs_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   if (nomination.transaction_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
@@ -364,35 +362,37 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  double mark_txs_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  x23::Async<void> finish_block_handle = finish_block(block_id);
+  x23::Async<void> close_snapshot_handle = close_snapshot(block_id);
+  x23::Async<void> commit_snapshot_handle = commit_snapshot(block_id);
+  x23::Async<void> mark_block_committed_handle = mark_block_committed(block_id);
+
+  double create_handles_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   nomination.block_hash = get_block_hash(nomination.transaction_hashes,
                                          /*prev_block_hash=*/db_tip.hash);
+
   double get_block_hash_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  co_await finish_block(block_id);
-  double finish_block_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
+  co_await finish_block_handle;
+  co_await close_snapshot_handle;
+  co_await commit_snapshot_handle;
+  co_await mark_block_committed_handle;
 
-  co_await close_snapshot(block_id);
-  double close_snapshot_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  co_await commit_snapshot(block_id);
-  double commit_snapshot_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  co_await mark_block_committed(block_id);
-  double mark_block_committed_duration = timer->elapsed();
+  double wait_for_handles_duration = timer->elapsed();
 
   info("wait_for_transfer_duration {}, open_block_duration {}, "
        "schedule_duration {}, run_on_executor_duration {}, mark_txs_duration "
-       "{}, get_block_hash_duration {}, finish_block_duration {}, "
-       "close_snapshot_duration {}, commit_snapshot_duration {}, "
-       "mark_block_committed_duration {}",
+       "{}, create_handles_duration {}, get_block_hash_duration {}, "
+       "wait_for_handles_duration {}",
        wait_for_transfer_duration, open_block_duration, schedule_duration,
-       run_on_executor_duration, mark_txs_duration, get_block_hash_duration,
-       finish_block_duration, close_snapshot_duration, commit_snapshot_duration,
-       mark_block_committed_duration);
+       run_on_executor_duration, mark_txs_duration, create_handles_duration,
+       get_block_hash_duration, wait_for_handles_duration);
 
   co_return result;
 }
