@@ -103,7 +103,7 @@ public:
   {
     info("Initializing loadgen experiment...");
     init_block_db_tip_ =
-        loadgen_client_.init_experiment(sched_coord_client, num_accounts);
+        loadgen_client_.init_experiment(sched_coord_client_, num_accounts);
     info("Done initializing experiment. Now running.");
   }
 

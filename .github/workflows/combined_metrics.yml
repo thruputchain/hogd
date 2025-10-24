@@ -38,7 +38,7 @@ jobs:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
     - name: run bench server
       # local work dir on CI is on disk
       run: |
@@ -75,7 +75,7 @@ jobs:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
     - name: clone metrics history
       run: ./scripts/clone_metrics_history.sh
     - name: run multiexec interface benchmarks
