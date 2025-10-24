@@ -72,6 +72,8 @@ using difference_t = int128_xdr;
 std::unique_ptr<NativeContract>
 make_native_token_contract()
 {
+  constexpr static uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
+
   NativeContractBuilder builder;
 
   // initialize
@@ -97,8 +99,6 @@ make_native_token_contract()
         if (!owner.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        constexpr static uint128_t kMaxInt128 =
-            std::numeric_limits<int128_t>::max();
 
         // can't negate bigger values
         if (from_xdr(amount) > kMaxInt128) {
@@ -164,7 +164,7 @@ make_native_token_contract()
     }
 
     // can't negate bigger values
-    if (from_xdr(amount) > std::numeric_limits<int128_t>::max()) {
+    if (from_xdr(amount) > kMaxInt128) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     int128_t amount_int = from_xdr(amount);
