@@ -57,28 +57,16 @@ add_xdr(roundtrip_hh
   ./integration_test_contracts/xdr/roundtrip.x
 )
 
-# Build multiple WASM targets in a single cargo invocation
+# Build each WASM target separately (building together causes larger binaries)
+# but use a shared stamp file to serialize builds and avoid cargo conflicts
 function(add_wasm_builds)
   # ARGN contains all the target names passed to the function
-  set(all_outputs "")
-  set(all_depends "")
-  set(all_packages "")
   
-  # Build lists for outputs, dependencies, and package flags
-  foreach(target_name ${ARGN})
-    list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm)
-    list(APPEND all_depends 
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
-    list(APPEND all_packages "-p" ${target_name})
-  endforeach()
-
-  list(APPEND all_depends ${generated_rs_files})
-  
-  # Add common dependencies
-  list(APPEND all_depends 
+  # Common dependencies
+  set(common_depends 
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+    ${generated_rs_files})
   
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
@@ -88,36 +76,39 @@ function(add_wasm_builds)
   # `./scripts/fetch.sh`
   # if your set of downloaded crates is incomplete.
   
-  # Use a stamp file to ensure cargo only runs once
-  set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/wasm_build.stamp)
-  add_custom_command(
-    OUTPUT ${stamp_file}
-    COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
-        cargo build
-        ${all_packages}
-        --target wasm32-unknown-unknown
-        --release
-        --locked
-        --frozen
-        ${WASM_FLAGS}
-        --offline
-        --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
-        -Zbuild-std=core,alloc
-        -Zbuild-std-features=std/optimize_for_size
-    COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
-    DEPENDS ${all_depends}
-    COMMENT "Building all WASM contracts in one cargo invocation"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  )
-  
-  # Create individual targets for each contract
+  # Use a stamp file to serialize cargo invocations and prevent conflicts
+  set(prev_stamp "")
   foreach(target_name ${ARGN})
-    # Make the unoptimized WASM depend on the stamp file
+    set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/wasm_build_${target_name}.stamp)
+    
+    set(target_depends
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
+      ${common_depends})
+    
+    # Make each build depend on the previous one to serialize cargo invocations
+    if(prev_stamp)
+      list(APPEND target_depends ${prev_stamp})
+    endif()
+    
     add_custom_command(
-      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
-      DEPENDS ${stamp_file}
-      COMMAND ${CMAKE_COMMAND} -E true
-      COMMENT "WASM built: ${target_name}"
+      OUTPUT ${stamp_file} ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
+      COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
+          cargo build
+          -p ${target_name}
+          --target wasm32-unknown-unknown
+          --release
+          --locked
+          --frozen
+          ${WASM_FLAGS}
+          --offline
+          --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
+          -Zbuild-std=core,alloc
+          -Zbuild-std-features=std/optimize_for_size
+      COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
+      DEPENDS ${target_depends}
+      COMMENT "Building ${target_name}.wasm"
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
     wasmopt_target(
@@ -129,6 +120,8 @@ function(add_wasm_builds)
     add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
 
     add_dependencies(all_wasm_contracts ${target_name}_wasm)
+    
+    set(prev_stamp ${stamp_file})
   endforeach()
 endfunction()
 
