@@ -46,6 +46,7 @@ public:
 
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 10'000;
+  static constexpr size_t kChunkSize = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
@@ -190,6 +191,11 @@ private:
   x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
+
+  x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
+      BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+      x23::XdrVec<NominatedTransaction> &transaction_nominations,
+      size_t chunk_size);
 
   x23::Async<bool> open_proposal_block(BlockID block_id);
 
