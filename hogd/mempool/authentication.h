@@ -1,5 +1,12 @@
 #pragma once
 
+#include <cassert>
+#include <memory>
+#include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+
 #include "account.hh"
 #include "auth_claim.hh"
 #include "db_sched.hh"
@@ -13,12 +20,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
-#include <cassert>
-#include <memory>
-#include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
 
 namespace hogd {
 

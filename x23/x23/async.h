@@ -211,7 +211,7 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
     std::invoke(std::move(cb_), std::forward<decltype(v)>(v)...);
   }
   std::suspend_never final_suspend() const noexcept { return {}; }
-  void unhandled_exception() noexcept { std::terminate(); }
+  void unhandled_exception() noexcept { trace_unhandled_exception(this); }
 };
 
 } // namespace detail
@@ -736,7 +736,10 @@ struct Detached {
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}
-    void unhandled_exception() const noexcept { std::terminate(); }
+    void unhandled_exception() const noexcept
+    {
+      trace_unhandled_exception(this);
+    }
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
 

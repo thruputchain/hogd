@@ -120,8 +120,13 @@ mock_contract_create_event(void * /*unused*/, uint64_t method_number)
         .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
   }
 
-  context->to_handler().log_event(nullptr, nullptr, nullptr,
-                                  std::as_bytes(std::span("test_event")));
+  auto r =
+      context->to_handler().log_event(nullptr, nullptr, nullptr,
+                                      std::as_bytes(std::span("test_event")));
+  if (!r.has_value()) {
+    return ForeignInvokeResult{
+        .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
+  }
 
   return ForeignInvokeResult{
       .panic = std::to_underlying(InvokeErrorCode::kInvokeNone)};
@@ -204,12 +209,10 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   EXPECT_EQ(event_log.events.size(), 1);
   EXPECT_EQ(event_log.events[0].contract_address, deployment_addr);
 
-  EventData event_data;
-  x23::deserialize(&event_data,
-                   x23::BufView{event_log.events[0].serialized_event});
-  EXPECT_EQ(event_data.topics.size(), 0);
-  EXPECT_EQ(event_data.event.size(), 11);
-  EXPECT_EQ(std::memcmp(event_data.event.data(), "test_event", 11), 0);
+  auto const &event = event_log.events[0];
+  EXPECT_EQ(event.num_topics, 0);
+  EXPECT_EQ(event.serialized_event.size(), 11);
+  EXPECT_EQ(std::memcmp(event.serialized_event.data(), "test_event", 11), 0);
 }
 
 } // namespace hogd

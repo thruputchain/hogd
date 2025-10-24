@@ -167,6 +167,10 @@ private:
 std::string trace(const PromiseBase *pb, unsigned indent = 0,
                   std::string ret = {});
 
+// Dump trace information about an unhandled exception before
+// terminating.
+[[noreturn]] void trace_unhandled_exception(const PromiseBase *pb) noexcept;
+
 // True if an argument list ends with a source_location following at
 // least one other argument.
 template<typename... Args>
