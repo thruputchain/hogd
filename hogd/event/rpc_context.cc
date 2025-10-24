@@ -15,6 +15,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -46,7 +47,11 @@ EventRPCContext::close_block(BlockID block_id)
   auto ts = x23::fastclock::now();
 
   auto file_wait = [](EventBlockContext &context) -> x23::Async<void> {
-    co_await default_threadpool().bg();
+    auto *pool = x23::ThreadPool::get_thread_pool();
+    if (!pool) {
+      pool = &default_threadpool();
+    }
+    co_await pool->bg();
     context.finish_file_write();
     co_return;
   }(context.get());
