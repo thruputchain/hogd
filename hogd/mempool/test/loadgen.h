@@ -2,6 +2,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
 
 namespace hogd {
@@ -180,7 +181,8 @@ public:
 
 private:
   // The number of txs we request at a time from loadgen.
-  static constexpr size_t kLoadgenTxBatchSize = 10'000;
+  static constexpr size_t kLoadgenTxBatchSize =
+      MempoolCoordinatorRpc::kMaxBlockSize;
 
   LoadgenClient loadgen_client_;
   sched_coord_client_t &sched_coord_client_;
