@@ -54,7 +54,7 @@ runs:
       run: |
         ulimit -c unlimited
         ./${{ inputs.build-dir }}/hogd/mempool/test/coordinator hog10:8070 hog7:11222 > coordinator_output.txt 2>&1 &
-        bash -c 'timeout 180s ./${{ inputs.build-dir }}/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+        bash -c 'timeout 90s ./${{ inputs.build-dir }}/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
       shell: bash
     - name: clone metrics history # This is idempotent
       run: ./scripts/clone_metrics_history.sh
