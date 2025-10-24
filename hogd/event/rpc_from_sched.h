@@ -1,7 +1,5 @@
 #pragma once
 
-#include <type_traits>
-
 #include "event_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/event/rpc_context.h"
