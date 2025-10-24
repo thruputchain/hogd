@@ -11,7 +11,6 @@
 
 #include "account.hh"
 #include "contract.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -105,6 +104,10 @@ public:
 
   bool release_blocktx_reference() { return block_.release_reference(); }
 
+  void assert_is_valid() const noexcept;
+
+  HogDBStatus<void> sync_balance_locks();
+
 private:
   struct ItemVersion {
     ItemChange change;
@@ -137,42 +140,14 @@ private:
   const ItemChange *read_change(const ItemKey &key) const;
   // request_change tries to apply a change to the transaction.
   HogDBStatus<void> request_change(const ItemKey &key, ItemChange &&change);
-  HogDBStatus<void> request_balance_change(Address const &addr, int128_t delta);
+  void request_balance_change(Address const &addr, int128_t delta);
 
   // lock_storage locks the storage for the given address.
   // cost must be nonnegative.
-  HogDBStatus<void> lock_storage(Address const &addr, int128_t cost);
+  void lock_storage(Address const &addr, int128_t cost);
 
   HogDBStatus<void> update_balance_lock(Address const &addr);
-  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr);
-
-  void assert_is_valid() const noexcept
-  {
-    assert(tx_depth_ >= 0);
-    std::unordered_map<Address, int128_t> balance_deltas;
-    if constexpr (is_debug_build()) {
-      for (const auto &[key, vec] : changes_) {
-        [[maybe_unused]] int depth = 0;
-        for (const ItemVersion &item : vec) {
-          assert(item.tx_depth >= depth);
-          assert(item.tx_depth <= tx_depth_);
-          depth = item.tx_depth + 1;
-        }
-        if (!vec.empty()) {
-          balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
-        }
-      }
-      for (const auto &[addr, vec] : balance_deltas_) {
-        if (!vec.empty()) {
-          assert(vec.back().total_locked_storage_amount ==
-                 balance_deltas[addr]);
-        }
-        else {
-          assert(balance_deltas[addr] == 0);
-        }
-      }
-    }
-  }
+  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr) const;
 };
 
 inline int

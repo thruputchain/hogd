@@ -275,6 +275,8 @@ Benchmark::run()
       fail(ret.error());
     if (HogDBStatus<void> ret = tx.request_nnint128(p.dst, p.amount); !ret)
       fail(ret.error());
+    if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)
+      fail(ret.error());
     tx.commit();
   };
 

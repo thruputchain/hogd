@@ -96,6 +96,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     // invoketx assertions fail if you call the dtor in an invalid state (where
     // i.e requests failed).
     cleanup.release();
+    ASSERT_TRUE(itx->sync_balance_locks().has_value());
 
     itx->commit();
     ctx.close_invoke_tx(1, 1, itx);

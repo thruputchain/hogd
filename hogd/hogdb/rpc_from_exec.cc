@@ -172,6 +172,12 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
       return err;
     }
   }
+  auto bal_req = itx->sync_balance_locks();
+  if (!bal_req) {
+    itx->rollback_to_savepoint(depth - 1);
+    return to_rpc_error(bal_req.error());
+  }
+  itx->assert_is_valid();
   return RPCError::kRPCNone;
 }
 
