@@ -765,7 +765,7 @@ concept is_vec = std::derived_from<
 // std::span of 1-byte trivial types.
 template<typename T>
 concept is_bytespan = std::ranges::contiguous_range<T> &&
-                      std::is_trivial_v<typename T::value_type> &&
+                      std::is_scalar_v<typename T::value_type> &&
                       sizeof(typename T::value_type) == 1;
 
 // Vectors of byte-like types that can be extended with the
@@ -855,7 +855,7 @@ public:
         self.resize(new_size);
         return std::move(self);
       }
-      if constexpr (std::is_trivial_v<typename Self::value_type>) {
+      if constexpr (std::is_trivially_copyable_v<typename Self::value_type>) {
         memmove(self.data(), self.data() + pos,
                 new_size * sizeof(typename Self::value_type));
         self.resize(new_size);
