@@ -211,6 +211,57 @@ MempoolCoordinatorRpc::propose_batch(
   co_return ret;
 }
 
+x23::Async<x23::Vec<bool>>
+MempoolCoordinatorRpc::propose_batch_in_chunks(
+    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+    x23::XdrVec<NominatedTransaction> &transaction_nominations,
+    size_t chunk_size)
+{
+  CHECK_GT(chunk_size, 0UL);
+
+  // Create the chunks.
+  size_t num_chunks =
+      (txs.size() / chunk_size) + ((txs.size() % chunk_size) ? 1 : 0);
+  x23::Vec<x23::Vec<SignedTransaction>> chunks(num_chunks, {});
+  chunks.reserve(num_chunks);
+  for (size_t i = 0; i < num_chunks; i++) {
+    auto end =
+        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * kChunkSize) : txs.end();
+    chunks.emplace_back(txs.begin() + (i * kChunkSize), end);
+  }
+
+  // Send the RPCs.
+  x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
+  x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
+  async_handles.reserve(num_chunks);
+  for (size_t i = 0; i < num_chunks; i++) {
+    async_handles.push_back(
+        propose_batch(block_id, chunks[i], nomination_chunks[i]));
+  }
+
+  // Wait for the results.
+  x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
+  for (size_t i = 0; i < num_chunks; i++) {
+    x23::Vec<bool> ret_chunk = co_await async_handles[i];
+    ret_chunks[i] = ret_chunk;
+  }
+
+  // Fold the results.
+  x23::Vec<bool> ret;
+  ret.reserve(txs.size());
+  transaction_nominations.reserve(txs.size());
+  for (size_t i = 0; i < num_chunks; i++) {
+    for (bool r : ret_chunks[i]) {
+      ret.push_back(r);
+    }
+    for (NominatedTransaction &nominated_tx : nomination_chunks[i]) {
+      transaction_nominations.push_back(nominated_tx);
+    }
+  }
+
+  co_return ret;
+}
+
 x23::Async<bool>
 MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 {
@@ -269,7 +320,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   }
 
   x23::Vec<bool> statuses =
-      co_await propose_batch(block_id, txs, nomination.transaction_nominations);
+      co_await propose_batch_in_chunks(block_id, txs,
+                                       nomination.transaction_nominations,
+                                       kChunkSize);
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
       tx_hashes;
   // We need to track the failed txs themselves (not just the hashes) because we
