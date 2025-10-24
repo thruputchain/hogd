@@ -4,6 +4,7 @@
 #include "hogd/base/log.h"
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -46,16 +47,16 @@ EventSchedRpc::eventsched_abandon_block(BlockID block_id)
   return RPCError::kRPCNone;
 }
 
-EventBlockResult
+x23::Async<EventBlockResult>
 EventSchedRpc::eventsched_close_block(BlockID block_id)
 {
-  auto r = ctx_.close_block(block_id);
+  auto r = co_await ctx_.close_block(block_id);
   if (!r) {
-    return EventBlockResult{to_rpc_error(r.error().code())};
+    co_return EventBlockResult{to_rpc_error(r.error().code())};
   }
   EventBlockResult result(RPCError::kRPCNone);
   result.root_hash() = r.value();
-  return result;
+  co_return result;
 }
 
 } // namespace hogd

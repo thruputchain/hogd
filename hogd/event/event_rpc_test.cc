@@ -3,11 +3,14 @@
 #include <string>
 
 #include "event.hh"
+#include "event_rpc.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "rpc_types.hh"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -34,7 +37,7 @@ TEST_F(EventRpcTest, BasicUsage)
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{}),
             RPCError::kRPCNone);
 
-  auto result = sched_rpc.eventsched_close_block(1);
+  auto result = sched_rpc.eventsched_close_block(1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
 
   EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{}),
@@ -71,7 +74,34 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EventSchedRpc sched_rpc(ctx);
 
   EXPECT_EQ(sched_rpc.eventsched_open_block(1), RPCError::kRPCNone);
-  EXPECT_EQ(sched_rpc.eventsched_close_block(1).error(), RPCError::kRPCNone);
+  EXPECT_EQ(sched_rpc.eventsched_close_block(1)().error(), RPCError::kRPCNone);
+}
+
+TEST_F(EventRpcTest, TestFromRPC)
+{
+  EventRPCContext ctx(temp_dir_);
+  RpcServer<EventExecRpc> exec_rpc(ctx);
+  RpcServer<EventSchedRpc> sched_rpc(ctx);
+
+  auto exec_port = exec_rpc.start_server(0);
+  auto sched_port = sched_rpc.start_server(0);
+
+  auto exec_addr = host_port_to_sockaddr("localhost", exec_port);
+  auto sched_addr = host_port_to_sockaddr("localhost", sched_port);
+
+  auto exec_client = x23::SRpcMulticlient<x23::RpcLogger>::make(exec_addr)
+                         ->client<EventExecutor1>();
+  auto sched_client = x23::SRpcMulticlient<x23::RpcLogger>::make(sched_addr)
+                          ->client<EventSched1>();
+
+  EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
+            RPCError::kRPCNone);
+
+  EXPECT_EQ(sched_client.eventsched_open_block(0), RPCError::kRPCNone);
+
+  EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
+            RPCError::kRPCNone);
+  EXPECT_EQ(sched_client.eventsched_close_block(0).error(), RPCError::kRPCNone);
 }
 
 } // namespace hogd
