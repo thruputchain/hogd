@@ -472,7 +472,7 @@ struct Deserializer
         write(2, msg, sizeof(msg) - 1);
         std::terminate();
       }
-      throw XdrBadInput("x23::Deserializer: input too short");
+      throw XdrBadInput("x23::Deserializer: input too short A");
     }
   }
 
@@ -483,7 +483,7 @@ struct Deserializer
         throw XdrBadInput("x23::Deserializer: size too large");
     }
     if (e - p < std::ptrdiff_t(n)) [[unlikely]]
-      throw XdrBadInput("x23::Deserializer: input too short");
+      throw XdrBadInput("x23::Deserializer: input too short B");
   }
 
   template<bool Safe> uint32_t get32()
@@ -639,7 +639,7 @@ struct Deserializer
     // case of a structure that starts with a bunch of integers and
     // ends with a vector, like call_body.
     else if (ee - p < ptrdiff_t(xdr_size_bounds<X>().min_))
-      throw XdrBadInput("x23::Deserializer: input too short");
+      throw XdrBadInput("x23::Deserializer: input too short C");
     else {
       constexpr auto kUF = first_unsafe_field<X>(xdr_size_bounds<X>().min_);
       [this, &x]<size_t... I>(std::index_sequence<I...>) {
