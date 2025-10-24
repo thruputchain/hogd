@@ -33,7 +33,7 @@ EventRPCContext::open_block(BlockID block_id)
   return {};
 }
 
-EventStatus<SHA256Hash>
+x23::Async<EventStatus<SHA256Hash>>
 EventRPCContext::close_block(BlockID block_id)
 {
   // TODO(jhumphri): Take this out before merging!
@@ -42,7 +42,7 @@ EventRPCContext::close_block(BlockID block_id)
   std::unique_lock ul(mtx_);
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
-    return EventError{EventErrorCode::kBadBlockID};
+    co_return EventError{EventErrorCode::kBadBlockID};
   }
 
   auto &context = it->second;
@@ -56,7 +56,7 @@ EventRPCContext::close_block(BlockID block_id)
 
   auto out_hash = context.get().get_root_hash();
   auto ts2 = x23::fastclock::now();
-  file_wait();
+  co_await file_wait;
   auto ts3 = x23::fastclock::now();
   context.get().finish_file(out_hash);
   gc_context_internal(it, ul);
@@ -64,7 +64,7 @@ EventRPCContext::close_block(BlockID block_id)
   info("time to get hash: {} ns, time to finish file: {} ns, time to gc "
        "context + rename: {} ns",
        ts2 - ts, ts3 - ts2, ts4 - ts3);
-  return out_hash;
+  co_return out_hash;
 }
 
 EventStatus<void>

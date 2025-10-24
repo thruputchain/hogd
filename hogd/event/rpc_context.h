@@ -12,6 +12,7 @@
 #include "hogd/event/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -33,7 +34,7 @@ public:
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
-  EventStatus<SHA256Hash> close_block(BlockID block_id);
+  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id);
 
   // Abandons a block.
   // Returns an error if the block is not open.

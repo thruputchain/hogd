@@ -19,7 +19,6 @@ target_link_libraries(
 )
 
 add_library(exec_interface_test_objects OBJECT
-  executor_state_manager_test.cc
   rpc_open_proposal_block_test.cc
 )
 target_link_libraries(
