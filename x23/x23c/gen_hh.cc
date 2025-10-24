@@ -1,9 +1,12 @@
+#include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <format>
 #include <map>
 #include <print>
 #include <ranges>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -85,13 +88,13 @@ struct Gen {
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
   static string map_type_ns(const string &, bool use_ns);
-  static string map_type(const string& s)
-  {
-    return map_type_ns(s, true);
-  }
+  static string map_type(const string &s) { return map_type_ns(s, true); }
   static const string &map_case(const string &);
   static const string &map_bound(const string &);
-  string type_name(const Declaration &d, bool generate, bool use_ns = true);
+  string type_name(const Declaration &d, bool generate);
+  // This is the canonical type name used when constructing canonical struct
+  // signatures in events.
+  static string canonical_type_name(const Declaration &d);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -414,11 +417,14 @@ struct x23::xdr_meta<struct {1}> {{
   bottom_ += "  };\n";
 
   // add field type names
-  bottom_ += std::format(R"(  static constexpr std::array<std::string_view, {0}> field_types{{
-)", nonvoid_count);
+  bottom_ += std::format(
+      R"(  static constexpr std::array<std::string_view, {0}> canonical_field_types{{
+)",
+      nonvoid_count);
   for (auto const &d : s) {
-    if (d.qual != Declaration::kVoid)
-      bottom_ += std::format("    \"{}\",\n", type_name(d, false, false));
+    if (d.qual == Declaration::kVoid)
+      continue;
+    bottom_ += std::format("    \"{}\",\n", canonical_type_name(d));
   }
   bottom_ += "  };\n";
 
@@ -759,12 +765,13 @@ Gen::show_comment(std::string_view comment, bool chomp, string prefix)
 string
 Gen::map_type_ns(const string &t, bool use_ns)
 {
-  const std::map<string, string> type_map = [](bool use_ns) -> std::map<string, string> {
+  const std::map<string, string> type_map =
+      [](bool use_ns) -> std::map<string, string> {
     if (use_ns) {
       return std::map<string, string>{
-      {"int", "std::int32_t"},    {"unsigned int", "std::uint32_t"},
-      {"hyper", "std::int64_t"},  {"unsigned hyper", "std::uint64_t"},
-      {"opaque", "std::uint8_t"},
+          {"int", "std::int32_t"},    {"unsigned int", "std::uint32_t"},
+          {"hyper", "std::int64_t"},  {"unsigned hyper", "std::uint64_t"},
+          {"opaque", "std::uint8_t"},
       };
     }
     return std::map<string, string>{
@@ -802,8 +809,81 @@ Gen::map_bound(const string &b)
   return b;
 }
 
+namespace {
+std::string
+numeralize_bound(const string &b)
+{
+  // try parsing as hexadecimal
+  try {
+    return std::format("{}", std::stoul(b, nullptr, 16));
+  } catch (const std::invalid_argument &) {
+    // not a hexadecimal number, so continue
+    std::println(stderr, "Failed to parse bound {} as hexadecimal number", b);
+  }
+  try {
+    return std::format("{}", std::stoul(b, nullptr, 10));
+  } catch (const std::invalid_argument &) {
+    std::println(stderr, "Failed to parse bound {} as decimal number", b);
+  }
+  return b;
+}
+} // namespace
+
+// This is the canonical typename used when constructing canonical struct
+// signatures in events.
+//
+// This name strips namespaces from typenames.
+// Typedefs are NOT resolved to their underlying types.
+// Bounds are represented as the canonical string, instead of the underlying
+// integer. Integer bounds are unified into one string format (i.e. "1024"
+// instead of "0x400").
+//
+// The rationale for this is that it captures the intent and constraints that we
+// have on changing common XDR types.  We already want to guarantee that, as XDR
+// evolves, serializations of a type T can always be parsed as a future version
+// of type T. By using the name T, instead of a more invasive canonicalization,
+// we enable this future upgradeability without changing the hash of a struct
+// signature. Similarly using the string name for bounds, instead of the
+// underlying integer, allows us to increase those bounds later. We also want to
+// be able to change the formatting of the integer bounds we use (i.e. adding
+// apostrophes or swapping hex to dec) without changing the signature.
 string
-Gen::type_name(const Declaration &d, bool generate, bool use_ns)
+Gen::canonical_type_name(const Declaration &d)
+{
+  assert(d.qual != Declaration::kVoid);
+
+  string tname;
+  if (holds_alternative<string>(d.type))
+    tname = map_type_ns(get<string>(d.type), false);
+  else {
+    if (holds_alternative<EnumBody>(d.type))
+      tname = "enum " + d.id;
+    else
+      tname = "struct " + d.id;
+  }
+
+  switch (d.qual) {
+  case Declaration::kScalar:
+    return std::format("{}", tname);
+  case Declaration::kPtr:
+    return std::format("Ptr<{}>", tname);
+  case Declaration::kArray:
+    return std::format("Array<{}, {}>", tname,
+                       numeralize_bound(map_bound(d.bound)));
+  case Declaration::kVec:
+    if (tname == "string"s) {
+      return std::format("BoundedStr<{}>",
+                         numeralize_bound(map_bound(d.bound)));
+    }
+    return std::format("Vec<{}, {}>", tname,
+                       numeralize_bound(map_bound(d.bound)));
+  default:
+    return {}; // suppress warnings
+  }
+}
+
+string
+Gen::type_name(const Declaration &d, bool generate)
 {
   using enum Declaration::Qual;
 
@@ -812,7 +892,7 @@ Gen::type_name(const Declaration &d, bool generate, bool use_ns)
 
   string tname;
   if (holds_alternative<string>(d.type))
-    tname = map_type_ns(get<string>(d.type), use_ns);
+    tname = map_type_ns(get<string>(d.type), true);
   else {
     if (holds_alternative<EnumBody>(d.type))
       tname = "enum " + d.id;
@@ -824,8 +904,6 @@ Gen::type_name(const Declaration &d, bool generate, bool use_ns)
     }
   }
 
-  std::println("tname = {} use_ns = {}", tname, use_ns);
-
   switch (d.qual) {
   case kScalar:
     return tname;
@@ -834,8 +912,9 @@ Gen::type_name(const Declaration &d, bool generate, bool use_ns)
   case kArray:
     return std::format("std::array<{}, {}>", tname, d.bound);
   case kVec:
-    if (tname == "string"s)
+    if (tname == "string"s) {
       return std::format("x23::BoundedStr<{}>", map_bound(d.bound));
+    }
     return std::format("x23::Vec<{}, {}>", tname, map_bound(d.bound));
   default:
     return {}; // suppress warnings

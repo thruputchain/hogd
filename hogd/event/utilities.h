@@ -22,18 +22,24 @@ TxEmittedEvent make_tx_emitted_event(ContractAddress const &contract_address,
                                      std::span<const std::byte> event);
 
 template<x23::is_xdr_struct T>
-constexpr std::string xdr_event_string() {
-    std::vector<std::string> args;
-    [&]<size_t... I>(std::index_sequence<I...>) {
-        (args.push_back(x23::xdr_type_name<std::tuple_element_t<I, T>>()), ...);
-    }(std::make_index_sequence<std::tuple_size_v<T>>{});
-    std::string args_joined;
-    for (auto &arg : args) {
-        args_joined += arg + ", ";
-    }
-    return x23::xdr_type_name<T>() + " (" + args_joined.substr(0, args_joined.size() - 2) + ")";
+constexpr std::string
+xdr_event_string()
+{
+  std::vector<std::string> args;
+  [&]<size_t... I>(std::index_sequence<I...>) {
+    (args.push_back(std::string(x23::xdr_meta<T>::canonical_field_types[I])),
+     ...);
+  }(std::make_index_sequence<std::tuple_size_v<T>>{});
+  std::string args_joined;
+  for (auto &arg : args) {
+    args_joined += arg + ", ";
+  }
+  return x23::xdr_type_name<T>() + " (" +
+         args_joined.substr(0, args_joined.size() - 2) + ")";
 }
 
-static_assert(xdr_event_string<TxEmittedEvent>() == "TxEmittedEvent (opaque[32], unsigned int, opaque<1024>)");
+static_assert(xdr_event_string<TxEmittedEvent>() ==
+              "TxEmittedEvent (ContractAddress, uint32_t, Vec<uint8_t, "
+              "kMaxEventLength>)");
 
 } // namespace hogd

@@ -487,11 +487,13 @@ visit_fields(auto &&f, T &&t)
   }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
 }
 
+// std::format is not constexpr until c++26
 template<size_t N>
-constexpr std::string to_string()
+constexpr std::string
+unsigned_to_string()
 {
   std::string out;
-  const char* nums = "0123456789";
+  const char *nums = "0123456789";
   if (N == 0) {
     return "0";
   }
@@ -504,9 +506,9 @@ constexpr std::string to_string()
   return out;
 }
 
-static_assert(to_string<0>() == "0");
-static_assert(to_string<1>() == "1");
-static_assert(to_string<12345>() == "12345");
+static_assert(unsigned_to_string<0>() == "0");
+static_assert(unsigned_to_string<1>() == "1");
+static_assert(unsigned_to_string<12345>() == "12345");
 
 template<is_xdr_type X>
 constexpr std::string
@@ -529,32 +531,26 @@ xdr_type_name()
   else return Multilambda{
       []<typename T>(Ptr<T> *) { return xdr_type_name<T>() + '*'; },
       []<typename T, size_t MS, typename A>(Vec<T, MS, A> *) {
-        //std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
-        std::string bound = MS >= 0xffffffff ? ""s : to_string<MS>();
+        std::string bound = MS >= 0xffffffff ? ""s : unsigned_to_string<MS>();
         if constexpr (same_as<T, std::uint8_t>)
           return "opaque<" + bound + ">";
-          //return std::format("opaque<{}>", bound);
         else
-          
-          //return std::format("{}<{}>", xdr_type_name<T>(), bound);
           return xdr_type_name<T>() + "<" + bound + ">";
       },
       []<typename T, size_t N>(std::array<T, N> *) {
         if constexpr (same_as<T, std::uint8_t>)
-          return "opaque[" + to_string<N>() + "]";
-          //return std::format("opaque[{}]", N);
+          return "opaque[" + unsigned_to_string<N>() + "]";
         else
-          return xdr_type_name<T>() + "[" + to_string<N>() + "]";
-          //return std::format("{}[{}]", xdr_type_name<T>(), N);
+          return xdr_type_name<T>() + "[" + unsigned_to_string<N>() + "]";
       },
       []<size_t MS>(BoundedStr<MS> *) {
-        //std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
-        std::string bound = MS >= 0xffffffff ? ""s : to_string<MS>();
+        std::string bound = MS >= 0xffffffff ? ""s : unsigned_to_string<MS>();
         return "string<" + bound + ">";
-        //return std::format("string<{}>", bound);
       },
   }(static_cast<X *>(nullptr));
 }
+
+static_assert(xdr_type_name<BoundedStr<0>>() == "string<0>");
 
 template<is_xdr_struct T>
 inline auto
