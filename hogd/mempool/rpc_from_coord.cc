@@ -222,6 +222,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  info("schedulercoord_nominate");
   // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
   while (!scheduler_->transfer_finished_) {
     co_await default_coropoll().pool_.bg();
@@ -232,12 +233,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
+    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
+    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -264,6 +267,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -298,6 +302,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // is empty. Thus, we fail the nomination.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
