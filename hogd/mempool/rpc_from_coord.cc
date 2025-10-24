@@ -96,17 +96,13 @@ MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 x23::Async<void>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
-  info("close_snapshot");
   DbBlockResult res =
       co_await db_sched_client_->dbsched_close_snapshot(block_id);
-  info("close_snapshot");
   // [dbsched_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
   auto r = co_await event_sched_client_->eventsched_close_block(block_id);
-  info("close_snapshot");
   CHECK_EQ(r.error(), RPCError::kRPCNone);
-  info("close_snapshot");
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
@@ -226,7 +222,6 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  info("schedulercoord_nominate");
   // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
   while (!scheduler_->transfer_finished_) {
     co_await default_coropoll().pool_.bg();
@@ -237,14 +232,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
-    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
-    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -264,22 +257,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
-  info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable, "
-       "{} are stranded",
-       txs.size(), scheduler_->num_on_runqueue(), scheduler_->num_stranded());
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
-    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  info("schedulercoord_nominate");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
-  info("schedulercoord_nominate");
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
       tx_hashes;
   // We need to track the failed txs themselves (not just the hashes) because we
@@ -297,13 +284,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     }
   }
   for (const ContractAddress &account : all_accounts) {
-    info("schedulercoord_nominate");
     co_await scheduler_->mark_txs_finished(tx_hashes[account]);
-    info("schedulercoord_nominate");
     if (!failed_txs[account].empty()) {
-      info("schedulercoord_nominate");
       co_await scheduler_->add_txs(failed_txs[account]);
-      info("schedulercoord_nominate");
     }
   }
 
@@ -312,24 +295,17 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // is empty. Thus, we fail the nomination.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
-    info("schedulercoord_nominate");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes,
                                          /*prev_block_hash=*/db_tip.hash);
-  info("schedulercoord_nominate");
   co_await finish_block(block_id);
-  info("schedulercoord_nominate");
   co_await close_snapshot(block_id);
-  info("schedulercoord_nominate");
   co_await commit_snapshot(block_id);
-  info("schedulercoord_nominate");
   co_await mark_block_committed(block_id);
 
-  info("schedulercoord_nominate(), returning {} txs",
-       result.scheduler_nomination().nomination.transaction_hashes.size());
   co_return result;
 }
 
