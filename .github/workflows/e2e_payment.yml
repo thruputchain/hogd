@@ -36,7 +36,7 @@ jobs:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
     - name: clear hogdb file directory
       run: |
         rm -r ./work_dir/ || true
@@ -74,7 +74,7 @@ jobs:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
     - uses: ./.github/actions/mempool_bench
       with:
         build-dir: release
