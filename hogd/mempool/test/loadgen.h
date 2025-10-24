@@ -132,23 +132,29 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
+      info("run HERE, kLoadgenTxBatchSize {}", kLoadgenTxBatchSize);
       const SignedTransactionBatch txs =
           loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+      info("run HERE, txs.size() {}", txs.size());
 
       ValidatorID validator_id{};
       sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs)();
+      info("run HERE");
 
       auto res_nominate = sched_coord_client_.schedulercoord_nominate(db_tip)();
+      info("run HERE");
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
 
       const SchedulerNomination nomination =
           res_nominate.scheduler_nomination();
+      info("run HERE");
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
       total_transactions_nominated +=
           nomination.nomination.transaction_hashes.size();
+      info("run HERE");
 
       if (print_stats) {
         // Compute and print the throughputs.
@@ -184,6 +190,7 @@ public:
              "{:.2f}",
              block_throughput_sec, overall_throughput_sec);
       }
+      info("run HERE");
     }
   }
 
