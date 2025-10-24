@@ -49,12 +49,18 @@ EventSchedRpc::eventsched_abandon_block(BlockID block_id)
 EventBlockResult
 EventSchedRpc::eventsched_close_block(BlockID block_id)
 {
+  info("eventsched_close_block");
   auto r = ctx_.close_block(block_id);
+  info("eventsched_close_block");
   if (!r) {
+    info("eventsched_close_block");
     return EventBlockResult{to_rpc_error(r.error().code())};
   }
+  info("eventsched_close_block");
   EventBlockResult result(RPCError::kRPCNone);
+  info("eventsched_close_block");
   result.root_hash() = r.value();
+  info("eventsched_close_block");
   return result;
 }
 
