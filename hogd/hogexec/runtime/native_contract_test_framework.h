@@ -439,10 +439,12 @@ public:
     address[0] = id;
     return address;
   }
-  static StorageKeyContractData make_storage_key(std::string_view str)
+  constexpr static StorageKeyContractData make_storage_key(std::string_view str)
   {
     StorageKeyContractData key{};
-    std::memcpy(key.data(), str.data(), str.size());
+    for (size_t i = 0; i < str.size(); i++) {
+      key[i] = str[i];
+    }
     return key;
   }
   static StorageKeyContractData

@@ -327,6 +327,8 @@ make_native_token_contract()
             to_xdr(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility}))};
       });
 
+  assert(builder.check_methods<itc_erc20::ERC20>());
+
   return builder.build();
 }
 

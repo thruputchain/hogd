@@ -147,7 +147,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
 TEST_F(NativeContractTest, GasCostsAccumulate)
 {
   NativeContractBuilder builder;
-  ContractAddress address{};
+  constexpr static ContractAddress kAddress{};
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
@@ -160,11 +160,11 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       });
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       1,
-      [&address](SystemCallHandler &handler,
-                 NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+      [](SystemCallHandler &handler,
+         NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
         auto [r1, g1] = handler.invoke(
-            address, 0, UINT64_MAX,
+            kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(100)
                     .value(),
@@ -177,7 +177,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r2, g2] = handler.invoke(
-            address, 0, UINT64_MAX,
+            kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(200)
                     .value(),
@@ -190,7 +190,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r3, g3] = handler.invoke(
-            address, 0, UINT64_MAX,
+            kAddress, 0, UINT64_MAX,
             Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                 serialize<uint32_t>(150)
                     .value(),
@@ -211,10 +211,10 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2,
-      [&address](SystemCallHandler &handler,
-                 NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+      [](SystemCallHandler &handler,
+         NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         auto [r, g] =
-            handler.invoke(address, 1, UINT64_MAX, Calldata{},
+            handler.invoke(kAddress, 1, UINT64_MAX, Calldata{},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -242,7 +242,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   contract.native_contract_id() = 0;
 
   snapshot_server_.impl_.setup_create_contract(contract);
-  snapshot_server_.impl_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.impl_.setup_create_deployment(kAddress, sha256(contract));
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -250,7 +250,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               Transaction{
                   .invocation =
                       {
-                          .invoked_address = address,
+                          .invoked_address = kAddress,
                           .entrypoint = entrypoint_from_method_id(2),
                           .gas_limit = UINT64_MAX,
                           .calldata = {},
@@ -279,23 +279,24 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   // Test to verify that items are loaded lazily
   NativeContractBuilder builder;
   ContractAddress address{};
-  StorageKeyContractData bad_key{};
+  constexpr static StorageKeyContractData kBadKey{};
   StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
-  bad_full_key.contract_data_key() = bad_key;
-
-  auto bstring = make_bytestring("bad");
+  bad_full_key.contract_data_key() = kBadKey;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+      0, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
         auto r =
-            handler.set_bytestring(bad_key, std::as_bytes(std::span(bstring)));
+            handler.set_bytestring(kBadKey, std::as_bytes(std::span(bstring)));
         if (!r.has_value() || !r.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto r2 = handler.get_bytestring(bad_key);
+        // This would have failed if the bytestring was not loaded lazily:
+        // we're getting the bytestring from the prior write, not the snapshot
+        auto r2 = handler.get_bytestring(kBadKey);
         if (!r2.has_value() || !r2.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -350,15 +351,17 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   // Test to verify that items are loaded lazily
   NativeContractBuilder builder;
   ContractAddress address{};
-  StorageKeyContractData bad_key{};
+
+  constexpr static StorageKeyContractData kBadKey{};
+
   StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
-  bad_full_key.contract_data_key() = bad_key;
+  bad_full_key.contract_data_key() = kBadKey;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+      0, [](SystemCallHandler &handler) -> InvokeStatus<void> {
         // get_nnint() with force_load_from_snapshot=false from clean state
         // should not query db
-        auto r0 = handler.get_nnint(bad_key, false);
+        auto r0 = handler.get_nnint(kBadKey, false);
         if (!r0.has_value() || !r0.value().has_value() ||
             r0.value().value().first.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -366,21 +369,21 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
         // add ops shouldn't query db
         auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, 100);
+            syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr, 100);
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
         auto [r2, _gas2] =
-            syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, -200);
+            syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr, -200);
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
         // assert that get_nnint() without a load doesn't query db
-        auto r3 = handler.get_nnint(bad_key, false);
+        auto r3 = handler.get_nnint(kBadKey, false);
         if (!r3.has_value() || !r3.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -391,9 +394,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
       });
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+      1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
         int128_t set_value = 100;
-        auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, bad_key,
+        auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
                                                             &set_value, 200);
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -402,7 +405,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
         // assert that get_nnint() after a set doesn't query db, even with
         // force_load_from_snapshot=true
-        auto r2 = handler.get_nnint(bad_key, true);
+        auto r2 = handler.get_nnint(kBadKey, true);
         if (!r2.has_value() || !r2.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -412,7 +415,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
         // get_nnint() after a set with force_load_from_snapshot=false should
         // return the set value if it exists
-        auto r3 = handler.get_nnint(bad_key, false);
+        auto r3 = handler.get_nnint(kBadKey, false);
         if (!r3.has_value() || !r3.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

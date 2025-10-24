@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
@@ -15,7 +16,6 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -23,9 +23,9 @@ namespace hogd {
 namespace detail {
 template<typename T> struct NativeContractArgs;
 
-template<typename T, typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (
-    T::*)(SystemCallHandler &, NativeRuntime &, Args...) const> {
+template<typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (*)(SystemCallHandler &,
+                                              NativeRuntime &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -35,9 +35,8 @@ struct NativeContractArgs<InvokeStatus<R> (
   }
 };
 
-template<typename T, typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (T::*)(SystemCallHandler &, Args...)
-                              const> {
+template<typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (*)(SystemCallHandler &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
   static auto extra_args(SystemCallHandler &handler, NativeRuntime & /*unused*/)
@@ -46,9 +45,8 @@ struct NativeContractArgs<InvokeStatus<R> (T::*)(SystemCallHandler &, Args...)
   }
 };
 
-template<typename T, typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (T::*)(NativeRuntime &, Args...)
-                              const> {
+template<typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (*)(NativeRuntime &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
   static auto extra_args(SystemCallHandler & /*unused*/, NativeRuntime &runtime)
@@ -57,8 +55,8 @@ struct NativeContractArgs<InvokeStatus<R> (T::*)(NativeRuntime &, Args...)
   }
 };
 
-template<typename T, typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (T::*)(Args...) const> {
+template<typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -101,12 +99,19 @@ public:
   constexpr static SerializationFormat kDefaultSerializationFormat =
       SerializationFormat::kTxs;
 
-  // Asserts that the arguments to the supplied lambda match the spec, before
-  // adding the lambda
   template<is_contract_trait ContractTrait, StringLiteral Name>
   void add(auto lambda)
   {
-    using fn_t = decltype(&decltype(lambda)::operator());
+    add<ContractTrait, Name>(+lambda);
+  }
+
+  // Asserts that the arguments to the supplied lambda match the spec, before
+  // adding the lambda
+  template<is_contract_trait ContractTrait, StringLiteral Name, typename R,
+           typename... Args>
+  void add(R (*lambda)(Args...))
+  {
+    using fn_t = decltype(lambda);
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
@@ -133,7 +138,13 @@ public:
 
   template<SerializationFormat Format> void add(MethodID id, auto lambda)
   {
-    using fn_t = decltype(&decltype(lambda)::operator());
+    add<Format>(id, +lambda);
+  }
+
+  template<SerializationFormat Format, typename R, typename... Args>
+  void add(MethodID id, R (*lambda)(Args...))
+  {
+    using fn_t = decltype(lambda);
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
@@ -212,6 +223,20 @@ public:
   }
 
   std::unique_ptr<NativeContract> build();
+
+  template<is_contract_trait ContractTrait> bool check_methods()
+  {
+    for (size_t i = 0; i < ContractTrait::kExportNames.size(); ++i) {
+      ContractEntrypointID entrypoint =
+          sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                    ContractTrait::kVersion, i);
+
+      if (!functions_.contains(sdk_method_id(entrypoint))) {
+        return false;
+      }
+    }
+    return true;
+  }
 
 private:
   std::unordered_map<MethodID, NativeContract::function_t> functions_;
