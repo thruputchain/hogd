@@ -228,10 +228,11 @@ requires x23::has_location<Args...> &&
          x23::detail::is_callback_like<
              x23::TypeNum<sizeof...(Args) - 2, Args...>>
 struct std::coroutine_traits<void, Args...> {
-  using promise_type =
-      decltype([]<std::size_t... N>(std::index_sequence<N...>) {
-        return x23::detail::CallbackPromise<x23::TypeNum<N, Args...>...>{};
-      }(std::make_index_sequence<sizeof...(Args) - 1>{}));
+  using promise_type = decltype([]<std::size_t... N>(std::index_sequence<N...>)
+                                    -> x23::detail::CallbackPromise<
+                                        x23::TypeNum<N, Args...>...> {
+    throw;
+  }(std::make_index_sequence<sizeof...(Args) - 1>{}));
 };
 
 namespace x23 {
@@ -511,7 +512,7 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb)
+  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
@@ -522,19 +523,19 @@ template<typename R> struct [[nodiscard]] Async {
   }
   template<std::convertible_to<Callback<R>> CB>
   requires (!detail::is_callback_of<CB, R>)
-  void operator()(CB &&cb)
+  void operator()(CB &&cb SLOC_DECL)
   {
-    (*this)(Callback<R>{std::forward<CB>(cb)});
+    (*this)(Callback<R>{std::forward<CB>(cb)} SLOC_COMMA_VAR);
   }
 
   // Return the Async value synchronously, pausing the current thread
   // until the result is ready.
-  R operator()()
+  R operator()(SLOC_DECL0)
   {
     assert(!in_thread_pool());
     std::binary_semaphore wait(0);
     if constexpr (std::is_void_v<R>) {
-      (*this)([&wait] { wait.release(); });
+      (*this)([&wait] { wait.release(); } SLOC_COMMA_VAR);
       wait.acquire();
     }
     else {
