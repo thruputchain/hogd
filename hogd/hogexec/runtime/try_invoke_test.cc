@@ -2212,16 +2212,16 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 {
   NativeContractBuilder builder;
 
-  StorageKeyContractData key = make_storage_key("test");
+  constexpr static StorageKeyContractData kKey = make_storage_key("test");
 
   // perform a set_add_nnint
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [&](SystemCallHandler &handler, int64_t set_amount,
-          int64_t add_amount) -> InvokeStatus<void> {
+      [](SystemCallHandler &handler, int64_t set_amount,
+         int64_t add_amount) -> InvokeStatus<void> {
         int128_t set_128 = set_amount;
         auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+            syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_128,
                                                add_amount);
 
         if (!r.has_value() ||
@@ -2234,10 +2234,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   // perform a add_nnint
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       1,
-      [&](SystemCallHandler &handler,
-          int64_t add_amount) -> InvokeStatus<void> {
+      [](SystemCallHandler &handler, int64_t add_amount) -> InvokeStatus<void> {
         auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+            syscall_NonnegativeIntSetAdd_inner(handler, kKey, nullptr,
                                                add_amount);
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2248,8 +2247,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2,
-      [&](SystemCallHandler &handler,
-          NativeRuntime &runtime) -> InvokeStatus<void> {
+      [](SystemCallHandler &handler,
+         NativeRuntime &runtime) -> InvokeStatus<void> {
         // perform an add_nnint, then perform a set_add_nnint with the
         // same set value in a try_invoke frame
         auto calldata0 =
@@ -2283,11 +2282,11 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         return {};
       });
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+      3, [](SystemCallHandler &handler) -> InvokeStatus<void> {
         // reset contract state
         int128_t set_value = 35;
         auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+            syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_value, 0);
         // auto r = handler.set_nnint(key, 35, 0);
         // if (!r.has_value() || !r.value().has_value()) {
         if (!r.has_value() ||
@@ -2315,7 +2314,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
   // write an initial int128 value
   StorageKey wrapped_key(StorageKeyType::kStorageKeyTypeContractData);
-  wrapped_key.contract_data_key() = key;
+  wrapped_key.contract_data_key() = kKey;
 
   // too much state here to parallelize the experiment
   model::WorkQueue work_queue;

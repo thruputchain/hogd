@@ -44,14 +44,14 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 {
   NativeContractBuilder builder;
 
-  StorageKeyContractData key = make_storage_key("test");
+  constexpr static StorageKeyContractData kKey = make_storage_key("test");
 
   // perform a set_add_nnint
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [&](SystemCallHandler &handler, int64_t set_amount,
-          int64_t add_amount) -> InvokeStatus<void> {
-        auto r = handler.set_nnint(key, set_amount, add_amount);
+      [](SystemCallHandler &handler, int64_t set_amount,
+         int64_t add_amount) -> InvokeStatus<void> {
+        auto r = handler.set_nnint(kKey, set_amount, add_amount);
         if (!r.has_value() || !r.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -59,8 +59,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
       });
   // reset contract state
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-        auto r = handler.set_nnint(key, 35, 0);
+      1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        auto r = handler.set_nnint(kKey, 35, 0);
         if (!r.has_value() || !r.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -84,7 +84,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
 
   StorageKey wrapped_key(StorageKeyType::kStorageKeyTypeContractData);
-  wrapped_key.contract_data_key() = key;
+  wrapped_key.contract_data_key() = kKey;
 
   model::WorkQueue work_queue;
 
