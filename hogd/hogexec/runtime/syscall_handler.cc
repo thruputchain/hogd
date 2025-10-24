@@ -542,7 +542,13 @@ SystemCallHandler::log_event(uint32_t num_topics,
 {
   assert(!invocation_frame_stack_.empty());
   assert(!is_read_only());
-  assert(data.size() <= kMaxLogMessageLen);
+  if (num_topics > kMaxTopics) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  if (data.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   auto message = make_tx_emitted_event(
       invocation_frame_stack_.get_active_frame().address(), num_topics, data);
