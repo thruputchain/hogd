@@ -272,8 +272,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  info("schedulercoord_nominate");
   x23::Vec<bool> statuses =
       co_await propose_batch(block_id, txs, nomination.transaction_nominations);
+  info("schedulercoord_nominate");
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
       tx_hashes;
   // We need to track the failed txs themselves (not just the hashes) because we
@@ -291,9 +293,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     }
   }
   for (const ContractAddress &account : all_accounts) {
+    info("schedulercoord_nominate");
     co_await scheduler_->mark_txs_finished(tx_hashes[account]);
+    info("schedulercoord_nominate");
     if (!failed_txs[account].empty()) {
+      info("schedulercoord_nominate");
       co_await scheduler_->add_txs(failed_txs[account]);
+      info("schedulercoord_nominate");
     }
   }
 
@@ -309,9 +315,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes,
                                          /*prev_block_hash=*/db_tip.hash);
+  info("schedulercoord_nominate");
   co_await finish_block(block_id);
+  info("schedulercoord_nominate");
   co_await close_snapshot(block_id);
+  info("schedulercoord_nominate");
   co_await commit_snapshot(block_id);
+  info("schedulercoord_nominate");
   co_await mark_block_committed(block_id);
 
   info("schedulercoord_nominate(), returning {} txs",

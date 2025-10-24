@@ -9,8 +9,8 @@ CLANG_FORMAT=clang-format
 CLANG_TIDY=run-clang-tidy
 CLANG_CXX=clang++
 CLANG_CC=clang
-GCC_CXX=g++
-GCC_CC=gcc
+GCC_CXX=g++-14
+GCC_CC=gcc-14
 NPROC=8
 if [[ "$OSTYPE" == "darwin"* ]]; then
   NPROC=$(sysctl -n hw.ncpu)
