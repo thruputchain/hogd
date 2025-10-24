@@ -5,7 +5,7 @@
 HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
 HOGD_BUILD_DIR="/home/local/$(whoami)/build"
 
-loadgen_server="hog5"
+loadgen_server="hog3"
 chuckd_server="hog3"
 fake_coordinator_server="hog3"
 mempool_server="hog3"
