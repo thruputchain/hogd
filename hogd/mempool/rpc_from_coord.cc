@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <future>
+#include <memory>
 #include <span>
 #include <tuple>
 #include <unordered_map>
