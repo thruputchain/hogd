@@ -188,6 +188,29 @@ struct BufHolder {
   }
 };
 
+template<typename T>
+concept has_syscall_result =
+    (std::signed_integral<T> && sizeof(T) >= sizeof(int)) ||
+    std::same_as<T, Errno> ||
+    requires(T t) { []<typename U>(std::expected<U, Errno> &) {}(t); };
+
+template<has_syscall_result T>
+inline bool
+is_eagain(T res)
+{
+  if constexpr (std::signed_integral<T>)
+    return res == -1 && errno == EAGAIN;
+  else {
+    if constexpr (requires {
+                    bool(res);
+                    { *res } -> decays_to<IoResult>;
+                  })
+      if (res)
+        return *res == IoResult::kAgain;
+    return res == Errno{EAGAIN};
+  }
+}
+
 class CoroPollImpl : public DestroyInhibit {
 public:
   using WorkItem = CpuHinted<CoroCB<Errno>>;
@@ -199,6 +222,15 @@ public:
     using BorrowedFd::get;
     explicit operator bool() const noexcept { return get() != kInvalidFd; }
     void reset() noexcept { *this = WaitToken{}; }
+
+    // You can pass a system call result through WaitToken to disable
+    // the token in the event that the result wasn't EAGAIN.
+    template<has_syscall_result T> T operator()(T res)
+    {
+      if (!is_eagain(res))
+        reset();
+      return res;
+    }
 
   private:
     using BorrowedFd::BorrowedFd;

@@ -62,6 +62,10 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   }
 
   // Create a new block
+  // GCC 15 has an assert that ptr is not null when dereferencing, which gcc14
+  // and clang21 lack.
+  assert(db_proxy_);
+  assert(event_server_proxy_);
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
