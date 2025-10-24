@@ -186,6 +186,8 @@ MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
+  info("propose_batch()");
+
   x23::Vec<bool> ret;
   ret.reserve(txs.size());
 
@@ -234,10 +236,12 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
   async_handles.reserve(num_chunks);
+  info("start sending chunks");
   for (size_t i = 0; i < num_chunks; i++) {
     async_handles.push_back(
         propose_batch(block_id, chunks[i], nomination_chunks[i]));
   }
+  info("done sending chunks, now wait for results");
 
   // Wait for the results.
   x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
@@ -245,6 +249,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     x23::Vec<bool> ret_chunk = co_await async_handles[i];
     ret_chunks[i] = ret_chunk;
   }
+  info("done waiting for results");
 
   // Fold the results.
   x23::Vec<bool> ret;
