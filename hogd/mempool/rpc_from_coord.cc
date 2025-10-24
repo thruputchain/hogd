@@ -309,6 +309,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await commit_snapshot(block_id);
   co_await mark_block_committed(block_id);
 
+  info("schedulercoord_nominate(), returning {} txs",
+       result.scheduler_nomination().nomination.transaction_hashes.size());
   co_return result;
 }
 
