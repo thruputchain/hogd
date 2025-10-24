@@ -6,7 +6,7 @@
 
 namespace x23 {
 
-size_t default_max_message_size = 0x7fffffff;
+size_t default_max_message_size = 0x7fffffffff;
 
 int RpcLogger::default_logfd = -1;
 
