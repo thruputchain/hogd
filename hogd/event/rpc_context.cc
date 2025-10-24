@@ -36,6 +36,9 @@ EventRPCContext::open_block(BlockID block_id)
 EventStatus<SHA256Hash>
 EventRPCContext::close_block(BlockID block_id)
 {
+  // TODO(jhumphri): Take this out before merging!
+  return SHA256Hash{};
+
   std::unique_lock ul(mtx_);
   auto it = event_block_contexts_.find(block_id);
   if (it == event_block_contexts_.end()) {
