@@ -25,6 +25,7 @@
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -36,7 +37,11 @@ namespace {
 x23::Detached
 async_free_trie(std::unique_ptr<MerkleTriePrefix> trie)
 {
-  co_await default_threadpool().bg();
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (!pool) {
+    pool = &default_threadpool();
+  }
+  co_await pool->bg();
   trie.reset();
   co_return;
 }
@@ -111,7 +116,11 @@ EventBlockContext::write_event(std::span<const uint8_t> data)
     using buf_t = std::decay_t<decltype(buffers_->buf)>;
     pending_writes_++;
     [](buf_t buf, EventBlockContext *self) -> x23::Detached {
-      co_await default_threadpool().bg();
+      auto *pool = x23::ThreadPool::get_thread_pool();
+      if (!pool) {
+        pool = &default_threadpool();
+      }
+      co_await pool->bg();
       // make sure the vector free is out of the critical section holding the
       // lock
       {
