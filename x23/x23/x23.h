@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <concepts>
@@ -486,6 +487,27 @@ visit_fields(auto &&f, T &&t)
   }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
 }
 
+template<size_t N>
+constexpr std::string to_string()
+{
+  std::string out;
+  const char* nums = "0123456789";
+  if (N == 0) {
+    return "0";
+  }
+  size_t n = N;
+  while (n > 0) {
+    out.push_back(nums[n % 10]);
+    n /= 10;
+  }
+  std::ranges::reverse(out);
+  return out;
+}
+
+static_assert(to_string<0>() == "0");
+static_assert(to_string<1>() == "1");
+static_assert(to_string<12345>() == "12345");
+
 template<is_xdr_type X>
 constexpr std::string
 xdr_type_name()
@@ -507,21 +529,29 @@ xdr_type_name()
   else return Multilambda{
       []<typename T>(Ptr<T> *) { return xdr_type_name<T>() + '*'; },
       []<typename T, size_t MS, typename A>(Vec<T, MS, A> *) {
-        std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
+        //std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
+        std::string bound = MS >= 0xffffffff ? ""s : to_string<MS>();
         if constexpr (same_as<T, std::uint8_t>)
-          return std::format("opaque<{}>", bound);
+          return "opaque<" + bound + ">";
+          //return std::format("opaque<{}>", bound);
         else
-          return std::format("{}<{}>", xdr_type_name<T>(), bound);
+          
+          //return std::format("{}<{}>", xdr_type_name<T>(), bound);
+          return xdr_type_name<T>() + "<" + bound + ">";
       },
       []<typename T, size_t N>(std::array<T, N> *) {
         if constexpr (same_as<T, std::uint8_t>)
-          return std::format("opaque[{}]", N);
+          return "opaque[" + to_string<N>() + "]";
+          //return std::format("opaque[{}]", N);
         else
-          return std::format("{}[{}]", xdr_type_name<T>(), N);
+          return xdr_type_name<T>() + "[" + to_string<N>() + "]";
+          //return std::format("{}[{}]", xdr_type_name<T>(), N);
       },
       []<size_t MS>(BoundedStr<MS> *) {
-        std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
-        return std::format("string<{}>", bound);
+        //std::string bound = MS >= 0xffffffff ? ""s : std::format("{}", MS);
+        std::string bound = MS >= 0xffffffff ? ""s : to_string<MS>();
+        return "string<" + bound + ">";
+        //return std::format("string<{}>", bound);
       },
   }(static_cast<X *>(nullptr));
 }

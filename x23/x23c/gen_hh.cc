@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <format>
 #include <map>
+#include <print>
 #include <ranges>
 #include <set>
 #include <string>
@@ -83,10 +84,14 @@ struct Gen {
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static const string &map_type(const string &);
+  static string map_type_ns(const string &, bool use_ns);
+  static string map_type(const string& s)
+  {
+    return map_type_ns(s, true);
+  }
   static const string &map_case(const string &);
   static const string &map_bound(const string &);
-  string type_name(const Declaration &d, bool generate);
+  string type_name(const Declaration &d, bool generate, bool use_ns = true);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -407,6 +412,16 @@ struct x23::xdr_meta<struct {1}> {{
       bottom_ += std::format("    \"{}\",\n", d.id);
   }
   bottom_ += "  };\n";
+
+  // add field type names
+  bottom_ += std::format(R"(  static constexpr std::array<std::string_view, {0}> field_types{{
+)", nonvoid_count);
+  for (auto const &d : s) {
+    if (d.qual != Declaration::kVoid)
+      bottom_ += std::format("    \"{}\",\n", type_name(d, false, false));
+  }
+  bottom_ += "  };\n";
+
   bottom_ += "};\n";
 
   if (!namespaces_.empty())
@@ -741,14 +756,24 @@ Gen::show_comment(std::string_view comment, bool chomp, string prefix)
   }
 }
 
-const string &
-Gen::map_type(const string &t)
+string
+Gen::map_type_ns(const string &t, bool use_ns)
 {
-  static const std::map<string, string> type_map{
+  const std::map<string, string> type_map = [](bool use_ns) -> std::map<string, string> {
+    if (use_ns) {
+      return std::map<string, string>{
       {"int", "std::int32_t"},    {"unsigned int", "std::uint32_t"},
       {"hyper", "std::int64_t"},  {"unsigned hyper", "std::uint64_t"},
       {"opaque", "std::uint8_t"},
-  };
+      };
+    }
+    return std::map<string, string>{
+        {"int", "int32_t"},    {"unsigned int", "uint32_t"},
+        {"hyper", "int64_t"},  {"unsigned hyper", "uint64_t"},
+        {"opaque", "uint8_t"},
+    };
+  }(use_ns);
+
   if (auto it = type_map.find(t); it != type_map.end())
     return it->second;
   else
@@ -778,7 +803,7 @@ Gen::map_bound(const string &b)
 }
 
 string
-Gen::type_name(const Declaration &d, bool generate)
+Gen::type_name(const Declaration &d, bool generate, bool use_ns)
 {
   using enum Declaration::Qual;
 
@@ -787,7 +812,7 @@ Gen::type_name(const Declaration &d, bool generate)
 
   string tname;
   if (holds_alternative<string>(d.type))
-    tname = map_type(get<string>(d.type));
+    tname = map_type_ns(get<string>(d.type), use_ns);
   else {
     if (holds_alternative<EnumBody>(d.type))
       tname = "enum " + d.id;
@@ -798,6 +823,8 @@ Gen::type_name(const Declaration &d, bool generate)
       prtop(";\n");
     }
   }
+
+  std::println("tname = {} use_ns = {}", tname, use_ns);
 
   switch (d.qual) {
   case kScalar:
