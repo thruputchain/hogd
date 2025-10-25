@@ -15,13 +15,11 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
-#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc_common.h"
@@ -242,53 +240,6 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
 {
   auto res = client_.pop_subtransactions(block_id, tx_id, count);
   return to_system_error_code<VoidMarker{}>(res, [] {});
-}
-
-StorageDeltaBatch
-StorageDeltaBatchBuilder::build()
-{
-  StorageDeltaBatch out;
-  out.append_range(positive_storage_deltas_);
-  out.append_range(storage_deltas_);
-  out.append_range(negative_storage_deltas_);
-  return out;
-}
-
-void
-StorageDeltaBatchBuilder::add_delta(AddressAndKey const &addrkey,
-                                    StorageDelta const &delta,
-                                    StorageItemRPCFlagSet flags)
-{
-  if (addrkey.key.key_type() ==
-      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
-    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd ||
-           delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-
-    int128_t add_value = [&] {
-      if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
-        return from_xdr(delta.nnint().add_value);
-      }
-      assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-      return from_xdr(delta.nnint_add());
-    }();
-
-    if (add_value > 0) {
-      positive_storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
-                                                             .delta = delta,
-                                                             .flags = flags});
-    }
-    else {
-      negative_storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
-                                                             .delta = delta,
-                                                             .flags = flags});
-    }
-  }
-  else {
-    // TODO(geoff): prioritize deletions
-    storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
-                                                  .delta = delta,
-                                                  .flags = flags});
-  }
 }
 
 } // namespace hogd
