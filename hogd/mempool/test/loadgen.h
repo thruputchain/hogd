@@ -83,12 +83,13 @@ public:
     return ret;
   }
 
-  SignedTransactionBatch get_transactions(size_t num_txs)
+  x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
   {
     LoadgenExtensionResult result =
-        client_->extend_experiment(context_id_, num_txs, 1'000'000'000)();
+        co_await client_->extend_experiment(context_id_, num_txs,
+                                            1'000'000'000);
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
-    return result.success().work_txs;
+    co_return result.success().work_txs;
   }
 
 private:
@@ -109,36 +110,43 @@ public:
     info("Done initializing experiment. Now running.");
   }
 
-  void run(bool print_stats)
+  x23::Detached run(bool print_stats)
   {
     DbTip db_tip = init_block_db_tip_;
 
     const std::chrono::steady_clock::time_point start =
         std::chrono::steady_clock::now();
     size_t total_transactions_nominated = 0;
+    SignedTransactionBatch txs =
+        loadgen_client_.get_transactions(kLoadgenTxBatchSize)();
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
       auto timer = std::make_unique<ElapsedTimer>();
-      const SignedTransactionBatch txs =
-          loadgen_client_.get_transactions(kLoadgenTxBatchSize);
-      double get_tx_duration = timer->elapsed();
 
-      timer = std::make_unique<ElapsedTimer>();
       ValidatorID validator_id{};
-      sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs)();
-      double submit_vetted_duration = timer->elapsed();
+      co_await sched_coord_client_.schedulercoord_submit_vetted(validator_id,
+                                                                txs);
 
+      double submit_vetted_duration = timer->elapsed();
       timer = std::make_unique<ElapsedTimer>();
-      auto res_nominate = sched_coord_client_.schedulercoord_nominate(db_tip)();
+
+      x23::Async<SchedulerNominationResult> nominate_handle =
+          sched_coord_client_.schedulercoord_nominate(db_tip);
+      x23::Async<SignedTransactionBatch> get_transactions_handle =
+          loadgen_client_.get_transactions(kLoadgenTxBatchSize);
+
+      double create_handles_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
+
+      SchedulerNominationResult res_nominate = co_await nominate_handle;
+      txs = co_await get_transactions_handle;
+
+      double wait_handles_duration = timer->elapsed();
+
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
-      double nominate_duration = timer->elapsed();
-      info(
-          "get_tx_duration {}, submit_vetted_duration {}, nominate_duration {}",
-          get_tx_duration, submit_vetted_duration, nominate_duration);
-
       const SchedulerNomination nomination =
           res_nominate.scheduler_nomination();
       db_tip = {.height = nomination.nomination.block_height,
@@ -146,6 +154,11 @@ public:
                 .id = nomination.block_id};
       total_transactions_nominated +=
           nomination.nomination.transaction_hashes.size();
+
+      info("submit_vetted_duration {}, create_handles_duration {}, "
+           "wait_handles_duration {}",
+           submit_vetted_duration, create_handles_duration,
+           wait_handles_duration);
 
       if (print_stats) {
         // Compute and print the throughputs.
