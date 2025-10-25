@@ -23,7 +23,8 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
+#include "x23/x23/async.h"
+#include "x23/x23/vec.h"
 
 namespace hogd {
 
@@ -52,7 +53,7 @@ public:
     return client_->init_experiment(infra.mempool_coord_rpc(), kNumAccounts);
   }
 
-  SignedTransactionBatch get_transactions(size_t num_txs)
+  x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
   {
     return client_->get_transactions(num_txs);
   }
@@ -212,7 +213,7 @@ loadgen_submit_unvetted(benchmark::State &state)
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs =
-        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -230,7 +231,7 @@ loadgen_submit_vetted(benchmark::State &state)
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs =
-        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -250,7 +251,7 @@ loadgen_nominate(benchmark::State &state)
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs =
-        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -275,7 +276,7 @@ loadgen_validate(benchmark::State &state)
   for (auto _ : state) {
     state.PauseTiming();
     const SignedTransactionBatch txs =
-        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize);
+        loadgen.get_transactions(MempoolCoordinatorRpc::kMaxBlockSize)();
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -320,7 +321,7 @@ loadgen_nominate_throughput(benchmark::State &state)
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
-  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs);
+  const SignedTransactionBatch txs = loadgen.get_transactions(kNumLoadgenTxs)();
 
   for (auto _ : state) {
     state.PauseTiming();
@@ -359,7 +360,7 @@ loadgen_validate_throughput(benchmark::State &state)
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   LoadgenHelper loadgen;
   DbTip db_tip = loadgen.init_experiment(server);
-  const SignedTransactionBatch txs = loadgen.get_transactions(kTotalTxsToRun);
+  const SignedTransactionBatch txs = loadgen.get_transactions(kTotalTxsToRun)();
 
   for (auto _ : state) {
     state.PauseTiming();
