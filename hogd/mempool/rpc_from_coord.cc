@@ -243,27 +243,13 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     async_handles.push_back(
         propose_batch(block_id, chunks[i], nomination_chunks[i]));
   }
-  info("propose_batch_in_chunks, there are {} chunks", num_chunks);
 
   // Wait for the RPC responses.
   x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
-  bool should_crash = false;
   for (size_t i = 0; i < num_chunks; i++) {
-    try {
-      x23::Vec<bool> ret_chunk = co_await async_handles[i];
-      ret_chunks[i] = ret_chunk;
-    } catch (...) {
-      info("propose_batch_in_chunks, got exception on iteration {}", i);
-      should_crash = true;
-    }
+    x23::Vec<bool> ret_chunk = co_await async_handles[i];
+    ret_chunks[i] = ret_chunk;
   }
-  if (should_crash) {
-    while (true) {
-      info("should crash, sleeping now");
-      std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-    }
-  }
-  CHECK(!should_crash);
 
   // Fold the results.
   x23::Vec<bool> ret;
