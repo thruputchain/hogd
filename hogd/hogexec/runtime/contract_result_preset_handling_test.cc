@@ -23,6 +23,11 @@ namespace hogd {
 
 namespace {
 
+constexpr ContractAddress kTestContractAddr =
+    NativeContractTestFramework::make_contract_address(0);
+constexpr ContractAddress kCallerContractAddr =
+    NativeContractTestFramework::make_contract_address(1);
+
 struct TestContract {
   constexpr static std::string_view kTraitName = "TestContract";
   constexpr static std::string_view kVersion = "0.0.0";
@@ -81,14 +86,14 @@ make_test_contract()
 }
 
 std::unique_ptr<NativeContract>
-make_caller_contract(ContractAddress test_contract_addr)
+make_caller_contract()
 {
   NativeContractBuilder builder;
 
   // Call return_ok_void method from TestContract
   builder.add<CallerContract, "call_return_ok_void">(
-      [test_contract_addr](SystemCallHandler &handler) -> InvokeStatus<void> {
-        test_contract_client_t client(test_contract_addr);
+      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] = client.template invoke<"return_ok_void">(handler);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -102,8 +107,8 @@ make_caller_contract(ContractAddress test_contract_addr)
 
   // Call return_ok_int method from TestContract
   builder.add<CallerContract, "call_return_ok_int">(
-      [test_contract_addr](SystemCallHandler &handler) -> InvokeStatus<void> {
-        test_contract_client_t client(test_contract_addr);
+      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] = client.template invoke<"return_ok_int">(handler);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -121,8 +126,8 @@ make_caller_contract(ContractAddress test_contract_addr)
 
   // Call return_err_void method from TestContract
   builder.add<CallerContract, "call_return_err_void">(
-      [test_contract_addr](SystemCallHandler &handler) -> InvokeStatus<void> {
-        test_contract_client_t client(test_contract_addr);
+      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
             client.template invoke<"return_err_void">(handler);
         if (!result.has_value() || !result.value().has_value()) {
@@ -137,8 +142,8 @@ make_caller_contract(ContractAddress test_contract_addr)
 
   // Call return_err_int method from TestContract
   builder.add<CallerContract, "call_return_err_int">(
-      [test_contract_addr](SystemCallHandler &handler) -> InvokeStatus<void> {
-        test_contract_client_t client(test_contract_addr);
+      [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] = client.template invoke<"return_err_int">(handler);
         if (!result.has_value() || !result.value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -179,13 +184,13 @@ protected:
     auto test_contract = make_test_contract();
     auto test_contract_xdr = make_native_contract(0);
     write_contract(test_contract_xdr);
-    write_deployment(test_contract_addr_, test_contract_xdr);
+    write_deployment(kTestContractAddr, test_contract_xdr);
 
     // Create and deploy the caller contract (calls methods from test contract)
-    auto caller_contract = make_caller_contract(test_contract_addr_);
+    auto caller_contract = make_caller_contract();
     auto caller_contract_xdr = make_native_contract(1);
     write_contract(caller_contract_xdr);
-    write_deployment(caller_contract_addr_, caller_contract_xdr);
+    write_deployment(kCallerContractAddr, caller_contract_xdr);
 
     // Set up the native contract map and runtime context
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -194,15 +199,13 @@ protected:
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
 
     // Grant storage tokens to both contracts
-    setup_grant_storage_token(test_contract_addr_, 1'000'000'000);
-    setup_grant_storage_token(caller_contract_addr_, 1'000'000'000);
+    setup_grant_storage_token(kTestContractAddr, 1'000'000'000);
+    setup_grant_storage_token(kCallerContractAddr, 1'000'000'000);
   }
 
-  ContractAddress test_contract_addr_ = make_contract_address(0);
-  ContractAddress caller_contract_addr_ = make_contract_address(1);
   std::shared_ptr<NativeContext> runtime_context_;
   caller_contract_client_t caller_contract_client_ =
-      caller_contract_client_t(caller_contract_addr_);
+      caller_contract_client_t(kCallerContractAddr);
 };
 
 TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)

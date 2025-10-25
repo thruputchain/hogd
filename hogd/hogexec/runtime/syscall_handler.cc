@@ -536,6 +536,26 @@ SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
   return {};
 }
 
+SyscallStatus<void>
+SystemCallHandler::log_event(uint32_t num_topics,
+                             std::span<const std::byte> data)
+{
+  assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
+  if (num_topics > kMaxTopics) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  if (data.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  auto message = make_tx_emitted_event(
+      invocation_frame_stack_.get_active_frame().address(), num_topics, data);
+  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
+  return {};
+}
+
 ContractAddress
 SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                              SHA256Hash const &nonce,

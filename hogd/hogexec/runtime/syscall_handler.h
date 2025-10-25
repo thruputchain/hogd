@@ -28,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -130,6 +131,8 @@ public:
   SyscallStatus<void> log_event(SHA256Hash const *topic0,
                                 SHA256Hash const *topic1,
                                 SHA256Hash const *topic2,
+                                std::span<const std::byte> data);
+  SyscallStatus<void> log_event(uint32_t num_topics,
                                 std::span<const std::byte> data);
 
   static ContractAddress
