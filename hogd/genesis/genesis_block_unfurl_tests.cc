@@ -60,6 +60,10 @@ protected:
 
 TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
+                    "storage cost changes";
+  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 
@@ -166,6 +170,10 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 // creations were not included in the db blocktx workflow
 TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
 {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
+                    "storage cost changes";
+  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 

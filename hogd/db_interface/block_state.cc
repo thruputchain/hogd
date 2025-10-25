@@ -157,6 +157,7 @@ BlockState::commit_transaction(TransactionID txid,
         cost_addrkey, cost_release_delta, StorageLock(StorageLockType::kNone),
         std::to_underlying(StorageItemRPCFlags::kStorageNone));
     assert(r.has_value());
+
     storage_view_.commit_storage_delta(cost_addrkey, cost_release_delta, *r);
   }
   tx_manager_.increment_closed();
