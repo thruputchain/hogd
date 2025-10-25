@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -27,6 +28,7 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "x23/cleanup.h"
@@ -48,11 +50,17 @@ public:
     connect_coord();
     connect_exec();
     event_server_port_ = event_server_exec_server_.start_server(0);
+    event_sched_server_port_ = event_server_sched_server_.start_server(0);
     connect_event();
+    connect_event_sched();
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
-  ~CommonBenchState() { stop_db_server(); }
+  ~CommonBenchState()
+  {
+    stop_db_server();
+    close_event_block(block_number_);
+  }
   // NOLINTEND(bugprone-exception-escape)
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
@@ -106,6 +114,35 @@ private:
     }();
   }
 
+  void connect_event_sched()
+  {
+    event_sched_client_ = [&] -> std::unique_ptr<event_sched_client_t> {
+      while (true) {
+        auto addr = x23::HostPort{server_addr_, coord_port_}.to_addr(true);
+        if (!addr) {
+          panic("failed to parse address to coord on {} port {}", server_addr_,
+                coord_port_);
+        }
+        x23::UniqueFd fd;
+        try {
+          fd = x23::tcpconnect(*addr);
+        } catch (const std::system_error &e) {
+          if (e.code() == std::errc::connection_refused) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            warn_every_n_sec(5.0F, "coord on {}:{} is not ready", server_addr_,
+                             coord_port_);
+            continue;
+          }
+          error("caught system error: {} {}", e.what(), e.code().message());
+          throw;
+        }
+        auto client_config = x23::srpc_stream_logged(fd.release());
+        return std::make_unique<event_sched_client_t>(
+            client_config->template client<EventSched1>());
+      }
+    }();
+  }
+
   void connect_event()
   {
     event_server_proxy_ = std::make_unique<EventServerProxy>(
@@ -137,10 +174,26 @@ private:
     ci_client.stop_server();
   }
 
+  void open_event_block(BlockID block_number)
+  {
+    auto r = event_sched_client_->eventsched_open_block(block_number);
+    if (r != RPCError::kRPCNone) {
+      throw std::runtime_error("Failed to open event block");
+    }
+  }
+  void close_event_block(BlockID block_number)
+  {
+    auto r = event_sched_client_->eventsched_close_block(block_number);
+    if (r.error() != RPCError::kRPCNone) {
+      throw std::runtime_error("Failed to close event block");
+    }
+  }
+
   std::string server_addr_;
   uint16_t exec_port_;
   uint16_t coord_port_;
   uint16_t event_server_port_;
+  uint16_t event_sched_server_port_;
 
   uint16_t ci_server_port_;
 
@@ -160,11 +213,16 @@ private:
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =
       TestEventAggregatorExecServer(event_server_);
+  TestEventAggregatorSchedServer event_server_sched_server_ =
+      TestEventAggregatorSchedServer(event_server_);
 
   using coord_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+  using event_sched_client_t =
+      EventSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
+  std::unique_ptr<event_sched_client_t> event_sched_client_;
 };
 
 inline void
@@ -174,6 +232,8 @@ CommonBenchState::advance_block()
   if (r.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
+
+  close_event_block(block_number_);
 
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
@@ -186,6 +246,8 @@ CommonBenchState::advance_block()
   if (r3 != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
+
+  open_event_block(block_number_ + 1);
 
   block_number_++;
 
