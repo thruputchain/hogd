@@ -202,13 +202,9 @@ MempoolCoordinatorRpc::propose_batch(
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
-      transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = result.proposal_data()});
-      ret.push_back(true);
-      break;
     case ExecResult::ExecResultOK:
       transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+          {.nondeterministic_proposal_data = result.proposal_data()});
       ret.push_back(true);
       break;
     default:
@@ -234,8 +230,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   chunks.reserve(num_chunks);
   for (size_t i = 0; i < num_chunks; i++) {
     auto end =
-        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * kChunkSize) : txs.end();
-    chunks.emplace_back(txs.begin() + (i * kChunkSize), end);
+        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * chunk_size) : txs.end();
+    chunks.emplace_back(txs.begin() + (i * chunk_size), end);
+    CHECK_LE(chunks.back().size(), chunk_size);
   }
 
   // Send the RPCs.
@@ -246,13 +243,27 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     async_handles.push_back(
         propose_batch(block_id, chunks[i], nomination_chunks[i]));
   }
+  info("propose_batch_in_chunks, there are {} chunks", num_chunks);
 
   // Wait for the RPC responses.
   x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
+  bool should_crash = false;
   for (size_t i = 0; i < num_chunks; i++) {
-    x23::Vec<bool> ret_chunk = co_await async_handles[i];
-    ret_chunks[i] = ret_chunk;
+    try {
+      x23::Vec<bool> ret_chunk = co_await async_handles[i];
+      ret_chunks[i] = ret_chunk;
+    } catch (...) {
+      info("propose_batch_in_chunks, got exception on iteration {}", i);
+      should_crash = true;
+    }
   }
+  if (should_crash) {
+    while (true) {
+      info("should crash, sleeping now");
+      std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    }
+  }
+  CHECK(!should_crash);
 
   // Fold the results.
   x23::Vec<bool> ret;
