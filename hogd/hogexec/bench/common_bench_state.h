@@ -291,6 +291,8 @@ CommonBenchState::run_genesis_block(
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
 
+  open_event_block(block_number_);
+
   for (auto const &block : initialization_txs) {
     for (auto const &tx : block) {
       auto handler = make_handler(tx);
