@@ -275,6 +275,8 @@ Scheduler::cycle_groups(const ContractAddress &account)
   // CHECK(co_await write_average_hog_age({account}));
 
   update_accounts({account});
+
+  co_return;
 }
 
 size_t
