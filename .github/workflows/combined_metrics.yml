@@ -87,6 +87,7 @@ jobs:
       run: |
         ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
     - name: run mempool benchmarks
+      continue-on-error: true
       uses: ./.github/actions/mempool_bench
       with:
         build-dir: release
@@ -97,15 +98,18 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
     - name: run event server benchmarks
+      continue-on-error: true
       uses: ./.github/actions/event_bench
       with:
         build-dir: release
         work-dir: ci_work_dir/
     - name: run metrics
+      continue-on-error: true
       uses: ./.github/actions/metrics
       with:
         build-dir: release
     - name: commit metrics
+      if: always()
       run: ./scripts/commit_metrics.sh
     - name: shut down bench server
       if: always()
