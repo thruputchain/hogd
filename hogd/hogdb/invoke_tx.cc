@@ -490,8 +490,8 @@ InvokeTX::assert_is_valid() const noexcept
         auto bal_it = balance_deltas_.find(addr);
         if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
           const auto &bal = bal_it->second.back();
-          int128_t expected_delta = bal.manual_transfer_amount -
-                                    bal.total_locked_storage_amount;
+          int128_t expected_delta =
+              bal.manual_transfer_amount - bal.total_locked_storage_amount;
           assert(nnint->delta() == expected_delta);
         }
         else {
@@ -516,8 +516,8 @@ InvokeTX::assert_is_valid() const noexcept
         assert(nnint);
 
         const auto &bal = vec.back();
-        int128_t expected_delta = bal.manual_transfer_amount -
-                                  bal.total_locked_storage_amount;
+        int128_t expected_delta =
+            bal.manual_transfer_amount - bal.total_locked_storage_amount;
         assert(nnint->delta() == expected_delta);
       }
     }
