@@ -1,13 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <random>
 #include <variant>
 #include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
@@ -128,6 +131,11 @@ public:
     if (current_subtransaction_batch_builder_) {
       batch = current_subtransaction_batch_builder_->build();
       current_subtransaction_batch_builder_ = std::nullopt;
+    }
+
+    if constexpr (is_debug_build()) {
+      std::shuffle(batch.begin(), batch.end(),
+                   std::mt19937{std::random_device{}()});
     }
 
     return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch);

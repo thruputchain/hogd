@@ -2044,6 +2044,10 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 
 TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP()
+        << "MockDB is broken when having manual transfers + storage costs";
+  }
   // Test to make sure that if a contract transfers storage tokens to another
   // contract, the new storage tokens can be used at the receiver contract
   // within the same transaction.
