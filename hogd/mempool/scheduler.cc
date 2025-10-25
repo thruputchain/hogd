@@ -273,9 +273,14 @@ Scheduler::cycle_groups(const ContractAddress &account)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account] = new_averages;
-  CHECK(co_await write_average_hog_age({account}));
+
+  // TODO(jhumphri): Flush all hog ages periodically, ideally on a background
+  // thread.
+  // CHECK(co_await write_average_hog_age({account}));
 
   update_accounts({account});
+
+  co_return;
 }
 
 size_t
