@@ -100,17 +100,21 @@ public:
   void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
                  StorageItemRPCFlagSet flags)
   {
-    current_subtransaction_batch_.push_back(FlaggedStorageDelta{.addrkey = addrkey, .delta = delta, .flags = flags});
+    current_subtransaction_batch_.push_back(FlaggedStorageDelta{
+        .addrkey = addrkey, .delta = delta, .flags = flags});
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
   {
     if constexpr (is_debug_build()) {
-      std::shuffle(current_subtransaction_batch_.begin(), current_subtransaction_batch_.end(),
+      std::shuffle(current_subtransaction_batch_.begin(),
+                   current_subtransaction_batch_.end(),
                    std::mt19937{std::random_device{}()});
     }
 
-    auto r = db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, current_subtransaction_batch_);
+    auto r =
+        db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
+                                              current_subtransaction_batch_);
     current_subtransaction_batch_.clear();
     return r;
   }
