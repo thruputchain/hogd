@@ -80,7 +80,6 @@ jobs:
       run: ./scripts/clone_metrics_history.sh
     - name: run multiexec interface benchmarks
       id: exec_scaling
-      continue-on-error: true
       uses: ./.github/actions/exec_scaling
       with:
         build-dir: release
