@@ -476,6 +476,51 @@ InvokeTX::assert_is_valid() const noexcept
         assert(balance_deltas[addr] == 0);
       }
     }
+
+    // Verify that balance changes in changes_ match what's expected from
+    // balance_deltas_
+    for (const auto &[key, vec] : changes_) {
+      if (key.is_address_balance() && !vec.empty()) {
+        const ItemVersion &item = vec.back();
+        assert(item.change.is_nnint128());
+        auto nnint = item.change.get_raw_nnint128();
+        assert(nnint);
+
+        Address addr = key.get_address();
+        auto bal_it = balance_deltas_.find(addr);
+        if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
+          const auto &bal = bal_it->second.back();
+          int128_t expected_delta = bal.manual_transfer_amount -
+                                    bal.total_locked_storage_amount;
+          assert(nnint->delta() == expected_delta);
+        }
+        else {
+          // No balance_deltas_ entry means no storage costs or transfers
+          assert(nnint->delta() == 0);
+        }
+      }
+    }
+
+    // Verify the reverse: for every address in balance_deltas_, there should
+    // be a corresponding balance item in changes_ with the correct delta
+    for (const auto &[addr, vec] : balance_deltas_) {
+      if (!vec.empty()) {
+        auto key = make_address_balance_item_key(addr);
+        auto it = changes_.find(key);
+        assert(it != changes_.end());
+        assert(!it->second.empty());
+
+        const ItemVersion &item = it->second.back();
+        assert(item.change.is_nnint128());
+        auto nnint = item.change.get_raw_nnint128();
+        assert(nnint);
+
+        const auto &bal = vec.back();
+        int128_t expected_delta = bal.manual_transfer_amount -
+                                  bal.total_locked_storage_amount;
+        assert(nnint->delta() == expected_delta);
+      }
+    }
   }
 }
 
