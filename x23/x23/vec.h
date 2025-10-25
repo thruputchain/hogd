@@ -253,6 +253,66 @@ private:
 
 } // namespace detail
 
+// This is a copy of std::span, purely for purposes of ADL, so we can
+// add functions like xdr_size(span<...>).  We do this because it's illegal
+// to open up the std namespace to define a
+// std::xdr_size(std::span<...>) function.
+template<typename T, size_t E = std::dynamic_extent>
+struct span : std::span<T, E> {
+  using super = std::span<T, E>;
+  using typename super::element_type;
+  using typename super::size_type;
+
+  using super::span;
+  span(const super &s) : super(s) {}
+
+  template<size_t Count> constexpr span<element_type, Count> first() const
+  {
+    return super::template first<Count>();
+  }
+  template<typename Self>
+  constexpr auto first(this const Self &self, size_type count)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.super::first(count));
+    else
+      return span<element_type>(self.super::first(count));
+  }
+  template<size_t Count> constexpr span<element_type, Count> last() const
+  {
+    return super::template first<Count>();
+  }
+  template<typename Self>
+  constexpr auto last(this const Self &self, size_type count)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.super::last(count));
+    else
+      return span<element_type>(self.super::last(count));
+  }
+
+  template<size_type Offset, size_type Count = std::dynamic_extent>
+  auto subspan() const
+  {
+    auto s = super::template subspan<Offset, Count>();
+    return span<element_type, decltype(s)::extent>(s);
+  }
+
+  template<typename Self>
+  auto subspan(this const Self &self, size_type offset,
+               size_type count = std::dynamic_extent)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.super::subspan(offset, count));
+    else
+      return span<element_type>(self.super::subspan(offset, count));
+  }
+};
+template<typename... Args>
+span(Args &&...args) -> span<
+    typename decltype(std::span(std::forward<Args>(args)...))::element_type,
+    decltype(std::span(std::forward<Args>(args)...))::extent>;
+
 template<typename T> constexpr size_t kMaxArraySize = PTRDIFF_MAX / sizeof(T);
 // The XDR spec requires that vectors with an unspecified length default to a
 // length of [2^32 - 1], which is also the maximum size permitted by XDR for a
@@ -571,8 +631,8 @@ public:
     append(std::ranges::begin(rg), std::ranges::end(rg));
   }
 
-  constexpr std::span<value_type> subspan(size_type offset = 0,
-                                          size_type count = std::dynamic_extent)
+  constexpr span<value_type> subspan(size_type offset = 0,
+                                     size_type count = std::dynamic_extent)
   {
     size_type new_size = size();
     if (offset >= new_size)
@@ -781,8 +841,8 @@ using Buf = Vec<uint8_t>;
 
 // Analogous to std::string_view, but can be initialized from a
 // variety of containers of std::uint8_t or char.
-struct BufView : std::span<const uint8_t> {
-  using super = std::span<const uint8_t>;
+struct BufView : span<const uint8_t> {
+  using super = span<const uint8_t>;
   BufView() noexcept : super() {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
   BufView(BS &&s) noexcept

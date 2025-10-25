@@ -33,6 +33,23 @@ static_assert(contains_recursive_xdr<contains_test_recursive>);
 static_assert(contains_recursive_xdr<test_recursive>);
 static_assert(!contains_recursive_xdr<uunion>);
 
+struct my_fix_4 {
+  int32_t i;
+};
+inline size_t
+xdr_size(const my_fix_4 &)
+{
+  return 4;
+}
+void
+xdr_serialize(auto &serializer, const my_fix_4 &f)
+{
+  serializer.put32(f.i);
+}
+
+static_assert(x23::detail::has_custom_serializer<my_fix_4>);
+static_assert(x23::is_xdr_serializable<my_fix_4>);
+
 void
 check_sizes()
 {
@@ -70,6 +87,21 @@ round_trip()
   fix_4 f4prime;
   deserialize(&f4prime, buf);
   assert(f4 == f4prime);
+
+  my_fix_4 mf4{.i = f4.i};
+  auto buf2 = serialize(mf4);
+  assert(buf == buf2);
+
+  {
+    x23::span s(&mf4, 1);
+    buf2 = serialize(s);
+    assert(buf == x23::Buf(std::from_range, buf2.subspan(4)));
+  }
+  {
+    x23::span s(&f4, 1);
+    buf = serialize(s);
+    assert(buf == buf2);
+  }
 
   u_4_12 u(4), uprime;
   u.f4().i = 26;
