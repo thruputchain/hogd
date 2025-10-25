@@ -61,8 +61,9 @@ coordinator_init(const std::string &mempool_address,
 
   info("coordinator initialization complete.");
 
-  // Runs forever.
   loadgen.run(/*print_stats=*/true);
+  // Wait forever.
+  std::promise<void>().get_future().wait();
 
   // TODO(jhumphri): Implement shutdown path.
 
