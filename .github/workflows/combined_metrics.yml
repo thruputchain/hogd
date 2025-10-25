@@ -79,6 +79,8 @@ jobs:
     - name: clone metrics history
       run: ./scripts/clone_metrics_history.sh
     - name: run multiexec interface benchmarks
+      id: exec_scaling
+      continue-on-error: true
       uses: ./.github/actions/exec_scaling
       with:
         build-dir: release
@@ -87,6 +89,7 @@ jobs:
       run: |
         ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
     - name: run mempool benchmarks
+      id: mempool_bench
       continue-on-error: true
       uses: ./.github/actions/mempool_bench
       with:
@@ -98,12 +101,14 @@ jobs:
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
     - name: run event server benchmarks
+      id: event_bench
       continue-on-error: true
       uses: ./.github/actions/event_bench
       with:
         build-dir: release
         work-dir: ci_work_dir/
     - name: run metrics
+      id: metrics
       continue-on-error: true
       uses: ./.github/actions/metrics
       with:
@@ -115,4 +120,14 @@ jobs:
       if: always()
       run: |
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+    - name: check for failures
+      if: always()
+      run: |
+        if [ "${{ steps.exec_scaling.outcome }}" == "failure" ] || \
+           [ "${{ steps.mempool_bench.outcome }}" == "failure" ] || \
+           [ "${{ steps.event_bench.outcome }}" == "failure" ] || \
+           [ "${{ steps.metrics.outcome }}" == "failure" ]; then
+          echo "One or more benchmark steps failed"
+          exit 1
+        fi
 
