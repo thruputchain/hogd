@@ -117,20 +117,17 @@ public:
     const std::chrono::steady_clock::time_point start =
         std::chrono::steady_clock::now();
     size_t total_transactions_nominated = 0;
+
     SignedTransactionBatch txs =
         loadgen_client_.get_transactions(kLoadgenTxBatchSize)();
+    ValidatorID validator_id{};
+    co_await sched_coord_client_.schedulercoord_submit_vetted(validator_id,
+                                                              txs);
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
       auto timer = std::make_unique<ElapsedTimer>();
-
-      ValidatorID validator_id{};
-      co_await sched_coord_client_.schedulercoord_submit_vetted(validator_id,
-                                                                txs);
-
-      double submit_vetted_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
 
       x23::Async<SchedulerNominationResult> nominate_handle =
           sched_coord_client_.schedulercoord_nominate(db_tip);
@@ -140,10 +137,22 @@ public:
       double create_handles_duration = timer->elapsed();
       timer = std::make_unique<ElapsedTimer>();
 
-      SchedulerNominationResult res_nominate = co_await nominate_handle;
       txs = co_await get_transactions_handle;
+      ValidatorID validator_id{};
+      x23::Async<void> submit_vetted_handle =
+          sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs);
 
-      double wait_handles_duration = timer->elapsed();
+      double wait_transactions_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
+
+      SchedulerNominationResult res_nominate = co_await nominate_handle;
+
+      double wait_nomination_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
+
+      co_await submit_vetted_handle;
+
+      double wait_submit_vetted_duration = timer->elapsed();
 
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
@@ -155,10 +164,11 @@ public:
       total_transactions_nominated +=
           nomination.nomination.transaction_hashes.size();
 
-      info("submit_vetted_duration {}, create_handles_duration {}, "
-           "wait_handles_duration {}",
-           submit_vetted_duration, create_handles_duration,
-           wait_handles_duration);
+      info("create_handles_duration {}, "
+           "wait_nomination_duration {}, wait_transactions_duration {}, "
+           "wait_submit_vetted_duration, {}",
+           create_handles_duration, wait_nomination_duration,
+           wait_transactions_duration, wait_submit_vetted_duration);
 
       if (print_stats) {
         // Compute and print the throughputs.
