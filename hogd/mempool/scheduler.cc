@@ -111,7 +111,17 @@ Scheduler::write_cache()
 x23::Async<void>
 Scheduler::add_txs(const SignedTransactionBatch &txs)
 {
-  // TODO(jhumphri): Optimize this with coroutines.
+  std::unordered_set<ContractAddress> addresses;
+  for (const SignedTransaction &tx : txs) {
+    addresses.insert(tx.tx.invocation.invoked_address);
+  }
+  x23::Vec<ContractAddress> addresses_to_send;
+  addresses_to_send.reserve(addresses.size());
+  for (const ContractAddress &address : addresses) {
+    addresses_to_send.push_back(address);
+  }
+  CHECK(co_await read_average_hog_age(addresses_to_send, /*force=*/false));
+
   for (const SignedTransaction &tx : txs) {
     SignedTransactionHash tx_hash = sha256(tx);
     if (hash_to_tx_.contains(tx_hash)) {
@@ -119,10 +129,6 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
       continue;
     }
 
-    // The mempool should not call [add_txs()] for txs that have an
-    // invalid account.
-    CHECK(co_await read_average_hog_age({tx.tx.invocation.invoked_address},
-                                        /*force=*/false));
     const HogAge &averages = cached_hogs_[tx.tx.invocation.invoked_address];
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
     const TxInfo info{.age = age,
@@ -150,11 +156,9 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
                 .insert(&it->second)
                 .second);
     }
-    {
-      const BlockHeight expiry_height =
-          info.tx.tx.uniquifier.block_expiry_height;
-      CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
-    }
+
+    const BlockHeight expiry_height = info.tx.tx.uniquifier.block_expiry_height;
+    CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     size_++;
   }
 }
