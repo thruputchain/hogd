@@ -118,10 +118,11 @@ private:
   {
     event_sched_client_ = [&] -> std::unique_ptr<event_sched_client_t> {
       while (true) {
-        auto addr = x23::HostPort{server_addr_, coord_port_}.to_addr(true);
+        auto addr =
+            x23::HostPort{"localhost", event_sched_server_port_}.to_addr(true);
         if (!addr) {
-          panic("failed to parse address to coord on {} port {}", server_addr_,
-                coord_port_);
+          panic("failed to parse address to event sched on localhost port {}",
+                event_sched_server_port_);
         }
         x23::UniqueFd fd;
         try {
@@ -129,8 +130,9 @@ private:
         } catch (const std::system_error &e) {
           if (e.code() == std::errc::connection_refused) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            warn_every_n_sec(5.0F, "coord on {}:{} is not ready", server_addr_,
-                             coord_port_);
+            warn_every_n_sec(5.0F,
+                             "event sched on localhost port {} is not ready",
+                             event_sched_server_port_);
             continue;
           }
           error("caught system error: {} {}", e.what(), e.code().message());
