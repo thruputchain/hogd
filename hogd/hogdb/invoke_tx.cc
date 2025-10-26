@@ -92,6 +92,9 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     delta = ign;
   }
 
+  info("snapshot_base: {}", snapshot_base.value());
+  info("delta: {}", delta);
+
   auto [ign, of] = overflowing_add(snapshot_base.value(), delta);
   if (of) {
     return HogDBError(HogDBCode::kOverflow);
@@ -116,9 +119,10 @@ InvokeTX::update_balance_lock(Address const &addr)
   // to create/apply/update one balance nnint delta.
   auto storage_change = get_storage_balance_change(addr);
   if (!storage_change) {
+    info("storage_change error: {}", storage_change.error());
     return storage_change.error();
   }
-
+  info("storage_change: {}", storage_change.value());
   auto new_item = ItemChange(std::move(storage_change.value()));
 
   auto key = make_address_balance_item_key(addr);
@@ -187,6 +191,7 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
+      info("cost_change: {} vec.back().locked_storage_cost: {}", cost_change, vec.back().locked_storage_cost);
       assert(cost_change <= vec.back().locked_storage_cost);
       // NONDETERMINISTIC:Compute the amount of storage tokens that can be
       // released after this transaction commits.
@@ -310,6 +315,10 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
     v.emplace_back(std::move(change), tx_depth_);
 
+    info("ret: {} tx_depth_: {}", *ret, tx_depth_);
+
+    assert(*ret >= 0 || change.is_permanent_exclusive());
+
     int128_t marginal_storage = std::max<int128_t>(0, *ret);
 
     // now lock the storage
@@ -339,6 +348,11 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     assert(item.tx_depth < tx_depth_);
     v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
   }
+
+  info("ret: {} previous_locked_storage: {}", *ret, previous_locked_storage);
+  assert(*ret >= 0 || change.is_permanent_exclusive());
+
+
   // now to lock the storage
   int128_t marginal_storage =
       std::max<int128_t>(0, *ret - previous_locked_storage);

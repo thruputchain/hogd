@@ -588,6 +588,8 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
     return merge_cost.error();
   }
   assert(snapshot_cost_.has_value());
+  // we should never reach this far if we have a permanent exclusive lock
+  assert(!permanent_exclusive_);
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
 
@@ -661,6 +663,11 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
       type_);
   if (!marginal_item)
     return marginal_item.error();
+  if (permanent_exclusive_) {
+    // If we have a permament exclusive lock, then we can release storage costs early
+    // since we know that no other transaction will be able to modify this item
+    return *marginal_item - *snapshot_cost_;
+  }
   return std::max<int128_t>(0, *marginal_item - *snapshot_cost_);
 }
 

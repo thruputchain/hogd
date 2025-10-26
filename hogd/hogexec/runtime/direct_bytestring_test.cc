@@ -1246,6 +1246,56 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
 
+TEST_P(DirectBytestringTest, PermanentExclusiveLockUseStorage)
+{
+  // Setup phase
+  auto contract_addr = make_contract_address(0);
+  const int128_t initial_balance = cost_model_->get_bytestring_cost(make_bytestring("value").size());
+  setup_grant_storage_token(contract_addr, initial_balance);
+  auto key = make_addrkey(contract_addr, "test");
+  auto key2 = make_addrkey(contract_addr, "test2");
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(key, make_bytestring_delta("value"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()), 0);
+
+
+  // Test phase
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(key, make_delete_delta(),
+               std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
+  tx2.add_delta(key2, make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  advance_block();
+
+  auto val = lookup_storage_item_from_db(key);
+  ASSERT_FALSE(val.has_value());
+
+  auto val2 = lookup_storage_item_from_db(key2);
+  ASSERT_TRUE(val2.has_value());
+  EXPECT_EQ(val2.value().bytestring(), make_bytestring("value"));
+
+  bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()), 0);
+
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
