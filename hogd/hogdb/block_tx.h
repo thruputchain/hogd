@@ -65,11 +65,6 @@ public:
 
   void release_balance(const Address &addr, int128_t delta);
 
-  // Try to acquire an exclusive lock on an item.
-  // Returns the storage cost if successful, error if item is already locked.
-  HogDBStatus<int128_t> try_lock_exclusive(const ItemKey &key,
-                                           ItemChange &change);
-
 private:
   struct ItemLock {
     ItemChange change;
