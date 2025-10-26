@@ -596,6 +596,13 @@ ItemChange::undo_merge(const ItemChange &change)
 {
   assert(type_.index() == change.type_.index());
 
+  // We never undo_merge of an exclusive lock;
+  // rather, blocktx checks that there is one ref on the itemchange,
+  // and sets the item change directly.
+  // So we do not need to modify this->exclusive_ or permanent_exclusive_.
+  assert(!change.permanent_exclusive_);
+  assert(!change.exclusive_);
+
   std::visit(
       [&change](auto &arg) {
         if constexpr (!is_monostate<decltype(arg)>)
@@ -617,7 +624,7 @@ ItemChange::commit_change(const ItemChange &change)
   }
 
   assert(!change.permanent_exclusive_ || permanent_exclusive_);
-  
+
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {

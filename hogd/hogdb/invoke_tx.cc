@@ -394,7 +394,8 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 
 HogDBStatus<void>
 InvokeTX::request_auth_data(Address const &addr,
-                            const AuthDataChangeArgs &auth_data_change)
+                            const AuthDataChangeArgs &auth_data_change,
+                            StorageItemRPCFlagSet flags)
 {
   auto base_auth_data =
       block_.get().get_db().read_address_account_auth_data(addr);
@@ -412,8 +413,12 @@ InvokeTX::request_auth_data(Address const &addr,
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
   }
+  auto change = ItemChange(std::move(auth_data_item));
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
   return request_change(make_account_auth_data_item_key(addr),
-                        std::move(auth_data_item));
+                        std::move(change));
 }
 
 HogDBStatus<void>

@@ -79,15 +79,17 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
 {
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
-    return to_rpc_error(
-        tx.request_bytes(make_item_key(addrkey), to_span(delta.bytestring()), flags));
+    return to_rpc_error(tx.request_bytes(make_item_key(addrkey),
+                                         to_span(delta.bytestring()), flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint_add()), flags));
+                                            from_xdr(delta.nnint_add()),
+                                            flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
                                             from_xdr(delta.nnint().set_value),
-                                            from_xdr(delta.nnint().add_value), flags));
+                                            from_xdr(delta.nnint().add_value),
+                                            flags));
   case StorageDeltaType::kDeltaTypeDelete:
     return to_rpc_error(tx.request_deletion(make_item_key(addrkey), flags));
   case StorageDeltaType::kDeltaTypeDeployContract:
@@ -100,14 +102,14 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     assert(addrkey.key.key_type() ==
            StorageKeyType::kStorageKeyTypeAccountAuthData);
     return to_rpc_error(
-        tx.request_auth_data(addrkey.address, delta.auth_data_change()));
+        tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     // Assume addrkey from FlaggedStorageDelta indicates correct ReplayCache for
     // this tx.
     assert(addrkey.key.key_type() ==
            StorageKeyType::kStorageKeyTypeReplayCache);
     return to_rpc_error(tx.request_consume_uniquifier(
-        addrkey.address, delta.consume_uniquifier_args().uniquifier));
+        addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;

@@ -1080,6 +1080,43 @@ TEST_P(DirectBytestringTest, ReuseExclusiveLock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value2"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_1.has_value());
+  ASSERT_TRUE(r1_1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value3"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_2.has_value());
+  ASSERT_TRUE(r1_2.value());
+
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
+  ASSERT_TRUE(val.has_value());
+  EXPECT_EQ(val.value().bytestring(), make_bytestring("value3"));
+}
+
+TEST_P(DirectBytestringTest, ReusePermamentExclusiveLock)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -1103,10 +1140,72 @@ TEST_P(DirectBytestringTest, ReuseExclusiveLock)
 
   advance_block();
 
-  auto val = lookup_storage_item_from_db(
-      make_addrkey(contract_addr, "test"));
+  auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
   ASSERT_TRUE(val.has_value());
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value3"));
+}
+
+TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_FALSE(r2.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
+  ASSERT_TRUE(val.has_value());
+  EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
+}
+
+TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // can't acquire an exclusive lock after the regular lock has been committed
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_FALSE(r2.value());
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
+  ASSERT_TRUE(val.has_value());
+  EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
 
 TEST_P(DirectBytestringTest, LockChangeAfterCommit)
@@ -1142,8 +1241,7 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   advance_block();
 
-  auto val = lookup_storage_item_from_db(
-      make_addrkey(contract_addr, "test"));
+  auto val = lookup_storage_item_from_db(make_addrkey(contract_addr, "test"));
   ASSERT_TRUE(val.has_value());
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
