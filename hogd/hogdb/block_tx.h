@@ -69,7 +69,6 @@ private:
   struct ItemLock {
     ItemChange change;
     size_t ref;
-    bool exclusive_lock{false};
   };
 
   HogDBDAO &db_;
