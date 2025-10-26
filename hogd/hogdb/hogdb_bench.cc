@@ -27,6 +27,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 
 namespace hogd {
