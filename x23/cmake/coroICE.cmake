@@ -3,6 +3,10 @@
 
 include(CheckCXXSourceCompiles)
 
+# Triggers more reliably without optimization
+set(_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
+
 check_cxx_source_compiles([=[
 #include <coroutine>
 #include <exception>
@@ -40,3 +44,5 @@ main()
   return 0;
 }
 ]=] X23_CORO_SLOC_OK)
+
+set(CMAKE_CXX_FLAGS ${_CMAKE_CXX_FLAGS})

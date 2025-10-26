@@ -21,12 +21,7 @@ elif test -r "$HOGD_PROJECT_DIR/hog.conf"; then
   . "$HOGD_PROJECT_DIR/hog.conf"
 fi
 
-X23ENV=$(env | grep '^X23')
-if test -n "$X23ENV"; then
-  X23ENV="export $X23ENV"
-else
-  X23ENV=":"
-fi
+EXPORT_REGEX='^X23'
 
 # -------------------------------
 
@@ -64,6 +59,14 @@ done
 
 # The code starts below.
 
+. "$(dirname $0)/remote-exec.sh"
+
+remote_launch() {
+  local ARGS=("$@") prog="$(basename $2)"
+  ARGS+=(">$logdir/$prog.log" '2>&1')
+  remote_exec "${ARGS[@]}" &
+}
+
 # This removes duplicates from [all_servers].
 all_servers=($(printf "%s\n" "${all_servers[@]}" | awk '!seen[$0]++'))
 
@@ -76,15 +79,11 @@ make_logdir() {
 # Kills all of the processes on all of the servers.
 kill_everything() {
   local do_wait=$1
-  local all_procs=("${procs[@]}" "make" "go")
+  local all_procs=("${procs[@]}" "go")
 
   for s in "${all_servers[@]}"; do
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "killall -9 ${all_procs[@]} > /dev/null 2>&1 || true" &
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" "killall -9 -q -e ${all_procs[@]}" || :
   done
-  if [[ $do_wait == true ]]; then
-    wait
-  fi
 }
 
 echo "Making log directories..."
@@ -105,7 +104,9 @@ cleanup() {
 
   # Kill the ssh sessions that print the [make] output and log statements from
   # the servers.
-  kill -9 "${ssh_pids[@]}" 2>/dev/null
+  if [[ ${#ssh_pids[@]} != 0 ]]; then
+    kill -9 "${ssh_pids[@]}" 2>/dev/null
+  fi
 
   # Now kill the chuckd and hogd processes on the servers. [kill_everything()]
   # issues the ssh commands as background processes, so these ssh commands will
@@ -113,7 +114,7 @@ cleanup() {
   # before the ssh commands complete so that it is not tempting to force quit
   # the script by hitting Ctrl-C multiple times. The processes will still get
   # killed on all of the servers.
-  kill_everything false #do_wait=false
+  kill_everything false & #do_wait=false
 
   exit $status
 }
@@ -129,7 +130,8 @@ build_all() {
   ssh_pids=($(jobs -pr))
   wait
 }
-build_all
+# build_all
+make -C "$HOGD_BUILD_DIR" -j$(nproc)
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
@@ -186,8 +188,8 @@ check_binaries() {
   done
 }
 
-echo "Checking binaries..."
-check_binaries
+#echo "Checking binaries..."
+#check_binaries
 
 # Wait for the port to open on the remote machine.
 wait_port() {
@@ -202,9 +204,7 @@ wait_port() {
 }
 
 echo "Start loadgen..."
-ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
-  "$X23ENV; \
-  nohup \"$LOADGEN_BINARY\" -p 11222 >$logdir/loadgen.log 2>&1 &"
+remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
 wait_port "$loadgen_server" 11222
 
 # echo "Start chuckd..."
@@ -229,43 +229,31 @@ wait_port "$loadgen_server" 11222
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "$X23ENV; \
-    nohup \"$HOGEXEC_BINARY\" \"$mempool_server\":8071 > $logdir/hogexec.log 2>&1 &"
+  remote_launch "$s" "$HOGEXEC_BINARY" "$mempool_server":8071
 done
 
 # Start event.
 echo "Start event..."
-ssh "${COMMON_SSH_OPTS[@]}" "$event_server" \
-  "$X23ENV; \
-  nohup \"$EVENT_BINARY\" \"$mempool_server\":8073 $logdir/event > $logdir/event.log 2>&1 &"
+remote_launch "$event_server" "$EVENT_BINARY" \
+  "$mempool_server":8073 "$logdir/event"
 
 # Start hogdb.
 echo "Start hogdb..."
 for s in "${hogdb_servers[@]}"; do
   # Remove any existing database so the experiment starts from a clean slate.
-  ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    "$X23ENV; \
-    rm -rf $logdir/hogdb; \
-    nohup \"$HOGDB_BINARY\" $logdir/hogdb 10000000000 \"$mempool_server\":8072 \
-    > $logdir/hogdb.log 2>&1 &"
+  ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $logdir/hogdb.data"
+  remote_launch "$s" "$HOGDB_BINARY" \
+    "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
 done
 
 # Start fake coordinator.
-ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-  "$X23ENV;                                                   \
-  nohup \"$FAKE_COORDINATOR_BINARY\" \"$mempool_server\":8070 \
-  \"$loadgen_server\":11222                                   \
-  > $logdir/fake_coordinator.log 2>&1 &"
+remote_launch "$fake_coordinator_server" "$FAKE_COORDINATOR_BINARY" \
+  "$mempool_server":8070 "$loadgen_server":11222
 
 # Start mempool.
 echo "Start mempool..."
-ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
-  "$X23ENV; \
-  nohup \"$MEMPOOL_BINARY\"                   \
-  ${#hogdb_servers[@]}                        \
-  ${#hogexec_servers[@]}                      \
-  > $logdir/mempool.log 2>&1 &"
+remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
+  ${#hogdb_servers[@]} ${#hogexec_servers[@]}
 
 # Wait for hogexec (port 8070).
 for s in "${hogexec_servers[@]}"; do
@@ -331,4 +319,4 @@ fi
 ssh_pids=($(jobs -pr))
 
 # The script just waits forever until Ctrl-C is pressed.
-tail -f /dev/null
+sleep infinity
