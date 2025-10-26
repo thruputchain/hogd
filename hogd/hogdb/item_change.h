@@ -255,7 +255,7 @@ template<> struct std::formatter<hogd::NNInt128> {
 
   static auto format(const hogd::NNInt128 &nnint, auto &ctx)
   {
-    return format_to(ctx.out(), "NNInt128{{base={}}}", nnint.value());
+    return format_to(ctx.out(), "NNInt128{{base={}, delta={}}}", nnint.base(), nnint.delta());
   }
 };
 static_assert(hogd::is_item<hogd::NNInt128>);
@@ -828,10 +828,10 @@ template<> struct std::formatter<hogd::ItemChange> {
   static auto format(const hogd::ItemChange &item_change, auto &ctx)
   {
     std::visit(
-        [&ctx](auto &&arg) {
+        [&ctx, &item_change](auto &&arg) {
           if constexpr (!std::same_as<std::decay_t<decltype(arg)>,
                                       std::monostate>) {
-            format_to(ctx.out(), "{}", arg);
+            format_to(ctx.out(), "Exclusive: {}, {}", item_change.exclusive_, arg);
           }
           else {
             format_to(ctx.out(), "monostate");
