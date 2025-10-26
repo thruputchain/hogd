@@ -661,6 +661,11 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
+  bool is_permanent_exclusive() const { return permanent_exclusive_; }
+  void set_permanent_exclusive() { 
+    permanent_exclusive_ = true;
+    exclusive_ = true;
+  }
   bool is_create_contract() const
   {
     return std::holds_alternative<NewContractData>(type_);
@@ -747,6 +752,7 @@ private:
       type_;
   LazySnapshotCost snapshot_cost_;
   bool exclusive_{false};
+  bool permanent_exclusive_{false};
   bool change_committed_{false};
 
   size_t storage_size() const;

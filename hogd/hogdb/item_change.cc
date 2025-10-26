@@ -568,6 +568,10 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
 {
   if (type_.index() != change.type_.index())
     return HogDBError(HogDBCode::kConflict);
+  // can't be permanent exclusive if not exclusive
+  assert(!change.permanent_exclusive_ || change.exclusive_);
+  assert(!permanent_exclusive_ || exclusive_);
+
   if (exclusive_ || change.exclusive_)
     return HogDBError(HogDBCode::kConflict);
 
@@ -606,11 +610,14 @@ ItemChange::commit_change(const ItemChange &change)
   assert(type_.index() == change.type_.index());
   // In the future, we will forward the change
   // to the variant.
-  if (change.exclusive_) {
+  if (change.exclusive_ && !change.permanent_exclusive_) {
     // Committing the change that held the exclusive lock allows
     // us to release that lock.
     exclusive_ = false;
   }
+
+  assert(!change.permanent_exclusive_ || permanent_exclusive_);
+  
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {

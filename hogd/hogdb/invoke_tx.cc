@@ -20,6 +20,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 
@@ -350,7 +351,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 }
 
 HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
+                           StorageItemRPCFlagSet flags)
 {
   // validate the nnint128. We can't assume it's in a valid state even if there
   // is not a conflict with another change because the executor may not know
@@ -364,11 +366,16 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
   }
 
   // nnint128 is valid; now try to request the change.
-  return request_change(key, NNInt128{base, delta});
+  auto change = ItemChange(NNInt128{base, delta});
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
 }
 
 HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
+                           StorageItemRPCFlagSet flags)
 {
   if (key.is_address_balance()) {
     request_balance_change(key.get_address(), delta);
@@ -382,7 +389,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
       return base.error();
     base = 0;
   }
-  return request_nnint128(key, *base, delta);
+  return request_nnint128(key, *base, delta, flags);
 }
 
 HogDBStatus<void>
