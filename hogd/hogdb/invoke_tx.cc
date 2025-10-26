@@ -422,8 +422,14 @@ InvokeTX::request_auth_data(Address const &addr,
 }
 
 HogDBStatus<void>
-InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
+InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
+                                     StorageItemRPCFlagSet flags)
 {
+  // We do not support setting exclusive locks on replay cache items;
+  // consuming a nonce is already a unique event.
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    return HogDBError(HogDBCode::kConflict);
+  }
   auto base_replay_cache =
       block_.get().get_db().read_address_replay_cache(addr);
   if (!base_replay_cache) {
