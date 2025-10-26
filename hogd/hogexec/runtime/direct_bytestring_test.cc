@@ -1071,6 +1071,241 @@ TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
   EXPECT_EQ(from_xdr(bal.value().nnint()), kInitialBalance);
 }
 
+TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
+{
+
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_addrkey(contract_addr, "test"),
+               make_bytestring_delta("value_long"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  advance_block();
+
+  // setup done
+
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()),
+            kInitialBalance -
+                cost_model_->get_bytestring_cost("value_long"s.length()));
+
+  // Now for the test
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+
+  advance_block();
+
+  bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()),
+            kInitialBalance -
+                cost_model_->get_bytestring_cost("value"s.length()));
+}
+
+TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
+{
+
+  auto contract_addr = make_contract_address(0);
+  const int128_t initial_cost =
+      cost_model_->get_bytestring_cost("value_long"s.length()) +
+      cost_model_->get_bytestring_cost("short"s.length());
+  setup_grant_storage_token(contract_addr, initial_cost);
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_addrkey(contract_addr, "test1"),
+               make_bytestring_delta("short"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx.add_delta(make_addrkey(contract_addr, "test2"),
+               make_bytestring_delta("short"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()),
+            cost_model_->get_bytestring_cost("value_long"s.length()) -
+                cost_model_->get_bytestring_cost("short"s.length()));
+
+  // We're going to try to release costs from test1 to use on test2.
+  // We (1) first acquire a lock on writing value_long to test1.
+  // We (2) then try to write value_long to test2, which should fail due to
+  // storage costs. We (3) then write s to test1, which should locally release
+  // locked costs. We (4) then try to write value_long to test2, which should
+  // succeed. We (5) then try to write value_longer to test2, which should fail.
+  // (We can't release storage costs that we didn't acquire during the tx)
+  // After committing, we should have
+  // get_bytestring_cost("value_long"s.length()) -
+  // get_bytestring_cost("s"s.length()) cost available.
+
+  // step 1
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test1"),
+                make_bytestring_delta("value_long"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // step 2
+  tx2.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value_long"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_1 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_1.has_value());
+  ASSERT_FALSE(r2_1.value());
+
+  // step 3
+  tx2.add_delta(make_addrkey(contract_addr, "test1"),
+                make_bytestring_delta("s"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_2.has_value());
+  ASSERT_TRUE(r2_2.value());
+
+  // step 4
+  tx2.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value_long"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_3 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_3.has_value());
+  ASSERT_TRUE(r2_3.value());
+
+  // step 5
+  tx2.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_4 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_4.has_value());
+  ASSERT_FALSE(r2_4.value());
+
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  const int128_t expected_cost =
+      cost_model_->get_bytestring_cost("value_long"s.length()) +
+      cost_model_->get_bytestring_cost("s"s.length());
+
+  bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()), initial_cost - expected_cost);
+
+  auto item1 =
+      lookup_storage_item_from_db(make_addrkey(contract_addr, "test1"));
+  ASSERT_TRUE(item1.has_value());
+  EXPECT_EQ(item1.value().bytestring(), make_bytestring("s"));
+
+  auto item2 =
+      lookup_storage_item_from_db(make_addrkey(contract_addr, "test2"));
+  ASSERT_TRUE(item2.has_value());
+  EXPECT_EQ(item2.value().bytestring(), make_bytestring("value_long"));
+}
+
+TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
+{
+  auto contract_addr = make_contract_address(0);
+  const int128_t initial_cost =
+      2 * cost_model_->get_bytestring_cost("value_long"s.length());
+  setup_grant_storage_token(contract_addr, initial_cost);
+
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_addrkey(contract_addr, "test1"),
+               make_bytestring_delta("value"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx.add_delta(make_addrkey(contract_addr, "test2"),
+               make_bytestring_delta("value"),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction({}).has_value());
+
+  advance_block();
+
+  // done setup
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test1"),
+                make_bytestring_delta("value_long"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  tx2.add_delta(make_addrkey(contract_addr, "test1"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_1 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_1.has_value());
+  ASSERT_TRUE(r2_1.value());
+
+  // tx2 has now locked an "_long" worth of storage costs, but is not using them
+  // for the top level value. It still needs them to maintain rollback
+  // potential.
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value_long"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  // This fails, because tx2 has the costs locked.
+  tx3.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value_long2"), // slightly longer
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3_1 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3_1.has_value());
+  ASSERT_FALSE(r3_1.value());
+
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  // now the costs should be released, although hogdb does not implement this
+  // yet
+  //
+  // tx3.add_delta(make_addrkey(contract_addr, "test2"),
+  // make_bytestring_delta("value_long2"), // slightly longer
+  // std::to_underlying(StorageItemRPCFlags::kStorageNone));
+
+  ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+
+  advance_block();
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
