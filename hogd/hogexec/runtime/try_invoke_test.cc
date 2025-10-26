@@ -1606,10 +1606,6 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
 
 TEST_P(TryInvokeTest, CostChangeAccounting)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test to check how marginal costs are accounted for when a try_invoke
   // updates, not creates, an item.
   // Root invocation makes three try_invoke invocations.
@@ -1713,6 +1709,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             // expects an error
              if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -1767,10 +1764,6 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
 
 TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly. Root invocation makes two try_invoke
   // invocations. Both succeed. The first makes a long bytestring write. The
@@ -1894,10 +1887,6 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
 
 TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
 {
-  if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending hogdb storage cost accounting";
-    return;
-  }
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly.
   //  Root invocation first makes a try_invocation call into a method that
