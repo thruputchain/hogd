@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <sys/socket.h>
 #include <system_error>
 #include <thread>
 
@@ -83,7 +84,6 @@ make_srpc_client(sockaddr_storage &ss, bool retry = false,
 {
   while (true) {
     x23::UniqueFd fd;
-
     try {
       fd = x23::tcpconnect(ss);
     } catch (const std::system_error &e) {
