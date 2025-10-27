@@ -23,9 +23,7 @@
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/rpc_common.h"
 #include "x23/sockio.h"
-#include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
