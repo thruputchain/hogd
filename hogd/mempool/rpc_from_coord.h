@@ -2,6 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <utility>
 
 #include "coord_sched.hh"
@@ -9,23 +12,28 @@
 #include "discovery.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/version.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "scheduler.h"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -37,9 +45,10 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 128;
+  static constexpr size_t kMaxBlockSize = 60'000;
+  static constexpr size_t kChunkSize = 10;
 
-  MempoolCoordinatorRpc() = default;
+  MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -47,17 +56,16 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  Scheduler &scheduler() { return *scheduler_; }
+  std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
-  static coord_sched_client_t get_client(x23::CoroPoll &cp)
+  static coord_sched_client_t get_client()
   {
     CoordCard card;
     CHECK(Registration::registration().coordinator_registered(&card));
 
-    x23::UniqueFd fd =
-        x23::tcpconnect(server_address_to_sockaddr(card.address_for_sched));
-    return x23::rpc_stream_logged(cp, fd.release())->client(CoordScheduler1{});
+    return create_client<CoordScheduler1>(
+        server_address_to_sockaddr(card.address_for_sched));
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
@@ -91,7 +99,7 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
   {
     // TODO(jhumphri): Implement.
     co_return;
@@ -105,6 +113,20 @@ public:
   // are still running.
   x23::Async<void> schedulercoord_shutdown();
 
+  x23::Async<DbSchedResult>
+  schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
+  {
+    return db_sched_client_->dbsched_load_genesis_block(genesis_block);
+  }
+
+  static SHA256Hash
+  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
+                 const BlockHash &prev_block_hash);
+
+  bool ready() const { return ready_.load(std::memory_order_acquire); }
+
+  void dump_stats() { scheduler_->dump_runqueue(); }
+
   void shut_down()
   {
     // TODO(jhumphri): Implement.
@@ -114,13 +136,6 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  // To compute the block hash, we insert tx hashes into a Merkle Trie. We make
-  // insertion faster with multiple threads. Using a lot of threads could cause
-  // worse performance if each thread has few hashes to insert. Thus, to
-  // calculate a reasonable number of threads to use, we ensure that each thread
-  // has at least [kMinHashesPerThread] hashes to insert.
-  static constexpr size_t kMinHashesPerThread = 16'384;
-
   const std::function<x23::Async<bool>(const SignedTransaction &tx)>
       auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
     co_return co_await authentication_->authenticate(tx);
@@ -139,22 +154,24 @@ private:
 
   void finish_init()
   {
-    coord_client_ =
-        std::make_unique<coord_sched_client_t>(get_client(client_cp_));
+    coord_client_ = std::make_unique<coord_sched_client_t>(get_client());
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
-    db_sched_client_ = std::make_unique<db_sched_client_t>(
-        std::move(MempoolDbRpc::get_clients(client_cp_)[0]));
-    exec_clients_ = MempoolExecutorRpc::get_clients(client_cp_);
-    event_sched_client_ = std::make_unique<event_sched_client_t>(
-        MempoolEventRpc::get_client(client_cp_));
+    db_sched_client_ = std::make_shared<db_sched_client_t>(
+        std::move(MempoolDbRpc::get_clients()[0]));
+    exec_clients_ = MempoolExecutorRpc::get_clients();
+    event_sched_client_ =
+        std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
     // [current_block_id_] with it.
     authentication_ =
-        std::make_unique<Authentication>(current_block_id_, *db_sched_client_);
-    scheduler_ = std::make_unique<Scheduler>(*db_sched_client_);
+        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
+    db_rpc_.register_scheduler(scheduler_);
+
+    ready_.store(true, std::memory_order_release);
   }
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
@@ -164,12 +181,14 @@ private:
   x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
-  static SHA256Hash
-  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
-
   x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
+
+  x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
+      BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+      x23::XdrVec<NominatedTransaction> &transaction_nominations,
+      size_t chunk_size);
 
   x23::Async<bool> open_proposal_block(BlockID block_id);
 
@@ -180,23 +199,21 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  // TODO(jhumphri): Replace with global pool and cp.
-  x23::ThreadPool client_pool_;
-  x23::CoroPoll client_cp_ = x23::CoroPoll(client_pool_);
+  MempoolDbRpc &db_rpc_;
+
   std::unique_ptr<coord_sched_client_t> coord_client_;
-  std::unique_ptr<db_sched_client_t> db_sched_client_;
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_;
-  std::unique_ptr<Scheduler> scheduler_;
+  BlockID current_block_id_ = 0;
+  std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
+  std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
-
-class MempoolCoordinatorServer : public RpcServer<MempoolCoordinatorRpc> {};
 
 } // namespace hogd

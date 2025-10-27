@@ -3,6 +3,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <span>
 #include <type_traits>
 
 #include "built_contracts/itc_erc20.h"
@@ -13,12 +14,14 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/event/utilities.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "standard_asset_events.hh"
 #include "types.hh"
 #include "x23/format.h"
 
@@ -64,6 +67,175 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
 using amount_t = uint128_xdr;
 using difference_t = int128_xdr;
 
+constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
+
+// implementation functions
+InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+transfer_impl(SystemCallHandler &handler, NativeRuntime &runtime,
+              ContractAddress receiver, amount_t amount)
+{
+  trace("native token transfer: receiver {} amount {}", x23::show(receiver),
+        x23::show(amount));
+  if (!runtime.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  }
+
+  // For now, amount_t is a uint, so we do not need to check for negative
+  // amounts here. adding the assertion in case that changes
+  static_assert(std::is_same_v<amount_t, uint128_xdr>);
+
+  auto owner = handler.get_msg_sender();
+  if (!owner.has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  // can't negate bigger values
+  if (from_xdr(amount) > kMaxInt128) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  int128_t amount_int = from_xdr(amount);
+
+  // subtract amount from owner's balance
+  auto r1 = handler.modify_native_token_balance(*owner, -amount_int);
+  if (!r1.has_value()) {
+    return r1.error().to_invoke_error();
+  }
+  if (!r1.value().has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  // add amount to receiver's balance
+  auto r2 = handler.modify_native_token_balance(receiver, amount_int);
+  if (!r2.has_value()) {
+    return r2.error().to_invoke_error();
+  }
+  if (!r2.value().has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  auto event_buf = make_event_from_xdr_struct(TransferEvent{
+      .from_address = *owner,
+      .to_address = receiver,
+      .amount = to_xdr(amount_int),
+  });
+
+  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
+  if (!event_res.has_value()) {
+    warn("failed to log transfer event in native token transfer");
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+}
+
+InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+transfer_from_impl(SystemCallHandler &handler, NativeRuntime &runtime,
+                   ContractAddress owner, ContractAddress receiver,
+                   amount_t amount)
+{
+  trace("native token transfer_from: owner {} receiver {} amount {}",
+        x23::show(owner), x23::show(receiver), x23::show(amount));
+  if (!runtime.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  }
+
+  // For now, amount_t is a uint, so we do not need to check for negative
+  // amounts here. adding the assertion in case that changes
+  static_assert(std::is_same_v<amount_t, uint128_xdr>);
+
+  // get spender
+  auto spender = handler.get_msg_sender();
+  if (!spender.has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  // can't negate bigger values
+  if (from_xdr(amount) > kMaxInt128) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  int128_t amount_int = from_xdr(amount);
+
+  // subtract amount from owner's balance
+  auto r1 = handler.modify_native_token_balance(owner, -amount_int);
+  if (!r1.has_value()) {
+    return r1.error().to_invoke_error();
+  }
+  if (!r1.value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  // add amount to receiver's balance
+  auto r2 = handler.modify_native_token_balance(receiver, amount_int);
+  if (!r2.has_value()) {
+    return r2.error().to_invoke_error();
+  }
+  if (!r2.value().has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  // subtract amount from spender's allowance
+  auto allow_res = adjust_allowance(handler, owner, *spender, -amount_int);
+  if (!allow_res.has_value()) {
+    return allow_res.error().to_invoke_error();
+  }
+  if (!allow_res.value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  auto event_buf = make_event_from_xdr_struct(TransferEvent{
+      .from_address = owner,
+      .to_address = receiver,
+      .amount = to_xdr(amount_int),
+  });
+
+  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
+  if (!event_res.has_value()) {
+    warn("failed to log transfer_from event in native token transfer_from");
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+}
+
+InvokeStatus<Result<void, itc_erc20::ERC20Error>>
+adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
+                      ContractAddress spender, difference_t amount)
+{
+  trace("native token adjust_allowance: spender {} amount {}",
+        x23::show(spender), x23::show(amount));
+  if (!runtime.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  }
+
+  auto owner = handler.get_msg_sender();
+  if (!owner.has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  auto r = adjust_allowance(handler, *owner, spender, from_xdr(amount));
+  if (!r.has_value()) {
+    return r.error().to_invoke_error();
+  }
+  if (!r.value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  auto event_buf = make_event_from_xdr_struct(ApprovalEvent{
+      .owner_address = *owner,
+      .spender_address = spender,
+      .amount = to_xdr(from_xdr(amount)),
+  });
+
+  auto event_res = handler.log_event(3, std::as_bytes(std::span(event_buf)));
+  if (!event_res.has_value()) {
+    warn("failed to log adjust_allowance event in native token "
+         "adjust_allowance");
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+
+  return {Result<void, itc_erc20::ERC20Error>::make_ok()};
+}
+
 } // namespace
 
 std::unique_ptr<NativeContract>
@@ -76,135 +248,13 @@ make_native_token_contract()
       kAlwaysErrorMethod<itc_erc20::ERC20, "initialize", 1>);
 
   // transfer
-  builder.add<itc_erc20::ERC20, "transfer">(
-      [](SystemCallHandler &handler, NativeRuntime &runtime,
-         ContractAddress receiver,
-         amount_t amount) -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
-        trace("native token transfer: receiver {} amount {}",
-              x23::show(receiver), x23::show(amount));
-        if (!runtime.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-        }
-
-        // For now, amount_t is a uint, so we do not need to check for negative
-        // amounts here. adding the assertion in case that changes
-        static_assert(std::is_same_v<amount_t, uint128_xdr>);
-
-        auto owner = handler.get_msg_sender();
-        if (!owner.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        // can't negate bigger values
-        if (from_xdr(amount) > std::numeric_limits<int128_t>::max()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        int128_t amount_int = from_xdr(amount);
-
-        // subtract amount from owner's balance
-        auto r1 = handler.modify_native_token_balance(*owner, -amount_int);
-        if (!r1.has_value()) {
-          return r1.error().to_invoke_error();
-        }
-        if (!r1.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        // add amount to receiver's balance
-        auto r2 = handler.modify_native_token_balance(receiver, amount_int);
-        if (!r2.has_value()) {
-          return r2.error().to_invoke_error();
-        }
-        if (!r2.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        return {Result<void, itc_erc20::ERC20Error>::make_ok()};
-      });
+  builder.add<itc_erc20::ERC20, "transfer">(transfer_impl);
 
   // transfer_from
-  builder.add<itc_erc20::ERC20, "transfer_from">(
-      [](SystemCallHandler &handler, NativeRuntime &runtime,
-         ContractAddress owner, ContractAddress receiver,
-         amount_t amount) -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
-        trace("native token transfer_from: owner {} receiver {} amount {}",
-              x23::show(owner), x23::show(receiver), x23::show(amount));
-        if (!runtime.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-        }
-
-        // For now, amount_t is a uint, so we do not need to check for negative
-        // amounts here. adding the assertion in case that changes
-        static_assert(std::is_same_v<amount_t, uint128_xdr>);
-
-        // get spender
-        auto spender = handler.get_msg_sender();
-        if (!spender.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        // can't negate bigger values
-        if (from_xdr(amount) > std::numeric_limits<int128_t>::max()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        int128_t amount_int = from_xdr(amount);
-
-        // subtract amount from owner's balance
-        auto r1 = handler.modify_native_token_balance(owner, -amount_int);
-        if (!r1.has_value()) {
-          return r1.error().to_invoke_error();
-        }
-        if (!r1.value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        // add amount to receiver's balance
-        auto r2 = handler.modify_native_token_balance(receiver, amount_int);
-        if (!r2.has_value()) {
-          return r2.error().to_invoke_error();
-        }
-        if (!r2.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        // subtract amount from spender's allowance
-        auto allow_res =
-            adjust_allowance(handler, owner, *spender, -amount_int);
-        if (!allow_res.has_value()) {
-          return allow_res.error().to_invoke_error();
-        }
-        if (!allow_res.value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        return {Result<void, itc_erc20::ERC20Error>::make_ok()};
-      });
+  builder.add<itc_erc20::ERC20, "transfer_from">(transfer_from_impl);
 
   // adjust_allowance
-  builder.add<itc_erc20::ERC20, "adjust_allowance">(
-      [](SystemCallHandler &handler, NativeRuntime &runtime,
-         ContractAddress spender, difference_t amount)
-          -> InvokeStatus<Result<void, itc_erc20::ERC20Error>> {
-        trace("native token adjust_allowance: spender {} amount {}",
-              x23::show(spender), x23::show(amount));
-        if (!runtime.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-        }
-
-        auto owner = handler.get_msg_sender();
-        if (!owner.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-
-        auto r = adjust_allowance(handler, *owner, spender, from_xdr(amount));
-        if (!r.has_value()) {
-          return r.error().to_invoke_error();
-        }
-        if (!r.value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {Result<void, itc_erc20::ERC20Error>::make_ok()};
-      });
+  builder.add<itc_erc20::ERC20, "adjust_allowance">(adjust_allowance_impl);
 
   // get_balance_of
   builder.add<itc_erc20::ERC20, "get_balance_of">(
@@ -276,6 +326,8 @@ make_native_token_contract()
         return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
             to_xdr(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility}))};
       });
+
+  assert(builder.check_methods<itc_erc20::ERC20>());
 
   return builder.build();
 }

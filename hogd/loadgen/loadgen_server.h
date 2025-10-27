@@ -18,6 +18,10 @@ class LoadgenRpc {
 public:
   using rpc_service = LoadgenInterfaceV1;
 
+  // We set the RPC max message size to a large value because the loadgen
+  // transfers a lot of data via individual RPC calls.
+  static constexpr size_t kRpcMaxMessageSize = 0x7fffffffff;
+
   LoadgenResult generate_experiment(ExperimentConfig config);
   LoadgenExtensionResult extend_experiment(LoadgenContextID context_id,
                                            uint64_t num_txs,
@@ -36,7 +40,5 @@ private:
 };
 
 static_assert(is_LoadgenInterfaceV1<LoadgenRpc *, std::type_identity_t>);
-
-class LoadgenServer : public RpcServer<LoadgenRpc> {};
 
 } // namespace hogd

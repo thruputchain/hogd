@@ -1,0 +1,71 @@
+name: "Run Mempool Bench"
+description: "Run the mempool benchmarks"
+inputs:
+  build-dir:
+    description: "Build directory to use"
+    required: true
+    type: string
+  work-dir:
+    description: "Work directory to use"
+    required: true
+    type: string
+runs:
+  using: "composite"
+  steps:
+    - name: make sure bench servers are running
+      run: |
+        ./scripts/wait-port.sh hog7 11111
+        ./scripts/wait-port.sh hog8 11111
+        ./scripts/wait-port.sh hog11 11111
+      shell: bash
+    - name: clear work dirs
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
+      shell: bash
+    - name: launch loadgen
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
+      shell: bash
+    - name: wait for loadgen
+      run: ./scripts/wait-port.sh hog7 11222
+      shell: bash
+    - name: launch hogexec
+      # the mempool runs on hog10
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
+      # can't wait for hogexec: that's waiting on the coordinator
+      shell: bash
+    - name: check hogexec is running
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
+      shell: bash
+    - name: launch event
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073 ${{ inputs.work-dir }}/
+      shell: bash
+    - name: launch hogdb
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb ${{ inputs.work-dir }}/ 10000000000 hog10:8072
+      shell: bash
+    - name: make sure procs are running
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 expect_running
+      shell: bash
+    - name: launch fake coordinator and mempool
+      run: |
+        ./${{ inputs.build-dir }}/hogd/mempool/test/coordinator hog10:8070 hog7:11222 > coordinator_output.txt 2>&1 &
+        bash -c 'timeout 90s ./${{ inputs.build-dir }}/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+      shell: bash
+    - name: clone metrics history # This is idempotent
+      run: ./scripts/clone_metrics_history.sh
+      shell: bash
+    - name: log integration metrics
+      run: ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+      shell: bash
+
+    - name: stop running processes
+      if: always()
+      shell: bash
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop

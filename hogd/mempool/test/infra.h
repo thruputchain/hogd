@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "account.hh"
+#include "built_contracts/contract_loader.h"
 #include "contract.hh"
-#include "contract_loader.h"
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -29,11 +29,11 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
-#include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "hogd/mempool/shared.h"
 #include "hogd/mempool/test/coordinator.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -53,7 +53,7 @@
 
 namespace hogd {
 
-constexpr static ContractAddress
+constexpr ContractAddress
 make_account_address(uint8_t i)
 {
   ContractAddress
@@ -69,58 +69,47 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra()
-  {
-    // Multiple tests run within the same process, so we need to clear the
-    // registration at the beginning of each test.
-    Registration::registration().clear();
-
-    // Start the mempool RPC servers. All of the subsystems register with the
-    // mempool, so the mempool RPC servers need to start first.
-    sched_db_server_.start_server(/*port=*/0);
-    sched_event_server_.start_server(/*port=*/0);
-    sched_exec_server_.start_server(/*port=*/0);
-    mempool_coord_server_.start_server(/*port=*/0);
-
-    // Initialize backend and blockchain state for tests.
-    init_db_backend();
-    init_contracts();
-
-    // Start the database RPC servers.
-    // [db_executor_server_] handles RPCs from the executor.
-    db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
-    db_executor_server_->start_server(/*port=*/0);
-    // [db_scheduler_server_] handles RPCs from the mempool.
-    db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-    db_scheduler_server_->start_server(/*port=*/0);
-
-    // Start the event RPC servers.
-    event_sched_server_.start_server(/*port=*/0);
-    event_exec_server_.start_server(/*port=*/0);
-
-    // We start the executor server in [register_executor_with_mempool()].
-
-    // Start the fake coordinator. We need a coordinator to register itself with
-    // the mempool. The real coordinator implementation is in the chuckd repo
-    // and is written in go. So to ease test implementation, we use a fake
-    // coordinator.
-    coordinator_sched_server_.start_server(/*port=*/0);
-
-    // Now have all of the subsystems register themselves with the mempool.
-    register_db_with_mempool();
-    register_event_with_mempool();
-    // The executor must register itself *after* the database and event servers
-    // have registered!
-    register_executor_with_mempool();
-    register_coordinator_with_mempool();
-  }
+  MempoolTestInfra(bool skip_genesis_block = false);
 
   ~MempoolTestInfra()
   {
-    // TODO(jhumphri): Implement clean shutdown for all RPC servers.
-    // We need to call [executor_.shut_down()] so that the [Exector] destructor
-    // does not block.
-    executor_.shut_down();
+    // jhumphri: I have noticed that the shutdown path is particularly prone to
+    // exceptions, so I wrap the entire destructor body in a try-catch block and
+    // I print the exception description followed by a [CHECK(false)]. This will
+    // bring more attention to an exception when it is thrown.
+    try {
+      mempool_coord_server_.impl_.scheduler()->shut_down()();
+      mempool_coord_server_.shut_down();
+
+      // TODO(jhumphri): Implement clean shutdown for all RPC servers.
+      // We need to call [executor_.shut_down()] so that the [Exector]
+      // destructor does not block.
+      executor_.shut_down();
+
+      coordinator_sched_server_.shut_down();
+
+      event_exec_server_.shut_down();
+      event_sched_server_.shut_down();
+
+      db_scheduler_server_->shut_down();
+      db_scheduler_server_.reset();
+      db_executor_server_->shut_down();
+      db_executor_server_.reset();
+      // [ctx_] holds an instance of [sched_db_client], so we need to destroy it
+      // so that the [sched_db_client] is in turned destroyed and therefore does
+      // not continue using the default coropoll.
+      ctx_.reset();
+
+      sched_exec_server_.shut_down();
+      sched_event_server_.shut_down();
+      sched_db_server_.shut_down();
+    } catch (const std::exception &e) {
+      error("~MempoolTestInfra received exception: {}", e.what());
+      CHECK(false);
+    } catch (...) {
+      error("~MempoolTestInfra received exception");
+      CHECK(false);
+    }
   }
 
   void set_hogs(const ContractAddress &account, int group, BlockHeight age,
@@ -151,6 +140,7 @@ public:
   void set_dbtip(const DbTip &db_tip)
   {
     CHECK(db_.write_dbtip(db_tip).has_value());
+    ctx_->get_tip() = db_tip;
   }
 
   // This getter is used by [auth_test.cc].
@@ -162,23 +152,14 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr size_t kRamDbBytes = 1024 * 1024 * 1024; // 1 GiB.
+  static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
   static std::string address(const std::string &host, uint16_t port)
   {
     return std::format("{}:{}", host, port);
   }
 
-  template<typename T>
-  static auto create_client(const std::string &host, uint16_t port)
-  {
-    x23::UniqueFd fd =
-        x23::tcpconnect(*x23::HostPort{host.c_str(), port}.to_addr());
-    return x23::rpc_stream_logged(default_coropoll(), fd.release())
-        ->client(T{});
-  }
-
-  void init_db_backend()
+  void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
   {
     // check the database's integrity and find the highest valid LSN.
     DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
@@ -194,8 +175,7 @@ private:
     CHECK(ramdb.has_value());
 
     db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(db_, trie_);
-    set_dbtip({.height = 0, .hash = {}, .id = 0});
+    ctx_ = std::make_unique<RPCContext>(db_, trie_, std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
@@ -308,17 +288,18 @@ private:
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.
-  CoordinatorSchedServer coordinator_sched_server_;
+  RpcServer<CoordinatorSchedRpc> coordinator_sched_server_;
 
   // The mempool servers.
-  RpcServer<MempoolDbRpc> sched_db_server_;
-  RpcServer<MempoolEventRpc> sched_event_server_;
-  RpcServer<MempoolExecutorRpc> sched_exec_server_;
   // We keep the [mempool_coord_server_] declaration below the various
   // database-related declarations above so that it is destructed first. We want
   // the database RPC server and its backend to be running so that the mempool
   // can flush its cache.
-  MempoolCoordinatorServer mempool_coord_server_;
+  RpcServer<MempoolDbRpc> sched_db_server_;
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_.impl_);
+  RpcServer<MempoolEventRpc> sched_event_server_;
+  RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };
 
 } // namespace hogd

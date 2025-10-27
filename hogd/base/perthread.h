@@ -89,6 +89,9 @@ public:
   template<typename F> static void for_each(size_t idx, F func)
   {
     for (TLItems *items : threads_) {
+      // TODO(geoff): Either handle the error properly in resize(),
+      // or add a runtime check to skip items here.
+      assert(items != nullptr);
       if (items->size() > idx)
         func((*items)[idx]);
     }
@@ -129,6 +132,8 @@ private:
       try {
         threads_.resize(threads_.size() - 1);
       } catch (const std::exception &e) {
+        // TODO(geoff): If this occurs, we will then
+        // later dereference a null pointer in for_each().
         threads_[i] = nullptr;
       }
       break;

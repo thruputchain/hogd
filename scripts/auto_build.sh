@@ -1,5 +1,16 @@
 #!/bin/bash
 
+SCRIPT_NAME=$(basename "$0")
+CURRENT_PID=$$
+
+# Find and kill other processes with the same name.
+for pid in $(pgrep -f "$SCRIPT_NAME"); do
+  if [ "$pid" != "$CURRENT_PID" ]; then
+    echo "Killing previous build.sh process (PID $pid)..."
+    kill -9 "$pid" 2>/dev/null
+  fi
+done
+
 # Get the repo root (absolute path)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "Error: not inside a Git repository."

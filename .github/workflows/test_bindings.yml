@@ -48,8 +48,10 @@ jobs:
       run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - name: configure test bindings
+      run: ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
     - name: build test bindings
-      run: ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address"
+      run: make -C build -j test_ffi_test
     - name: run ffi tests
       run: ./build/hogd/test_ffi/test_ffi_test
 

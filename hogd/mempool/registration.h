@@ -11,12 +11,12 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/mempool/shared.h"
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
 #include "x23/vec.h"
 

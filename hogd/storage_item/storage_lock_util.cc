@@ -50,8 +50,8 @@ delta_to_typeclass(StorageDelta const &delta,
     return StorageItemTypeClass(StorageItemType::kItemTypeDeleted);
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
     return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
-    return StorageItemTypeClass(StorageItemType::kItemTypeReplayCache);
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
+    return StorageItemTypeClass(StorageItemType::kItemTypeReplayCacheData);
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     return StorageItemTypeClass(StorageItemType::kItemTypeAuthData);
   case StorageDeltaType::kDeltaTypeDeployContract:
@@ -116,11 +116,11 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeDeleted);
     return lock;
-  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     lock.full_typeclass_lock().extra_lock_data.item_type(
-        StorageItemType::kItemTypeReplayCache);
-    lock.full_typeclass_lock().extra_lock_data.nonces() =
-        delta.replay_cache_modify().nonces;
+        StorageItemType::kItemTypeReplayCacheData);
+    lock.full_typeclass_lock().extra_lock_data.uniquifier() =
+        delta.consume_uniquifier_args().uniquifier;
     return lock;
   case StorageDeltaType::kDeltaTypeAuthDataChange:
   {

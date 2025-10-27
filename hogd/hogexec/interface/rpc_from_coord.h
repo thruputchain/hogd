@@ -3,15 +3,18 @@
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "exec_sched.hh"
-#include "hogd/base/rpc_server.h"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
@@ -26,7 +29,7 @@ public:
 
   ExecutorMempoolRpc() = default;
 
-  void init(IntroExecResult &&exec_result)
+  void init(IntroExecResult &&exec_result, size_t n_exec_threads)
   {
     self_executor_id_ = exec_result.exec_id;
 
@@ -36,7 +39,17 @@ public:
         EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
-                                               std::move(event_server_proxy));
+                                               std::move(event_server_proxy),
+                                               n_exec_threads);
+    info("ExecutorMempoolRpc: initialized with {} threads", n_exec_threads);
+    ready_flag_ = true;
+  }
+
+  ExecResult executorsched_ready()
+  {
+    if (!ready_flag_)
+      return ExecResult::ExecResultSystemError;
+    return ExecResult::ExecResultOK;
   }
 
   // Disable copy and move
@@ -81,13 +94,26 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  TransactionID allocate_tx_id();
+  // Allocates a contiguous block of transaction IDs.
+  // Returns the first transaction ID in the block
+  // (so i.e. the allocated ids are [first_id, first_id + count - 1] inclusive)
+  TransactionID allocate_tx_ids(size_t count);
+
+  ATTRIBUTE_ALWAYS_INLINE bool initialize_check()
+  {
+    return executor_states_ != nullptr;
+  }
+
+  PerThreadARC<ExecutorContext> *try_get_context(BlockID block_id,
+                                                 ExecutionMode mode);
+  void release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
 
   std::unique_ptr<ExecutorStateManager> executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
+  std::atomic<bool> ready_flag_ = false;
 };
 
 static_assert(is_ExecutorSched1<ExecutorMempoolRpc *, x23::MaybeAsync>);

@@ -74,7 +74,8 @@ ERC20ExperimentState::generate_experiment()
                              erc20_meta::entrypoint<"initialize">(),
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
-                             int128_t{1'000'000} * config_.num_accounts);
+                             // The number of hogs each wallet starts with.
+                             int128_t{500'000} * config_.num_accounts);
   erc20_address_ =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
@@ -89,7 +90,7 @@ ERC20ExperimentState::generate_experiment()
                                wallet_meta::entrypoint<"initialize">(),
                                wallet_meta::make_calldata<"initialize">(
                                    wallet.public_key),
-                               1'000'000'000);
+                               500'000);
   }
 
   // make unfurl txs
@@ -114,7 +115,7 @@ ERC20ExperimentState::generate_experiment()
                     {
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                        .gas_limit = GasAmount{1'000'000},
+                        .gas_limit = GasAmount{20'000},
                         .calldata = wallet_meta::make_calldata<"do_action">(
                             ed25519_sign(wallets_[0].secret_key,
                                          internal_calldata),
@@ -203,7 +204,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                 .invoked_address = wallets_[sender].address,
                                 .entrypoint =
                                     wallet_meta::entrypoint<"do_action">(),
-                                .gas_limit = GasAmount{1'000'000},
+                                .gas_limit = GasAmount{20'000},
                                 .calldata =
                                     wallet_meta::make_calldata<"do_action">(
                                         ed25519_sign(

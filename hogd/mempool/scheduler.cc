@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <functional>
 #include <map>
-#include <print>
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
@@ -59,7 +58,7 @@ Scheduler::read_average_hog_age(const ContractAddressBatch &addresses,
     co_return true;
   }
 
-  HogAgeResult res = co_await db_sched_client_.dbsched_get_hog_ages(to_send);
+  HogAgeResult res = co_await db_sched_client_->dbsched_get_hog_ages(to_send);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     co_return false;
   }
@@ -89,7 +88,7 @@ Scheduler::write_average_hog_age(const ContractAddressBatch &addresses)
     }
     ages.push_back(it->second);
   }
-  co_return (co_await db_sched_client_.dbsched_write_hog_ages(ages)) ==
+  co_return (co_await db_sched_client_->dbsched_write_hog_ages(ages)) ==
       DbSchedResult::DbSchedResultOK;
 }
 
@@ -156,6 +155,7 @@ Scheduler::add_txs(const SignedTransactionBatch &txs)
           info.tx.tx.uniquifier.block_expiry_height;
       CHECK(expiry_to_tx_[expiry_height].insert(&it->second).second);
     }
+    size_++;
   }
 }
 
@@ -196,10 +196,10 @@ Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 
     // We should cycle if either of the following is true:
     // 1. Cycling will increase the average age of the
-    // [kHogAgeGroupToSchedule]
-    //    group.
+    //    [kHogAgeGroupToSchedule] group.
+    //
     // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
-    //    schedule tx that requires [gas_limit] hogs, but cycling will add
+    //    schedule a tx that requires [gas_limit] hogs, but cycling will add
     //    enough hogs to the group to schedule it.
     if (already_scheduled_average_older || combined_averages_older ||
         (account_to_tx_[account].empty() && gas_limit > to_schedule)) {
@@ -269,28 +269,46 @@ Scheduler::cycle_groups(const ContractAddress &account)
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   cached_hogs_[account] = new_averages;
-  CHECK(co_await write_average_hog_age({account}));
+
+  // TODO(jhumphri): Flush all hog ages periodically, ideally on a background
+  // thread.
+  // CHECK(co_await write_average_hog_age({account}));
 
   update_accounts({account});
+
+  co_return;
+}
+
+size_t
+Scheduler::num_stranded() const
+{
+  size_t num_stranded = 0;
+  for (const auto &[_, gas_map] : stranded_) {
+    for (const auto &[_, txs] : gas_map) {
+      num_stranded += txs.size();
+    }
+  }
+  return num_stranded;
 }
 
 void
 Scheduler::dump_runqueue() const
 {
   for (const auto &[height, tx_infos] : age_to_tx_) {
-    std::println("runqueue age {}:", height);
-    for (const TxInfo *info : tx_infos) {
-      std::println("  - account {}", info->tx.tx.invocation.invoked_address[0]);
+    info("runqueue age {}:", height);
+    for (const TxInfo *i : tx_infos) {
+      info("  - tx from account {}", i->tx.tx.invocation.invoked_address[0]);
     }
   }
+  info("num stranded: {}", num_stranded());
 }
 
 x23::Async<void>
 Scheduler::process_received_hogs(const ContractAddress &account,
-                                 uint128_xdr num_received,
+                                 uint128_t num_received,
                                  BlockHeight current_block)
 {
-  if (!from_xdr(num_received)) {
+  if (!num_received) {
     co_return;
   }
 
@@ -302,15 +320,15 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
 
   new_averages.num_hogs[kHogAgeGroupReceived] =
-      to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
+      to_xdr(from_xdr(received_hogs) + num_received);
   {
     // See comment above for [compute_average_age()].
     //
     // Note that [compute_average_age()] will never divide by 0 because we
     // check at the top of this function that [num_received] is not 0.
     new_averages.average_ages[kHogAgeGroupReceived] =
-        compute_average_age(from_xdr(received_hogs), received_age,
-                            from_xdr(num_received), current_block);
+        compute_average_age(from_xdr(received_hogs), received_age, num_received,
+                            current_block);
   }
   cached_hogs_[account] = new_averages;
 
@@ -325,9 +343,88 @@ Scheduler::process_received_hogs(const ContractAddress &account,
   // hogs into the other groups and then potentially add stranded txs to the
   // runqueue. We need to call [cycle_groups()] twice to get the
   // [kHogAgeGroupReceived] hogs into the [kHogAgeGroupToSchedule] group.
-  if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+  if (account_to_tx_[account].empty() && stranded_.contains(account)) {
     co_await cycle_groups(account);
     co_await cycle_groups(account);
+  }
+}
+
+// TODO(jhumphri): Add test for this.
+x23::Async<void>
+Scheduler::process_deducted_hogs(const ContractAddress &account,
+                                 uint128_t num_deducted)
+{
+  if (!num_deducted) {
+    co_return;
+  }
+
+  CHECK(co_await read_average_hog_age({account}, /*force=*/false));
+  const HogAge &averages = cached_hogs_[account];
+  HogAge new_averages = averages;
+
+  const uint128_t received_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+  const uint128_t already_scheduled_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const uint128_t to_schedule_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+
+  CHECK_LE(num_deducted,
+           to_schedule_hogs + already_scheduled_hogs + received_hogs);
+
+  bool removed_txs_from_runqueue = false;
+  for (ssize_t i = kHogAgeGroupReceived; i >= kHogAgeGroupToSchedule; i--) {
+    if (i == kHogAgeGroupToSchedule && num_deducted > to_schedule_hogs) {
+      removed_txs_from_runqueue = true;
+
+      // TODO(jhumphri): Optimize this. It would be nice if we could just remove
+      // the account's lower priority txs until we recover enough hogs rather
+      // than removing all txs. Note that if we do this, I need to make sure to
+      // [cached_hogs_] has the total number of hogs for the txs on the runqueue
+      // before I call [update_accounts()] but that function expects this as a
+      // precondition.
+      for (TxInfo *info : account_to_tx_[account]) {
+        CHECK_EQ(age_to_tx_[info->age].erase(info), 1UL);
+        if (age_to_tx_[info->age].empty()) {
+          CHECK_EQ(age_to_tx_.erase(info->age), 1UL);
+        }
+
+        const BlockHeight expiry_height =
+            info->tx.tx.uniquifier.block_expiry_height;
+        CHECK_EQ(expiry_to_tx_[expiry_height].erase(info), 1UL);
+        if (expiry_to_tx_[expiry_height].empty()) {
+          CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
+        }
+      }
+
+      for (TxInfo *info : account_to_tx_[account]) {
+        // We have recovered the hogs from this tx, so add the hogs back to the
+        // [kHogAgeGroupToSchedule] group.
+        new_averages.num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(from_xdr(new_averages.num_hogs[kHogAgeGroupToSchedule]) +
+                   info->tx.tx.invocation.gas_limit);
+        CHECK(stranded_[account][info->tx.tx.invocation.gas_limit]
+                  .insert(info)
+                  .second);
+      }
+      CHECK_EQ(account_to_tx_.erase(account), 1UL);
+    }
+
+    const uint128_t current = from_xdr(averages.num_hogs[i]);
+    uint128_t to_deduct = std::min(num_deducted, current);
+    new_averages.num_hogs[i] = to_xdr(current - to_deduct);
+    num_deducted -= to_deduct;
+    if (!num_deducted) {
+      break;
+    }
+  }
+  cached_hogs_[account] = new_averages;
+
+  // TODO(jhumphri): Add a test for this.
+  // If we removed all of the account's txs from the runqueue to recover their
+  // hogs, we need to add back as many txs to the runqueue as we can.
+  if (removed_txs_from_runqueue) {
+    update_accounts({account});
   }
 }
 
@@ -358,37 +455,39 @@ Scheduler::update_accounts(const x23::Vec<ContractAddress> &accounts)
     // Handle txs that are currently stranded. We may now have enough hogs to
     // add some or all of them to the runqueue.
     HogAge &averages = cached_hogs_[account];
-    for (auto gas_it = stranded_[account].begin();
-         gas_it != stranded_[account].end();) {
-      GasAmount gas_limit = gas_it->first;
-      std::unordered_set<TxInfo *> &infos = gas_it->second;
+    if (stranded_.contains(account)) {
+      for (auto gas_it = stranded_[account].begin();
+           gas_it != stranded_[account].end();) {
+        GasAmount gas_limit = gas_it->first;
+        std::unordered_set<TxInfo *> &infos = gas_it->second;
 
-      for (auto it = infos.begin(); it != infos.end();) {
-        TxInfo *info = *it;
-        CHECK_EQ(gas_limit, info->tx.tx.invocation.gas_limit);
+        for (auto it = infos.begin(); it != infos.end();) {
+          TxInfo *info = *it;
+          CHECK_EQ(gas_limit, info->tx.tx.invocation.gas_limit);
 
-        if (gas_limit > from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
-          break;
+          if (gas_limit > from_xdr(averages.num_hogs[kHogAgeGroupToSchedule])) {
+            break;
+          }
+
+          it = stranded_[account][gas_limit].erase(it);
+          averages.num_hogs[kHogAgeGroupToSchedule] =
+              to_xdr(from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) -
+                     info->tx.tx.invocation.gas_limit);
+          info->age = averages.average_ages[kHogAgeGroupToSchedule];
+          CHECK(account_to_tx_[account].insert(info).second);
+          CHECK(age_to_tx_[info->age].insert(info).second);
         }
 
-        it = stranded_[account][gas_limit].erase(it);
-        averages.num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]) -
-                   info->tx.tx.invocation.gas_limit);
-        info->age = averages.average_ages[kHogAgeGroupToSchedule];
-        CHECK(account_to_tx_[account].insert(info).second);
-        CHECK(age_to_tx_[info->age].insert(info).second);
+        if (infos.empty()) {
+          gas_it = stranded_[account].erase(gas_it);
+        }
+        else {
+          gas_it++;
+        }
       }
-
-      if (infos.empty()) {
-        gas_it = stranded_[account].erase(gas_it);
+      if (stranded_[account].empty()) {
+        CHECK_EQ(stranded_.erase(account), 1UL);
       }
-      else {
-        gas_it++;
-      }
-    }
-    if (stranded_[account].empty()) {
-      CHECK_EQ(stranded_.erase(account), 1UL);
     }
   }
 }
@@ -425,8 +524,8 @@ Scheduler::get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
 {
   while (num) {
     std::unordered_map<ContractAddress, TxInfo *> account_set;
-    for (TxInfo *i : info) {
-      account_set.insert({i->account, i});
+    for (TxInfo *info : info) {
+      account_set.insert({info->account, info});
     }
 
     std::vector<TxInfo *> to_schedule;
@@ -484,7 +583,7 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
                  info.tx.tx.invocation.gas_limit);
     }
 
-    CHECK(find_and_remove_from_runqueue(tx_hashes, /*ret=*/nullptr));
+    CHECK(find_and_remove_from_runqueue({tx_hash}, /*ret=*/nullptr));
     {
       const BlockHeight expiry_height =
           info.tx.tx.uniquifier.block_expiry_height;
@@ -500,8 +599,16 @@ Scheduler::discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes)
   // for all accounts in [accounts], add any stranded txs to the runqueue if
   // possible.
   for (const ContractAddress &account : accounts) {
+    uint128_t reserved_hogs = 0;
+    for (const TxInfo *info : account_to_tx_[account]) {
+      reserved_hogs += info->tx.tx.invocation.gas_limit;
+    }
+    cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule] = to_xdr(
+        from_xdr(cached_hogs_[account].num_hogs[kHogAgeGroupToSchedule]) +
+        reserved_hogs);
+
     update_accounts({account});
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
+    if (account_to_tx_[account].empty() && stranded_.contains(account)) {
       co_await cycle_groups(account);
     }
   }
@@ -520,12 +627,32 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   co_await discard_expired_txs(block_height);
 
   size_t num_scheduled = 0;
-  while (num_scheduled < block_size && !age_to_tx_.empty()) {
+  std::unordered_set<ContractAddress> scheduled_accounts;
+
+  while (num_scheduled < block_size) {
+    if (age_to_tx_.empty()) {
+      for (const ContractAddress &account : scheduled_accounts) {
+        if (!stranded_.contains(account)) {
+          continue;
+        }
+        CHECK(!stranded_[account].empty());
+        GasAmount min_gas_amount = stranded_[account].begin()->first;
+        co_await cycle_if_needed(account, min_gas_amount);
+      }
+
+      // Check if there are now txs on the runqueue. If there are still no txs
+      // on the runqueue, then break.
+      if (age_to_tx_.empty()) {
+        break;
+      }
+    }
+
     const size_t num_remaining = block_size - num_scheduled;
     auto &[average_age, info] = *age_to_tx_.begin();
+    size_t num_added_this_iteration = std::min(info.size(), num_remaining);
 
     if (info.size() <= num_remaining) {
-      // All of the txs in [info] in the block, so we add all of them. Note
+      // All of the txs in [info] fit in the block, so we add all of them. Note
       // that [get_txs_all()] removes the txs from [info], so it is important
       // that we add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
@@ -540,86 +667,63 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
     }
+
+    for (size_t i = 0; i < num_added_this_iteration; i++) {
+      size_t idx = txs.size() - i - 1;
+      CHECK_LT(idx, txs.size());
+      const SignedTransaction &tx = txs.at(idx);
+      scheduled_accounts.insert(tx.tx.invocation.invoked_address);
+      return_tx_hogs(tx, block_height);
+    }
   }
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
       {hashes, txs};
   co_return ret;
 }
 
-// TODO(jhumphri): We should remove the [block] parameter. We should know the
-// current block number based on the block number passed to [schedule()].
-x23::Async<void>
-Scheduler::mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                             BlockHeight block)
+void
+Scheduler::return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height)
 {
-  std::unordered_set<ContractAddress> accounts;
+  HogAge &age = cached_hogs_[tx.tx.invocation.invoked_address];
 
-  for (const SignedTransactionHash &hash : hashes) {
-    auto it = hash_to_tx_.find(hash);
-    CHECK(it != hash_to_tx_.end());
-    TxInfo &info = it->second;
-    HogAge &age = cached_hogs_[info.tx.tx.invocation.invoked_address];
-    accounts.insert(info.account);
+  const uint128_xdr to_schedule_hogs =
+      to_xdr(static_cast<uint128_t>(tx.tx.invocation.gas_limit));
+  const BlockHeight to_schedule_age = block_height;
 
-    const uint128_xdr to_schedule_hogs =
-        to_xdr(static_cast<uint128_t>(info.tx.tx.invocation.gas_limit));
-    const BlockHeight to_schedule_age = block;
+  const uint128_xdr already_scheduled_hogs =
+      age.num_hogs[kHogAgeGroupAlreadyScheduled];
+  const BlockHeight already_scheduled_age =
+      age.average_ages[kHogAgeGroupAlreadyScheduled];
 
-    const uint128_xdr already_scheduled_hogs =
-        age.num_hogs[kHogAgeGroupAlreadyScheduled];
-    const BlockHeight already_scheduled_age =
-        age.average_ages[kHogAgeGroupAlreadyScheduled];
-
-    // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
-    bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
-    age.num_hogs[kHogAgeGroupAlreadyScheduled] =
-        to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
-    if (empty) {
-      age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
-    }
-    else {
-      // See comment above for [compute_average_age()].
-      age.average_ages[kHogAgeGroupAlreadyScheduled] =
-          compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
-                              from_xdr(already_scheduled_hogs),
-                              already_scheduled_age);
-    }
-    {
-      const BlockHeight expiry_height =
-          info.tx.tx.uniquifier.block_expiry_height;
-      CHECK_EQ(expiry_to_tx_[expiry_height].erase(&info), 1UL);
-      if (expiry_to_tx_[expiry_height].empty()) {
-        CHECK_EQ(expiry_to_tx_.erase(expiry_height), 1UL);
-      }
-    }
-    CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+  // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
+  bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
+  if (empty) {
+    age.average_ages[kHogAgeGroupAlreadyScheduled] = to_schedule_age;
   }
-  for (const ContractAddress &account : accounts) {
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      co_await cycle_groups(account);
-    }
+  else {
+    // See comment above for [compute_average_age()].
+    age.average_ages[kHogAgeGroupAlreadyScheduled] =
+        compute_average_age(from_xdr(to_schedule_hogs), to_schedule_age,
+                            from_xdr(already_scheduled_hogs),
+                            already_scheduled_age);
   }
 }
 
-x23::Async<SignedTransactionBatch>
-Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
+x23::Async<void>
+Scheduler::mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes)
 {
-  std::unordered_set<ContractAddress> accounts;
-  SignedTransactionBatch txs;
-  txs.reserve(hashes.size());
+  CHECK(!tx_hashes.empty());
+  const SignedTransactionHash &tx_hash = tx_hashes.front();
+  CHECK(hash_to_tx_.contains(tx_hash));
+  ContractAddress account =
+      hash_to_tx_[tx_hash].tx.tx.invocation.invoked_address;
 
-  for (const SignedTransactionHash &hash : hashes) {
+  for (const SignedTransactionHash &hash : tx_hashes) {
     auto it = hash_to_tx_.find(hash);
     CHECK(it != hash_to_tx_.end());
     TxInfo &info = it->second;
-    accounts.insert(info.account);
-
-    cached_hogs_[info.tx.tx.invocation.invoked_address]
-        .num_hogs[kHogAgeGroupToSchedule] =
-        to_xdr(from_xdr(cached_hogs_[info.tx.tx.invocation.invoked_address]
-                            .num_hogs[kHogAgeGroupToSchedule]) +
-               info.tx.tx.invocation.gas_limit);
-    txs.push_back(info.tx);
     {
       const BlockHeight expiry_height =
           info.tx.tx.uniquifier.block_expiry_height;
@@ -629,17 +733,12 @@ Scheduler::mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes)
       }
     }
     CHECK_EQ(hash_to_tx_.erase(hash), 1UL);
+    size_--;
   }
-  // Now that we have refunded the hogs to the [kHogAgeGroupToSchedule] group
-  // for all accounts in [accounts], add any stranded txs to the runqueue if
-  // possible.
-  for (const ContractAddress &account : accounts) {
-    update_accounts({account});
-    if (account_to_tx_[account].empty() && !stranded_[account].empty()) {
-      co_await cycle_groups(account);
-    }
+
+  if (account_to_tx_[account].empty() && stranded_.contains(account)) {
+    co_await cycle_groups(account);
   }
-  co_return txs;
 }
 
 bool
@@ -695,6 +794,7 @@ Scheduler::find_and_remove_from_runqueue(
         CHECK_EQ(stranded_.erase(it->second.account), 1UL);
       }
     }
+    size_--;
   }
   return true;
 }

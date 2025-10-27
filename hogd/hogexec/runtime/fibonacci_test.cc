@@ -103,18 +103,18 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
   auto contract = hogd::load_contract("fibonacci.wasm");
-  auto fib_contract_addr = make_contract_address(0);
+  constexpr static ContractAddress kFibContractAddr = make_contract_address(0);
   write_contract(contract);
-  write_deployment(fib_contract_addr, contract);
-  setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
+  write_deployment(kFibContractAddr, contract);
+  setup_grant_storage_token(kFibContractAddr, 1'000'000'000);
 
   NativeContractBuilder builder;
 
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
-      [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
-                          uint32_t expect) -> InvokeStatus<void> {
-        fib_client_t client(fib_contract_addr);
+      [](SystemCallHandler &handler, uint32_t input,
+         uint32_t expect) -> InvokeStatus<void> {
+        fib_client_t client(kFibContractAddr);
         auto [decoded, _gas] =
             client.template invoke<"fibonacci">(handler, input);
         if (!decoded.has_value() || !decoded.value().has_value()) {
@@ -145,7 +145,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
           {ContractType::kNative, native_runtime_context},
           {ContractType::kWasmi, wasm_runtime_context_}});
 
-  fib_client_t client(fib_contract_addr);
+  fib_client_t client(kFibContractAddr);
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   {

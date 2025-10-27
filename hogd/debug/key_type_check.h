@@ -43,6 +43,13 @@ check_item_key_type(StorageKeyType key_type, StorageItemType item_type)
         assert(false);
       }
       break;
+    case StorageKeyType::kStorageKeyTypeReplayCache:
+      if (item_type != StorageItemType::kItemTypeReplayCacheData) {
+        error("item type is not valid for key type: {} with {}", key_type,
+              item_type);
+        assert(false);
+      }
+      break;
     default:
       return;
       // item type is valid for key type

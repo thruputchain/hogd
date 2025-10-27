@@ -448,8 +448,10 @@ public:
   }
   constexpr void reserve(size_type cap)
   {
-    if (cap > capacity())
+    if (cap > capacity()) {
+      cap = std::max(cap, std::min(2 * capacity(), max_size()));
       realloc(cap);
+    }
   }
   constexpr size_type capacity() const noexcept { return b_.bufend - b_.begin; }
   constexpr void shrink_to_fit() { realloc(size()); }
@@ -534,8 +536,8 @@ public:
       requires requires { value_type(*first); }
   {
     if (const difference_type num = last - first; num > 0) {
-      if (capacity() - size() < size_t(num))
-        realloc(size() + num);
+      if (capacity() - size() < size_type(num))
+        reserve(size() + num);
       if !consteval {
         std::uninitialized_copy(first, last, b_.end);
         b_.end += num;
@@ -967,6 +969,19 @@ uformat_to(Out *s, std::format_string<Args...> fmt, Args &&...args)
     char *p = reinterpret_cast<char *>(p0);
     char *p2 = std::vformat_to(p + old_size, fmt.get(),
                                std::make_format_args(args...));
+    return p2 - p;
+  });
+}
+
+template<is_bytevec Out>
+void
+uvformat_to(Out *s, std::string_view fmt, std::format_args args)
+{
+  size_t old_size = s->size();
+  size_t new_size = old_size + detail::vformatted_size(fmt, args);
+  s->resize_and_overwrite(new_size, [&](auto *p0, size_t count) {
+    char *p = reinterpret_cast<char *>(p0);
+    char *p2 = std::vformat_to(p + old_size, fmt, args);
     return p2 - p;
   });
 }

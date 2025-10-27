@@ -1,3 +1,4 @@
+#include <cassert>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -18,6 +19,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
 
@@ -58,7 +60,7 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
     // some items that are in the trie
 
-    RPCContext ctx(dao, trie);
+    RPCContext ctx(dao, trie, nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
@@ -68,8 +70,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     }));
     ASSERT_TRUE(
         ctx.get_db().write_cost_model(ctx.get_cost_model()).has_value());
-    auto btx = ctx.open_block_tx(1);
-    ASSERT_TRUE(btx);
+    auto open_result = ctx.open_block_tx(1);
+    ASSERT_TRUE(open_result.has_value());
 
     auto *itx = ctx.get_invoke_tx(1, 1);
 
@@ -78,27 +80,37 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     auto cleanup =
         x23::Defer([itx, sp]() { itx->rollback_to_savepoint(sp - 1); });
 
-    ASSERT_TRUE(
-        itx->request_nnint128(make_address_balance_item_key(ContractAddress{0}),
-                              ctx.get_cost_model().get_nnint_cost() +
-                                  ctx.get_cost_model().get_bytestring_cost(6))
-            .has_value());
-    ASSERT_TRUE(itx->request_nnint128(ItemKey(ContractAddress{0},
-                                              StorageKeyContractData{0}),
-                                      10)
+    ASSERT_TRUE(itx->request_nnint128(
+                       make_address_balance_item_key(ContractAddress{0}),
+                       ctx.get_cost_model().get_nnint_cost() +
+                           ctx.get_cost_model().get_bytestring_cost(6),
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
                     .has_value());
-    ASSERT_TRUE(itx->request_bytes(ItemKey(ContractAddress{0},
-                                           StorageKeyContractData{1}),
-                                   std::as_bytes(std::span("hello")))
+    ASSERT_TRUE(itx->request_nnint128(
+                       ItemKey(ContractAddress{0}, StorageKeyContractData{0}),
+                       10,
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
+                    .has_value());
+    ASSERT_TRUE(itx->request_bytes(
+                       ItemKey(ContractAddress{0}, StorageKeyContractData{1}),
+                       std::as_bytes(std::span("hello")),
+                       std::to_underlying(StorageItemRPCFlags::kStorageNone))
                     .has_value());
 
     // invoketx assertions fail if you call the dtor in an invalid state (where
     // i.e requests failed).
     cleanup.release();
+    ASSERT_TRUE(itx->sync_balance_locks().has_value());
 
     itx->commit();
-    ASSERT_TRUE((*btx)->commit().has_value());
-    ctx.close_block_tx(1);
+    ctx.close_invoke_tx(1, 1, itx);
+
+    auto *btx = ctx.get_block_tx(1, false);
+    assert(btx != nullptr);
+    ASSERT_TRUE((btx->get()).commit().has_value());
+
+    ASSERT_TRUE(btx->initiate_shutdown());
+    ctx.remove_shutdown_block_tx(1);
 
     ASSERT_TRUE(ctx.update_dbtip(1).has_value());
 

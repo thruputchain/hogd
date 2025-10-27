@@ -16,20 +16,6 @@ add_custom_target(
 
 add_custom_command(
     OUTPUT
-        ${CMAKE_BINARY_DIR}/hogd/xdr/syscall_args.x
-    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
-    COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py
-    --output_dir=${CMAKE_BINARY_DIR}/hogd/xdr/
-    --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
-    --syscall_args_x
-)
-add_custom_target(
-	generate_syscall_args_x ALL
-	DEPENDS ${CMAKE_BINARY_DIR}/hogd/xdr/syscall_args.x
-)
-
-add_custom_command(
-    OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_inner.h
     DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
@@ -42,6 +28,8 @@ add_custom_target(
     generate_syscall_inner_h ALL
     DEPENDS ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_inner.h
 )
+
+add_dependencies(generate_syscall_inner_h generate_contract_types_ffi_h)
 
 add_custom_command(
     OUTPUT

@@ -1,5 +1,6 @@
 add_subdirectory(crypto)
 add_subdirectory(wasmi)
+add_subdirectory(contract_types)
 
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/wasmi/src/ffi_enums.rs

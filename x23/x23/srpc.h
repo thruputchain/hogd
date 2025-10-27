@@ -40,19 +40,37 @@
 
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <exception>
+#include <expected>
+#include <format>
+#include <functional>
 #include <print>
 #include <semaphore>
 #include <stop_token>
+#include <sys/socket.h>
 #include <thread>
+#include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <variant>
 
 #include <x23/cleanup.h>
 #include <x23/cpumap.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
+#include <x23/rpc_msg.hh>
+#include <x23/serialize.h>
 #include <x23/sockio.h>
 #include <x23/uiobuf.h>
 #include <x23/vec.h>
+#include <x23/x23.h>
 
 namespace x23 {
 
@@ -98,7 +116,7 @@ public:
   void stop() noexcept;
 
 protected:
-  using Xid = uint32_t;
+  using Xid = std::uint32_t;
 
   virtual ~SRpcFd();
 
@@ -296,6 +314,11 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   template<typename ProcMeta>
   ProcMeta::return_type send_call(const is_xdr_type auto &...args)
   {
+    // If this fails, you tried to make a blocking RPC call from
+    // within a coroutine, which can cause deadlock.
+    extern bool in_thread_pool();
+    assert(!in_thread_pool());
+
     auto msg = call_msg<ProcMeta>();
     const bool logging = logger_.active();
     Xid xid = logging ? genxid() : 0;

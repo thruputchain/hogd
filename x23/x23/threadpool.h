@@ -122,6 +122,7 @@
 #include <x23/cpumap.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
+#include <x23/signal.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -137,7 +138,7 @@ template<typename T> struct CpuHinted {
   [[no_unique_address]] T value;
   unsigned cpuhint;
 
-  template<std::constructible_from<> = T>
+  template<std::same_as<T> U = T> requires std::constructible_from<U>
   CpuHinted() noexcept : value{}, cpuhint{}
   {}
   CpuHinted(T v, unsigned h) noexcept : value(std::move(v)), cpuhint(h) {}
@@ -191,7 +192,7 @@ template<typename T> struct CpuHinted<std::atomic<T>> {
 
 class ThreadPool {
 public:
-  using Job = CpuHinted<std::coroutine_handle<>>;
+  using Job = CpuHinted<CoroHandle>;
 
   const size_t nthreads_;
   const size_t nqueues_;
@@ -209,31 +210,28 @@ public:
   template<typename R>
   void make_callback(CpuHinted<CoroCB<R>> cb, references<R> auto &&r)
   {
-    if (std::coroutine_handle<> h =
+    if (CoroHandle h =
             cb->set_result_without_resuming(std::forward<decltype(r)>(r)))
       go({h, cb.cpuhint});
   }
   void make_callback(CpuHinted<CoroCB<void>> cb)
   {
-    if (std::coroutine_handle<> h = cb->set_result_without_resuming())
+    if (CoroHandle h = cb->set_result_without_resuming())
       go({h, cb.cpuhint});
   }
 
+private:
+  struct [[nodiscard]] AwaitBackground {
+    ThreadPool &pool;
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(auto h) const noexcept { pool.go({h, cpuid()}); }
+    void await_resume() const noexcept {}
+  };
+
+public:
   // co_await pool.bg() suspends the current coroutine and resumes it
   // as soon as possible in a different thread.
-  [[nodiscard]] auto bg()
-  {
-    struct AwaitBackground {
-      ThreadPool &pool;
-      bool await_ready() const noexcept { return false; }
-      void await_suspend(std::coroutine_handle<> h) const noexcept
-      {
-        pool.go({h, cpuid()});
-      }
-      void await_resume() const noexcept {}
-    };
-    return AwaitBackground(*this);
-  }
+  [[nodiscard]] auto bg() { return AwaitBackground{*this}; }
 
   // Queue a callback to run in a thread of the ThreadPool.  Returns
   // immediately.  Since the task will consume one of the tasks in the
@@ -345,6 +343,8 @@ public:
 #endif // NDEBUG
   };
 
+  std::string show();
+
 private:
   // Timestamp for empty queues
   static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
@@ -383,6 +383,7 @@ private:
   };
 
   std::unique_ptr<RunQueue[]> runqueues_;
+  AutoSignalCbHandle sigcb_;
 
   // Return which queue a QPtr references, or -1 if none
   int qno(const QPtr &ptr) const
@@ -457,6 +458,7 @@ private:
   }
 
   void qselect(QPtr *lq, unsigned cpuhint);
+  void debug_dump();
 };
 
 } // namespace x23

@@ -2,42 +2,64 @@
 
 #include "hogd/storage_item/replay_cache.h"
 #include "storage_item.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
 TEST(ReplayCache, Basic)
 {
-  ReplayCache cache(ReplayCacheMetadata{.minimum_threshold = 10}, {11, 12, 14});
 
-  EXPECT_FALSE(cache.can_accept(9));
-  EXPECT_FALSE(cache.can_accept(10));
-  EXPECT_FALSE(cache.can_accept(11));
-  EXPECT_TRUE(cache.can_accept(13));
-  EXPECT_FALSE(cache.can_accept(14));
-  EXPECT_TRUE(cache.can_accept(15));
+  ReplayCache cache(10);
 
-  EXPECT_FALSE(cache.contains(10));
-  EXPECT_TRUE(cache.contains(11));
-  EXPECT_TRUE(cache.contains(12));
-  EXPECT_FALSE(cache.contains(13));
-  EXPECT_TRUE(cache.contains(14));
-  EXPECT_FALSE(cache.contains(15));
+  cache.add(Uniquifier{.block_expiry_height = 11, .nonce = 11});
+  cache.add(Uniquifier{.block_expiry_height = 12, .nonce = 12});
+  cache.add(Uniquifier{.block_expiry_height = 14, .nonce = 14});
 
-  EXPECT_EQ(cache.size(), 3);
+  EXPECT_FALSE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 9, .nonce = 9}));
+
+  EXPECT_FALSE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 9, .nonce = 9}));
+  EXPECT_TRUE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 10, .nonce = 10}));
+  EXPECT_FALSE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 11, .nonce = 11}));
+  EXPECT_TRUE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 13, .nonce = 13}));
+  EXPECT_FALSE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 14, .nonce = 14}));
+  EXPECT_TRUE(
+      cache.can_accept(Uniquifier{.block_expiry_height = 15, .nonce = 15}));
+
+  EXPECT_FALSE(
+      cache.contains(Uniquifier{.block_expiry_height = 10, .nonce = 10}));
+  EXPECT_TRUE(
+      cache.contains(Uniquifier{.block_expiry_height = 11, .nonce = 11}));
+  EXPECT_TRUE(
+      cache.contains(Uniquifier{.block_expiry_height = 12, .nonce = 12}));
+  EXPECT_FALSE(
+      cache.contains(Uniquifier{.block_expiry_height = 13, .nonce = 13}));
+  EXPECT_TRUE(
+      cache.contains(Uniquifier{.block_expiry_height = 14, .nonce = 14}));
+  EXPECT_FALSE(
+      cache.contains(Uniquifier{.block_expiry_height = 15, .nonce = 15}));
+
+  EXPECT_EQ(cache.data().uniquifiers.size(), 3);
 }
 
 TEST(ReplayCache, CountRemainingAfterClear)
 {
-  ReplayCache cache(ReplayCacheMetadata{.minimum_threshold = 10},
-                    {11, 12, 14, 15});
+  ReplayCache cache(
+      ReplayCacheData{
+          .uniquifiers = {Uniquifier{.block_expiry_height = 11, .nonce = 11},
+                          Uniquifier{.block_expiry_height = 12, .nonce = 12},
+                          Uniquifier{.block_expiry_height = 14, .nonce = 14},
+                          Uniquifier{.block_expiry_height = 15, .nonce = 15}}},
+      10);
 
-  EXPECT_EQ(cache.count_remaining_after_clear(10), 4);
-  EXPECT_EQ(cache.count_remaining_after_clear(11), 3);
-  EXPECT_EQ(cache.count_remaining_after_clear(12), 2);
-  EXPECT_EQ(cache.count_remaining_after_clear(13), 2);
-  EXPECT_EQ(cache.count_remaining_after_clear(14), 1);
-  EXPECT_EQ(cache.count_remaining_after_clear(15), 0);
-  EXPECT_EQ(cache.count_remaining_after_clear(16), 0);
+  ReplayCache cache2(cache.data(), 12);
+
+  EXPECT_EQ(cache2.committed_size(), 3);
 }
 
 } // namespace hogd

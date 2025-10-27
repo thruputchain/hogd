@@ -5,11 +5,9 @@
 #include <cstddef>
 #include <cstring>
 #include <sys/socket.h>
-#include <thread>
 #include <type_traits>
 
 // generated x23 headers
-#include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -18,7 +16,6 @@
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 

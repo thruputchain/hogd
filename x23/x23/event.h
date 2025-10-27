@@ -23,9 +23,11 @@
 #include <x23/corosync.h>
 #include <x23/corotrace.h>
 #include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/signal.h>
 #include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
@@ -92,8 +94,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
       std::conditional_t<kStructSize <= 0xffff, std::uint16_t,
                          std::conditional_t<kStructSize <= 0xffffffff,
                                             std::uint32_t, size_t>>>;
-  using Super = std::enable_shared_from_this<GenReadBuffer>;
-  static constexpr size_t kTrimSize = sizeof(Super) + (2 * sizeof(PosType));
+  static constexpr size_t kTrimSize = sizeof(RefCount) + (2 * sizeof(PosType));
   static_assert(kStructSize > kTrimSize);
   using Mem = std::array<char, kStructSize - kTrimSize>;
 
@@ -102,7 +103,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
   Mem m_;
 
   GenReadBuffer() noexcept = default;
-  GenReadBuffer(GenReadBuffer &&) noexcept = delete;
+  GenReadBuffer(const GenReadBuffer &) = delete;
 
   size_t nbuffered() const noexcept { return stop_ - start_; }
 
@@ -127,6 +128,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
     iov[1].iov_base = m_.data();
     iov[1].iov_len = m_.size();
     auto n = ::readv(fd, iov, 2);
+
     if (n <= ptrdiff_t(len))
       return n;
     stop_ = n - len;
@@ -163,48 +165,14 @@ struct WriteBuffer : RefCount {
       }
     return write(cp, fd, std::move(buf));
   }
-  Errno flush(CoroPoll &cp, BorrowedFd fd)
-  {
-    return Service{*this, cp, fd}.go();
-  }
+  inline Errno flush(CoroPoll &cp, BorrowedFd fd);
 
 private:
   std::atomic_bool want_write_{false};
   std::mutex service_lock_;
   MVar<BufVec> writer_;
 
-  class Service {
-  public:
-    [[nodiscard]]
-    Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
-      : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
-    {}
-
-    Errno go();
-
-  private:
-    WriteBuffer *wb_;
-    CoroPoll *cp_;
-    BorrowedFd fd_;
-    std::unique_lock<std::mutex> lk_;
-    bool got_eagain_{false};
-
-    Service(Service &&) noexcept = default;
-    bool work_needed()
-    {
-      if (wb_->want_write_)
-        return true;
-      lk_.unlock();
-      return wb_->want_write_ && lk_.try_lock();
-    }
-    BufVec get_work()
-    {
-      wb_->want_write_ = false;
-      return wb_->writer_.exchange({});
-    }
-    Errno write(BufVec &work);
-    static Detached worker(Service self, BufVec work);
-  };
+  class Service;
 };
 
 struct BufHolder {
@@ -220,34 +188,89 @@ struct BufHolder {
   }
 };
 
+template<typename T>
+concept has_syscall_result =
+    (std::signed_integral<T> && sizeof(T) >= sizeof(int)) ||
+    std::same_as<T, Errno> ||
+    requires(T t) { []<typename U>(std::expected<U, Errno> &) {}(t); };
+
+template<has_syscall_result T>
+inline bool
+is_eagain(T res)
+{
+  if constexpr (std::signed_integral<T>)
+    return res == -1 && errno == EAGAIN;
+  else {
+    if constexpr (requires {
+                    bool(res);
+                    { *res } -> decays_to<IoResult>;
+                  })
+      if (res)
+        return *res == IoResult::kAgain;
+    return res == Errno{EAGAIN};
+  }
+}
+
 class CoroPollImpl : public DestroyInhibit {
 public:
   using WorkItem = CpuHinted<CoroCB<Errno>>;
   ThreadPool &pool_;
 
+  template<bool Write> class WaitToken : private BorrowedFd {
+  public:
+    WaitToken() noexcept : BorrowedFd(kInvalidFd) {}
+    using BorrowedFd::get;
+    explicit operator bool() const noexcept { return get() != kInvalidFd; }
+    void reset() noexcept { *this = WaitToken{}; }
+
+    // You can pass a system call result through WaitToken to disable
+    // the token in the event that the result wasn't EAGAIN.
+    template<has_syscall_result T> T operator()(T res)
+    {
+      if (!is_eagain(res))
+        reset();
+      return res;
+    }
+
+  private:
+    using BorrowedFd::BorrowedFd;
+    WaitToken(const BorrowedFd &fd) : BorrowedFd(fd) {}
+    friend class CoroPollImpl;
+  };
+  using ReadToken = WaitToken<false>;
+  using WriteToken = WaitToken<true>;
+
   CoroPollImpl(ThreadPool &pool);
   ~CoroPollImpl();
 
-  void read_clear(BorrowedFd fd) { clear(fd, false); }
+  ReadToken read_clear(BorrowedFd fd)
+  {
+    clear(fd, false);
+    return fd;
+  }
 
-  // Do a read_clear(fd) before a read operation on an fd that might
-  // return EAGAIN.  If it does return EAGAIN, then co_await
-  // read_wait(fd) to wait for the file descriptor to be readable
+  // Do a tok = read_clear(fd) before a read operation on an fd that
+  // might return EAGAIN.  If it does return EAGAIN, then co_await
+  // read_wait(tok) to wait for the file descriptor to be readable
   // again.
-  Async<Errno> read_wait(BorrowedFd fd)
+  Async<Errno> read_wait(ReadToken fd)
   {
     auto [async, cb] = make_async<Errno>();
     setcb(fd, false, {cb, cpuid()});
     return std::move(async);
   }
 
-  void write_clear(BorrowedFd fd) { clear(fd, true); }
+  WriteToken write_clear(BorrowedFd fd)
+  {
+    clear(fd, true);
+    return fd;
+  }
 
-  // Do a write_clear(fd) before a write operation on an fd that might
-  // return EAGAIN.  If it does return EAGAIN, then co_await
-  // write_wait(fd) to wait for the file descriptor to be writable
+  // Do a tok = write_clear(fd) before a write operation on an fd that
+  // might return EAGAIN.  If it does return EAGAIN, then co_await
+  // write_wait(tok) to wait for the file descriptor to be writable
   // again.
-  Async<Errno> write_wait(BorrowedFd fd)
+  Async<Errno> write_wait(WriteToken fd)
   {
     auto [async, cb] = make_async<Errno>();
     setcb(fd, true, {cb, cpuid()});
@@ -262,6 +285,13 @@ public:
   // poison(), the file descriptor number could still be poisoned when
   // it is recycled by another socket.
   void reset(BorrowedFd fd);
+
+  // Reset and close a file descriptor
+  void close(BorrowedFd fd)
+  {
+    reset(fd);
+    ::close(fd.get());
+  }
 
   // Make any pending and future callbacks return with EBADF untill
   // reset() is called.  Pending callbacks are made asynchronously, so
@@ -300,9 +330,9 @@ private:
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
-    std::atomic<std::uint32_t> ready{0};
+    std::atomic<std::uint32_t> ready_{0};
     // callbacks: [0] = reader, [1] = writer
-    std::array<AtomicWorkItem, 2> callbacks{};
+    std::array<AtomicWorkItem, 2> callbacks_{};
 
     FdState() noexcept = default;
     FdState(FdState &&other) noexcept : BufHolder(std::move(other))
@@ -327,10 +357,10 @@ private:
     void copy_fields(const FdState &other)
     {
       mode_ = other.mode_.load();
-      ready = other.ready.load();
-      for (size_t i = 0; i < callbacks.size(); ++i) {
-        callbacks[i].value = other.callbacks[i].value.load();
-        callbacks[i].cpuhint = other.callbacks[i].cpuhint.load();
+      ready_ = other.ready_.load();
+      for (size_t i = 0; i < callbacks_.size(); ++i) {
+        callbacks_[i].value = other.callbacks_[i].value.load();
+        callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
       }
     }
   };
@@ -342,6 +372,7 @@ private:
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
+  AutoSignalCbHandle sigcb_;
 
   struct FdPtr {
     FdState *p_;
@@ -351,13 +382,16 @@ private:
   };
   FdPtr getfd(BorrowedFd fd);
 
+  std::string showfd(const FdPtr &fdp);
+  void debug_dump();
+
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode();
-    if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange({})) {
+    if ((fdp->ready_ & epflags[write]) || mode != kActive)
+      if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
         wi(mode == kActive ? 0 : EBADF);
       }
@@ -407,7 +441,7 @@ public:
   // flush any delayed writes when the read buffer is empty.
   Async<std::expected<size_t, Errno>> read(BorrowedFd fd, Buf *out, size_t len,
                                            bool full = true,
-                                           bool sync = false SLOC_PARM);
+                                           bool sync = false SLOC_DECL);
 
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
@@ -416,7 +450,7 @@ public:
   // this concurrently in two threads will likely lead to a mishmash
   // of data.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
-                                            BufView data SLOC_PARM);
+                                            BufView data SLOC_DECL);
 
   // Asynchronous write.  Writes data to fd, but returns immediately
   // if some or all of the data will continue to be written in the
@@ -437,7 +471,7 @@ public:
   template<typename Addr = std::nullptr_t>
   Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
                                           socklen_t *addrlen = nullptr,
-                                          bool close_on_exec = true SLOC_PARM)
+                                          bool close_on_exec = true SLOC_DECL)
   {
     while (!stop_requested()) {
       socklen_t ignoredlen;
@@ -446,7 +480,7 @@ public:
           addrlen = &ignoredlen;
         *addrlen = sizeof(*addr);
       }
-      read_clear(lfd);
+      auto tok = read_clear(lfd);
 #if HAVE_ACCEPT4
       int fd =
           accept4(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen,
@@ -471,25 +505,25 @@ public:
       }
       if (Errno err{}; err != EAGAIN)
         co_return err;
-      if (auto err = co_await read_wait(lfd))
+      if (auto err = co_await read_wait(tok))
         co_return err;
     }
     co_return Errno{EBADF};
   }
 
   Async<std::expected<void, Errno>> connect(BorrowedFd fd, const sockaddr *sa,
-                                            socklen_t len SLOC_PARM);
+                                            socklen_t len SLOC_DECL);
   Async<std::expected<void, Errno>>
-  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
+  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_DECL)
   {
     return connect(fd, reinterpret_cast<const sockaddr *>(ss),
                    sockaddr_len(*ss) X23_IFTRACE(, sloc));
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
-                                              socklen_t len SLOC_PARM);
+                                              socklen_t len SLOC_DECL);
   Async<std::expected<int, Errno>>
-  tcpconnect(const sockaddr_storage *ss SLOC_PARM)
+  tcpconnect(const sockaddr_storage *ss SLOC_DECL)
   {
     return tcpconnect(reinterpret_cast<const sockaddr *>(ss),
                       sockaddr_len(*ss) X23_IFTRACE(, sloc));
@@ -497,7 +531,7 @@ public:
 
   // Connect and return a file descriptor or a system error.
   Async<std::expected<int, std::system_error>>
-  tcpconnect(std::string host, std::string port SLOC_PARM);
+  tcpconnect(std::string host, std::string port SLOC_DECL);
 
 protected:
   std::thread pollthread_;
@@ -508,4 +542,45 @@ protected:
   void loop();
 };
 
+namespace detail {
+class WriteBuffer::Service {
+public:
+  [[nodiscard]]
+  Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
+    : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+  {}
+
+  Errno go();
+
+private:
+  WriteBuffer *wb_;
+  CoroPoll *cp_;
+  BorrowedFd fd_;
+  std::unique_lock<std::mutex> lk_;
+  CoroPoll::WriteToken tok_;
+
+  Service(Service &&) noexcept = default;
+  bool work_needed()
+  {
+    if (wb_->want_write_)
+      return true;
+    lk_.unlock();
+    return wb_->want_write_ && lk_.try_lock();
+  }
+  BufVec get_work()
+  {
+    wb_->want_write_ = false;
+    return wb_->writer_.exchange({});
+  }
+  Errno write(BufVec &work);
+  static Detached worker(Service self, BufVec work);
+};
+
+inline Errno
+WriteBuffer::flush(CoroPoll &cp, BorrowedFd fd)
+{
+  return Service{*this, cp, fd}.go();
+}
+
+} // namespace detail
 } // namespace x23

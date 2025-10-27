@@ -34,8 +34,10 @@ public:
   // Starts the server on the specified port.
   uint16_t start_server(uint16_t port)
   {
-    std::tie(port_, listen_fd_) =
-        tcp_rpc_server(cp_, port, [this](auto c) { c->server(&impl_); });
+    std::tie(port_, listen_fd_) = tcp_rpc_server(cp_, port, [this](auto c) {
+      c->max_message_size = max_message_size_;
+      c->server(&impl_);
+    });
     return port_;
   }
 
@@ -50,6 +52,7 @@ public:
 
   x23::CoroPoll &cp_;
   RpcImplementation impl_;
+  size_t max_message_size_ = x23::default_max_message_size;
 
   ~RpcServer() { cp_.reset(listen_fd_); }
 

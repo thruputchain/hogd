@@ -42,7 +42,7 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   HogDBDAO db(RAMDB(std::move(*db_result)));
   MerkleTriePrefix trie;
-  RPCContext ctx(db, trie);
+  RPCContext ctx(db, trie, nullptr);
 
   // Start the scheduler server
   std::println("Starting scheduler server on port {}", coord_port);

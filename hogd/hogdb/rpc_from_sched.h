@@ -2,10 +2,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <condition_variable>
 #include <cstdint>
-#include <mutex>
-#include <optional>
 #include <type_traits>
 
 // generated x23 headers
@@ -17,11 +14,9 @@
 #include "types.hh"
 
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "x23/async.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -86,7 +81,9 @@ private:
 
   // commit_block is a helper function that performs all the steps necessary to
   // commit.
-  HogDBStatus<void> commit_block(BlockID id);
+  // There must be an active reference to the blocktx.  This active reference
+  // should be the last reference that is open for the btx..
+  HogDBStatus<void> commit_block(BlockID id, PerThreadARC<BlockTX> *btx);
 };
 static_assert(is_DbSched1<HogDBSchedRpc *, x23::Async>);
 

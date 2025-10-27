@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <x23/cleanup.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
 #include <x23/vec.h>
@@ -259,7 +260,8 @@ struct BufVec {
     using enum IoResult;
     while (!empty()) {
       auto iov{to_vec()};
-      auto n = writev(fd.get(), iov.data(), iov.size());
+      auto n = writev(fd.get(), iov.data(),
+                      std::min(iov.size(), static_cast<size_t>(IOV_MAX)));
       if (n < 0) {
         if (errno == EAGAIN)
           return kAgain;

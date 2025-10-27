@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <map>
 #include <optional>
 #include <utility>
@@ -14,6 +15,21 @@
 namespace hogd {
 
 enum class ExecutionMode : uint8_t { kProposing = 0, kValidating = 1 };
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::ExecutionMode> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::ExecutionMode &mode, auto &ctx)
+  {
+    return format_to(ctx.out(), "{}",
+                     mode == hogd::ExecutionMode::kProposing
+                         ? "ExecutionMode::kProposing"
+                         : "ExecutionMode::kValidating");
+  }
+};
+
+namespace hogd {
 
 // Data structure for proposal mode execution that collects nondeterministic
 // choices made during transaction execution

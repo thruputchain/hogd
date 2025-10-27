@@ -60,10 +60,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <queue>
 
 #include <x23/async.h>
 #include <x23/corotrace.h>
-#include <x23/mvar.h>
 #include <x23/threadpool.h>
 
 namespace x23 {
@@ -77,7 +77,7 @@ public:
     LockerState(LockerState &&) = delete;
 
   private:
-    atomic_coroutine_handle next{};
+    std::atomic<std::coroutine_handle<>> next_;
     friend CoroLock;
   };
 
@@ -88,29 +88,11 @@ public:
   [[nodiscard]] auto lock(this Self &self, LockerState *ls)
   {
     // LockerState can only be used for one lock at a time
-    assert(ls->next.load(std::memory_order_relaxed) == nullptr);
-
-    struct AwaitAcquire {
-      Self &lk_;
-      LockerState *next_;
-      LockerState *prev_;
-
-      AwaitAcquire(Self &lk, LockerState *ls) : lk_(lk), next_(ls) {}
-      bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
-      void await_suspend(std::coroutine_handle<> h SLOC_PARM)
-      {
-#if X23_CORO_TRACE
-        corotrace.set_suspend(h, sloc, "CoroLock",
-                              static_cast<const void *>(&lk_));
-#endif // X23_CORO_TRACE
-        prev_->next = h;
-      }
-      void await_resume() {}
-    };
+    assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
 
     if constexpr (requires { self.block_while_inhibited(); })
       // Self is a CoroSharedLock
-      return [](AwaitAcquire await) -> Async<void> {
+      return [](Self::AwaitAcquire await) -> Async<void> {
         co_await await;
         if (ThreadPool *pool = ThreadPool::get_thread_pool())
           co_await pool->async(&Self::block_while_inhibited, &await.lk_);
@@ -126,12 +108,8 @@ public:
   // lock before returning.
   void unlock(LockerState *ls)
   {
-    if (std::coroutine_handle<> h = next(ls)) {
-#if X23_CORO_TRACE
-      corotrace.clear_suspend(h);
-#endif // X23_CORO_TRACE
+    if (std::coroutine_handle<> h = next(ls))
       h();
-    }
   }
 
   Async<void> await_free()
@@ -146,6 +124,24 @@ public:
   }
 
 private:
+  struct AwaitAcquire {
+    CoroLock &lk_;
+    LockerState *next_;
+    LockerState *prev_;
+
+    AwaitAcquire(CoroLock &lk, LockerState *ls) : lk_(lk), next_(ls) {}
+    bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
+    void await_suspend(auto h SLOC_DECL)
+    {
+#if X23_CORO_TRACE
+      if (PromiseBase *base = PromiseBase::get(h))
+        base->suspension_ = sloc;
+#endif // X23_CORO_TRACE
+      prev_->next_ = h;
+    }
+    void await_resume() {}
+  };
+
   template<typename T> struct AwaitReleaseAndReturn;
 
 public:
@@ -168,7 +164,7 @@ private:
   // If last_ is NULL, the lock is free.  If last_ points to a
   // LockerState, then it belongs to the last coroutine in line to
   // acquire the lock, in which case a new coroutine can enqueue
-  // itself by putting its own atomic_coroutine_handle into the last
+  // itself by putting its own coroutine_handle into the last
   // LockerState and setting last_ to its own LockerState.
   std::atomic<LockerState *> last_{nullptr};
 
@@ -176,13 +172,13 @@ private:
   {
     LockerState *lscopy = ls;
     if (last_.compare_exchange_strong(lscopy, nullptr)) {
-      assert(ls->next.load(std::memory_order_relaxed) == nullptr);
+      assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
       return nullptr;
     }
     std::coroutine_handle<> h;
-    while (!(h = ls->next))
+    while (!(h = ls->next_))
       detail::pause_instruction();
-    ls->next.store(nullptr, std::memory_order_relaxed);
+    ls->next_.store(nullptr, std::memory_order_relaxed);
     return h;
   }
 };
@@ -191,7 +187,7 @@ namespace detail {
 
 // If we are in a thread pool, resume the coroutine in another thread.
 // If not, resume it synchronously in this thread.
-void resume_in_another_thread(std::coroutine_handle<>);
+void resume_in_another_thread(CoroHandle);
 
 } // namespace detail
 
@@ -237,7 +233,7 @@ protected:
     // The normal behavior is to run the next locker as soon as you
     // release the lock (either explicitly or implicitly when a
     // CoroGuard is destroyed).
-    detail::resume_in_another_thread(next_coro);
+    detail::resume_in_another_thread(CoroHandle{next_coro, nullptr});
     return next_locker;
   }
 
@@ -414,6 +410,81 @@ private:
   {
     return p ? CrashIfSuspended{} : CrashIfSuspended{nullptr};
   }
+};
+
+// Simple coroutine-based semaphore.
+//
+//    CoroSem sem(1);         // initial value of counter (defaults to 1)
+//
+//    co_await sem.acquire(); // returns counter times more than up
+//
+//    co_await sem.release(); // release semaphore
+//
+//    sem.release();          // can also release outside coroutine
+class CoroSem {
+public:
+  CoroSem(int count = 1) : count_(count) {}
+  ~CoroSem()
+  {
+    // If this fails you destroyed a CoroSem with waiters
+    assert(!next_);
+  }
+
+  [[nodiscard]] auto acquire() noexcept { return Downer{*this}; }
+
+  auto release()
+  {
+    std::unique_lock ul(lk_);
+    if (Downer *head = next_) {
+      if (!(next_ = head->next_))
+        last_ = &next_;
+      ul.unlock();
+      head->h_();
+    }
+    else
+      ++count_;
+    return std::suspend_never{};
+  }
+
+private:
+  struct Downer {
+    CoroSem &s_;
+    std::unique_lock<std::mutex> ul_;
+    std::coroutine_handle<> h_;
+    Downer *next_{};
+
+    Downer(CoroSem &s) : s_(s) {}
+    Downer(const Downer &) = delete;
+
+    bool await_ready() noexcept
+    {
+      if (!ul_)
+        ul_ = std::unique_lock(s_.lk_);
+      if (!s_.count_)
+        return false;
+      --s_.count_;
+      ul_.unlock();
+      return true;
+    }
+    void await_suspend(auto h SLOC_DECL) noexcept
+    {
+      assert(ul_);
+#if X23_CORO_TRACE
+      if (PromiseBase *base = PromiseBase::get(h))
+        base->suspension_ = sloc;
+#endif // X23_CORO_TRACE
+      h_ = h;
+      *s_.last_ = this;
+      s_.last_ = &next_;
+      ul_.unlock();
+    }
+    void await_resume() noexcept {}
+  };
+
+  std::mutex lk_;
+  unsigned count_;
+  Downer *next_{};
+  Downer **last_{&next_};
 };
 
 } // namespace x23

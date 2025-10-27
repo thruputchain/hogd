@@ -6,6 +6,7 @@
 #include <string>
 
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 
@@ -75,7 +76,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("Starting loadgen server on port {}", port);
 
   // Create and start the loadgen server
-  hogd::LoadgenServer server;
+  hogd::RpcServer<hogd::LoadgenRpc> server;
+  // We set the [max_message_size_] to a large value because the loadgen
+  // transfers a lot of data via its RPC calls.
+  server.max_message_size_ = hogd::LoadgenRpc::kRpcMaxMessageSize;
   auto actual_port = server.start_server(port);
   hogd::info("Loadgen server started successfully on port {}", actual_port);
 

@@ -35,20 +35,13 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: set gcc-14 in check
-      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+    - uses: ./.github/actions/prepare_env
     - name: check
       run: ./scripts/check.sh -p -b
+    - name: save core dumps
+      if: failure()
+      run: |
+        echo "Saving core dumps"
+        mkdir -p ../core_dumps
+        find . -name '*.core' -print0 | xargs -0 mv -t ../core_dumps/
 

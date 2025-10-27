@@ -67,12 +67,16 @@ add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc
+  deserialize_test.cc
   direct_auth_data_tests.cc
   direct_bytestring_test.cc
   direct_nnint_test.cc
+  direct_nonce_tests.cc
+  direct_storage_ordering_tests.cc
   error_handling_test.cc
   event_test.cc
   execution_mode_test.cc
+  ffi_helpers_tests.cc
   fibonacci_test.cc
   gas_api_test.cc
   interleaving_tests.cc
@@ -92,6 +96,7 @@ add_library(runtime_test_objects OBJECT
   revert_tests.cc
   runtime_test.cc
   serialize_roundtrip_test.cc
+  shutdown_test.cc
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
@@ -124,6 +129,7 @@ add_dependencies(
   generate_syscall_inner_h
   generate_syscall_meta_h
   generate_wasmi_ffi_h
+  generate_contract_types_ffi_h
   protocol
 )
 

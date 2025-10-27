@@ -19,7 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/event/event.h"
+#include "hogd/event/utilities.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -39,6 +39,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -462,7 +463,9 @@ SystemCallHandler::get_calldata() const
 NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
-  assert(root_invoke_succeeded_);
+  // Either succeeded on the root tx, or deterministic error during execution.
+  // Not allowed to have i.e. validation failure here, or block abort.
+  assert(cumulative_invoke_result_.has_readable_proposal_data());
   return std::visit([](auto const &arg) -> NondeterministicProposalData const
                                             & { return arg.proposal_data(); },
                     execution_mode_data_);
@@ -471,8 +474,6 @@ SystemCallHandler::get_proposal_data() const
 SHA256Hash
 SystemCallHandler::get_proposed_tx_hash() const
 {
-  assert(root_invoke_succeeded_);
-
   ProposedTransaction proposed_tx{.signed_tx = signed_tx_,
                                   .nondeterministic_proposal_data =
                                       get_proposal_data()};
@@ -497,7 +498,7 @@ SystemCallHandler::emit_events()
   });
 }
 
-void
+SyscallStatus<void>
 SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
                              SHA256Hash const *topic2,
                              std::span<const std::byte> data)
@@ -506,11 +507,53 @@ SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
   assert(!is_read_only());
   assert(data.size() <= kMaxLogMessageLen);
 
+  x23::Buf buf;
+  uint32_t num_topics = 0;
+  if (topic0) {
+    buf.append_range(*topic0);
+    num_topics++;
+  }
+  if (topic1) {
+    buf.append_range(*topic1);
+    num_topics++;
+  }
+  if (topic2) {
+    buf.append_range(*topic2);
+    num_topics++;
+  }
+
+  buf.append(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+
+  if (buf.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto message = make_tx_emitted_event(
-      invocation_frame_stack_.get_active_frame().address(), topic0, topic1,
-      topic2, data);
+      invocation_frame_stack_.get_active_frame().address(), num_topics,
+      std::as_bytes(std::span(buf)));
 
   invocation_frame_stack_.get_active_frame().log_event(std::move(message));
+  return {};
+}
+
+SyscallStatus<void>
+SystemCallHandler::log_event(uint32_t num_topics,
+                             std::span<const std::byte> data)
+{
+  assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
+  if (num_topics > kMaxTopics) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  if (data.size() > kMaxEventLength) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  auto message = make_tx_emitted_event(
+      invocation_frame_stack_.get_active_frame().address(), num_topics, data);
+  invocation_frame_stack_.get_active_frame().log_event(std::move(message));
+  return {};
 }
 
 ContractAddress

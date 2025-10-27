@@ -89,6 +89,7 @@
 #include <map>
 #include <print>
 #include <stop_token>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -320,7 +321,8 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
-  Detached reader(SLOC_PARM0);
+  Detached reader(SLOC_DECL0);
+  virtual void log_message(std::string msg) = 0;
 
 private:
   struct ClientState {
@@ -334,8 +336,8 @@ private:
     cp_->awrite(fd_, make_record(msg, x...));
   }
 
-  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
-  Async<Errno> read_record(Buf *b SLOC_PARM);
+  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_DECL0);
+  Async<Errno> read_record(Buf *b SLOC_DECL);
 
   friend class RefCount;
 };
@@ -386,12 +388,11 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
   RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
   {
-    logger_.template log_server_advertise<VersMeta>(fd_);
-    assert(!reader_running_);
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
             std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
     srvmap_.emplace(dispatch->getpv(), dispatch);
+    logger_.log_message("serving {}", VersMeta::version_name);
     return this;
   }
   template<typename VersMeta, typename Server, typename... ExtraArgs>
@@ -407,7 +408,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     if (!reader_running_) {
       reader_running_ = true;
+      logger_.log_message("launching reader");
       reader();
+      logger_.log_message("reader launched");
     }
   }
 
@@ -469,6 +472,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
+
+  // NOLINTNEXTLINE(portability-template-virtual-member-function)
+  void log_message(std::string msg) override { logger_.log_message("{}", msg); }
 };
 
 // The return type of RpcStream<Logger>::client<VersMeta>, for

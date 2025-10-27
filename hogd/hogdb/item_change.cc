@@ -4,9 +4,13 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <iterator>
 #include <limits>
+#include <ranges>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
+#include <utility>
 #include <variant>
 
 #include "account.hh"
@@ -21,6 +25,8 @@
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_item.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 
@@ -363,6 +369,163 @@ AuthDataItem::undo_merge(const AuthDataItem &auth_data_item)
   }
 }
 
+ReplayCacheIt::ReplayCacheIt(BlockHeight expired_height,
+                             ReplayCacheData const &cache)
+  : expired_height_{expired_height}, base_replay_cache_{}
+{
+  // prune expired entries right on construction so only live entries get
+  // factored x23's append_range size check for reserve makes it hard to use
+  // std::views, do things manually.
+  base_replay_cache_.uniquifiers.reserve(cache.uniquifiers.size());
+  for (Uniquifier const &uniquifier : cache.uniquifiers) {
+    if (uniquifier.block_expiry_height <= expired_height)
+      continue;
+    base_replay_cache_.uniquifiers.push_back(std::move(uniquifier));
+  }
+}
+
+HogDBStatus<void>
+ReplayCacheIt::check_conflict(Uniquifier const &uniquifier)
+{
+  {
+    auto it = std::ranges::find_if(additions_,
+                                   [&uniquifier](Uniquifier const &addition) {
+                                     return uniquifier.nonce == addition.nonce;
+                                   });
+    // nonce was in list of recent additions
+    if (it != additions_.end())
+      return HogDBError(HogDBCode::kConflict);
+  }
+  {
+    auto it = std::ranges::find_if(base_replay_cache_.uniquifiers,
+                                   [&uniquifier](Uniquifier const &base) {
+                                     return base.nonce == uniquifier.nonce;
+                                   });
+    // nonce was in the base replay cache
+    if (it != base_replay_cache_.uniquifiers.end())
+      return HogDBError(HogDBCode::kConflict);
+  }
+  return {};
+}
+
+HogDBStatus<void>
+ReplayCacheIt::try_consume_uniquifier(Uniquifier const &uniquifier)
+{
+  assert_is_valid();
+
+  // reject uniquifiers that are used too late
+  if (uniquifier.block_expiry_height <= expired_height_)
+    return HogDBError(HogDBCode::kConflict);
+
+  // reject uniquifiers that are already used
+  HogDBStatus<void> ret = check_conflict(uniquifier);
+  if (!ret)
+    return ret;
+
+  additions_.emplace_back(uniquifier);
+
+  assert_is_valid();
+  return {};
+}
+
+HogDBStatus<void>
+ReplayCacheIt::commit(HogDBDAO &db, MerkleTriePrefix &trie,
+                      const ItemKey &key) const
+{
+  assert_is_valid();
+
+  auto res = build_result();
+  auto ret = db.write_address_replay_cache(key.get_address(), res);
+  if (!ret) {
+    return ret.error();
+  }
+  auto buf = x23::serialize(res);
+  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+                                                  std::as_bytes(std::span(buf)))
+            .has_value());
+  return ret;
+}
+
+ReplayCacheData
+ReplayCacheIt::build_result() const
+{
+  ReplayCacheData result = base_replay_cache_;
+  std::ranges::copy(additions_, std::back_inserter(result.uniquifiers));
+  return result;
+}
+
+int128_t
+ReplayCacheIt::committed_storage_cost(const StorageCostModel *cost_model) const
+{
+  // try_consume_uniqufier never allows the addition of conflicting entries and
+  // neither does merge. Hence, all uniquifiers in the change will be part
+  // of its commit.
+  return marginal_storage_cost(cost_model);
+}
+
+int128_t
+ReplayCacheIt::marginal_storage_cost(const StorageCostModel *cost_model) const
+{
+  size_t entries = base_replay_cache_.uniquifiers.size() + additions_.size();
+  return cost_model->get_replay_cache_cost(entries);
+}
+
+bool
+ReplayCacheIt::narrow(const ReplayCacheIt &) // NOLINT - lint wants static
+{
+  // Currently, the executor only modifies a replay cache based on the
+  // uniquifier assigned to a transaction right at its start and only once.
+  // Since a single transaction should never be able to modify a replay cache
+  // twice, narrow() shouldn't be possible on it. Later, if we allow
+  // transactions to interact with replay caches then this will need to be
+  // implemented.
+  assert(false);
+  return false;
+}
+
+HogDBStatus<int128_t>
+ReplayCacheIt::merge(const ReplayCacheIt &replay_cache,
+                     const StorageCostModel *cost_model)
+{
+  assert_is_valid();
+  replay_cache.assert_is_valid();
+
+  if (base_replay_cache_ != replay_cache.base_replay_cache_)
+    return HogDBError(HogDBCode::kConflict);
+
+  // Check that incoming uniquifiers aren't in this cache or additions.
+  for (auto const &other_addition : replay_cache.additions_) {
+    HogDBStatus<void> ret = check_conflict(other_addition);
+    if (!ret)
+      return ret.error();
+  }
+
+  // Conflicts checked; now do merge
+  std::ranges::copy(replay_cache.additions_, std::back_inserter(additions_));
+
+  assert_is_valid();
+  size_t entries =
+      base_replay_cache_.uniquifiers.size() + replay_cache.additions_.size();
+  return cost_model->get_replay_cache_cost(entries);
+}
+
+void
+ReplayCacheIt::undo_merge(const ReplayCacheIt &replay_cache)
+{
+  assert_is_valid();
+  replay_cache.assert_is_valid();
+
+  auto removal_nonces =
+      replay_cache.additions_ | std::views::transform(&Uniquifier::nonce);
+  std::unordered_set<ReplayNonce> removals(removal_nonces.begin(),
+                                           removal_nonces.end());
+  std::erase_if(additions_, [&removals](Uniquifier const &addition) {
+    return removals.contains(addition.nonce);
+  });
+
+  assert_is_valid();
+}
+
 namespace {
 
 template<typename T>
@@ -390,14 +553,15 @@ ItemChange::narrow(const ItemChange &change)
     return;
   }
 
-  exclusive_ = !std::visit(
-      [&change](auto &arg) -> bool {
-        if constexpr (!is_monostate<decltype(arg)>)
-          return arg.narrow(
-              std::get<std::decay_t<decltype(arg)>>(change.type_));
-        return {};
-      },
-      type_);
+  exclusive_ = exclusive_ ||
+               !std::visit(
+                   [&change](auto &arg) -> bool {
+                     if constexpr (!is_monostate<decltype(arg)>)
+                       return arg.narrow(
+                           std::get<std::decay_t<decltype(arg)>>(change.type_));
+                     return {};
+                   },
+                   type_);
 }
 
 HogDBStatus<int128_t>
@@ -405,6 +569,10 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
 {
   if (type_.index() != change.type_.index())
     return HogDBError(HogDBCode::kConflict);
+  // can't be permanent exclusive if not exclusive
+  assert(!change.permanent_exclusive_ || change.exclusive_);
+  assert(!permanent_exclusive_ || exclusive_);
+
   if (exclusive_ || change.exclusive_)
     return HogDBError(HogDBCode::kConflict);
 
@@ -421,6 +589,8 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
     return merge_cost.error();
   }
   assert(snapshot_cost_.has_value());
+  // we should never reach this far if we have a permanent exclusive lock
+  assert(!permanent_exclusive_);
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
 
@@ -428,6 +598,13 @@ void
 ItemChange::undo_merge(const ItemChange &change)
 {
   assert(type_.index() == change.type_.index());
+
+  // We never undo_merge of an exclusive lock;
+  // rather, blocktx checks that there is one ref on the itemchange,
+  // and sets the item change directly.
+  // So we do not need to modify this->exclusive_ or permanent_exclusive_.
+  assert(!change.permanent_exclusive_);
+  assert(!change.exclusive_);
 
   std::visit(
       [&change](auto &arg) {
@@ -443,11 +620,14 @@ ItemChange::commit_change(const ItemChange &change)
   assert(type_.index() == change.type_.index());
   // In the future, we will forward the change
   // to the variant.
-  if (change.exclusive_) {
+  if (change.exclusive_ && !change.permanent_exclusive_) {
     // Committing the change that held the exclusive lock allows
     // us to release that lock.
     exclusive_ = false;
   }
+
+  assert(!change.permanent_exclusive_ || permanent_exclusive_);
+
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
@@ -471,20 +651,6 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<int128_t>
-ItemChange::marginal_storage_cost(HogDBDAO &db, const ItemKey &key,
-                                  const StorageCostModel *cost_model)
-{
-
-  if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key, cost_model);
-    if (!ret)
-      return ret.error();
-  }
-
-  return marginal_storage_cost(cost_model);
-}
-
-HogDBStatus<int128_t>
 ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
 {
   assert(snapshot_cost_.has_value());
@@ -498,6 +664,12 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
       type_);
   if (!marginal_item)
     return marginal_item.error();
+  if (permanent_exclusive_) {
+    // If we have a permament exclusive lock, then we can release storage costs
+    // early since we know that no other transaction will be able to modify this
+    // item
+    return *marginal_item - *snapshot_cost_;
+  }
   return std::max<int128_t>(0, *marginal_item - *snapshot_cost_);
 }
 
@@ -521,18 +693,6 @@ ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
       type_);
 }
 
-HogDBStatus<int128_t>
-ItemChange::committed_storage_cost(HogDBDAO &db, const ItemKey &key,
-                                   const StorageCostModel *cost_model)
-{
-  if (!snapshot_cost_) {
-    auto ret = load_snapshot_cost(db, key, cost_model);
-    if (!ret)
-      return ret.error();
-  }
-  return committed_storage_cost(cost_model);
-}
-
 HogDBStatus<void>
 ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
                                StorageCostModel const *cost_model)
@@ -550,6 +710,7 @@ ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
   }();
   if (!snapshot_cost)
     return snapshot_cost.error();
+  assert(*snapshot_cost >= 0);
   snapshot_cost_ = *snapshot_cost;
   return {};
 }

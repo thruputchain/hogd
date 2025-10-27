@@ -1,4 +1,5 @@
 
+#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
@@ -19,6 +20,7 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
   if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
     Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
+  sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
 };
 
 CoroPollImpl::~CoroPollImpl()
@@ -29,23 +31,22 @@ CoroPollImpl::~CoroPollImpl()
 void
 CoroPollImpl::clear(BorrowedFd fd, bool write)
 {
-  // std::println("{}_clear({})", write ? "write" : "read", fd.get());
+  // debug("{}_clear(fd {})", write ? "write" : "read", fd.get());
 
   auto fdp = getfd(fd);
-  assert(!fdp->callbacks[write].value.load(std::memory_order_relaxed));
+  assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready &= ~epflags[write] | epflags[!write];
+  fdp->ready_ &= ~epflags[write] | epflags[!write];
 }
 
 void
 CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 {
-  // std::println("setcb({}, {})", fd.get(), write ? "write" : "read");
+  // debug("setcb({}, {})", fd.get(), write ? "write" : "read");
 
   using enum FdState::Mode;
   FdPtr fdp = getfd(fd);
   FdState::Mode mode = fdp->mode();
-
   if (stop_requested() || mode == kPoisoned) {
     wi(EBADF);
     return;
@@ -55,13 +56,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   // calling {read,write}_wait.
   assert(mode != kFree);
 
-  if ((fdp->ready & epflags[write]) && mode == kActive) {
+  if ((fdp->ready_ & epflags[write]) && mode == kActive) {
     wi(0);
     return;
   }
 
   ++numcoro_;
-  [[maybe_unused]] auto oldwi = fdp->callbacks[write].exchange(wi);
+  [[maybe_unused]] auto oldwi = fdp->callbacks_[write].exchange(wi);
   // If this assertion fails, you attempted to register two read or
   // two write callbacks on the same file descriptor.
   assert(!*oldwi);
@@ -69,6 +70,44 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   setmode(fdp, kActive);
   // have to re-check in case write edge occured before we published wi
   docb(fdp, write);
+}
+
+std::string
+CoroPollImpl::showfd(const FdPtr &fdp)
+{
+  int fd = fdp.get() - state_;
+  auto ret = std::format("  fd {}, mode {}, ready {}\n", fd,
+                         int(fdp->mode_.load()), fdp->ready_.load());
+  for (unsigned writer = 0; writer <= 1; ++writer) {
+    if (auto cb = fdp->callbacks_[writer].value.load()) {
+      uformat_to(&ret, "    {} (CPU {})\n", writer ? "writer" : "reader",
+                 fdp->callbacks_[0].cpuhint.load());
+      ret = trace(cb.resume_, 6, std::move(ret));
+    }
+  }
+  return ret;
+}
+
+void
+CoroPollImpl::debug_dump()
+{
+  using enum FdState::Mode;
+  std::string msg;
+  uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
+             (void *)static_cast<CoroPoll *>(this), eventfd_.get());
+  {
+    auto _lk = std::unique_lock(resize_lock_);
+    for (unsigned i = 0; i < state_size_; ++i) {
+      FdState *p = state_ + i;
+      if (p->mode_ == kFree)
+        continue;
+      msg += showfd(FdPtr{.p_ = p});
+    }
+  }
+  int fd = debug.fd();
+  if (fd < 0)
+    fd = 2;
+  ::write(fd, msg.data(), msg.size());
 }
 
 void
@@ -98,6 +137,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 
   int fd = fdp.get() - state_;
 
+  // debug("setmode fd {}: {} -> {}", fd, int(old_mode), int(mode));
+
   if (mode == kActive) {
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
@@ -107,7 +148,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     assert(err != -1);
   }
   else {
-    fdp->ready = 0; // because EPOLLERR is sticky
+    fdp->ready_ = 0; // because EPOLLERR is sticky
     if (old_mode == kActive) {
       [[maybe_unused]] int err =
           epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
@@ -133,16 +174,15 @@ CoroPollImpl::get_max_fd()
   return state_size_;
 }
 
-// To wake CoroPoll::check from another thread, we just add a
-// level-triggered, one-shot check for a readable file descriptor
-// (always true).  Because we don't update the active flags in state,
-// check won't incur an epoll_ctl system call to remove the event.
+// To wake CoroPoll::check from another thread, we write to an eventfd
+// that we always monitor.
 void
 CoroPollImpl::wake()
 {
   uint64_t one{1};
-  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
-    Errno{}.raise("write(eventfd)");
+  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]] {
+    assert(!"write(eventfd)");
+  }
 }
 
 CoroPollImpl::FdPtr
@@ -218,12 +258,12 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
-    state_[fd].ready |= evs[i].events;
+    state_[fd].ready_ |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
-        if (WorkItem wi = state_[fd].callbacks[write].exchange({})) {
+        if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
           --numcoro_;
-          if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+          if (CoroHandle h = wi->set_result_without_resuming(err))
             coroqueue.emplace_back(h, wi.cpuhint);
         }
       }
@@ -250,8 +290,8 @@ CoroPollImpl::poison(BorrowedFd fd)
 void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
-  if (WorkItem wi = getfd(fd.get())->callbacks[write].exchange({}))
-    if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+  if (WorkItem wi = getfd(fd.get())->callbacks_[write].exchange({}))
+    if (CoroHandle h = wi->set_result_without_resuming(err))
       pool_.go({h, wi.cpuhint});
 }
 

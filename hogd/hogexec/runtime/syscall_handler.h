@@ -10,6 +10,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "auth_claim.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -27,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -113,6 +115,11 @@ public:
   // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
 
+  AuthClaimData const &get_auth_claims() const
+  {
+    return signed_tx_.tx.auth_claims;
+  }
+
   // Get the buffer returned by a child call frame.
   // Error if most recent child did call set_return_buffer.
   SyscallStatus<const ReturnBuffer *> get_return_buffer() const;
@@ -121,8 +128,12 @@ public:
   // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
 
-  void log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
-                 SHA256Hash const *topic2, std::span<const std::byte> data);
+  SyscallStatus<void> log_event(SHA256Hash const *topic0,
+                                SHA256Hash const *topic1,
+                                SHA256Hash const *topic2,
+                                std::span<const std::byte> data);
+  SyscallStatus<void> log_event(uint32_t num_topics,
+                                std::span<const std::byte> data);
 
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,

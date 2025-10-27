@@ -75,22 +75,23 @@ to_span(const Bytestring &bs)
 RPCError
 HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
-                              StorageItemRPCFlagSet /*flags*/)
+                              StorageItemRPCFlagSet flags)
 {
-  // TODO(abelay): support StorageItemRPCFlagSet, which could request exclusive.
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
-    return to_rpc_error(
-        tx.request_bytes(make_item_key(addrkey), to_span(delta.bytestring())));
+    return to_rpc_error(tx.request_bytes(make_item_key(addrkey),
+                                         to_span(delta.bytestring()), flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint_add())));
+                                            from_xdr(delta.nnint_add()),
+                                            flags));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
                                             from_xdr(delta.nnint().set_value),
-                                            from_xdr(delta.nnint().add_value)));
+                                            from_xdr(delta.nnint().add_value),
+                                            flags));
   case StorageDeltaType::kDeltaTypeDelete:
-    return to_rpc_error(tx.request_deletion(make_item_key(addrkey)));
+    return to_rpc_error(tx.request_deletion(make_item_key(addrkey), flags));
   case StorageDeltaType::kDeltaTypeDeployContract:
     assert(addrkey.key.key_type() ==
            StorageKeyType::kStorageKeyTypeAddressMetadata);
@@ -101,7 +102,14 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     assert(addrkey.key.key_type() ==
            StorageKeyType::kStorageKeyTypeAccountAuthData);
     return to_rpc_error(
-        tx.request_auth_data(addrkey.address, delta.auth_data_change()));
+        tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
+  case StorageDeltaType::kDeltaTypeConsumeUniquifier:
+    // Assume addrkey from FlaggedStorageDelta indicates correct ReplayCache for
+    // this tx.
+    assert(addrkey.key.key_type() ==
+           StorageKeyType::kStorageKeyTypeReplayCache);
+    return to_rpc_error(tx.request_consume_uniquifier(
+        addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
@@ -128,7 +136,7 @@ HogDBExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     }
   }
   itx->commit();
-  ctx_.close_invoke_tx(block, tx);
+  ctx_.close_invoke_tx(block, tx, itx);
 
   return RPCError::kRPCNone;
 }
@@ -140,7 +148,8 @@ HogDBExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
   if (!itx)
     return RPCError::kRPCBadBlockID;
   itx->abort();
-  ctx_.close_invoke_tx(block, tx);
+  ctx_.close_invoke_tx(block, tx, itx);
+
   return RPCError::kRPCNone;
 }
 
@@ -164,6 +173,12 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
       return err;
     }
   }
+  auto bal_req = itx->sync_balance_locks();
+  if (!bal_req) {
+    itx->rollback_to_savepoint(depth - 1);
+    return to_rpc_error(bal_req.error());
+  }
+  itx->assert_is_valid();
   return RPCError::kRPCNone;
 }
 

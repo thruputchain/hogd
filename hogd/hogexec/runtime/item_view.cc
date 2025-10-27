@@ -315,13 +315,9 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
 StorageDelta
 ReplayCacheItem::get_delta() const
 {
-  auto delta = StorageDelta(StorageDeltaType::kDeltaTypeReplayCacheModify);
-  delta.replay_cache_modify() =
-      ReplayCacheModifyArgs{.minimum_threshold = metadata_.minimum_threshold};
-  delta.replay_cache_modify().nonces.reserve(inserted_nonces_.size());
-  for (auto nonce : inserted_nonces_) {
-    delta.replay_cache_modify().nonces.push_back(nonce);
-  }
+  auto delta = StorageDelta(StorageDeltaType::kDeltaTypeConsumeUniquifier);
+  delta.consume_uniquifier_args() =
+      ConsumeUniquifierArgs{.uniquifier = consumed_uniquifier_};
   return delta;
 }
 

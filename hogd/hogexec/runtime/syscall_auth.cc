@@ -1,4 +1,5 @@
 
+#include "hogd/hogexec/runtime/ffi_helpers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/rust/contract_types/bindings.h"
 #include "syscall_error.hh"
 #include "types.hh"
 #include "x23/x23.h"
@@ -83,6 +85,27 @@ syscall_ChangePublicKeyRegistration_inner(
     return {status.value().error().code(), 0};
   }
 
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetAuthClaimCount_inner(SystemCallHandler &syscall_handler,
+                                uint32_t &output_count)
+{
+  output_count = syscall_handler.get_auth_claims().size();
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
+                           uint32_t input_index,
+                           generated::AuthClaim &output_auth_claim)
+{
+  if (input_index >= syscall_handler.get_auth_claims().size()) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+  auto const &claim = syscall_handler.get_auth_claims()[input_index];
+  output_auth_claim = FFIHelperType<generated::AuthClaim>::to_ffi(claim);
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

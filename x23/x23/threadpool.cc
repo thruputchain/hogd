@@ -3,8 +3,12 @@
 #include <atomic>
 #include <memory>
 
+#include <signal.h>
+
+#include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace x23 {
 
@@ -21,6 +25,7 @@ ThreadPool::ThreadPool(size_t nthreads)
     workers_.push_back(std::make_unique<Worker>(this, i));
     threads_.emplace_back(&ThreadPool::Worker::work, workers_.back().get());
   }
+  sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
 }
 
 ThreadPool::~ThreadPool()
@@ -148,6 +153,42 @@ ThreadPool::drain() noexcept
   // Now also wait for all running threads to yield, since some of
   // those might still have been enqueued before drain was called.
   quiesce();
+}
+
+std::string
+ThreadPool::show()
+{
+  using namespace std::chrono;
+  std::vector<uint64_t> oldest(nqueues_);
+  std::vector<uint> nt(nqueues_);
+  uint64_t now = fastclock::get_ns();
+  for (uint i = 0; i < nqueues_; ++i) {
+    oldest[i] = runqueues_[i].qtime();
+    nt[i] = queue_nthreads(i);
+  }
+  std::string ret =
+      std::format("ThreadPool {}: {} threads, {} run queues, {} ns\n",
+                  (void *)this, nthreads_, nqueues_, now);
+  for (uint i = 0; i < nqueues_; ++i) {
+    uformat_to(&ret, "  queue {}: {} threads", i, nt[i]);
+    if (oldest[i] == kEmpty)
+      ret += ", EMPTY";
+    else
+      uformat_to(&ret, ", oldest job age {:.3f} us (time {})",
+                 int64_t(now - oldest[i]) / 1000.0, oldest[i]);
+    ret += '\n';
+  }
+  return ret;
+}
+
+void
+ThreadPool::debug_dump()
+{
+  std::string msg = show();
+  int fd = debug.fd();
+  if (fd < 0)
+    fd = 2;
+  ::write(fd, msg.data(), msg.size());
 }
 
 ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept

@@ -32,11 +32,11 @@
 
 // Set to 1 unless the compiler generates internal compiler errors
 // compiling the coro trace code.
-#cmakedefine01 X23_CORO_SLOCK_OK
+#cmakedefine01 X23_CORO_SLOC_OK
 
 // Define to 1 to enable tracing of coroutine flow (when
 // x23::CoroTrace::enable is true), 0 to disable, or leave undefined
-// to use !defined(NDEBUG) && X23_CORO_SLOCK_OK
+// to use !defined(NDEBUG) && X23_CORO_SLOC_OK
 #cmakedefine X23_CORO_TRACE @X23_CORO_TRACE@
 
 // Define to 1 if you have the abi::__cxa_demangle function
@@ -44,6 +44,9 @@
 
 // Define to 1 if you have std::stacktrace
 #cmakedefine01 HAVE_STD_STACKTRACE
+
+// Define to 1 if you have backtrace and backtrace_symbols in <execinfo.h>
+#cmakedefine01 HAVE_BACKTRACE_SYMBOLS
 
 // Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
 #cmakedefine01 HAVE_ATOMIC_SHARED_PTR

@@ -12,41 +12,26 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
+#include "hogd/mempool/shared.h"
 #include "transaction.hh"
-#include "types.h"
 #include "types.hh"
-#include "x23/vec.h"
 #include "x23/x23/async.h"
+#include "x23/x23/corosync.h"
+#include "x23/x23/vec.h"
 
 namespace hogd {
 
 class Scheduler {
 public:
-  Scheduler(db_sched_client_t &db_sched_client)
-    : db_sched_client_(db_sched_client)
+  Scheduler(std::shared_ptr<db_sched_client_t> db_sched_client)
+    : db_sched_client_(std::move(db_sched_client))
   {}
 
-  // Destructors cannot throw exceptions, though the destructor below calls
-  // [write_cache()], which is capable of throwing an exception (due to the
-  // [CHECK()]). We need to catch and squash this exception in the destructor so
-  // that the destructor itself cannot throw an exception.
-  //
-  // We know that the CHECK will never fail. Thus, in the event of an exception,
-  // we just print an error message to [stderr] and take no further action.
-  ~Scheduler()
+  x23::Async<void> shut_down()
   {
-    try {
-      // Note that we are invoking [write_cache()] synchronously below. If you
-      // notice a deadlock around here, this synchronous call is likely the
-      // culprit.
-      write_cache()();
-    } catch (const std::exception &e) {
-      std::cerr << "[Scheduler::~Scheduler] Exception in write_cache(): "
-                << e.what() << '\n';
-    } catch (...) {
-      std::cerr << "[Scheduler::~Scheduler] Unknown exception in write_cache()"
-                << '\n';
-    }
+    // TODO(jhumphri): Need to remove the txs from the runqueue and add their
+    // hogs back to the [kHogAgeGroupToSchedule] group for each wallet.
+    co_await write_cache();
   }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
@@ -64,8 +49,11 @@ public:
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
   x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                         uint128_xdr num_received,
+                                         uint128_t num_received,
                                          BlockHeight current_block);
+
+  x23::Async<void> process_deducted_hogs(const ContractAddress &account,
+                                         uint128_t num_deducted);
 
   // Reorders txs in the runqueue and adds/removes txs from the runqueue based
   // on the number of hogs and hog ages for an account. Note that this function
@@ -82,24 +70,20 @@ public:
   schedule(BlockHeight block_height, size_t block_size);
 
   // Call this method when txs are successfully executed *as part of a block
-  // that this node proposed*. This method just removes the remaining tx state
-  // from the scheduler, so we need to call this to prevent a memory leak.
-  x23::Async<void>
-  mark_txs_executed(const x23::Vec<SignedTransactionHash> &hashes,
-                    BlockHeight block);
-
-  // Call this method when txs failed to execute. This method adds the hogs
-  // consumed by the tx back to the account and removes the remaining tx state
-  // from the scheduler. The txs are then returned by the method.
+  // that this node proposed* and/or when txs failed to execute.
   //
-  // Note: I initially thought it made sense to have this method add the txs
-  // back to the runqueue. However, txs may have failed due to irrecoverable
-  // errors, such as sending too many hogs to another account. Thus, this method
-  // returns the failed txs and the caller can choose to what to do next,
-  // whether that is reenqueing the txs in the scheduler, dropping the txs, or
-  // doing something else.
-  x23::Async<SignedTransactionBatch>
-  mark_txs_failed(const x23::Vec<SignedTransactionHash> &hashes);
+  // All of the txs pass to this method must having the same invoking account!
+  //
+  // This method removes the remaining tx state from the scheduler, so we need
+  // to call this to prevent a memory leak.
+  //
+  // Note: I initially thought it made sense to have this method add the failed
+  // txs back to the runqueue. However, txs may have failed due to irrecoverable
+  // errors, such as sending too many hogs to another account. The caller must
+  // choose what to do next, whether that is reenqueing the txs in the
+  // scheduler, dropping the txs, or doing something else.
+  x23::Async<void>
+  mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -112,9 +96,9 @@ public:
   // Note that this method removes the txs from the runqueue, but it does not
   // remove their state entirely from the scheduler. Specifically, information
   // about the txs is still held in [hash_to_tx_]. The caller needs to
-  // ultimately call [mark_txs_executed()] to remove this state.
+  // ultimately call [mark_txs_finished()] to remove this state.
   // TODO(jhumphri): We should pass a set instead of a vector, both here and in
-  // [mark_txs_executed()] and the other functions. Otherwise, a malicious
+  // [mark_txs_finished()] and the other functions. Otherwise, a malicious
   // nomination could crash a node by including the same hash twice and
   // triggering a CHECK failure.
   bool
@@ -149,8 +133,28 @@ public:
       const std::function<x23::Async<bool>(const SignedTransaction &tx)>
           &filter);
 
+  // The number of txs in the scheduler, including both those of the runqueue
+  // and those that are stranded.
+  size_t size() const { return size_; }
+  size_t num_stranded() const;
+  // If you call [schedule()] and then call [num_on_runqueue()] *before* you
+  // call [mark_txs_finished()], this function will return a stale count.
+  size_t num_on_runqueue() const
+  {
+    size_t n_stranded = num_stranded();
+    CHECK_LE(n_stranded, size());
+    return size() - n_stranded;
+  }
+
   // Debug.
   void dump_runqueue() const;
+
+  // TODO(jhumphri): Add multi-thread support to the scheduler.
+
+  // TODO(jhumphri): Replace [transfer_finished_] with the coropoll semaphore
+  // that David aded on [dm/x23].
+  std::atomic<bool> transfer_finished_ = false;
+  x23::CoroLock global_lock_;
 
 private:
   // We use this type to store information about a tx in the runqueue.
@@ -204,6 +208,8 @@ private:
                       x23::Vec<SignedTransactionHash> &hashes,
                       x23::Vec<SignedTransaction> &txs);
 
+  void return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height);
+
   // Discards all txs that have expired before [current_height]. In other words,
   // if [current_height] is the height of the current block being scheduled,
   // then all txs that expire at heights [current_height - 1] and smaller are
@@ -221,7 +227,7 @@ private:
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
-  db_sched_client_t &db_sched_client_;
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
 
   // Caches the number of hogs and hog ages for an account so that the scheduler
   // does not need to make as many RPC calls to the database.
@@ -271,6 +277,8 @@ private:
   // height, we want to discard all txs that expire at that block height,
   // regardless of whether they are on the runqueue or stranded.
   std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
+
+  size_t size_ = 0;
 };
 
 } // namespace hogd
