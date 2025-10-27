@@ -157,7 +157,6 @@ RPCError
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch const &batch)
 {
-  info("try_push_new_subtransaction: block: {}, tx: {}", block, tx);
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
@@ -174,7 +173,6 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
       return err;
     }
   }
-  info("sync_balance_locks");
   auto bal_req = itx->sync_balance_locks();
   if (!bal_req) {
     itx->rollback_to_savepoint(depth - 1);
