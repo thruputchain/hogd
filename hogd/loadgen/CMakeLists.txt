@@ -65,3 +65,20 @@ add_dependencies(
 )
 
 set_property(TARGET erc20_experiment_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+# create tx_size_stats binary
+add_executable(
+  tx_size_stats
+  tx_size_stats.cc
+)
+target_link_libraries(
+  tx_size_stats
+  loadgen
+  hogd
+)
+
+add_dependencies(
+  tx_size_stats
+  all_wasm_contracts
+  all_wasm_headers
+)
