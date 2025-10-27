@@ -1,19 +1,18 @@
 #pragma once
 
-#include <chrono>
+#include <string>
+#include <sys/socket.h>
 
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "loadgen.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
-#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 
@@ -45,31 +44,7 @@ inline auto
 create_client(const sockaddr_storage &ss, bool retry = false,
               size_t max_message_size = x23::default_max_message_size)
 {
-  while (true) {
-    try {
-      x23::UniqueFd fd = x23::tcpconnect(ss);
-      CHECK(static_cast<bool>(fd));
-      auto config = x23::rpc_stream_logged(default_coropoll(), fd.release());
-      config->max_message_size = max_message_size;
-      return config->client(T{});
-    } catch (std::system_error &e) {
-      const std::string msg =
-          std::format("Could not open RPC client: {}", e.what());
-      if (!retry) {
-        panic("{}", msg);
-      }
-      info("{}", msg);
-    } catch (...) {
-      const std::string msg = std::format("Could not open RPC client");
-      if (!retry) {
-        panic("{}", msg);
-      }
-      info("{}", msg);
-    }
-    // Common retry path.
-    // Wait briefly and then try again on the next iteration...
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
+  return make_rpc_client<T>(ss, retry, max_message_size);
 }
 
 template<typename T>
