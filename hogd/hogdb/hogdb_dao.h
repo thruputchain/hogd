@@ -27,6 +27,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/replay_cache.h"
 #include "sched_coord.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/span.h"

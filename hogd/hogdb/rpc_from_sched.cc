@@ -338,6 +338,10 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
     block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
   }
 
+  if (auto r = itx->sync_balance_locks(); !r) {
+    error("failed to sync balance locks: {}", r.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
   itx->commit();
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 

@@ -1,13 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <random>
 #include <variant>
 #include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
@@ -86,23 +89,6 @@ private:
   client_t client_;
 };
 
-class StorageDeltaBatchBuilder {
-public:
-  // Is responsible for sorting storage deltas appropriately for consumption by
-  // the database.
-  StorageDeltaBatch build();
-
-  void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
-                 StorageItemRPCFlagSet flags);
-
-private:
-  std::vector<FlaggedStorageDelta> positive_storage_deltas_;
-  std::vector<FlaggedStorageDelta> negative_storage_deltas_;
-
-  // might be positive or negative; we don't know in executor which is the case
-  std::vector<FlaggedStorageDelta> storage_deltas_;
-};
-
 // A DatabaseProxy that is scoped to a single transaction.
 class PerTransactionDatabaseProxy {
 public:
@@ -111,26 +97,26 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
-  std::optional<StorageDeltaBatch> current_subtransaction_batch_;
-
   void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
                  StorageItemRPCFlagSet flags)
   {
-    if (!current_subtransaction_batch_builder_) {
-      current_subtransaction_batch_builder_ = StorageDeltaBatchBuilder();
-    }
-    current_subtransaction_batch_builder_->add_delta(addrkey, delta, flags);
+    current_subtransaction_batch_.push_back(FlaggedStorageDelta{
+        .addrkey = addrkey, .delta = delta, .flags = flags});
   }
 
   SystemStatus<bool> try_push_current_subtransaction()
   {
-    StorageDeltaBatch batch;
-    if (current_subtransaction_batch_builder_) {
-      batch = current_subtransaction_batch_builder_->build();
-      current_subtransaction_batch_builder_ = std::nullopt;
+    if constexpr (is_debug_build()) {
+      std::shuffle(current_subtransaction_batch_.begin(),
+                   current_subtransaction_batch_.end(),
+                   std::mt19937{std::random_device{}()});
     }
 
-    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch);
+    auto r =
+        db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
+                                              current_subtransaction_batch_);
+    current_subtransaction_batch_.clear();
+    return r;
   }
 
   SystemStatus<void> pop_subtransactions(uint32_t count)
@@ -140,20 +126,17 @@ public:
 
   SystemStatus<void> commit_transaction(NewContractBatch const &new_contracts)
   {
-    assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
   }
 
   SystemStatus<void> abort_transaction()
   {
-    assert(!current_subtransaction_batch_builder_);
     return db_proxy_.abort_transaction(block_id_, tx_id_);
   }
 
 private:
+  StorageDeltaBatch current_subtransaction_batch_;
   DatabaseProxy &db_proxy_;
-  std::optional<StorageDeltaBatchBuilder>
-      current_subtransaction_batch_builder_ = std::nullopt;
   const BlockID block_id_;
   const TransactionID tx_id_;
 };

@@ -55,6 +55,10 @@ protected:
 
 TEST_P(ERC20ExperimentTest, Basic)
 {
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
+                    "storage cost changes";
+  }
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_accounts = 10,
   });
