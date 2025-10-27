@@ -14,6 +14,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -121,16 +122,10 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
-        auto server_addr =
+        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
-                          x23::uformat("{}", mock_db.read_port_number_)}
-                .to_addr(true);
-        if (!server_addr) {
-          throw std::runtime_error(
-              std::format("failed server error: {}", server_addr.error()));
-        }
-        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-            ->client(DatabaseToExecutorInterfaceV1{});
+                          x23::uformat("{}", mock_db.read_port_number_)},
+            false);
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
@@ -143,13 +138,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           throw std::runtime_error("Failed to parse database shard address");
         }
-        auto server_addr = hostport.to_addr(true);
-        if (!server_addr) {
-          throw std::runtime_error(
-              std::format("failed server error: {}", server_addr.error()));
-        }
-        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-            ->client(DatabaseToExecutorInterfaceV1{});
+        return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
+                                                                    false);
       }
       throw std::runtime_error("unimplemented");
     }())

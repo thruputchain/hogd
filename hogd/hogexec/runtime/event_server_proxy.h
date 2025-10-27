@@ -15,7 +15,7 @@ namespace hogd {
 
 class EventServerProxy {
 public:
-  EventServerProxy(x23::HostPort host_port);
+  EventServerProxy(x23::HostPort const &host_port);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
