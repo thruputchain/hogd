@@ -61,10 +61,22 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
+  auto timer = std::make_unique<ElapsedTimer>();
+
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
+
+  double get_lock_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   co_await scheduler_->add_txs(batch);
   cg.reset();
+
+  double add_txs_duration = timer->elapsed();
+  info("mempool schedulercoord_submit_vetted get_lock_duration {}, "
+       "add_txs_duration {}",
+       get_lock_duration, add_txs_duration);
+
   co_return;
 }
 
@@ -190,13 +202,9 @@ MempoolCoordinatorRpc::propose_batch(
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
-      transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = result.proposal_data()});
-      ret.push_back(true);
-      break;
     case ExecResult::ExecResultOK:
       transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+          {.nondeterministic_proposal_data = result.proposal_data()});
       ret.push_back(true);
       break;
     default:
@@ -222,8 +230,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   chunks.reserve(num_chunks);
   for (size_t i = 0; i < num_chunks; i++) {
     auto end =
-        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * kChunkSize) : txs.end();
-    chunks.emplace_back(txs.begin() + (i * kChunkSize), end);
+        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * chunk_size) : txs.end();
+    chunks.emplace_back(txs.begin() + (i * chunk_size), end);
+    CHECK_LE(chunks.back().size(), chunk_size);
   }
 
   // Send the RPCs.
@@ -306,14 +315,22 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
+
+  x23::CoroGuard cg;
+  co_await cg(scheduler_->global_lock_);
+
   std::tie(nomination.transaction_hashes, txs) =
       co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
                                     kMaxBlockSize);
+  size_t num_on_runqueue = scheduler_->num_on_runqueue();
+  size_t num_stranded = scheduler_->num_stranded();
+  cg.reset();
+
   double schedule_duration = timer->elapsed();
 
   info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable, "
        "{} are stranded",
-       txs.size(), scheduler_->num_on_runqueue(), scheduler_->num_stranded());
+       txs.size(), num_on_runqueue, num_stranded);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
@@ -346,12 +363,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       failed_txs[address].push_back(txs[i]);
     }
   }
+
+  co_await cg(scheduler_->global_lock_);
   for (const ContractAddress &account : all_accounts) {
     co_await scheduler_->mark_txs_finished(tx_hashes[account]);
     if (!failed_txs[account].empty()) {
       co_await scheduler_->add_txs(failed_txs[account]);
     }
   }
+  cg.reset();
 
   if (nomination.transaction_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
