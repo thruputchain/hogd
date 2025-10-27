@@ -167,9 +167,12 @@ concept is_{0} =)",
         top_ += std::format(
             R"({0}
   (requires(Server __s, ExtraArgs...ea) {{
+    {{ __s->{1}({2}{3}ea...) }};
+  }}) &&
+  ((requires(Server __s, ExtraArgs...ea) {{
      {{ __s->{1}({2}{3}ea...) }}
        -> std::convertible_to<RetTrans<void>>;
-   }} || std::convertible_to<std::monostate, RetTrans<void>>))",
+   }} || std::convertible_to<std::monostate, RetTrans<void>>)))",
             andand.get(), proc.id,
             join(proc.arg_types | std::views::transform(map_type) |
                      std::views::transform(
