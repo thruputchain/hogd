@@ -314,6 +314,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
 
     v.emplace_back(std::move(change), tx_depth_);
+    assert(*ret >= 0);
 
     info("ret: {} tx_depth_: {}", *ret, tx_depth_);
 
@@ -322,7 +323,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     int128_t marginal_storage = std::max<int128_t>(0, *ret);
 
     // now lock the storage
-    if (marginal_storage > 0) {
+    if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);
       v.back().locked_storage_cost = marginal_storage;
     }
@@ -352,13 +353,21 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   info("ret: {} previous_locked_storage: {}", *ret, previous_locked_storage);
   assert(*ret >= 0 || change.is_permanent_exclusive());
 
+  int128_t marginal_storage = *ret - previous_locked_storage;
+  // It's ok if marginal storage is negative;
+  // that means we're releasing storage costs relative to the prior locked
+  // storage. Note that locking a positive value in a balance does NOT make that
+  // balance immediately available to other transactions, so this is safe to do.
+  // Additionally, the NNInt item preserves (via narrow()) the invariant that
+  // we'll always be able to rollback to a prior saved state, so releasing
+  // storage costs that were locked earlier in the tx is safe. Because *ret >=
+  // 0, we won't ever release storage costs that we didn't lock up in this
+  // transaction.
 
   // now to lock the storage
-  int128_t marginal_storage =
-      std::max<int128_t>(0, *ret - previous_locked_storage);
-  if (marginal_storage > 0) {
+  if (marginal_storage != 0) {
     lock_storage(key.get_address(), marginal_storage);
-    v.back().locked_storage_cost += marginal_storage;
+    v.back().locked_storage_cost = *ret;
   }
 
   return {};
