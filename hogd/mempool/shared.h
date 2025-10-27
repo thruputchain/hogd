@@ -8,6 +8,7 @@
 #include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "loadgen.hh"
