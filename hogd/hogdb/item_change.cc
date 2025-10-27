@@ -553,14 +553,15 @@ ItemChange::narrow(const ItemChange &change)
     return;
   }
 
-  exclusive_ = !std::visit(
-      [&change](auto &arg) -> bool {
-        if constexpr (!is_monostate<decltype(arg)>)
-          return arg.narrow(
-              std::get<std::decay_t<decltype(arg)>>(change.type_));
-        return {};
-      },
-      type_);
+  exclusive_ = exclusive_ ||
+               !std::visit(
+                   [&change](auto &arg) -> bool {
+                     if constexpr (!is_monostate<decltype(arg)>)
+                       return arg.narrow(
+                           std::get<std::decay_t<decltype(arg)>>(change.type_));
+                     return {};
+                   },
+                   type_);
 }
 
 HogDBStatus<int128_t>

@@ -1640,7 +1640,7 @@ TEST_P(DirectBytestringTest,
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
 
-  // This succeeds, because the increase in storage cost is performed while the
+  // This succeeds, because the decrease in storage cost is performed while the
   // exclusive lock is held.
   tx2.add_delta(make_addrkey(contract_addr, "test"),
                 make_bytestring_delta("value_long"),
@@ -1693,6 +1693,72 @@ TEST_P(DirectBytestringTest,
   advance_block();
 }
 
+TEST_P(DirectBytestringTest, MultipleDeletes)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB doesn't implement permanent exclusive lock "
+                    "immediate cost release";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  const int128_t initial_cost =
+      cost_model_->get_bytestring_cost("value"s.length());
+  setup_grant_storage_token(contract_addr, initial_cost);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+  ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  advance_block();
+  // test setup done
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  // this lock fails because tx3 already has deleted the item.
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
+  auto r2_1 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_1.has_value());
+  ASSERT_FALSE(r2_1.value());
+
+  ASSERT_TRUE(tx3.abort_transaction().has_value());
+
+  // now tx2 can acquire in exclusive mode
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock));
+  tx2.add_delta(make_addrkey(contract_addr, "test2"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_2.has_value());
+  ASSERT_TRUE(r2_2.value());
+
+  ASSERT_TRUE(tx2.commit_transaction({}).has_value());
+
+  advance_block();
+
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()), 0);
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,

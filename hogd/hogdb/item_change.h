@@ -833,7 +833,8 @@ template<> struct std::formatter<hogd::ItemChange> {
         [&ctx, &item_change](auto &&arg) {
           if constexpr (!std::same_as<std::decay_t<decltype(arg)>,
                                       std::monostate>) {
-            format_to(ctx.out(), "Exclusive: {}, {}", item_change.exclusive_,
+            format_to(ctx.out(), "Exclusive(Permanent): {}({}), {}",
+                      item_change.exclusive_, item_change.permanent_exclusive_,
                       arg);
           }
           else {
