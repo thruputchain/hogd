@@ -1,6 +1,6 @@
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <map>
 #include <print>
@@ -128,6 +128,7 @@ print_tx_size_stats()
 } // namespace
 } // namespace hogd
 
+// NOLINTBEGIN(bugprone-exception-escape)
 int
 main(int argc, char *argv[])
 {
@@ -138,3 +139,4 @@ main(int argc, char *argv[])
   hogd::print_tx_size_stats();
   return EXIT_SUCCESS;
 }
+// NOLINTEND(bugprone-exception-escape)
