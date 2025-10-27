@@ -29,7 +29,6 @@
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"

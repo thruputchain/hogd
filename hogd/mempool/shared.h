@@ -1,13 +1,9 @@
 #pragma once
 
-#include <atomic>
 #include <chrono>
-#include <unordered_map>
-#include <utility>
 
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"

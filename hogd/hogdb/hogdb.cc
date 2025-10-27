@@ -1,7 +1,6 @@
 // hogdb.cc - handles initialization for hogdb
 
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <format>
@@ -13,7 +12,6 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
-#include <thread>
 #include <utility>
 
 // XDR headers
