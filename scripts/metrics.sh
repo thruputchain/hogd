@@ -28,9 +28,21 @@ BUILD_DIR=$1
 ./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim >metrics_history/metrics/initial_token_claim-codesize/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 # Performance metrics
-## hogdb_bench
+## hogdb_bench (roundrobin_payments)
 ./metrics_history/scripts/make_metric_file.sh hogdb-bench $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/hogdb_bench.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## hogdb_bench_onetomany
+./metrics_history/scripts/make_metric_file.sh hogdb-bench-onetomany $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hogdb_bench_onetomany.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-onetomany/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## hogdb_bench_manytoone
+./metrics_history/scripts/make_metric_file.sh hogdb-bench-manytoone $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hogdb_bench_manytoone.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-manytoone/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## hogdb_bench_new_storage
+./metrics_history/scripts/make_metric_file.sh hogdb-bench-new-storage $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hogdb_bench_new_storage.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-new-storage/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## mass fibonacci.wasm calls
 ./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $GIT_branch $GIT_commit $GIT_commit_time
