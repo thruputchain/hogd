@@ -13,6 +13,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
@@ -263,13 +264,10 @@ std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
 HogdbWrapper::make_sched_db_client()
 {
   auto sched_db_port = test_sched_db_server_.start_server(/*port=*/0);
-  x23::UniqueFd fd =
-      x23::tcpconnect(*x23::HostPort{"localhost", sched_db_port}.to_addr(true));
-  using sched_db_client_t =
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-  return std::make_unique<sched_db_client_t>(
-      x23::rpc_stream_logged(default_coropoll(), fd.release())
-          ->client(SchedDb1{}));
+  return std::make_unique<
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
+      make_rpc_client<SchedDb1>(x23::HostPort{"localhost", sched_db_port},
+                                false));
 }
 
 void
