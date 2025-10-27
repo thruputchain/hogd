@@ -30,9 +30,6 @@
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 

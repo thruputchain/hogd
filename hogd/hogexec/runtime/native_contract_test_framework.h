@@ -1,11 +1,11 @@
 #pragma once
 
-#include <condition_variable>
-#include <format>
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <condition_variable>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <map>
 #include <memory>
@@ -26,6 +26,7 @@
 #include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -254,17 +255,8 @@ class CoordWrapper {
 public:
   CoordWrapper(uint16_t port)
     : coord_client_([port] {
-        auto addr = x23::HostPort{"localhost", port}.to_addr(true);
-        if (!addr) {
-          throw std::runtime_error("Failed to parse address to coord server");
-        }
-        auto fd = x23::tcpconnect(*addr);
-        if (!fd) {
-          throw std::runtime_error("Failed to connect to coord server");
-        }
-        auto client_config = x23::srpc_stream_logged(fd.release());
-
-        return client_config->template client<DbSched1>();
+        return make_srpc_client<DbSched1>(x23::HostPort{"localhost", port},
+                                          false);
       }())
   {}
 

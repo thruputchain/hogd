@@ -1,38 +1,28 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 
-#include <format>
-#include <stdexcept>
-#include <utility>
-
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 
 namespace {
 
 auto
-connect_to_event_server(x23::HostPort host_port)
+connect_to_event_server(x23::HostPort const &host_port)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error(
-        std::format("failed server error: {}", server_addr.error()));
-  }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-      ->client(EventExecutor1{});
+  return make_srpc_multiclient<EventExecutor1>(host_port, false);
 }
 
 } // namespace
 
-EventServerProxy::EventServerProxy(x23::HostPort host_port)
-  : client_(connect_to_event_server(std::move(host_port)))
+EventServerProxy::EventServerProxy(x23::HostPort const &host_port)
+  : client_(connect_to_event_server(host_port))
 {}
 
 PerTransactionEventServerProxy::PerTransactionEventServerProxy(

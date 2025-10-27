@@ -26,6 +26,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
@@ -42,7 +43,6 @@
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
-#include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -184,14 +184,7 @@ namespace {
 auto
 connect_to_event_sched_server(uint16_t port)
 {
-  auto server_addr = x23::HostPort{"localhost", port}.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error("Failed to connect to event server");
-  }
-  auto fd = x23::tcpconnect(server_addr.value());
-
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())
-      ->client(EventSched1{});
+  return make_rpc_client<EventSched1>(x23::HostPort{"localhost", port}, false);
 }
 
 auto
@@ -201,12 +194,7 @@ connect_to_db_server(ShardCard const &card)
   if (!host_port.parse(card.address_for_sched)) {
     throw std::runtime_error("Failed to parse db server address");
   }
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error("Failed to connect to db server");
-  }
-  return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
-      ->client(DbSched1{});
+  return make_srpc_client<DbSched1>(host_port, false);
 }
 
 auto
@@ -216,16 +204,7 @@ connect_to_exec_server(const ExecCard &card)
   if (!host_port.parse(card.address)) {
     throw std::runtime_error("Failed to parse exec server address");
   }
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error("Failed to connect to exec server");
-  }
-  auto fd = x23::tcpconnect(server_addr.value());
-  if (!fd) {
-    throw std::runtime_error("Failed to connect to exec server");
-  }
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())
-      ->client(ExecutorSched1{});
+  return make_rpc_client<ExecutorSched1>(host_port, false);
 }
 
 } // namespace
