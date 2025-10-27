@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <bit>
 #include <expected>
 
 #include <sys/uio.h>
@@ -141,7 +142,6 @@ static_assert(is_bytevec<VecQ<std::uint8_t>>);
 // kCopyThreshold, but will assume ownership of larger Bufs moved in.
 struct BufVec {
   static constexpr size_t kCopyThreshold = 4096;
-  static constexpr size_t kChunkSize = 2 * kCopyThreshold;
 
   VecQ<Buf> bufs_;
   size_t skip_{};
@@ -171,7 +171,7 @@ struct BufVec {
       b = b.subspan(offset);
     if (backfull(b.size())) {
       Buf &back = bufs_.emplace_back();
-      back.reserve(std::max(kChunkSize, b.size()));
+      back.reserve(std::max(chunk_size(), b.size()));
       back.append_range(b);
     }
     else
@@ -213,7 +213,7 @@ struct BufVec {
         ++eit;
       }
       if (eit == r.end())
-        n = std::max(n, kChunkSize);
+        n = std::max(n, chunk_size());
       Buf &back = bufs_.emplace_back();
       back.reserve(n);
       while (it != eit) {
@@ -307,6 +307,13 @@ private:
       return true;
     const auto &back = bufs_.back();
     return back.capacity() - back.size() < n;
+  }
+
+  size_t chunk_size() const
+  {
+    static constexpr size_t kMinChunk = 2 * kCopyThreshold;
+    static constexpr size_t kMaxShift = 32 - std::bit_width(kMinChunk);
+    return kMinChunk << std::min(bufs_.size(), kMaxShift);
   }
 };
 

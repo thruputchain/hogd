@@ -268,33 +268,33 @@ struct span : std::span<T, E> {
 
   template<size_t Count> constexpr span<element_type, Count> first() const
   {
-    return super::template first<Count>();
+    return get_super().template first<Count>();
   }
   template<typename Self>
   constexpr auto first(this const Self &self, size_type count)
   {
     if constexpr (E == std::dynamic_extent)
-      return Self(self.super::first(count));
+      return Self(self.get_super().first(count));
     else
-      return span<element_type>(self.super::first(count));
+      return span<element_type>(self.get_super().first(count));
   }
   template<size_t Count> constexpr span<element_type, Count> last() const
   {
-    return super::template first<Count>();
+    return get_super().template first<Count>();
   }
   template<typename Self>
   constexpr auto last(this const Self &self, size_type count)
   {
     if constexpr (E == std::dynamic_extent)
-      return Self(self.super::last(count));
+      return Self(self.get_super().last(count));
     else
-      return span<element_type>(self.super::last(count));
+      return span<element_type>(self.get_super().last(count));
   }
 
   template<size_type Offset, size_type Count = std::dynamic_extent>
   auto subspan() const
   {
-    auto s = super::template subspan<Offset, Count>();
+    auto s = get_super().template subspan<Offset, Count>();
     return span<element_type, decltype(s)::extent>(s);
   }
 
@@ -303,10 +303,14 @@ struct span : std::span<T, E> {
                size_type count = std::dynamic_extent)
   {
     if constexpr (E == std::dynamic_extent)
-      return Self(self.super::subspan(offset, count));
+      return Self(self.get_super().subspan(offset, count));
     else
-      return span<element_type>(self.super::subspan(offset, count));
+      return span<element_type>(self.get_super().subspan(offset, count));
   }
+
+private:
+  super &get_super() { return *this; }
+  const super &get_super() const { return *this; }
 };
 template<typename... Args>
 span(Args &&...args) -> span<
