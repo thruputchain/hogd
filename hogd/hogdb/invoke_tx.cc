@@ -12,7 +12,6 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -304,10 +303,10 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       return ret.error();
     }
 
-    v.emplace_back(std::move(change), tx_depth_);
-
     assert(*ret >= 0 || change.is_permanent_exclusive());
     int128_t marginal_storage = *ret;
+
+    v.emplace_back(std::move(change), tx_depth_);
 
     // now lock the storage
     if (marginal_storage != 0) {
@@ -329,6 +328,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   int128_t previous_locked_storage = item.locked_storage_cost;
 
+  assert(*ret >= 0 || change.is_permanent_exclusive());
+  int128_t marginal_storage = *ret - previous_locked_storage;
+
   if (item.tx_depth == tx_depth_) {
     item.change = std::move(change);
   }
@@ -337,8 +339,6 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
   }
 
-  assert(*ret >= 0 || change.is_permanent_exclusive());
-  int128_t marginal_storage = *ret - previous_locked_storage;
   // It's ok if marginal storage is negative;
   // that means we're releasing storage costs relative to the prior locked
   // storage. Note that locking a positive value in a balance does NOT make that
