@@ -7,7 +7,6 @@
 #include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <print>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
@@ -30,12 +29,8 @@ WriteBuffer::Service::write(BufVec &work)
     if (*res != IoResult::kAgain)
       tok_.reset();
   }
-  else {
-    Errno error = res.error();
-    std::println("HERE! res.error() is {}", error);
-    fflush(stdout);
+  else
     cp_->poison(fd_);
-  }
   return 0;
 }
 
@@ -141,11 +136,8 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
       if (Errno err = co_await read_wait(tok))
         co_return err;
     }
-    else {
-      std::println("WOW! res is {}", res.error());
-      fflush(stdout);
+    else
       co_return res;
-    }
   }
   co_return out->size() - startsize;
 }
