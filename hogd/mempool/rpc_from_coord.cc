@@ -372,6 +372,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   }
   cg.reset();
 
+  MerkleTriePrefix trie;
+  build_block_merkle_trie(nomination.transaction_hashes, trie);
+
   auto timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
   double just_wait_for_executor_duration = timer2->elapsed();
@@ -383,6 +386,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     if (!statuses[i]) {
       failed_txs[address].push_back(txs[i]);
+      trie.remove(HexArray(nomination.transaction_hashes[i]));
     }
   }
   co_await cg(scheduler_->global_lock_);
@@ -413,8 +417,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double create_handles_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  MerkleTriePrefix trie;
-  build_block_merkle_trie(nomination.transaction_hashes, trie);
   nomination.block_hash = get_block_hash(trie,
                                          /*prev_block_hash=*/db_tip.hash);
 
