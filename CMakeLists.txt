@@ -76,9 +76,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
-set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
+set(CMAKE_C_FLAGS_RELEASE "-UNDEBUG -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-UNDEBUG -O3")
 
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
