@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cstdlib>
-#include <exception>
 #include <limits>
 #include <map>
 #include <print>
