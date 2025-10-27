@@ -10,7 +10,7 @@ string(REPLACE "-Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 if(EPOLL)
     check_cxx_source_compiles([=[
     #include <sys/epoll.h>
-    
+
     int
     main()
     {

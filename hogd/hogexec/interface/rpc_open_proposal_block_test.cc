@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/init.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -208,3 +209,13 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
 }
 
 } // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  auto ret = hogd::hogd_init(argc, argv, false);
+  if (ret != 0)
+    return ret;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

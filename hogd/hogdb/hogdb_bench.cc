@@ -27,6 +27,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -271,9 +272,19 @@ Benchmark::run()
     assert(ref);
 
     InvokeTX tx(block);
-    if (HogDBStatus<void> ret = tx.request_nnint128(p.src, -p.amount); !ret)
+    if (HogDBStatus<void> ret =
+            tx.request_nnint128(p.src, -p.amount,
+                                std::to_underlying(
+                                    StorageItemRPCFlags::kStorageNone));
+        !ret)
       fail(ret.error());
-    if (HogDBStatus<void> ret = tx.request_nnint128(p.dst, p.amount); !ret)
+    if (HogDBStatus<void> ret =
+            tx.request_nnint128(p.dst, p.amount,
+                                std::to_underlying(
+                                    StorageItemRPCFlags::kStorageNone));
+        !ret)
+      fail(ret.error());
+    if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)
       fail(ret.error());
     tx.commit();
   };

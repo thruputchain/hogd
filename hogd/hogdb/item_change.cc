@@ -553,14 +553,15 @@ ItemChange::narrow(const ItemChange &change)
     return;
   }
 
-  exclusive_ = !std::visit(
-      [&change](auto &arg) -> bool {
-        if constexpr (!is_monostate<decltype(arg)>)
-          return arg.narrow(
-              std::get<std::decay_t<decltype(arg)>>(change.type_));
-        return {};
-      },
-      type_);
+  exclusive_ = exclusive_ ||
+               !std::visit(
+                   [&change](auto &arg) -> bool {
+                     if constexpr (!is_monostate<decltype(arg)>)
+                       return arg.narrow(
+                           std::get<std::decay_t<decltype(arg)>>(change.type_));
+                     return {};
+                   },
+                   type_);
 }
 
 HogDBStatus<int128_t>
@@ -568,6 +569,10 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
 {
   if (type_.index() != change.type_.index())
     return HogDBError(HogDBCode::kConflict);
+  // can't be permanent exclusive if not exclusive
+  assert(!change.permanent_exclusive_ || change.exclusive_);
+  assert(!permanent_exclusive_ || exclusive_);
+
   if (exclusive_ || change.exclusive_)
     return HogDBError(HogDBCode::kConflict);
 
@@ -584,6 +589,8 @@ ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
     return merge_cost.error();
   }
   assert(snapshot_cost_.has_value());
+  // we should never reach this far if we have a permanent exclusive lock
+  assert(!permanent_exclusive_);
   return std::max<int128_t>(0, *merge_cost - *snapshot_cost_);
 }
 
@@ -591,6 +598,13 @@ void
 ItemChange::undo_merge(const ItemChange &change)
 {
   assert(type_.index() == change.type_.index());
+
+  // We never undo_merge of an exclusive lock;
+  // rather, blocktx checks that there is one ref on the itemchange,
+  // and sets the item change directly.
+  // So we do not need to modify this->exclusive_ or permanent_exclusive_.
+  assert(!change.permanent_exclusive_);
+  assert(!change.exclusive_);
 
   std::visit(
       [&change](auto &arg) {
@@ -606,11 +620,14 @@ ItemChange::commit_change(const ItemChange &change)
   assert(type_.index() == change.type_.index());
   // In the future, we will forward the change
   // to the variant.
-  if (change.exclusive_) {
+  if (change.exclusive_ && !change.permanent_exclusive_) {
     // Committing the change that held the exclusive lock allows
     // us to release that lock.
     exclusive_ = false;
   }
+
+  assert(!change.permanent_exclusive_ || permanent_exclusive_);
+
   change_committed_ = true;
   std::visit(
       [&change](auto &arg) {
@@ -647,6 +664,12 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
       type_);
   if (!marginal_item)
     return marginal_item.error();
+  if (permanent_exclusive_) {
+    // If we have a permament exclusive lock, then we can release storage costs
+    // early since we know that no other transaction will be able to modify this
+    // item
+    return *marginal_item - *snapshot_cost_;
+  }
   return std::max<int128_t>(0, *marginal_item - *snapshot_cost_);
 }
 

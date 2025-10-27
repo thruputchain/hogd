@@ -11,7 +11,6 @@
 
 #include "account.hh"
 #include "contract.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
@@ -20,6 +19,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 
@@ -72,17 +72,21 @@ public:
 
   // request_nnint128 requests to perform set_add(base, delta).
   HogDBStatus<void> request_nnint128(const ItemKey &key, int128_t base,
-                                     int128_t delta);
+                                     int128_t delta,
+                                     StorageItemRPCFlagSet flags);
 
   // request_nnint128 requests to perform set_add(SNAPSHOT.base, delta).
-  HogDBStatus<void> request_nnint128(const ItemKey &key, int128_t delta);
+  HogDBStatus<void> request_nnint128(const ItemKey &key, int128_t delta,
+                                     StorageItemRPCFlagSet flags);
 
   // request_bytes requests to insert buf.
   HogDBStatus<void> request_bytes(const ItemKey &key,
-                                  std::span<const std::byte> buf);
+                                  std::span<const std::byte> buf,
+                                  StorageItemRPCFlagSet flags);
 
   // request_deletion requests to delete the key.
-  HogDBStatus<void> request_deletion(const ItemKey &key);
+  HogDBStatus<void> request_deletion(const ItemKey &key,
+                                     StorageItemRPCFlagSet flags);
 
   // request_deploy_contract requests to deploy a contract.
   // Note that this does NOT create the contract, or update a refcount on that
@@ -97,13 +101,19 @@ public:
   // request_auth_data requests to change the auth data for an address.
   HogDBStatus<void>
   request_auth_data(Address const &addr,
-                    const AuthDataChangeArgs &auth_data_change);
+                    const AuthDataChangeArgs &auth_data_change,
+                    StorageItemRPCFlagSet flags);
   // add uniquifier to replay cache if it is not already in the cache,
   // otherwise fail.
   HogDBStatus<void> request_consume_uniquifier(Address const &addr,
-                                               Uniquifier uniquifier);
+                                               Uniquifier uniquifier,
+                                               StorageItemRPCFlagSet flags);
 
   bool release_blocktx_reference() { return block_.release_reference(); }
+
+  void assert_is_valid() const noexcept;
+
+  HogDBStatus<void> sync_balance_locks();
 
 private:
   struct ItemVersion {
@@ -135,44 +145,18 @@ private:
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
   const ItemChange *read_change(const ItemKey &key) const;
+
   // request_change tries to apply a change to the transaction.
   HogDBStatus<void> request_change(const ItemKey &key, ItemChange &&change);
-  HogDBStatus<void> request_balance_change(Address const &addr, int128_t delta);
+
+  void request_balance_change(Address const &addr, int128_t delta);
 
   // lock_storage locks the storage for the given address.
   // cost must be nonnegative.
-  HogDBStatus<void> lock_storage(Address const &addr, int128_t cost);
+  void lock_storage(Address const &addr, int128_t cost);
 
   HogDBStatus<void> update_balance_lock(Address const &addr);
-  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr);
-
-  void assert_is_valid() const noexcept
-  {
-    assert(tx_depth_ >= 0);
-    std::unordered_map<Address, int128_t> balance_deltas;
-    if constexpr (is_debug_build()) {
-      for (const auto &[key, vec] : changes_) {
-        [[maybe_unused]] int depth = 0;
-        for (const ItemVersion &item : vec) {
-          assert(item.tx_depth >= depth);
-          assert(item.tx_depth <= tx_depth_);
-          depth = item.tx_depth + 1;
-        }
-        if (!vec.empty()) {
-          balance_deltas[key.get_address()] += vec.back().locked_storage_cost;
-        }
-      }
-      for (const auto &[addr, vec] : balance_deltas_) {
-        if (!vec.empty()) {
-          assert(vec.back().total_locked_storage_amount ==
-                 balance_deltas[addr]);
-        }
-        else {
-          assert(balance_deltas[addr] == 0);
-        }
-      }
-    }
-  }
+  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr) const;
 };
 
 inline int
@@ -193,15 +177,24 @@ InvokeTX::read_change(const ItemKey &key) const
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_bytes(const ItemKey &key, std::span<const std::byte> buf)
+InvokeTX::request_bytes(const ItemKey &key, std::span<const std::byte> buf,
+                        StorageItemRPCFlagSet flags)
 {
-  return request_change(key, Bytes{buf});
+  auto change = ItemChange(Bytes{buf});
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_deletion(const ItemKey &key)
+InvokeTX::request_deletion(const ItemKey &key, StorageItemRPCFlagSet flags)
 {
-  return request_change(key, Deletion{});
+  auto change = ItemChange(Deletion{});
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
 }
 
 inline HogDBStatus<void>

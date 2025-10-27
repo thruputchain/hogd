@@ -22,7 +22,18 @@ echo "Committer email: $committer_email"
 echo "Commit message: Add metrics for $GIT_branch $GIT_commit"
 
 git add metrics/
+
 GIT_COMMITTER_NAME="$committer_name" \
   GIT_COMMITTER_EMAIL="$committer_email" \
   git commit -m "Add metrics for $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>"
-git push
+
+while true; do
+  if git push; then
+    break
+  else
+    echo "Push failed, attempting pull --rebase and retry..."
+    GIT_COMMITTER_NAME="$committer_name" \
+      GIT_COMMITTER_EMAIL="$committer_email" \
+      git pull --rebase
+  fi
+done

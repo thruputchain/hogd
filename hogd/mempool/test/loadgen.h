@@ -1,7 +1,9 @@
 #pragma once
 
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
 
 namespace hogd {
@@ -81,12 +83,13 @@ public:
     return ret;
   }
 
-  SignedTransactionBatch get_transactions(size_t num_txs)
+  x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
   {
     LoadgenExtensionResult result =
-        client_->extend_experiment(context_id_, num_txs, 1'000'000'000)();
+        co_await client_->extend_experiment(context_id_, num_txs,
+                                            1'000'000'000);
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
-    return result.success().work_txs;
+    co_return result.success().work_txs;
   }
 
 private:
@@ -103,31 +106,56 @@ public:
   {
     info("Initializing loadgen experiment...");
     init_block_db_tip_ =
-        loadgen_client_.init_experiment(sched_coord_client, num_accounts);
+        loadgen_client_.init_experiment(sched_coord_client_, num_accounts);
     info("Done initializing experiment. Now running.");
   }
 
-  void run(bool print_stats)
+  x23::Detached run(bool print_stats)
   {
     DbTip db_tip = init_block_db_tip_;
 
     const std::chrono::steady_clock::time_point start =
         std::chrono::steady_clock::now();
     size_t total_transactions_nominated = 0;
+
+    SignedTransactionBatch txs =
+        loadgen_client_.get_transactions(kLoadgenTxBatchSize)();
+    ValidatorID validator_id{};
+    co_await sched_coord_client_.schedulercoord_submit_vetted(validator_id,
+                                                              txs);
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
-      const SignedTransactionBatch txs =
+      auto timer = std::make_unique<ElapsedTimer>();
+
+      x23::Async<SchedulerNominationResult> nominate_handle =
+          sched_coord_client_.schedulercoord_nominate(db_tip);
+      x23::Async<SignedTransactionBatch> get_transactions_handle =
           loadgen_client_.get_transactions(kLoadgenTxBatchSize);
 
-      ValidatorID validator_id{};
-      sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs)();
+      double create_handles_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
 
-      auto res_nominate = sched_coord_client_.schedulercoord_nominate(db_tip)();
+      txs = co_await get_transactions_handle;
+      ValidatorID validator_id{};
+      x23::Async<void> submit_vetted_handle =
+          sched_coord_client_.schedulercoord_submit_vetted(validator_id, txs);
+
+      double wait_transactions_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
+
+      SchedulerNominationResult res_nominate = co_await nominate_handle;
+
+      double wait_nomination_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
+
+      co_await submit_vetted_handle;
+
+      double wait_submit_vetted_duration = timer->elapsed();
+
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
-
       const SchedulerNomination nomination =
           res_nominate.scheduler_nomination();
       db_tip = {.height = nomination.nomination.block_height,
@@ -135,6 +163,12 @@ public:
                 .id = nomination.block_id};
       total_transactions_nominated +=
           nomination.nomination.transaction_hashes.size();
+
+      info("create_handles_duration {}, "
+           "wait_nomination_duration {}, wait_transactions_duration {}, "
+           "wait_submit_vetted_duration, {}",
+           create_handles_duration, wait_nomination_duration,
+           wait_transactions_duration, wait_submit_vetted_duration);
 
       if (print_stats) {
         // Compute and print the throughputs.
@@ -180,7 +214,8 @@ public:
 
 private:
   // The number of txs we request at a time from loadgen.
-  static constexpr size_t kLoadgenTxBatchSize = 10'000;
+  static constexpr size_t kLoadgenTxBatchSize =
+      MempoolCoordinatorRpc::kMaxBlockSize;
 
   LoadgenClient loadgen_client_;
   sched_coord_client_t &sched_coord_client_;

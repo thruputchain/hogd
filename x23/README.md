@@ -320,7 +320,7 @@ options to get a value from an `Async`:
 ### `Detached` coroutines
 
 If you want to launch a coroutine to do background work, you can do
-this be declaring a function that returns `Detached`.  For example:
+this by declaring a function that returns `Detached`.  For example:
 
 ``` cpp
 Detached

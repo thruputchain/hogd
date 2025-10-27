@@ -24,6 +24,10 @@ struct SubTransactionState {
   std::unordered_map<AddressAndKey, std::pair<StorageDelta, int128_t>> deltas_;
 };
 
+// THE STORAGE COST ACCOUNTING HERE IS BROKEN.
+// It specifically doesn't properly account for manual balance transfers (and
+// how one manual balance transfer overwrites a prior balance transfer).)
+
 // Store data relevant to the 2PC process for one transaction.
 class TransactionState {
 public:
