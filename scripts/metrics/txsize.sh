@@ -1,7 +1,7 @@
 #!/bin/bash
 
-if [ $# -ne 2 ]; then
-  echo "Usage: $0 <build_dir>"
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <build_dir>" 1>&2
   exit 1
 fi
 
