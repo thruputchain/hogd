@@ -1709,6 +1709,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              if (!r2.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             // expects an error
              if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }

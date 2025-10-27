@@ -255,7 +255,8 @@ template<> struct std::formatter<hogd::NNInt128> {
 
   static auto format(const hogd::NNInt128 &nnint, auto &ctx)
   {
-    return format_to(ctx.out(), "NNInt128{{base={}}}", nnint.value());
+    return format_to(ctx.out(), "NNInt128{{base={}, delta={}}}", nnint.base(),
+                     nnint.delta());
   }
 };
 static_assert(hogd::is_item<hogd::NNInt128>);
@@ -661,6 +662,12 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
+  bool is_permanent_exclusive() const { return permanent_exclusive_; }
+  void set_permanent_exclusive()
+  {
+    permanent_exclusive_ = true;
+    exclusive_ = true;
+  }
   bool is_create_contract() const
   {
     return std::holds_alternative<NewContractData>(type_);
@@ -747,6 +754,7 @@ private:
       type_;
   LazySnapshotCost snapshot_cost_;
   bool exclusive_{false};
+  bool permanent_exclusive_{false};
   bool change_committed_{false};
 
   size_t storage_size() const;
@@ -822,10 +830,12 @@ template<> struct std::formatter<hogd::ItemChange> {
   static auto format(const hogd::ItemChange &item_change, auto &ctx)
   {
     std::visit(
-        [&ctx](auto &&arg) {
+        [&ctx, &item_change](auto &&arg) {
           if constexpr (!std::same_as<std::decay_t<decltype(arg)>,
                                       std::monostate>) {
-            format_to(ctx.out(), "{}", arg);
+            format_to(ctx.out(), "Exclusive(Permanent): {}({}), {}",
+                      item_change.exclusive_, item_change.permanent_exclusive_,
+                      arg);
           }
           else {
             format_to(ctx.out(), "monostate");

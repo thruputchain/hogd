@@ -12,7 +12,6 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -20,6 +19,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 
@@ -101,8 +101,6 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     // case
     return HogDBError(HogDBCode::kConflict);
   }
-  trace("Storage balance change for {} is {} + {}", addr, snapshot_base.value(),
-        delta);
   return NNInt128(snapshot_base.value(), delta);
 }
 
@@ -117,7 +115,6 @@ InvokeTX::update_balance_lock(Address const &addr)
   if (!storage_change) {
     return storage_change.error();
   }
-
   auto new_item = ItemChange(std::move(storage_change.value()));
 
   auto key = make_address_balance_item_key(addr);
@@ -155,7 +152,6 @@ InvokeTX::update_balance_lock(Address const &addr)
 void
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
-  trace("Locking storage for {}: amount {}", addr, cost);
   auto &bal_stats = balance_deltas_[addr];
   if (bal_stats.empty()) {
     bal_stats.emplace_back(
@@ -307,10 +303,10 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       return ret.error();
     }
 
-    v.emplace_back(std::move(change), tx_depth_);
-    assert(*ret >= 0);
-
+    assert(*ret >= 0 || change.is_permanent_exclusive());
     int128_t marginal_storage = *ret;
+
+    v.emplace_back(std::move(change), tx_depth_);
 
     // now lock the storage
     if (marginal_storage != 0) {
@@ -332,6 +328,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   int128_t previous_locked_storage = item.locked_storage_cost;
 
+  assert(*ret >= 0 || change.is_permanent_exclusive());
+  int128_t marginal_storage = *ret - previous_locked_storage;
+
   if (item.tx_depth == tx_depth_) {
     item.change = std::move(change);
   }
@@ -339,8 +338,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     assert(item.tx_depth < tx_depth_);
     v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
   }
-  assert(*ret >= 0);
-  int128_t marginal_storage = *ret - previous_locked_storage;
+
   // It's ok if marginal storage is negative;
   // that means we're releasing storage costs relative to the prior locked
   // storage. Note that locking a positive value in a balance does NOT make that
@@ -361,7 +359,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 }
 
 HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
+                           StorageItemRPCFlagSet flags)
 {
   // validate the nnint128. We can't assume it's in a valid state even if there
   // is not a conflict with another change because the executor may not know
@@ -375,11 +374,16 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
   }
 
   // nnint128 is valid; now try to request the change.
-  return request_change(key, NNInt128{base, delta});
+  auto change = ItemChange(NNInt128{base, delta});
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
 }
 
 HogDBStatus<void>
-InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
+                           StorageItemRPCFlagSet flags)
 {
   if (key.is_address_balance()) {
     request_balance_change(key.get_address(), delta);
@@ -393,12 +397,13 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
       return base.error();
     base = 0;
   }
-  return request_nnint128(key, *base, delta);
+  return request_nnint128(key, *base, delta, flags);
 }
 
 HogDBStatus<void>
 InvokeTX::request_auth_data(Address const &addr,
-                            const AuthDataChangeArgs &auth_data_change)
+                            const AuthDataChangeArgs &auth_data_change,
+                            StorageItemRPCFlagSet flags)
 {
   auto base_auth_data =
       block_.get().get_db().read_address_account_auth_data(addr);
@@ -416,13 +421,23 @@ InvokeTX::request_auth_data(Address const &addr,
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
   }
+  auto change = ItemChange(std::move(auth_data_item));
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
   return request_change(make_account_auth_data_item_key(addr),
-                        std::move(auth_data_item));
+                        std::move(change));
 }
 
 HogDBStatus<void>
-InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier)
+InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
+                                     StorageItemRPCFlagSet flags)
 {
+  // We do not support setting exclusive locks on replay cache items;
+  // consuming a nonce is already a unique event.
+  if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
+    return HogDBError(HogDBCode::kConflict);
+  }
   auto base_replay_cache =
       block_.get().get_db().read_address_replay_cache(addr);
   if (!base_replay_cache) {

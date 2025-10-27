@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <span>
 #include <sys/socket.h>
+#include <utility>
 
 // generated x23 headers
 #include "account.hh"
@@ -16,6 +17,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
@@ -300,7 +302,9 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
-        auto r = itx->request_nnint128(item_key, value);
+        auto r = itx->request_nnint128(item_key, value,
+                                       std::to_underlying(
+                                           StorageItemRPCFlags::kStorageNone));
         if (!r.has_value()) {
           error("failed to write genesis block storage: {}", r.error());
           failure = true;
