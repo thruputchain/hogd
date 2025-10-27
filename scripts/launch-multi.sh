@@ -296,11 +296,11 @@ else
   # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
   #   "tail -n +1 -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
   ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-    "tail -n +1 -f $logdir/fake_coordinator.log" |
+    "tail -n +1 -f $logdir/coordinator.log" |
     sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
-    "tail -n +1 -f $logdir/mempool.log" | sed "s/^/[${mempool_server}\/mempool] /" &
+    "tail -n +1 -f $logdir/mempool_exec.log" | sed "s/^/[${mempool_server}\/mempool] /" &
 
   for s in "${hogexec_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
@@ -308,7 +308,7 @@ else
   done
 
   ssh "${COMMON_SSH_OPTS[@]}" "$event_server" \
-    "tail -n +1 -f $logdir/event.log" | sed "s/^/[${event_server}\/event] /" &
+    "tail -n +1 -f $logdir/event_exec.log" | sed "s/^/[${event_server}\/event] /" &
 
   for s in "${hogdb_servers[@]}"; do
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
