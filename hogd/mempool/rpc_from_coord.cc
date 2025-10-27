@@ -346,12 +346,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   }
 
   timer = std::make_unique<ElapsedTimer>();
-  x23::Vec<bool> statuses =
-      co_await propose_batch_in_chunks(block_id, txs,
-                                       nomination.transaction_nominations,
-                                       kChunkSize);
-  double run_on_executor_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
+
+  x23::Async<x23::Vec<bool>> propose_batch_in_chunks_handle =
+      propose_batch_in_chunks(block_id, txs, nomination.transaction_nominations,
+                              kChunkSize);
 
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
       tx_hashes;
@@ -359,20 +357,32 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // re-enqueue these txs in the scheduler.
   std::unordered_map<ContractAddress, SignedTransactionBatch> failed_txs;
   std::unordered_set<ContractAddress> all_accounts;
-  // We remove failed txs from [nomination.transaction_hashes], so we iterate
-  // backwards.
-  for (ssize_t i = statuses.size() - 1; i >= 0; i--) {
+  for (size_t i = 0; i < txs.size(); i++) {
     const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     all_accounts.insert(address);
     tx_hashes[address].push_back(nomination.transaction_hashes[i]);
+  }
+  co_await cg(scheduler_->global_lock_);
+  for (const ContractAddress &account : all_accounts) {
+    co_await scheduler_->mark_txs_finished(tx_hashes[account]);
+  }
+  cg.reset();
+
+  auto timer2 = std::make_unique<ElapsedTimer>();
+  x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
+  double just_wait_for_executor_duration = timer2->elapsed();
+
+  double run_on_executor_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  for (size_t i = 0; i < txs.size(); i++) {
+    const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     if (!statuses[i]) {
       failed_txs[address].push_back(txs[i]);
     }
   }
-
   co_await cg(scheduler_->global_lock_);
   for (const ContractAddress &account : all_accounts) {
-    co_await scheduler_->mark_txs_finished(tx_hashes[account]);
     if (!failed_txs[account].empty()) {
       co_await scheduler_->add_txs(failed_txs[account]);
     }
@@ -414,10 +424,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   info("wait_for_transfer_duration {}, create_snapshot_and_open_block_duration "
        "{}, schedule_duration {}, run_on_executor_duration {}, "
+       "just_wait_for_executor_duration {}, "
        "mark_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}",
        wait_for_transfer_duration, create_snapshot_and_open_block_duration,
-       schedule_duration, run_on_executor_duration, mark_txs_duration,
+       schedule_duration, run_on_executor_duration,
+       just_wait_for_executor_duration, mark_txs_duration,
        create_handles_duration, get_block_hash_duration,
        wait_for_handles_duration);
 
