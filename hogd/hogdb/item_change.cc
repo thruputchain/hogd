@@ -664,8 +664,9 @@ ItemChange::marginal_storage_cost(const StorageCostModel *cost_model) const
   if (!marginal_item)
     return marginal_item.error();
   if (permanent_exclusive_) {
-    // If we have a permament exclusive lock, then we can release storage costs early
-    // since we know that no other transaction will be able to modify this item
+    // If we have a permament exclusive lock, then we can release storage costs
+    // early since we know that no other transaction will be able to modify this
+    // item
     return *marginal_item - *snapshot_cost_;
   }
   return std::max<int128_t>(0, *marginal_item - *snapshot_cost_);

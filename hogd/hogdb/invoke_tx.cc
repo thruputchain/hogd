@@ -191,7 +191,8 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
       auto cost_change = block_.get().commit_change(key, vec.back().change);
-      info("cost_change: {} vec.back().locked_storage_cost: {}", cost_change, vec.back().locked_storage_cost);
+      info("cost_change: {} vec.back().locked_storage_cost: {}", cost_change,
+           vec.back().locked_storage_cost);
       assert(cost_change <= vec.back().locked_storage_cost);
       // NONDETERMINISTIC:Compute the amount of storage tokens that can be
       // released after this transaction commits.
@@ -314,13 +315,11 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     }
 
     v.emplace_back(std::move(change), tx_depth_);
-    assert(*ret >= 0);
-
     info("ret: {} tx_depth_: {}", *ret, tx_depth_);
 
     assert(*ret >= 0 || change.is_permanent_exclusive());
 
-    int128_t marginal_storage = std::max<int128_t>(0, *ret);
+    int128_t marginal_storage = *ret;
 
     // now lock the storage
     if (marginal_storage != 0) {
