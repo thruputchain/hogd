@@ -288,19 +288,26 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double wait_for_transfer_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
   BlockID block_id = get_ns_since_epoch();
-  if (!co_await create_snapshot(
-          /*prev_block_id=*/db_tip.id, block_id,
-          BlockExecutionMode::kBlockExecutionModeProposal)) {
+
+  x23::Async<bool> create_snapshot_handler =
+      create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
+                      BlockExecutionMode::kBlockExecutionModeProposal);
+  x23::Async<bool> open_proposal_block_handler = open_proposal_block(block_id);
+
+  bool create_snapshot_handler_ret = co_await create_snapshot_handler;
+  bool open_proposal_block_handler_ret = co_await open_proposal_block_handler;
+  if (!create_snapshot_handler_ret || !open_proposal_block_handler_ret) {
+    if (create_snapshot_handler_ret) {
+      co_await abandon_snapshot(block_id);
+    }
+    if (open_proposal_block_handler_ret) {
+      co_await finish_block(block_id);
+    }
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  if (!co_await open_proposal_block(block_id)) {
-    co_await abandon_snapshot(block_id);
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
-  }
-  double open_block_duration = timer->elapsed();
+  double create_snapshot_and_open_block_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
   SchedulerNominationResult result(
@@ -319,9 +326,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
 
-  std::tie(nomination.transaction_hashes, txs) =
-      co_await scheduler_->schedule(/*block_height=*/nomination.block_height,
-                                    kMaxBlockSize);
+  std::tie(nomination.transaction_hashes, txs) = co_await scheduler_->schedule(
+      /*block_height=*/nomination.block_height, kMaxBlockSize);
   size_t num_on_runqueue = scheduler_->num_on_runqueue();
   size_t num_stranded = scheduler_->num_stranded();
   cg.reset();
@@ -406,13 +412,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   double wait_for_handles_duration = timer->elapsed();
 
-  info("wait_for_transfer_duration {}, open_block_duration {}, "
-       "schedule_duration {}, run_on_executor_duration {}, mark_txs_duration "
-       "{}, create_handles_duration {}, get_block_hash_duration {}, "
-       "wait_for_handles_duration {}",
-       wait_for_transfer_duration, open_block_duration, schedule_duration,
-       run_on_executor_duration, mark_txs_duration, create_handles_duration,
-       get_block_hash_duration, wait_for_handles_duration);
+  info("wait_for_transfer_duration {}, create_snapshot_and_open_block_duration "
+       "{}, schedule_duration {}, run_on_executor_duration {}, "
+       "mark_txs_duration {}, create_handles_duration {}, "
+       "get_block_hash_duration {}, wait_for_handles_duration {}",
+       wait_for_transfer_duration, create_snapshot_and_open_block_duration,
+       schedule_duration, run_on_executor_duration, mark_txs_duration,
+       create_handles_duration, get_block_hash_duration,
+       wait_for_handles_duration);
 
   co_return result;
 }
