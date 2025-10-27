@@ -108,6 +108,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <print>
 #include <semaphore>
 #include <tuple>
 #include <type_traits>
@@ -253,7 +254,10 @@ public:
     // it has no work associated with it, meaning it's not an Async
     // and you haven't turned it into a CoroCB.  Otherwise, you could
     // destroy the Awaitable while it's in use by another thread.
-    assert(!flags());
+    if (flags()) {
+      std::println("about to throw an assert");
+      assert(!flags());
+    }
   }
 
   //

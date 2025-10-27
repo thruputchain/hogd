@@ -260,12 +260,27 @@ struct BufVec {
     using enum IoResult;
     while (!empty()) {
       auto iov{to_vec()};
-      auto n = writev(fd.get(), iov.data(), iov.size());
+      auto n = writev(fd.get(), iov.data(),
+                      std::min(iov.size(), static_cast<size_t>(IOV_MAX)));
       if (n < 0) {
         if (errno == EAGAIN)
           return kAgain;
         Errno ret;
         clear();
+
+        size_t sum = 0;
+        for (const iovec &i : iov) {
+          sum += i.iov_len;
+        }
+        std::println("YIKES! errno is {}, fcntl {}, fd.get() {}, iov.data() "
+                     "{}, iov.size() {}, sum is {}, num iovec structs is {}",
+                     errno, fcntl(fd.get(), F_GETFD), fd.get(),
+                     (void *)iov.data(), iov.size(), sum, iov.size());
+        for (const iovec &i : iov) {
+          std::println("iovec iov_base = {}, iov_len = {}", (void *)i.iov_base,
+                       i.iov_len);
+        }
+        fflush(stdout);
         return ret;
       }
       trim(n);
