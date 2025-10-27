@@ -140,17 +140,12 @@ MempoolCoordinatorRpc::finish_block(BlockID block_id)
   return exec_clients_[0].executorsched_finish_block(block_id);
 }
 
-// We add each tx hash to the Merkle trie as a key with an empty value. So in
-// essence, we are using the Merkle trie as a set. We then compute the root hash
-// of the trie and return it.
-SHA256Hash
-MempoolCoordinatorRpc::get_block_hash(
-    const x23::Vec<SignedTransactionHash> &hashes,
-    const BlockHash &prev_block_hash)
+void
+MempoolCoordinatorRpc::build_block_merkle_trie(
+    const x23::Vec<SignedTransactionHash> &hashes, MerkleTriePrefix &trie)
 {
   CHECK(!hashes.empty());
 
-  MerkleTriePrefix trie;
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   // The optimal number of threads to use varies with the number of hashes we
   // are adding to the trie. For example, if we are adding 128 hashes to the
@@ -181,6 +176,15 @@ MempoolCoordinatorRpc::get_block_hash(
   for (std::future<void> &future : futures) {
     future.get();
   }
+}
+
+// We add each tx hash to the Merkle trie as a key with an empty value. So in
+// essence, we are using the Merkle trie as a set. We then compute the root hash
+// of the trie and return it.
+SHA256Hash
+MempoolCoordinatorRpc::get_block_hash(MerkleTriePrefix &trie,
+                                      const BlockHash &prev_block_hash)
+{
   trie.generate_top_level_hashes();
   SHA256Hash root_hash = trie.get_root_hash();
 
@@ -409,7 +413,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double create_handles_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  nomination.block_hash = get_block_hash(nomination.transaction_hashes,
+  MerkleTriePrefix trie;
+  build_block_merkle_trie(nomination.transaction_hashes, trie);
+  nomination.block_hash = get_block_hash(trie,
                                          /*prev_block_hash=*/db_tip.hash);
 
   double get_block_hash_duration = timer->elapsed();
@@ -532,9 +538,20 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Check [validated] and verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above
   // that all of these hashes correspond to vetted txs.
-  if (!validated || get_block_hash(nomination.transaction_hashes,
-                                   /*prev_block_hash=*/db_tip.hash) !=
-                        nomination.block_hash) {
+  if (!validated) {
+    co_await scheduler_->add_txs(signed_txs);
+
+    co_await finish_block(block_id);
+    co_await abandon_snapshot(block_id);
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+
+  MerkleTriePrefix trie;
+  build_block_merkle_trie(nomination.transaction_hashes, trie);
+  if (get_block_hash(trie,
+                     /*prev_block_hash=*/db_tip.hash) !=
+      nomination.block_hash) {
     co_await scheduler_->add_txs(signed_txs);
 
     co_await finish_block(block_id);

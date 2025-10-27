@@ -119,9 +119,12 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
-  static SHA256Hash
-  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
-                 const BlockHash &prev_block_hash);
+  static void
+  build_block_merkle_trie(const x23::Vec<SignedTransactionHash> &hashes,
+                          MerkleTriePrefix &trie);
+
+  static SHA256Hash get_block_hash(MerkleTriePrefix &trie,
+                                   const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 

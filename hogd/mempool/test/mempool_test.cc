@@ -139,8 +139,11 @@ TEST(Mempool, Validate)
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
+  MerkleTriePrefix trie;
+  MempoolCoordinatorRpc::build_block_merkle_trie(nomination.transaction_hashes,
+                                                 trie);
   nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
+      trie,
       /*prev_block_hash=*/nomination.prev_block_hash);
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           {txs[0]})();
@@ -175,8 +178,11 @@ TEST(Mempool, ValidateBatch)
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
+  MerkleTriePrefix trie;
+  MempoolCoordinatorRpc::build_block_merkle_trie(nomination.transaction_hashes,
+                                                 trie);
   nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
+      trie,
       /*prev_block_hash=*/nomination.prev_block_hash);
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
@@ -229,8 +235,11 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
+  MerkleTriePrefix trie;
+  MempoolCoordinatorRpc::build_block_merkle_trie(nomination.transaction_hashes,
+                                                 trie);
   nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-      nomination.transaction_hashes,
+      trie,
       /*prev_block_hash=*/nomination.prev_block_hash);
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
