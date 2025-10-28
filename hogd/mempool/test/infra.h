@@ -2,17 +2,18 @@
 
 #include <array>
 #include <cstring>
+#include <exception>
 #include <format>
 #include <memory>
 #include <span>
 #include <string>
+#include <sys/socket.h>
 #include <utility>
 
 #include "account.hh"
 #include "built_contracts/contract_loader.h"
 #include "contract.hh"
 #include "db_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
@@ -45,10 +46,7 @@
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
-#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {

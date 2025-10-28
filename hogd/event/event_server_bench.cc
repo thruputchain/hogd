@@ -17,6 +17,7 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -28,7 +29,6 @@
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
@@ -57,19 +57,7 @@ connect_to_event_exec_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event exec server address: {}", address));
   }
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error(
-        std::format("Failed to resolve event exec server address: {}",
-                    address));
-  }
-  auto fd = x23::tcpconnect(server_addr.value());
-  if (!fd) {
-    throw std::runtime_error(
-        std::format("Failed to connect to event exec server: {}", address));
-  }
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())
-      ->client(EventExecutor1{});
+  return make_rpc_client<EventExecutor1>(host_port, false);
 }
 
 auto
@@ -80,19 +68,7 @@ connect_to_event_sched_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event sched server address: {}", address));
   }
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error(
-        std::format("Failed to resolve event sched server address: {}",
-                    address));
-  }
-  auto fd = x23::tcpconnect(server_addr.value());
-  if (!fd) {
-    throw std::runtime_error(
-        std::format("Failed to connect to event sched server: {}", address));
-  }
-  return x23::rpc_stream_logged(default_coropoll(), fd.release())
-      ->client(EventSched1{});
+  return make_rpc_client<EventSched1>(host_port, false);
 }
 
 const SHA256Hash topic0 = sha256(std::string_view{"topic0"});

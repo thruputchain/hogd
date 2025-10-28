@@ -53,30 +53,31 @@ InvokeTX::read_bytes(const ItemKey &key)
   return ret;
 }
 
-HogDBStatus<NNInt128>
+HogDBStatus<std::pair<NNInt128, bool>>
 InvokeTX::get_storage_balance_change(Address const &addr) const
 {
-  auto snapshot_base = [&] -> HogDBStatus<int128_t> {
+  auto r = [&] -> HogDBStatus<std::pair<int128_t, bool>> {
     auto it = changes_.find(make_address_balance_item_key(addr));
     if (it == changes_.end() || it->second.empty()) {
       auto val = block_.get().get_db().read_address_balance(addr);
       if (!val) {
         if (val.error() == HogDBCode::kNotFound) {
-          return 0;
+          return {{0, true}};
         }
         return val.error();
       }
-      return *val;
+      return {{*val, false}};
     }
     auto const &item_change = it->second;
     assert(item_change.back().change.is_nnint128());
     auto nnint = item_change.back().change.get_raw_nnint128();
     assert(nnint);
-    return nnint->base();
+    return {{nnint->base(), false}};
   }();
-  if (!snapshot_base) {
-    return snapshot_base.error();
+  if (!r) {
+    return r.error();
   }
+  auto [snapshot_base, force_create] = r.value();
 
   auto bal_it = balance_deltas_.find(addr);
 
@@ -91,7 +92,7 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     delta = ign;
   }
 
-  auto [ign, of] = overflowing_add(snapshot_base.value(), delta);
+  auto [ign, of] = overflowing_add(snapshot_base, delta);
   if (of) {
     return HogDBError(HogDBCode::kOverflow);
   }
@@ -101,7 +102,7 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     // case
     return HogDBError(HogDBCode::kConflict);
   }
-  return NNInt128(snapshot_base.value(), delta);
+  return {{NNInt128(snapshot_base, delta), force_create}};
 }
 
 // Is only responsible for updating the lock on the balance item;
@@ -111,15 +112,25 @@ InvokeTX::update_balance_lock(Address const &addr)
 {
   // Combines the manual balance transfers with the up-to-now storage cost
   // to create/apply/update one balance nnint delta.
-  auto storage_change = get_storage_balance_change(addr);
-  if (!storage_change) {
-    return storage_change.error();
+  auto storage_change_res = get_storage_balance_change(addr);
+  if (!storage_change_res) {
+    return storage_change_res.error();
   }
-  auto new_item = ItemChange(std::move(storage_change.value()));
+  auto [storage_change, force_create] = storage_change_res.value();
+  auto new_item = ItemChange(std::move(storage_change));
 
   auto key = make_address_balance_item_key(addr);
   auto &change = changes_[key];
   if (change.empty()) {
+    // Check if there's no storage change.  If so, no need to acquire the
+    // storage lock, UNLESS the balance item is not present in the database and
+    // must be implicitly created.
+    assert(new_item.is_nnint128());
+    auto nnint = new_item.get_raw_nnint128();
+    assert(nnint);
+    if (nnint->delta() == 0 && !force_create) {
+      return {};
+    }
 
     auto status = block_.get().lock(key, new_item);
     if (!status) {
@@ -129,11 +140,24 @@ InvokeTX::update_balance_lock(Address const &addr)
     change.emplace_back(std::move(new_item), tx_depth_, 0);
     return {};
   }
+  assert(!force_create);
 
   auto last = change.back();
   assert(last.tx_depth <= tx_depth_);
   assert(last.change.is_nnint128());
   new_item.narrow(last.change);
+
+  assert(last.change.is_nnint128());
+  assert(new_item.is_nnint128());
+  assert(new_item.get_raw_nnint128());
+  assert(last.change.get_raw_nnint128());
+
+  // Check if the new item is the same as the previous storage lock.
+  // If so, no need to update the lock.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  if (*last.change.get_raw_nnint128() == *new_item.get_raw_nnint128()) {
+    return {};
+  }
 
   auto status = block_.get().modify_lock(key, last.change, new_item);
   if (!status) {
@@ -509,6 +533,7 @@ InvokeTX::assert_is_valid() const noexcept
       if (key.is_address_balance() && !vec.empty()) {
         const ItemVersion &item = vec.back();
         assert(item.change.is_nnint128());
+        [[maybe_unused]]
         auto nnint = item.change.get_raw_nnint128();
         assert(nnint);
 
@@ -516,7 +541,8 @@ InvokeTX::assert_is_valid() const noexcept
         auto bal_it = balance_deltas_.find(addr);
         if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
           const auto &bal = bal_it->second.back();
-          int128_t expected_delta =
+          [[maybe_unused]]
+          const int128_t expected_delta =
               bal.manual_transfer_amount - bal.total_locked_storage_amount;
           assert(nnint->delta() == expected_delta);
         }
@@ -533,16 +559,24 @@ InvokeTX::assert_is_valid() const noexcept
       if (!vec.empty()) {
         auto key = make_address_balance_item_key(addr);
         auto it = changes_.find(key);
+        if (it == changes_.end() || it->second.empty()) {
+          auto const &bal = vec.back();
+          assert(bal.manual_transfer_amount - bal.total_locked_storage_amount ==
+                 0);
+          continue;
+        }
         assert(it != changes_.end());
         assert(!it->second.empty());
 
         const ItemVersion &item = it->second.back();
         assert(item.change.is_nnint128());
+        [[maybe_unused]]
         auto nnint = item.change.get_raw_nnint128();
         assert(nnint);
 
         const auto &bal = vec.back();
-        int128_t expected_delta =
+        [[maybe_unused]]
+        const int128_t expected_delta =
             bal.manual_transfer_amount - bal.total_locked_storage_amount;
         assert(nnint->delta() == expected_delta);
       }

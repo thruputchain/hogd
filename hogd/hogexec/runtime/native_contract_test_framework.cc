@@ -10,9 +10,9 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
@@ -25,7 +25,6 @@
 #include "sched_db.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
@@ -263,13 +262,10 @@ std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
 HogdbWrapper::make_sched_db_client()
 {
   auto sched_db_port = test_sched_db_server_.start_server(/*port=*/0);
-  x23::UniqueFd fd =
-      x23::tcpconnect(*x23::HostPort{"localhost", sched_db_port}.to_addr(true));
-  using sched_db_client_t =
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-  return std::make_unique<sched_db_client_t>(
-      x23::rpc_stream_logged(default_coropoll(), fd.release())
-          ->client(SchedDb1{}));
+  return std::make_unique<
+      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
+      make_rpc_client<SchedDb1>(x23::HostPort{"localhost", sched_db_port},
+                                false));
 }
 
 void

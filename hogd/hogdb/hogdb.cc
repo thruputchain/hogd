@@ -1,7 +1,6 @@
 // hogdb.cc - handles initialization for hogdb
 
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <format>
@@ -12,13 +11,12 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
-#include <thread>
 #include <utility>
 
 // XDR headers
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/rpc_client.h"
 #include "sched_db.hh"
 
 #include "hogd/base/log.h"
@@ -64,28 +62,10 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
     throw std::runtime_error(
         std::format("Invalid coordinator address: {}", coordinator_addr));
   }
-  auto addr = host_port.to_addr(true);
-  if (!addr) {
-    throw std::runtime_error(
-        std::format("failed to resolve coordinator address: {}",
-                    coordinator_addr));
-  }
-
-  auto fd = [&cp](sockaddr_storage addr) {
-    while (true) {
-      auto fd = cp.tcpconnect(&addr)();
-      if (fd) {
-        return *fd;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      warn_every_n_sec(5.0F, "waiting for coordinator address {}",
-                       x23::show_ipaddr(addr));
-    }
-  }(*addr);
 
   return std::make_unique<
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
-      x23::rpc_stream_logged(cp, fd)->template client<SchedDb1>());
+      make_rpc_client<SchedDb1>(host_port, cp, true));
 }
 
 int

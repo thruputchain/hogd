@@ -1,4 +1,3 @@
-#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <print>
@@ -52,9 +51,10 @@ int
 handle_shutdown_command(std::string const &host, std::string const &port)
 {
   try {
-    auto client =
-        hogd::connect_to_control_server(host, port,
-                                        std::chrono::milliseconds(10000));
+    // This command does not retry on failure to connect;
+    // in that case, the control server is already not running.
+    // This is relevant in case of crash in CI.
+    auto client = hogd::connect_to_control_server(host, port, false);
 
     hogd::info("Sending shutdown command to {}:{}", host, port);
     client.shutdown_server();

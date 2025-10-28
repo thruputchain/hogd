@@ -2,19 +2,16 @@
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
-#include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
@@ -28,10 +25,8 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
-#include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "x23/cleanup.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -87,62 +82,16 @@ public:
 private:
   void connect_coord()
   {
-    coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
-      while (true) {
-        auto addr = x23::HostPort{server_addr_, coord_port_}.to_addr(true);
-        if (!addr) {
-          panic("failed to parse address to coord on {} port {}", server_addr_,
-                coord_port_);
-        }
-        x23::UniqueFd fd;
-        try {
-          fd = x23::tcpconnect(*addr);
-        } catch (const std::system_error &e) {
-          if (e.code() == std::errc::connection_refused) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            warn_every_n_sec(5.0F, "coord on {}:{} is not ready", server_addr_,
-                             coord_port_);
-            continue;
-          }
-          error("caught system error: {} {}", e.what(), e.code().message());
-          throw;
-        }
-        auto client_config = x23::srpc_stream_logged(fd.release());
-        return std::make_unique<coord_client_t>(
-            client_config->template client<DbSched1>());
-      }
-    }();
+    coord_client_ = std::make_unique<coord_client_t>(
+        make_srpc_client<DbSched1>(x23::HostPort{server_addr_, coord_port_},
+                                   true));
   }
 
   void connect_event_sched()
   {
-    event_sched_client_ = [&] -> std::unique_ptr<event_sched_client_t> {
-      while (true) {
-        auto addr =
-            x23::HostPort{"localhost", event_sched_server_port_}.to_addr(true);
-        if (!addr) {
-          panic("failed to parse address to event sched on localhost port {}",
-                event_sched_server_port_);
-        }
-        x23::UniqueFd fd;
-        try {
-          fd = x23::tcpconnect(*addr);
-        } catch (const std::system_error &e) {
-          if (e.code() == std::errc::connection_refused) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            warn_every_n_sec(5.0F,
-                             "event sched on localhost port {} is not ready",
-                             event_sched_server_port_);
-            continue;
-          }
-          error("caught system error: {} {}", e.what(), e.code().message());
-          throw;
-        }
-        auto client_config = x23::srpc_stream_logged(fd.release());
-        return std::make_unique<event_sched_client_t>(
-            client_config->template client<EventSched1>());
-      }
-    }();
+    event_sched_client_ =
+        std::make_unique<event_sched_client_t>(make_srpc_client<EventSched1>(
+            x23::HostPort{"localhost", event_sched_server_port_}, true));
   }
 
   void connect_event()

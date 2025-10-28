@@ -1,16 +1,14 @@
 #include <cassert>
-#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
 #include <stdexcept>
 #include <string>
-#include <system_error>
-#include <thread>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/event/rpc_context.h"
 #include "hogd/event/rpc_from_exec.h"
@@ -19,9 +17,7 @@
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
-#include "x23/cleanup.h"
 #include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -45,26 +41,7 @@ connect_to_event_sched_server(std::string const &address)
   if (!host_port.parse(address)) {
     throw std::runtime_error("Failed to parse db server address");
   }
-  auto server_addr = host_port.to_addr(true);
-  if (!server_addr) {
-    throw std::runtime_error("Failed to connect to db server");
-  }
-
-  while (true) {
-    x23::UniqueFd fd;
-    try {
-      fd = x23::tcpconnect(server_addr.value());
-    } catch (const std::system_error &e) {
-      if (e.code() == std::errc::connection_refused) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        warn_every_n_sec(5.0F, "Failed to connect to db server: {}", address);
-        continue;
-      }
-      throw;
-    }
-    assert(fd);
-    return x23::srpc_stream_logged(fd.release())->client(SchedEvent1{});
-  }
+  return make_srpc_client<SchedEvent1>(host_port, true);
 }
 
 int

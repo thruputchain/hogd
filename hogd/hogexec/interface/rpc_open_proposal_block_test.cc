@@ -9,6 +9,7 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/os.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
@@ -22,6 +23,7 @@
 #include "transaction.hh"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
@@ -35,24 +37,13 @@ public:
     server_port_ = rpc_server_.start_server(0);
 
     // Create RPC client connected to the server
-    auto server_addr = host_port_to_sockaddr("localhost", server_port_);
-    auto client_fd = default_coropoll().tcpconnect(&server_addr)();
-    if (!client_fd) {
-      throw std::runtime_error("Failed to connect to RPC server");
-    }
+    client_ = make_srpc_multiclient<ExecutorSched1>(x23::HostPort{"localhost",
+                                                                  server_port_},
+                                                    false);
 
-    client_ = x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr)
-                  ->client<ExecutorSched1>();
+    db_client_ = make_srpc_multiclient<DbSched1>(
+        x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
 
-    auto db_server_addr =
-        host_port_to_sockaddr("localhost", db_wrapper_.coord_port());
-    auto db_client_fd = default_coropoll().tcpconnect(&db_server_addr)();
-    if (!db_client_fd) {
-      throw std::runtime_error("Failed to connect to DB server");
-    }
-
-    db_client_ = x23::SRpcMulticlient<x23::RpcLogger>::make(db_server_addr)
-                     ->client<DbSched1>();
     auto db_res = db_client_.dbsched_load_genesis_block(GenesisBlock{});
     if (db_res != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error("Failed to load genesis block");
