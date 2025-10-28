@@ -11,6 +11,6 @@ CWD=$(pwd)
 rm -rf $CWD/tmp
 mkdir -p $CWD/tmp
 
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp new_storage 1000000 24 1>&2
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp new_storage 1000000 24
 
 rm -rf $CWD/tmp

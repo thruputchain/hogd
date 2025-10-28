@@ -362,6 +362,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::unique_ptr<hogd::Benchmark> bench = fn(n, workers);
     double sec = hogd::measure([&bench] { bench->run(); });
     std::println("took {} seconds", sec);
+    hogd::info("took {} seconds", sec);
     return 0;
   }
 
