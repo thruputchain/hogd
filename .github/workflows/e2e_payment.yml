@@ -7,7 +7,7 @@ jobs:
   bench_servers:
     strategy:
       matrix:
-        runner: [client, hog7, hog8] # [client] is hog11
+        runner: [client, hog6, hog7, hog8] # [client] is hog11
     runs-on: ${{ matrix.runner }}
     steps:
     - name: Clean up .gitconfig
@@ -85,6 +85,7 @@ jobs:
     - name: cleanup control servers
       if: always()
       run: |
+        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown

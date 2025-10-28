@@ -14,12 +14,14 @@ runs:
   steps:
     - name: make sure bench servers are running
       run: |
+        ./scripts/wait-port.sh hog6 11111
         ./scripts/wait-port.sh hog7 11111
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
       shell: bash
     - name: clear work dirs
       run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 clear_work_dir
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 clear_work_dir
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 clear_work_dir
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
@@ -30,7 +32,12 @@ runs:
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
       shell: bash
-    - name: launch hogexec
+    - name: launch first hogexec
+      # the mempool runs on hog10
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 start hogd/hogexec/hogexec hog10:8071
+      # can't wait for hogexec: that's waiting on the coordinator
+      shell: bash
+    - name: launch second hogexec
       # the mempool runs on hog10
       run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
       # can't wait for hogexec: that's waiting on the coordinator
@@ -46,6 +53,7 @@ runs:
       shell: bash
     - name: make sure procs are running
       run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 expect_running
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 expect_running
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 expect_running
@@ -66,6 +74,7 @@ runs:
       if: always()
       shell: bash
       run: |
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 stop
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 stop
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 stop
         ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop

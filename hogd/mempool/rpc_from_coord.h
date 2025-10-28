@@ -184,7 +184,8 @@ private:
 
   x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-                x23::XdrVec<NominatedTransaction> &transaction_nominations);
+                x23::XdrVec<NominatedTransaction> &transaction_nominations,
+                size_t executor_idx);
 
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
       BlockID block_id, const x23::Vec<SignedTransaction> &txs,
@@ -195,7 +196,8 @@ private:
                                              size_t executor_idx);
 
   x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+                                  const x23::Vec<ProposedTransaction> &txs,
+                                  size_t executor_idx);
 
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
