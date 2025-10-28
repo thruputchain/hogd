@@ -193,6 +193,12 @@ add_subdirectory(external/model-checker)
 set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
 include_directories(${MODEL_CHECKER_SOURCE_DIR})
 
+# Add cmake directory to module path for custom Find modules
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Find RocksDB (will use RocksDBConfig.cmake if available, otherwise FindRocksDB.cmake)
+find_package(RocksDB REQUIRED)
+
 add_subdirectory(built_contracts)
 
 # Finally, enable hogd's own code
