@@ -11,6 +11,7 @@
 #include <rocksdb/status.h>
 
 #include "hogd/base/log.h"
+#include "hogd/config.h"
 #include "hogd/indexer/status.h"
 
 namespace hogd {
@@ -25,6 +26,9 @@ IndexerStatus<IndexDB>
 IndexDB::make_new(const std::filesystem::path &path,
                   rocksdb::CompressionType compression_algorithm)
 {
+  if (!is_compression_supported(compression_algorithm)) {
+    return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
+  }
   // Create directory if it doesn't exist
   std::error_code ec;
   std::filesystem::create_directories(path, ec);
@@ -60,6 +64,10 @@ IndexerStatus<IndexDB>
 IndexDB::open(const std::filesystem::path &path,
               rocksdb::CompressionType compression_algorithm)
 {
+  if (!is_compression_supported(compression_algorithm)) {
+    return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
+  }
+
   rocksdb::Options options;
   options.create_if_missing = false; // Don't create if it doesn't exist
 
@@ -93,6 +101,37 @@ IndexDB::get_build_config()
 {
   // Detailed build config logs are written to the LOG file in the db directory.
   return rocksdb::GetRocksBuildInfoAsString("", true);
+}
+
+bool
+IndexDB::is_compression_supported(
+    rocksdb::CompressionType compression_algorithm)
+{
+  // NOLINTBEGIN(bugprone-branch-clone)
+  switch (compression_algorithm) {
+  case rocksdb::CompressionType::kNoCompression:
+    return true;
+  case rocksdb::CompressionType::kSnappyCompression:
+    return ROCKSDB_WITH_SNAPPY;
+  case rocksdb::CompressionType::kZlibCompression:
+    return ROCKSDB_WITH_ZLIB;
+  case rocksdb::CompressionType::kBZip2Compression:
+    return ROCKSDB_WITH_BZ2;
+  case rocksdb::CompressionType::kLZ4Compression:
+    return ROCKSDB_WITH_LZ4;
+  case rocksdb::CompressionType::kLZ4HCCompression:
+    return ROCKSDB_WITH_LZ4;
+  case rocksdb::CompressionType::kXpressCompression:
+    warn("Not set up to check for Xpress compression support");
+    return false;
+  case rocksdb::CompressionType::kZSTD:
+    return ROCKSDB_WITH_ZSTD;
+  default:
+    warn("Unknown compression algorithm: {}",
+         static_cast<int>(compression_algorithm));
+    return false;
+  }
+  // NOLINTEND(bugprone-branch-clone)
 }
 
 } // namespace hogd

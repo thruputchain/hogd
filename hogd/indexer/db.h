@@ -50,6 +50,9 @@ public:
   // Check if database is open
   bool is_open() const { return db_ != nullptr; }
 
+  static bool
+  is_compression_supported(rocksdb::CompressionType compression_algorithm);
+
 private:
   IndexDB() = default;
   explicit IndexDB(rocksdb::DB *db) : db_(db) {}
