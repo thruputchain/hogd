@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <format>
 #include <functional>
+#include <future>
 #include <optional>
 #include <ostream>
 #include <span>
