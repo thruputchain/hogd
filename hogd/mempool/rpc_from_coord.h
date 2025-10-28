@@ -161,6 +161,7 @@ private:
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients()[0]));
     exec_clients_ = MempoolExecutorRpc::get_clients();
+    info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
@@ -179,7 +180,7 @@ private:
   x23::Async<void> abandon_snapshot(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> commit_snapshot(BlockID block_id);
-  x23::Async<void> finish_block(BlockID block_id);
+  x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
 
   x23::Async<x23::Vec<bool>>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
@@ -190,12 +191,14 @@ private:
       x23::XdrVec<NominatedTransaction> &transaction_nominations,
       size_t chunk_size);
 
-  x23::Async<bool> open_proposal_block(BlockID block_id);
+  x23::Async<ExecResult> open_proposal_block(BlockID block_id,
+                                             size_t executor_idx);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs);
 
-  x23::Async<bool> open_validation_block(BlockID block_id);
+  x23::Async<ExecResult> open_validation_block(BlockID block_id,
+                                               size_t executor_idx);
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
