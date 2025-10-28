@@ -631,6 +631,7 @@ public:
     std::vector<std::future<void>> futures;
     futures.reserve(tries_.size());
 
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < tries_.size(); i++) {
       futures.push_back(
           pool.submit([this, i] { tries_[i].generate_top_level_hashes(); }));
