@@ -181,7 +181,11 @@ MempoolCoordinatorRpc::get_block_hash(
   for (std::future<void> &future : futures) {
     future.get();
   }
+  ElapsedTimer timer;
   trie.generate_top_level_hashes();
+  double generate_top_level_hashes_duration = timer.elapsed();
+  info("generate_top_level_hashes_duration {}",
+       generate_top_level_hashes_duration);
   SHA256Hash root_hash = trie.get_root_hash();
 
   BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,

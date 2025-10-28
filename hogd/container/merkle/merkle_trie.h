@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <format>
 #include <functional>
+#include <future>
 #include <optional>
 #include <ostream>
 #include <span>
@@ -19,6 +20,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -623,10 +625,19 @@ public:
     }
   }
 
-  void generate_top_level_hashes()
+  void
+  generate_top_level_hashes(WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.generate_top_level_hashes();
+    std::vector<std::future<void>> futures;
+    futures.reserve(tries_.size());
+
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (size_t i = 0; i < tries_.size(); i++) {
+      futures.push_back(
+          pool.submit([this, i] { tries_[i].generate_top_level_hashes(); }));
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
     }
   }
 
