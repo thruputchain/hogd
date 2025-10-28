@@ -196,13 +196,15 @@ MempoolCoordinatorRpc::get_block_hash(
 x23::Async<x23::Vec<bool>>
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-    x23::XdrVec<NominatedTransaction> &transaction_nominations)
+    x23::XdrVec<NominatedTransaction> &transaction_nominations,
+    size_t executor_idx)
 {
   x23::Vec<bool> ret;
   ret.reserve(txs.size());
 
   ExecProposeBatchResult res =
-      co_await exec_clients_[0].executorsched_propose_batch(block_id, txs);
+      co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
+                                                                       txs);
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -245,7 +247,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   async_handles.reserve(num_chunks);
   for (size_t i = 0; i < num_chunks; i++) {
     async_handles.push_back(
-        propose_batch(block_id, chunks[i], nomination_chunks[i]));
+        propose_batch(block_id, chunks[i], nomination_chunks[i],
+                      /*executor_idx=*/i % exec_clients_.size()));
   }
 
   // Wait for the RPC responses.
@@ -467,10 +470,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
-                                      const x23::Vec<ProposedTransaction> &txs)
+                                      const x23::Vec<ProposedTransaction> &txs,
+                                      size_t executor_idx)
 {
   ExecValidateBatchResult res =
-      co_await exec_clients_[0].executorsched_validate_batch(block_id, txs);
+      co_await exec_clients_[executor_idx].executorsched_validate_batch(
+          block_id, txs);
   co_return !(std::ranges::any_of(res, [](const ExecResult &r) {
     return r != ExecResult::ExecResultOK;
   }));
@@ -572,7 +577,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // Now execute the txs on the executor.
 
   // Careful--[validate_batch()] is calling co_await in its function body.
-  bool validated = co_await validate_batch(block_id, txs);
+  bool validated = co_await validate_batch(block_id, txs, /*executor_idx=*/0);
   co_await scheduler_->mark_txs_finished(nomination.transaction_hashes);
 
   // Check [validated] and verify the block hash. It is safe to directly use
