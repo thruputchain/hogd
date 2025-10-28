@@ -78,6 +78,7 @@ function(add_wasm_builds)
   
   # Use a stamp file to serialize cargo invocations and prevent conflicts
   set(prev_stamp "")
+  set(prev_target "")
   foreach(target_name ${ARGN})
     set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/wasm_build_${target_name}.stamp)
     
@@ -111,17 +112,32 @@ function(add_wasm_builds)
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
     
+    # Create an intermediate target for the unoptimized wasm (cargo build output)
+    add_custom_target(${target_name}_unoptimized DEPENDS 
+      ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
+      ${stamp_file})
+    
+    # Enforce target-level dependency to prevent parallel cargo builds
+    # This serializes the actual cargo invocations, not the wasm-opt steps
+    if(prev_target)
+      add_dependencies(${target_name}_unoptimized ${prev_target})
+    endif()
+    
     wasmopt_target(
       ${target_name}_optimized 
       ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
       ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
       -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
+    
+    # Make the optimized target depend on the unoptimized one
+    add_dependencies(${target_name}_optimized ${target_name}_unoptimized)
 
     add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
 
     add_dependencies(all_wasm_contracts ${target_name}_wasm)
     
     set(prev_stamp ${stamp_file})
+    set(prev_target ${target_name}_unoptimized)
   endforeach()
 endfunction()
 

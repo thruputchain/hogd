@@ -5,13 +5,16 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <print>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
@@ -28,6 +31,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
 #include "storage_delta_flags.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -35,8 +39,6 @@ namespace hogd {
 namespace {
 
 constexpr int128_t kDefaultBalance = 100;
-
-constexpr int128_t kBaseItemCost = 10000;
 
 // config parameter: location to store ramdb.
 std::string db_path;
@@ -62,18 +64,19 @@ struct Payment {
   ItemKey src;
   ItemKey dst;
   int128_t amount;
+  std::optional<Uniquifier> uniquifier;
 };
 
 class Benchmark {
 public:
   static std::unique_ptr<Benchmark>
-  make_one_to_many_payments_benchmark(size_t n, int workers);
+  make_one_to_many_payments_benchmark(size_t n, int workers, bool use_nonces);
   static std::unique_ptr<Benchmark>
-  make_many_to_one_payments_benchmark(size_t n, int workers);
+  make_many_to_one_payments_benchmark(size_t n, int workers, bool use_nonces);
   static std::unique_ptr<Benchmark>
-  make_round_robin_payments_benchmark(size_t n, int workers);
-  static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
-                                                               int workers);
+  make_round_robin_payments_benchmark(size_t n, int workers, bool use_nonces);
+  static std::unique_ptr<Benchmark>
+  make_new_storage_benchmark(size_t n, int workers, bool use_nonces);
 
   Benchmark(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie, int workers,
             std::vector<Payment> &&ops)
@@ -91,6 +94,15 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
+
+  StorageCostModel cost_model_{StorageCostModelXdr{
+      .ext = ExtensionPoint(0),
+      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .bytestring_cost_per_byte = 10,
+      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+      .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+  }};
 };
 
 namespace {
@@ -99,6 +111,14 @@ constexpr ItemKey
 make_key(size_t addr, size_t item)
 {
   return make_item_key(make_address(addr), item);
+}
+
+constexpr std::optional<Uniquifier>
+maybe_uniquifier(BlockHeight height, ReplayNonce nonce, bool use_nonces)
+{
+  if (!use_nonces)
+    return std::nullopt;
+  return Uniquifier{.block_expiry_height = height, .nonce = nonce};
 }
 
 HogDBDAO
@@ -138,13 +158,17 @@ populate_account_balances(HogDBDAO &db, size_t n,
 } // namespace
 
 std::unique_ptr<Benchmark>
-Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
+Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
+                                               bool nonces)
 {
   // generate payment ops.
   std::vector<Payment> ops;
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    ops.emplace_back(make_key(0, 0), make_key(0, i), 1);
+    // db tip at start is height 0 which is still uncommitted.
+    // so 0 is not yet an expired height for uniquifiers.
+    ops.emplace_back(make_key(0, 0), make_key(0, i), 1,
+                     maybe_uniquifier(0, i, nonces));
   }
 
   // create the benchmark.
@@ -161,7 +185,14 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
     if (!ret)
       fail(ret.error());
   }
-  populate_account_balances(bench->db_, n);
+
+  // one account acts as source. if each has a uniquifier and they all get
+  // committed as part of a single block, then the source account needs balance
+  // to cover the storage cost of a replay entry for every transaction.
+  populate_account_balances(bench->db_, n,
+                            bench->cost_model_.kBaseItemCost +
+                                (bench->cost_model_.kReplayCacheCostPerEntry *
+                                 n));
   HogDBStatus<uint64_t> lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
@@ -170,13 +201,15 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 }
 
 std::unique_ptr<Benchmark>
-Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
+Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
+                                               bool nonces)
 {
   // generate payment ops.
   std::vector<Payment> ops;
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    ops.emplace_back(make_key(0, i), make_key(0, 0), 1);
+    ops.emplace_back(make_key(i, 0), make_key(0, 0), 1,
+                     maybe_uniquifier(0, i, nonces));
   }
 
   // create the benchmark.
@@ -189,11 +222,15 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = bench->db_.write_nnint128(make_key(0, i), 1);
+    ret = bench->db_.write_nnint128(make_key(i, 0), 1);
     if (!ret)
       fail(ret.error());
   }
-  populate_account_balances(bench->db_, n);
+  // initial storage amount per account should be sufficient for replay cache
+  // entries because each source only needs to record a single entry.
+  populate_account_balances(bench->db_, n,
+                            bench->cost_model_.kBaseItemCost +
+                                bench->cost_model_.kReplayCacheCostPerEntry);
   HogDBStatus<uint64_t> lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
@@ -202,40 +239,15 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
 }
 
 std::unique_ptr<Benchmark>
-Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
+Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
+                                               bool use_nonces)
 {
   // generate payment ops.
   std::vector<Payment> ops;
   ops.reserve(n);
   for (size_t i = 0; i < n; i++) {
-    ops.emplace_back(make_key(0, i), make_key(0, (i + 1) % n), 1);
-  }
-
-  // create the benchmark.
-  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
-                                           workers, std::move(ops));
-
-  // set up initial DB state.
-  for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(0, i), 1);
-        !ret)
-      fail(ret.error());
-  }
-  populate_account_balances(bench->db_, n);
-  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
-    fail(lsn.error());
-
-  return bench;
-}
-
-std::unique_ptr<Benchmark>
-Benchmark::make_new_storage_benchmark(size_t n, int workers)
-{
-  // generate payment ops.
-  std::vector<Payment> ops;
-  ops.reserve(n);
-  for (size_t i = 0; i < n; i++) {
-    ops.emplace_back(make_key(i, 0), make_key(i, 1), 1);
+    ops.emplace_back(make_key(i, 0), make_key((i + 1) % n, 0), 1,
+                     maybe_uniquifier(0, i, use_nonces));
   }
 
   // create the benchmark.
@@ -248,7 +260,43 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
         !ret)
       fail(ret.error());
   }
-  populate_account_balances(bench->db_, n, kBaseItemCost);
+  // initial storage amount per account should be sufficient for replay cache
+  // entries because each source only needs to record a single entry.
+  populate_account_balances(bench->db_, n,
+                            bench->cost_model_.kBaseItemCost +
+                                bench->cost_model_.kReplayCacheCostPerEntry);
+  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
+    fail(lsn.error());
+
+  return bench;
+}
+
+std::unique_ptr<Benchmark>
+Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
+{
+  // generate payment ops.
+  std::vector<Payment> ops;
+  ops.reserve(n);
+  for (size_t i = 0; i < n; i++) {
+    ops.emplace_back(make_key(i, 0), make_key(i, 1), 1,
+                     maybe_uniquifier(0, i, use_nonces));
+  }
+
+  // create the benchmark.
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
+                                           workers, std::move(ops));
+
+  // set up initial DB state.
+  for (size_t i = 0; i < n; i++) {
+    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(i, 0), 1);
+        !ret)
+      fail(ret.error());
+  }
+  // initial storage amount per account should be sufficient for replay cache
+  // entries because each source only needs to record a single entry.
+  populate_account_balances(bench->db_, n,
+                            bench->cost_model_.kBaseItemCost +
+                                bench->cost_model_.kReplayCacheCostPerEntry);
   if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
 
@@ -258,14 +306,14 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
 void
 Benchmark::run()
 {
-  StorageCostModel cost_model = StorageCostModel(StorageCostModelXdr{
-      .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(kBaseItemCost),
-      .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(kBaseItemCost),
-      .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
-  });
-  PerThreadARC<BlockTX> block(db_, *trie_, cost_model, nullptr, 1);
+  // swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
+  // trace("trace logging enabled");
+
+  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr, 1);
+
+  DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
+  if (HogDBStatus<void> ret = db_.write_dbtip(tip); !ret)
+    fail(ret.error());
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block](const Payment &p) {
@@ -274,6 +322,16 @@ Benchmark::run()
     assert(ref);
 
     InvokeTX tx(block);
+    if (p.uniquifier) {
+      Uniquifier u = *p.uniquifier;
+      u.block_expiry_height = block.get().get_height();
+      HogDBStatus<void> ret =
+          tx.request_consume_uniquifier(p.src.get_address(), u,
+                                        std::to_underlying(
+                                            StorageItemRPCFlags::kStorageNone));
+      if (!ret)
+        fail(ret.error());
+    }
     if (HogDBStatus<void> ret =
             tx.request_nnint128(p.src, -p.amount,
                                 std::to_underlying(
@@ -314,7 +372,8 @@ Benchmark::run()
   assert(r);
 }
 
-using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers);
+using bench_fn = std::unique_ptr<Benchmark> (*)(size_t n, int workers,
+                                                bool use_nonces);
 
 const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"roundrobin_payments", "each payer pays exactly one other payer",
@@ -340,13 +399,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting hogdb_bench!");
 
   auto print_usage = [] {
-    std::println("usage: [db_path] [command] [num] [workers]");
+    std::println("usage: <db_path> <command> <num> <workers> [use_nonces]");
     std::println("commands");
     for (const auto &[name, desc, ign] : hogd::benchmarks)
       std::println("  {}: {}", name, desc);
   };
 
-  if (argc < 4) {
+  if (argc < 5) {
     print_usage();
     return 1;
   }
@@ -354,12 +413,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string cmd = argv[2];
   size_t n = std::stoul(argv[3], nullptr, 0);
   int workers = std::stoi(argv[4], nullptr, 0);
+  bool use_nonces = false;
+  if (argc > 5)
+    use_nonces = static_cast<bool>(std::stoul(argv[5], nullptr, 0));
 
   for (const auto &[name, ign, fn] : hogd::benchmarks) {
     if (cmd != name)
       continue;
 
-    std::unique_ptr<hogd::Benchmark> bench = fn(n, workers);
+    std::unique_ptr<hogd::Benchmark> bench = fn(n, workers, use_nonces);
     double sec = hogd::measure([&bench] { bench->run(); });
     std::println("took {} seconds", sec);
     hogd::info("took {} seconds", sec);
