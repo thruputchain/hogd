@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <format>
 #include <functional>
+#include <future>
 #include <optional>
 #include <ostream>
 #include <span>
@@ -19,6 +20,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -50,7 +52,22 @@ public:
   // Type definitions.
   using Key = HexArray;
 
-  MerkleTrie() { init_root_node(); }
+  // Any nodes at a depth less than or equal to [no_hash_depth] are *not* hashed
+  // on any insert/update/remove operation on the trie. They are only hashed
+  // when [generate_top_level_hashes()] or [generate_all_hashes()] are called.
+  //
+  // The nodes in the topmost layers of the trie (i.e., the layers with the
+  // lowest depths relative to the root node, which has a depth of 0) are
+  // typically under heavy contention. By not hashing these nodes on every
+  // insert/update/remove operation, we significantly reduce contention and thus
+  // improve end-to-end performance. We do need to call
+  // [generate_top_level_hashes()] when we are done with all operations, but the
+  // overhead of this is much smaller than hashing these nodes on all
+  // operations.
+  MerkleTrie(size_t no_hash_depth = 3) : no_hash_depth_(no_hash_depth)
+  {
+    init_root_node();
+  }
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
@@ -186,20 +203,6 @@ public:
   void generate_top_level_hashes();
 
 private:
-  // Any nodes at a depth less than or equal to [kNoHashDepth] are *not* hashed
-  // on any insert/update/remove operation on the trie. They are only hashed
-  // when [generate_top_level_hashes()] or [generate_all_hashes()] are called.
-  //
-  // The nodes in the topmost layers of the trie (i.e., the layers with the
-  // lowest depths relative to the root node, which has a depth of 0) are
-  // typically under heavy contention. By not hashing these nodes on every
-  // insert/update/remove operation, we significantly reduce contention and thus
-  // improve end-to-end performance. We do need to call
-  // [generate_top_level_hashes()] when we are done with all operations, but the
-  // overhead of this is much smaller than hashing these nodes on all
-  // operations.
-  static constexpr size_t kNoHashDepth = 3;
-
   // Returns a string representation of [node] and all nodes under it in the
   // trie.
   static std::string string_from_node(const Node &node);
@@ -447,6 +450,8 @@ private:
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
+  // See the note above the constructor about [no_hash_depth].
+  const size_t no_hash_depth_ = 3;
   // The number of KV pairs in the trie.
   std::atomic<size_t> size_ = 0;
   // If this is true, nodes are hashed on every [insert()/remove()] operation.
@@ -487,7 +492,9 @@ private:
 // trie.remove(key);
 class MerkleTriePrefix {
 public:
-  MerkleTriePrefix() = default;
+  MerkleTriePrefix(size_t no_hash_depth = 3)
+    : tries_(make_tries(std::make_index_sequence<kNumTries>{}, no_hash_depth))
+  {}
 
   SHA256Hash get_root_hash()
   {
@@ -618,10 +625,19 @@ public:
     }
   }
 
-  void generate_top_level_hashes()
+  void
+  generate_top_level_hashes(WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.generate_top_level_hashes();
+    std::vector<std::future<void>> futures;
+    futures.reserve(tries_.size());
+
+    // NOLINTNEXTLINE(modernize-loop-convert)
+    for (size_t i = 0; i < tries_.size(); i++) {
+      futures.push_back(
+          pool.submit([this, i] { tries_[i].generate_top_level_hashes(); }));
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
     }
   }
 
@@ -658,6 +674,14 @@ private:
 
   static constexpr size_t kNumTries = 16;
   static_assert(kNumTries == 1 << (4 * kPrefixSize));
+
+  template<std::size_t... Is>
+  static std::array<MerkleTrie, kNumTries>
+  make_tries(std::index_sequence<Is...> /*unused*/, size_t no_hash_depth)
+  {
+    return std::array<MerkleTrie, kNumTries>{
+        ((void)Is, MerkleTrie(no_hash_depth))...};
+  }
 
   static std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
   {

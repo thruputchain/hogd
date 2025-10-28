@@ -1339,9 +1339,9 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through,
     }
 
     if (!locked) {
-      if (locked_through_depth <= kNoHashDepth) {
+      if (locked_through_depth <= no_hash_depth_) {
         // Do not rehash the nodes that have a depth less than or equal to
-        // [kNoHashDepth].
+        // [no_hash_depth_].
         n->rw_lock.unlock();
         return;
       }
@@ -1391,7 +1391,7 @@ MerkleTrie::generate_top_level_hashes()
   auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
     node.hash = node.compute_node_hash();
   };
-  walk<Node>(&root_, prefix, f, /*max_depth=*/kNoHashDepth);
+  walk<Node>(&root_, prefix, f, /*max_depth=*/no_hash_depth_);
 }
 
 void
