@@ -12,5 +12,7 @@ rm -rf $CWD/tmp
 mkdir -p $CWD/tmp
 
 $BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
 
 rm -rf $CWD/tmp

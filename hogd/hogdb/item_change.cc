@@ -697,6 +697,11 @@ HogDBStatus<void>
 ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
                                StorageCostModel const *cost_model)
 {
+  if (snapshot_cost_.has_value()) {
+    assert(*snapshot_cost_ >= 0);
+    return {};
+  }
+
   auto snapshot_cost = [&db, key, cost_model] -> HogDBStatus<size_t> {
     HogDBStatus<size_t> ret = db.get_charged_storage_cost(key, cost_model);
     if (!ret && ret.error() == HogDBCode::kNotFound) {
