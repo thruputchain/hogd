@@ -37,7 +37,7 @@ public:
        rocksdb::CompressionType compression_algorithm =
            rocksdb::CompressionType::kLZ4Compression);
 
-  ~IndexDB();
+  ~IndexDB() = default;
 
   // Delete copy, allow move
   IndexDB(const IndexDB &) = delete;

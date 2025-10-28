@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include <rocksdb/compression_type.h>
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include <rocksdb/db.h>
 #include <rocksdb/options.h>
 #include <rocksdb/status.h>
@@ -89,9 +90,6 @@ IndexDB::open(const std::filesystem::path &path,
   }
   return IndexerError(IndexerErrorCode::kInternal);
 }
-
-IndexDB::~IndexDB()
-{}
 
 IndexDB::IndexDB(IndexDB &&) noexcept = default;
 IndexDB &IndexDB::operator=(IndexDB &&) noexcept = default;
