@@ -64,7 +64,6 @@ public:
   // operations.
   MerkleTrie(size_t no_hash_depth = 3) : no_hash_depth_(no_hash_depth)
   {
-    info("trie {}, no_hash_depth_ is {}", (void *)this, no_hash_depth_);
     init_root_node();
   }
 
