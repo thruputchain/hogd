@@ -3,10 +3,10 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <mutex>
 #include <utility>
 
+#include <x23/debug.h>
 #include <x23/refcnt.h>
 #include <x23/threadpool.h>
 #include <x23/utility.h>
@@ -27,7 +27,8 @@ public:
   bool try_lock(this auto &&self, bool want_notify = false) noexcept
   {
     int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
-    assert(prev == kUnlocked || prev == kLocked || prev == kLockedWantNotify);
+    x23assert(prev == kUnlocked || prev == kLocked ||
+              prev == kLockedWantNotify);
     if (prev == kLockedWantNotify || (prev == kLocked && want_notify))
       prev =
           self.status_.exchange(kLockedWantNotify, std::memory_order_acquire);
@@ -47,7 +48,7 @@ public:
     if (int old = status_.exchange(kUnlocked); old == kLockedWantNotify)
       status_.notify_all();
     else
-      assert(old == kLocked);
+      x23assert(old == kLocked);
   }
 
   bool busy() const noexcept
@@ -62,7 +63,7 @@ public:
         status_.compare_exchange_weak(prev, kLockedWantNotify,
                                       std::memory_order_acquire);
       else
-        assert(prev == kUnlocked || prev == kLockedWantNotify);
+        x23assert(prev == kUnlocked || prev == kLockedWantNotify);
       if (prev == kUnlocked)
         return;
       status_.wait(kLockedWantNotify);

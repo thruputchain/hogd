@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +20,7 @@
 #include <utility>
 #include <variant>
 
+#include <x23/debug.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
@@ -407,8 +407,8 @@ public:
   {
 #ifndef NDEBUG
     if (!empty()) {
-      assert(data() >= container.data());
-      assert(data() + size() <= container.data() + container.size());
+      x23assert(data() >= container.data());
+      x23assert(data() + size() <= container.data() + container.size());
     }
 #endif // !NDEBUG
   }

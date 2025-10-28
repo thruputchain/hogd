@@ -38,7 +38,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -60,6 +59,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/debug.h>
 #include <x23/typename.h>
 #include <x23/utility.h>
 
@@ -493,7 +493,7 @@ public:
   }
   constexpr decltype(auto) operator[](this auto &&self, size_type i) noexcept
   {
-    assert(i < self.size());
+    x23assert(i < self.size());
     return (self.data()[i]);
   }
   constexpr decltype(auto) front(this auto &&self) { return (self[0]); }

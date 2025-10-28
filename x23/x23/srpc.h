@@ -41,7 +41,6 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
@@ -196,9 +195,9 @@ struct SRpcDispatcher : SRpcService {
   Buf serve(const rpc_msg &msg, BufView argdata) override
   {
     using enum msg_type;
-    assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
-           msg.body.cbody().prog == program() &&
-           msg.body.cbody().vers == version());
+    x23assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
+              msg.body.cbody().prog == program() &&
+              msg.body.cbody().vers == version());
     return with_proc_meta<version_meta, Buf>(msg.body.cbody().proc,
                                              Executor{*this, msg, argdata});
   }
@@ -317,7 +316,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     // If this fails, you tried to make a blocking RPC call from
     // within a coroutine, which can cause deadlock.
     extern bool in_thread_pool();
-    assert(!in_thread_pool());
+    x23assert(!in_thread_pool());
 
     auto msg = call_msg<ProcMeta>();
     const bool logging = logger_.active();

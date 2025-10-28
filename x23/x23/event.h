@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -111,7 +110,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
   {
     if (len == 0)
       return 0;
-    assert(len <= PTRDIFF_MAX);
+    x23assert(len <= PTRDIFF_MAX);
 
     if (size_t buflen = nbuffered()) {
       size_t n = std::min(len, buflen);

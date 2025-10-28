@@ -88,7 +88,7 @@ public:
     if (auto sz = size(); n < sz)
       offset_ += n;
     else {
-      assert(n == sz);
+      x23assert(n == sz);
       clear();
     }
   }

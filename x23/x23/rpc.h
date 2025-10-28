@@ -142,9 +142,9 @@ struct RpcDispatcher : RpcService {
   MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd argdata) override
   {
     using enum msg_type;
-    assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
-           msg.body.cbody().prog == program() &&
-           msg.body.cbody().vers == version());
+    x23assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
+              msg.body.cbody().prog == program() &&
+              msg.body.cbody().vers == version());
     return with_proc_meta<version_meta, MaybeAsync<Buf>>(
         msg.body.cbody().proc, [&]<typename ProcMeta>() -> MaybeAsync<Buf> {
           if constexpr (std::is_void_v<ProcMeta>)

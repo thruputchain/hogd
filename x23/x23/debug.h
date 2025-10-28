@@ -2,8 +2,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <format>
 #include <map>
+#include <source_location>
 #include <string>
 
 #include <unistd.h>
@@ -116,5 +118,56 @@ inline DebugFd<"X23SERVER_TRACE"> debug;
 //       // ...
 //    }
 Defer<> dump_rusage(int fd = debug.fd());
+
+std::string stacktrace(unsigned indent = 2, std::string ret = {});
+
+#ifdef NDEBUG
+
+template<typename... Args>
+[[noreturn]] inline void
+panic(std::format_string<Args...>, const Args &...args)
+{
+  std::unreachable();
+}
+
+consteval bool
+panicking()
+{
+  return false;
+}
+
+#define x23assert(cond)
+
+#else // !NDEBUG
+
+namespace detail {
+[[noreturn]] void do_panic(std::string_view fmt, std::format_args args,
+                           std::source_location sloc) noexcept;
+} // namespace detail
+
+template<typename... Args> struct panic {
+  panic(std::format_string<Args...> fmt, const Args &...args,
+        std::source_location sloc = std::source_location::current()) noexcept
+  {
+    detail::do_panic(fmt.get(), std::make_format_args(args...), sloc);
+  }
+};
+template<typename... Args>
+panic(std::format_string<Args...>, const Args &...args) -> panic<Args...>;
+
+#define x23assert(cond)                                                        \
+  do {                                                                         \
+    if (!(cond)) [[unlikely]]                                                  \
+      ::x23::panic("x23assert failure: {}", #cond);                            \
+  } while (0)
+
+extern std::atomic_bool panicking_flag;
+inline bool
+panicking() noexcept
+{
+  return panicking_flag.load(std::memory_order_relaxed);
+}
+
+#endif // !NDEBUG
 
 } // namespace x23

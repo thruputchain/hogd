@@ -38,7 +38,7 @@ struct XdrCallFailed : XdrException {
   static std::string make_message(const rpc_msg &m)
   {
     using enum reply_stat;
-    assert(m.body.mtype() == REPLY);
+    x23assert(m.body.mtype() == REPLY);
     if (m.body.rbody().stat() == MSG_ACCEPTED) {
       auto stat = m.body.rbody().areply().reply_data.stat();
       return std::format("RPC call failed ({})", stat);
@@ -102,7 +102,7 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  assert(ret.size() <= 0x80000003UZ);
+  x23assert(ret.size() <= 0x80000003UZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }

@@ -1,6 +1,5 @@
 
 #include <array>
-#include <cassert>
 #include <map>
 #include <thread>
 
@@ -8,6 +7,7 @@
 #include <signal.h> // Need for NSIG (might not be in <csignal>)
 #include <unistd.h>
 
+#include <x23/debug.h>
 #include <x23/mvar.h>
 #include <x23/signal.h>
 #include <x23/sockio.h>
@@ -88,14 +88,6 @@ get_sig_pipe()
 }
 
 void
-handler(int sig)
-{
-  if (sig > 0 && size_t(sig) < sig_state.size())
-    sig_state[sig].flag.store(1);
-  write(get_sig_pipe()[1], "", 1);
-}
-
-void
 service_once()
 {
   int sig = 0;
@@ -141,10 +133,18 @@ service_loop()
 
 } // namespace
 
+void
+signal_handler(int sig)
+{
+  if (sig > 0 && size_t(sig) < sig_state.size())
+    sig_state[sig].flag.store(1);
+  write(get_sig_pipe()[1], "", 1);
+}
+
 RawSignalCbHandle
 signal_cb(int sig, std::function<void()> cb)
 {
-  assert(sig > 0 && size_t(sig) < sig_state.size());
+  x23assert(sig > 0 && size_t(sig) < sig_state.size());
 
   static std::atomic_flag init{};
   if (!init.test_and_set(std::memory_order_relaxed)) {
@@ -158,7 +158,7 @@ signal_cb(int sig, std::function<void()> cb)
   if (!sig_state[sig].numcb++) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handler;
+    sa.sa_handler = signal_handler;
     sa.sa_flags = SA_RESTART;
     if (sigaction(sig, &sa, nullptr) == -1)
       Errno{}.raise("sigaction({})", sig);
@@ -169,12 +169,12 @@ signal_cb(int sig, std::function<void()> cb)
 void
 RawSignalCbHandle::cancel()
 {
-  assert(delflag_ && !delflag_->load(std::memory_order_relaxed));
+  x23assert(delflag_ && !delflag_->load(std::memory_order_relaxed));
   *delflag_ = true;
   delflag_ = nullptr;
 
   auto count = sig_service_count.load();
-  handler(0); // Ensure service_loop removes cb from map
+  signal_handler(0); // Ensure service_loop removes cb from map
 
   // If we are servicing signals, wait to ensure callbacks are done
   // before returning.  Otherwise, if this is happening in a

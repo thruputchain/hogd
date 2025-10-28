@@ -121,6 +121,7 @@
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corotrace.h>
+#include <x23/debug.h>
 #include <x23/typename.h>
 #include <x23/utility.h>
 
@@ -253,7 +254,7 @@ public:
     // it has no work associated with it, meaning it's not an Async
     // and you haven't turned it into a CoroCB.  Otherwise, you could
     // destroy the Awaitable while it's in use by another thread.
-    assert(!flags());
+    x23assert(!flags());
   }
 
   //
@@ -267,7 +268,7 @@ public:
   // introducing a new type.
   void launch()
   {
-    assert(!(flags() & ~kRunning));
+    x23assert(!(flags() & ~kRunning));
     flags_.store(kRunning, std::memory_order_relaxed);
   }
   void set_result(references<R> auto &&...r)
@@ -329,7 +330,7 @@ public:
       else
         return;
     }
-    assert(f & kException);
+    x23assert(f & kException);
     Defer _c{[this] { std::destroy_at(&exception_); }};
     std::rethrow_exception(std::move(exception_));
   }
@@ -341,20 +342,20 @@ public:
   void do_return(references<R> auto &&...r)
       requires (sizeof...(r) == kReturnValue)
   {
-    assert((flags() & (kRunning | kResult | kException)) == kRunning);
+    x23assert((flags() & (kRunning | kResult | kException)) == kRunning);
     std::construct_at(&result_, std::forward<decltype(r)>(r)...);
     flags_.fetch_or(kResult, std::memory_order_relaxed);
   }
   void do_exception(std::exception_ptr p)
   {
-    assert((flags() & (kRunning | kResult | kException)) == kRunning);
+    x23assert((flags() & (kRunning | kResult | kException)) == kRunning);
     std::construct_at(&exception_, std::move(p));
     flags_.fetch_or(kException, std::memory_order_relaxed);
   }
   std::coroutine_handle<> caller()
   {
     unsigned oldflags = flags_.fetch_or(kReturning, std::memory_order_acq_rel);
-    assert(oldflags & (kResult | kException));
+    x23assert(oldflags & (kResult | kException));
     if (oldflags & kAwaiting) {
       return caller_;
     }
@@ -532,7 +533,7 @@ template<typename R> struct [[nodiscard]] Async {
   // until the result is ready.
   R operator()(SLOC_DECL0)
   {
-    assert(!in_thread_pool());
+    x23assert(!in_thread_pool());
     std::binary_semaphore wait(0);
     if constexpr (std::is_void_v<R>) {
       (*this)([&wait] { wait.release(); } SLOC_COMMA_VAR);
@@ -665,7 +666,7 @@ struct MaybeAsync : void_variant<Awaitable, T> {
       noexcept(noexcept((*asyncp())(std::declval<Args>()...)))
   {
     auto *a = asyncp();
-    assert(a);
+    x23assert(a);
     return (*a)(std::forward<Args>(args)...);
   }
 
@@ -691,7 +692,7 @@ private:
     if constexpr (!std::is_void_v<T>)
       return std::move(get<1>(*this));
     else
-      assert(has_value());
+      x23assert(has_value());
   }
   awaitable_type *asyncp() noexcept { return get_if<0>(this); }
   decltype(auto) awaiter() noexcept { return detail::get_awaiter(*asyncp()); }
