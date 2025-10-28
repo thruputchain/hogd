@@ -289,6 +289,7 @@ Benchmark::run()
     if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)
       fail(ret.error());
     tx.commit();
+    tx.release_blocktx_reference();
   };
 
   // run invoke_tx in parallel on the workers for all payment ops.
