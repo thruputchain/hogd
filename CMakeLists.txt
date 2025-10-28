@@ -193,6 +193,9 @@ add_subdirectory(external/model-checker)
 set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
 include_directories(${MODEL_CHECKER_SOURCE_DIR})
 
+# Find RocksDB
+find_package(RocksDB REQUIRED)
+
 add_subdirectory(built_contracts)
 
 # Finally, enable hogd's own code

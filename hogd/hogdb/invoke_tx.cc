@@ -560,6 +560,7 @@ InvokeTX::assert_is_valid() const noexcept
         auto key = make_address_balance_item_key(addr);
         auto it = changes_.find(key);
         if (it == changes_.end() || it->second.empty()) {
+          [[maybe_unused]]
           auto const &bal = vec.back();
           assert(bal.manual_transfer_amount - bal.total_locked_storage_amount ==
                  0);
