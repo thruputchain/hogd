@@ -185,7 +185,11 @@ SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(MerkleTriePrefix &trie,
                                       const BlockHash &prev_block_hash)
 {
+  ElapsedTimer timer;
   trie.generate_top_level_hashes();
+  double generate_top_level_hashes_duration = timer.elapsed();
+  info("generate_top_level_hashes_duration {}",
+       generate_top_level_hashes_duration);
   SHA256Hash root_hash = trie.get_root_hash();
 
   BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
