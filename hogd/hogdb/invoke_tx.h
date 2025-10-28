@@ -156,7 +156,13 @@ private:
   void lock_storage(Address const &addr, int128_t cost);
 
   HogDBStatus<void> update_balance_lock(Address const &addr);
-  HogDBStatus<NNInt128> get_storage_balance_change(Address const &addr) const;
+
+  // get_storage_balance_change returns the storage balance change for the given
+  // address. If and only if the balance item is not present in the database AND
+  // no prior operation on this invoketx has forced the creation of the
+  // address's balance item, then the second element of the pair is true.
+  HogDBStatus<std::pair<NNInt128, bool>>
+  get_storage_balance_change(Address const &addr) const;
 };
 
 inline int

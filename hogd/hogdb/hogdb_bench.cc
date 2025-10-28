@@ -36,6 +36,8 @@ namespace {
 
 constexpr int128_t kDefaultBalance = 100;
 
+constexpr int128_t kBaseItemCost = 10000;
+
 // config parameter: location to store ramdb.
 std::string db_path;
 
@@ -246,7 +248,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
         !ret)
       fail(ret.error());
   }
-  populate_account_balances(bench->db_, n);
+  populate_account_balances(bench->db_, n, kBaseItemCost);
   if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
 
@@ -258,9 +260,9 @@ Benchmark::run()
 {
   StorageCostModel cost_model = StorageCostModel(StorageCostModelXdr{
       .ext = ExtensionPoint(0),
-      .base_data_item_cost = to_xdr(int128_t{12000}),
+      .base_data_item_cost = to_xdr(kBaseItemCost),
       .bytestring_cost_per_byte = 10,
-      .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+      .base_contract_deployment_cost = to_xdr(kBaseItemCost),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
   });
   PerThreadARC<BlockTX> block(db_, *trie_, cost_model, nullptr, 1);
@@ -287,6 +289,7 @@ Benchmark::run()
     if (HogDBStatus<void> ret = tx.sync_balance_locks(); !ret)
       fail(ret.error());
     tx.commit();
+    tx.release_blocktx_reference();
   };
 
   // run invoke_tx in parallel on the workers for all payment ops.
@@ -359,6 +362,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::unique_ptr<hogd::Benchmark> bench = fn(n, workers);
     double sec = hogd::measure([&bench] { bench->run(); });
     std::println("took {} seconds", sec);
+    hogd::info("took {} seconds", sec);
     return 0;
   }
 

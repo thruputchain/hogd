@@ -227,6 +227,8 @@ public:
     return cost_model->get_nnint_cost();
   }
 
+  bool operator==(const NNInt128 &other) const = default;
+
 private:
   int128_t base_;
   int128_t delta_;
