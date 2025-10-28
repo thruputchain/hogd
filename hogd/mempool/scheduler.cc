@@ -12,6 +12,7 @@
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -623,13 +624,25 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
   hashes.reserve(block_size);
   txs.reserve(block_size);
 
+  auto timer = std::make_unique<ElapsedTimer>();
+
   // Discard any expired txs before scheduling the current block.
   co_await discard_expired_txs(block_height);
+
+  double discard_expired_txs_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> scheduled_accounts;
 
+  size_t num_iterations = 0;
+  size_t num_get_txs_all = 0;
+  size_t num_get_txs_subset = 0;
+  size_t num_cycles = 0;
+
   while (num_scheduled < block_size) {
+    num_iterations++;
+
     if (age_to_tx_.empty()) {
       for (const ContractAddress &account : scheduled_accounts) {
         if (!stranded_.contains(account)) {
@@ -638,6 +651,7 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
         CHECK(!stranded_[account].empty());
         GasAmount min_gas_amount = stranded_[account].begin()->first;
         co_await cycle_if_needed(account, min_gas_amount);
+        num_cycles++;
       }
 
       // Check if there are now txs on the runqueue. If there are still no txs
@@ -657,12 +671,14 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       // that we add [info.size()] to [num_scheduled] first.
       num_scheduled += info.size();
       get_txs_all(info, hashes, txs);
+      num_get_txs_all++;
     }
     else {
       // We can only fit some of the txs in [info] in the block, so we need to
       // choose a subset of [info] to schedule.
       num_scheduled += num_remaining;
       get_txs_subset(info, num_remaining, hashes, txs);
+      num_get_txs_subset++;
     }
     if (info.empty()) {
       CHECK_EQ(age_to_tx_.erase(average_age), 1UL);
@@ -676,6 +692,14 @@ Scheduler::schedule(BlockHeight block_height, size_t block_size)
       return_tx_hogs(tx, block_height);
     }
   }
+
+  double while_loop_duration = timer->elapsed();
+  info("schedule(), discard_expired_txs_duration {}, while_loop_duration {}, "
+       "num_iterations {}, num_get_txs_all {}, num_get_txs_subset {}, "
+       "num_cycles {}",
+       discard_expired_txs_duration, while_loop_duration, num_iterations,
+       num_get_txs_all, num_get_txs_subset, num_cycles);
+
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret =
       {hashes, txs};
   co_return ret;
