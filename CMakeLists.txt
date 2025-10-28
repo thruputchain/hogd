@@ -91,12 +91,6 @@ file(MAKE_DIRECTORY "${BUILT_HEADERS_DIR}")
 set(HOGD_BUILT_HEADERS_DIR "${BUILT_HEADERS_DIR}/hogd")
 file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
 
-configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
-  ${HOGD_BUILT_HEADERS_DIR}/config.h
-  @ONLY
-)
-
 # A target that regenerates version.cc on every build.
 set(VERSION_CC "${HOGD_BUILT_HEADERS_DIR}/version.cc")
 add_custom_target(version ALL
@@ -193,11 +187,56 @@ add_subdirectory(external/model-checker)
 set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
 include_directories(${MODEL_CHECKER_SOURCE_DIR})
 
-# Add cmake directory to module path for custom Find modules
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+# Enable rocksdb
+# Disable tests and tools
+set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+set(WITH_GFLAGS OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARK_TOOLS OFF CACHE BOOL "" FORCE)
+set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
+set(WITH_CORE_TOOLS OFF CACHE BOOL "" FORCE)
+set(ROCKSDB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(FAIL_ON_WARNINGS OFF CACHE BOOL "" FORCE)
+# Performance optimizations
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(USE_RTTI OFF CACHE BOOL "" FORCE)
+else()
+  # Required in debug builds: rocksdb uses dynamic_cast in assertions.
+  set(USE_RTTI ON CACHE BOOL "" FORCE)
+endif()
 
-# Find RocksDB (will use RocksDBConfig.cmake if available, otherwise FindRocksDB.cmake)
-find_package(RocksDB REQUIRED)
+set(PORTABLE OFF CACHE BOOL "" FORCE)  # Allow architecture-specific optimizations
+set(FORCE_SSE42 ON CACHE BOOL "" FORCE)  # Enable SSE4.2 (modern CPUs)
+# Compression support (all fast and commonly available)
+set(WITH_SNAPPY ON CACHE BOOL "" FORCE)
+set(WITH_LZ4 ON CACHE BOOL "" FORCE)
+set(WITH_ZSTD ON CACHE BOOL "" FORCE)
+set(WITH_ZLIB ON CACHE BOOL "" FORCE)
+set(WITH_BZ2 ON CACHE BOOL "" FORCE)
+# Set variables for config.h
+set(ROCKSDB_WITH_SNAPPY ${WITH_SNAPPY})
+set(ROCKSDB_WITH_LZ4 ${WITH_LZ4})
+set(ROCKSDB_WITH_ZSTD ${WITH_ZSTD})
+set(ROCKSDB_WITH_ZLIB ${WITH_ZLIB})
+set(ROCKSDB_WITH_BZ2 ${WITH_BZ2})
+message(STATUS "ROCKSDB_WITH_SNAPPY: ${ROCKSDB_WITH_SNAPPY}")
+message(STATUS "ROCKSDB_WITH_LZ4: ${ROCKSDB_WITH_LZ4}")
+message(STATUS "ROCKSDB_WITH_ZSTD: ${ROCKSDB_WITH_ZSTD}")
+message(STATUS "ROCKSDB_WITH_ZLIB: ${ROCKSDB_WITH_ZLIB}")
+message(STATUS "ROCKSDB_WITH_BZ2: ${ROCKSDB_WITH_BZ2}")
+# Memory allocator (jemalloc is faster than system malloc)
+set(WITH_JEMALLOC ON CACHE BOOL "" FORCE)
+# Fix for macOS/LLVM: atomic operations are built-in, no need for -latomic
+set(BUILTIN_ATOMIC ON CACHE BOOL "" FORCE)
+add_subdirectory(external/rocksdb EXCLUDE_FROM_ALL)
+set(ROCKSDB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rocksdb/include")
+include_directories(${ROCKSDB_SOURCE_DIR})
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
+  ${HOGD_BUILT_HEADERS_DIR}/config.h
+  @ONLY
+)
 
 add_subdirectory(built_contracts)
 
