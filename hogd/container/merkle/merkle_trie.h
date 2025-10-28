@@ -667,7 +667,7 @@ private:
 
   template<std::size_t... Is>
   static std::array<MerkleTrie, kNumTries>
-  make_tries(std::index_sequence<Is...>, size_t no_hash_depth)
+  make_tries(std::index_sequence<Is...> /*unused*/, size_t no_hash_depth)
   {
     return std::array<MerkleTrie, kNumTries>{
         ((void)Is, MerkleTrie(no_hash_depth))...};
