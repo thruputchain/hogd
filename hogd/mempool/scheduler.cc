@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <memory>
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
