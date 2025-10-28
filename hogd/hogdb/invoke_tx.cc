@@ -149,9 +149,12 @@ InvokeTX::update_balance_lock(Address const &addr)
 
   assert(last.change.is_nnint128());
   assert(new_item.is_nnint128());
+  assert(new_item.get_raw_nnint128());
+  assert(last.change.get_raw_nnint128());
 
   // Check if the new item is the same as the previous storage lock.
   // If so, no need to update the lock.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   if (*last.change.get_raw_nnint128() == *new_item.get_raw_nnint128()) {
     return {};
   }
