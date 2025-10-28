@@ -509,6 +509,7 @@ InvokeTX::assert_is_valid() const noexcept
       if (key.is_address_balance() && !vec.empty()) {
         const ItemVersion &item = vec.back();
         assert(item.change.is_nnint128());
+        [[maybe_unused]]
         auto nnint = item.change.get_raw_nnint128();
         assert(nnint);
 
@@ -516,7 +517,8 @@ InvokeTX::assert_is_valid() const noexcept
         auto bal_it = balance_deltas_.find(addr);
         if (bal_it != balance_deltas_.end() && !bal_it->second.empty()) {
           const auto &bal = bal_it->second.back();
-          int128_t expected_delta =
+          [[maybe_unused]]
+          const int128_t expected_delta =
               bal.manual_transfer_amount - bal.total_locked_storage_amount;
           assert(nnint->delta() == expected_delta);
         }
@@ -538,11 +540,13 @@ InvokeTX::assert_is_valid() const noexcept
 
         const ItemVersion &item = it->second.back();
         assert(item.change.is_nnint128());
+        [[maybe_unused]]
         auto nnint = item.change.get_raw_nnint128();
         assert(nnint);
 
         const auto &bal = vec.back();
-        int128_t expected_delta =
+        [[maybe_unused]]
+        const int128_t expected_delta =
             bal.manual_transfer_amount - bal.total_locked_storage_amount;
         assert(nnint->delta() == expected_delta);
       }
