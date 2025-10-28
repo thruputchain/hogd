@@ -4,7 +4,7 @@ add_library(indexer STATIC
 )
 
 target_link_libraries(indexer PUBLIC
-    RocksDB::rocksdb
+    rocksdb
     hogd
 )
 

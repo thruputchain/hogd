@@ -25,11 +25,11 @@ target_link_libraries(
 
 # Build the db_bench executable
 add_executable(
-  db_bench
+  ramdb_bench
   db_bench.cc
 )
 target_link_libraries(
-  db_bench
+  ramdb_bench
   ramdb
 )
 
@@ -46,14 +46,14 @@ target_link_libraries(
 
 # create test binary
 add_executable(
-  db_test
+  ramdb_test
   db_test.cc
 )
 target_link_libraries(
-  db_test
+  ramdb_test
   ramdb
   GTest::gtest_main
 )
 gtest_discover_tests(
-  db_test
+  ramdb_test
   PROPERTIES TIMEOUT 100)

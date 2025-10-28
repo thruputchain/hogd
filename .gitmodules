@@ -25,3 +25,6 @@
 [submodule "groundhog-go"]
 	path = groundhog-go
 	url = git@github.com:groundhogchain/groundhog-go.git
+[submodule "external/rocksdb"]
+	path = external/rocksdb
+	url = https://github.com/facebook/rocksdb.git
