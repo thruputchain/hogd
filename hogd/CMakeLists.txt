@@ -45,10 +45,13 @@ add_subdirectory(ramdb)
 add_subdirectory(indexer)
 # add_subdirectory(rpc)
 
-# Finally, build the hogdb, hogexec, and coord executables
+# Finally, build the hogdb, hogexec, and mempool executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
 add_subdirectory(mempool)
+
+# Build utilities
+add_subdirectory(utils)
 
 # Build module for mock contract tests
 if (ENABLE_TEST_FFI)
