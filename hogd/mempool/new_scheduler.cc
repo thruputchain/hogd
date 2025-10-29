@@ -295,9 +295,13 @@ NewScheduler::schedule(size_t block_size)
         it = txs.erase(it);
       }
       else {
-        // TODO(jhumphri): Discard all remaining txs and go to next account.
+        // TODO(jhumphri): Discard all remaining txs and go to next account. Or
+        // actually, maybe we should not discard the txs because we will have
+        // enough hogs if we cycle the account.
       }
     }
+    // TODO(jhumphri): Check if we should remove [account] from
+    // [ready_accounts_].
   }
   // size_ -= num_scheduled;
 
