@@ -14,11 +14,11 @@ runs:
   steps:
     - name: set port env vars
       run: |
-        export CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)
-        export MEMPOOL_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolExecutorServerPort)
-        export MEMPOOL_DB_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolDbServerPort)
-        export MEMPOOL_EVENT_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolEventServerPort)
-        export MEMPOOL_COORDINATOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolCoordinatorServerPort)
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolExecutorServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_DB_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolDbServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EVENT_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolEventServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_COORDINATOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolCoordinatorServerPort)" >> $GITHUB_ENV
       shell: bash
     - name: make sure bench servers are running
       run: |

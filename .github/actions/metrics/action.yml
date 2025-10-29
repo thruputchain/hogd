@@ -10,7 +10,7 @@ runs:
   steps:
     - name: set port env vars
       run: |
-        export CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
       shell: bash
     - name: make sure bench servers are running
       run: |

@@ -41,7 +41,7 @@ jobs:
       run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
     - name: set port env vars
       run: |
-        export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
+        echo "CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
     - name: run bench server
       # local work dir on CI is on disk
       run: |

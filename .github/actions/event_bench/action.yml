@@ -14,8 +14,8 @@ runs:
   steps:
     - name: set port env vars
       run: |
-        export EVENT_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kEventExecutorServerPort)
-        export EVENT_MEMPOOL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kEventMempoolServerPort)
+        echo "EVENT_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kEventExecutorServerPort)" >> $GITHUB_ENV
+        echo "EVENT_MEMPOOL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kEventMempoolServerPort)" >> $GITHUB_ENV
       shell: bash
     - name: make sure bench server is running
       run: |
