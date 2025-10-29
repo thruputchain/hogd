@@ -72,10 +72,10 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  x23::Async<bool> read_average_hog_age(const ContractAddressBatch &addresses,
-                                        bool force);
   HogAge &get_cached_hog_age(const ContractAddress &address);
-  x23::Async<bool> write_average_hog_age(const ContractAddressBatch &addresses);
+
+  x23::Async<void>
+  read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
