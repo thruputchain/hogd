@@ -25,6 +25,43 @@
 
 namespace hogd {
 
+
+HogDBStatus<int128_t>
+InvokeTX::lock(const ItemKey &key, ItemChange &change) {
+  auto lock = get_item_lock(key);
+  if (!lock.has_value()) {
+    return lock.error();
+  }
+  assert(lock.value() != nullptr);
+  return (*lock)->lock(key, block_.get().get_db(), change);
+}
+
+HogDBStatus<int128_t>
+InvokeTX::modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change) {
+  auto lock = get_item_lock(key);
+  if (!lock.has_value()) {
+    return lock.error();
+  }
+  assert(lock.value() != nullptr);
+  return (*lock)->modify_lock(old_change, new_change);
+}
+
+void
+InvokeTX::unlock(const ItemKey &key, const ItemChange &change) {
+  auto lock = get_item_lock(key);
+  assert(lock.has_value());
+  assert(lock.value() != nullptr);
+  (*lock)->unlock(change);
+}
+
+int128_t
+InvokeTX::commit_change(const ItemKey &key, const ItemChange &change) {
+  auto lock = get_item_lock(key);
+  assert(lock.has_value());
+  assert(lock.value() != nullptr);
+  return (*lock)->commit_change(key, change);
+}
+
 HogDBStatus<int128_t>
 InvokeTX::read_nnint128(const ItemKey &key)
 {
@@ -51,6 +88,22 @@ InvokeTX::read_bytes(const ItemKey &key)
   if (!ret)
     return HogDBError(HogDBCode::kTypeMismatch);
   return ret;
+}
+
+HogDBStatus<ItemLockMVar*>
+InvokeTX::get_item_lock(const ItemKey &key) {
+  auto it = item_locks_.find(key);
+  if (it != item_locks_.end()) {
+    return it->second;
+  }
+  auto r = block_.get().get_item_lock(key);
+  if (!r) {
+    return r.error();
+  }
+  [[maybe_unused]]
+  auto [new_it, inserted] = item_locks_.emplace(key, r.value());
+  assert(inserted);
+  return new_it->second;
 }
 
 HogDBStatus<std::pair<NNInt128, bool>>
@@ -132,7 +185,7 @@ InvokeTX::update_balance_lock(Address const &addr)
       return {};
     }
 
-    auto status = block_.get().lock(key, new_item);
+    auto status = lock(key, new_item);
     if (!status) {
       return status.error();
     }
@@ -159,7 +212,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto status = block_.get().modify_lock(key, last.change, new_item);
+  auto status = modify_lock(key, last.change, new_item);
   if (!status) {
     return status.error();
   }
@@ -205,7 +258,7 @@ InvokeTX::commit()
   // as committed
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      auto cost_change = block_.get().commit_change(key, vec.back().change);
+      int128_t cost_change = commit_change(key, vec.back().change);
       assert(cost_change <= vec.back().locked_storage_cost);
       // NONDETERMINISTIC:Compute the amount of storage tokens that can be
       // released after this transaction commits.
@@ -228,7 +281,7 @@ InvokeTX::abort()
 
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      block_.get().unlock(key, vec.back().change);
+      unlock(key, vec.back().change);
     }
   }
   changes_.clear();
@@ -252,12 +305,12 @@ InvokeTX::rollback_to_savepoint(int depth)
     if (!vec.empty()) {
       // can't fail because reservation <= than previous one.
       [[maybe_unused]] HogDBStatus<int128_t> ret =
-          block_.get().modify_lock(key, tmp, vec.back().change);
+          modify_lock(key, tmp, vec.back().change);
       assert(ret);
       assert(vec.back().locked_storage_cost >= *ret);
       continue;
     }
-    block_.get().unlock(key, tmp);
+    unlock(key, tmp);
   }
 
   for (auto &[addr, vec] : balance_deltas_) {
@@ -322,7 +375,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDBStatus<int128_t> ret = block_.get().lock(key, change);
+    HogDBStatus<int128_t> ret = lock(key, change);
     if (!ret) {
       return ret.error();
     }
@@ -345,7 +398,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   ItemVersion &item = v.back();
   change.narrow(item.change);
   HogDBStatus<int128_t> ret =
-      block_.get().modify_lock(key, item.change, change);
+      modify_lock(key, item.change, change);
   if (!ret) {
     return ret.error();
   }
