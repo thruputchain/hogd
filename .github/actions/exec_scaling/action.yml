@@ -11,6 +11,7 @@ runs:
     - name: set port env vars
       run: |
         echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
+      shell: bash
     - name: make sure bench servers are running
       run: |
         ./scripts/wait-port.sh hog6 ${{ env.CI_CONTROL_PORT }}

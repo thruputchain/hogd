@@ -203,7 +203,7 @@ static_assert(is_SchedDb1<TestSchedDBServer *, std::type_identity_t>);
 
 class HogdbWrapper {
 public:
-  HogdbWrapper() : db_(open_db()), ctx_(db_, trie_, make_sched_db_client())
+  HogdbWrapper() : ctx_(HogDBDAO(open_db()), trie_, make_sched_db_client())
   {
     db_sched_server_.start_server(/*port=*/0);
     db_executor_server_.start_server(/*port=*/0);
@@ -243,7 +243,6 @@ private:
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
   make_sched_db_client();
 
-  HogDBDAO db_;
   MerkleTriePrefix trie_;
   RpcServer<TestSchedDBServer> test_sched_db_server_;
   RPCContext ctx_;
