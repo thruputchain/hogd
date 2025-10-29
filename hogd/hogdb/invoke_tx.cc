@@ -34,7 +34,7 @@ InvokeTX::lock(const ItemKey &key, ItemChange &change)
     return lock.error();
   }
   assert(lock.value() != nullptr);
-  return (*lock)->lock(key, block_.get().get_db(), change);
+  return (*lock)->lock(change);
 }
 
 HogDBStatus<int128_t>
@@ -102,7 +102,11 @@ InvokeTX::get_item_lock(const ItemKey &key)
   if (it != item_locks_.end()) {
     return it->second;
   }
-  auto *lock = block_.get().get_item_lock(key);
+  auto r = block_.get().get_item_lock(key);
+  if (!r) {
+    return r.error();
+  }
+  auto *lock = r.value();
   [[maybe_unused]] auto [new_it, inserted] = item_locks_.emplace(key, lock);
   assert(inserted);
   return new_it->second;

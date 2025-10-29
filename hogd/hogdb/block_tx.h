@@ -33,8 +33,7 @@ public:
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> lock(const ItemKey &key, HogDBDAO &db,
-                             ItemChange &change);
+  HogDBStatus<int128_t> lock(ItemChange &change);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
   // It returns an amount of storage tokens at least as large as what will
@@ -50,7 +49,7 @@ public:
   // returns the increase in committed storage cost.
   int128_t commit_change(const ItemKey &key, const ItemChange &change);
 
-  // This should only be called if there is some other synchronization mechanism
+  // These functions should only be called if there is some other synchronization mechanism
   // protecting the change from concurrent modification.
   const ItemChange *unsafe_get_change() const
   {
@@ -58,6 +57,12 @@ public:
       return nullptr;
     }
     return &lock_.change;
+  }
+  void unsafe_set_snaphot_cost(size_t cost) { 
+    lock_.change.set_snapshot_cost(cost); 
+  }
+  HogDBStatus<void> unsafe_load_snapshot_cost(HogDBDAO &db, const ItemKey &key) {
+    return lock_.change.load_snapshot_cost(db, key, cost_model_);
   }
 
 private:
@@ -114,7 +119,7 @@ public:
   // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
-  ItemLockMVar *get_item_lock(const ItemKey &key);
+  HogDBStatus<ItemLockMVar *> get_item_lock(const ItemKey &key);
 
   // void release_balance(const Address &addr, int128_t delta);
 

@@ -9,7 +9,9 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/hogdb/block_id_manager.h"
+#include "hogd/hogdb/block_tx.h"
 #include "rpc_types.hh"
 #include "types.hh"
 

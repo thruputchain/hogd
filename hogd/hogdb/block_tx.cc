@@ -94,17 +94,9 @@ ItemLockMVar::do_unlock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
 }
 
 HogDBStatus<int128_t>
-ItemLockMVar::lock(const ItemKey &key, HogDBDAO &db, ItemChange &change)
+ItemLockMVar::lock(ItemChange &change)
 {
   auto [lock, ul] = acquire_local_mutex();
-  if (key.is_address_balance()) {
-    change.set_snapshot_cost(0);
-  }
-  else {
-    if (auto r = change.load_snapshot_cost(db, key, cost_model_); !r) {
-      return r.error();
-    }
-  }
   return do_lock(ul, *lock, change, cost_model_);
 }
 
@@ -161,7 +153,7 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   }
 }*/
 
-ItemLockMVar *
+HogDBStatus<ItemLockMVar *>
 BlockTX::get_item_lock(const ItemKey &key)
 {
 
@@ -170,17 +162,26 @@ BlockTX::get_item_lock(const ItemKey &key)
     if (lock) {
       return lock;
     }
-    lock = new ItemLockMVar(get_mutex(key), &cost_model_);
-    return addr_balance_locks_.insert(
+    assert(lock == nullptr);
+
+    auto* out = addr_balance_locks_.insert(
         key.get_address(), ItemLockMVar(get_mutex(key), &cost_model_), ul);
+    out->unsafe_set_snaphot_cost(0);
+    return out;
   }
 
   auto [lock, ul] = item_locks_.find(key);
   if (lock) {
     return lock;
   }
-  return item_locks_.insert(key, ItemLockMVar(get_mutex(key), &cost_model_),
+  assert(lock == nullptr);
+
+  auto* out = item_locks_.insert(key, ItemLockMVar(get_mutex(key), &cost_model_),
                             ul);
+  if (auto r = out->unsafe_load_snapshot_cost(db_, key); !r) {
+    return r.error();
+  }
+  return out;
 }
 
 #if 0
