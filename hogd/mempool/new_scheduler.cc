@@ -1,5 +1,6 @@
 #include "hogd/mempool/new_scheduler.h"
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <optional>
@@ -226,7 +227,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
 }
 
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-NewScheduler::schedule(BlockHeight block_height, size_t block_size)
+NewScheduler::schedule(BlockHeight /* block_height */, size_t block_size)
 {
   x23::Vec<SignedTransactionHash> tx_hashes;
   x23::Vec<SignedTransaction> txs;
