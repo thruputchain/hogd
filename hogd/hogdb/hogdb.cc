@@ -87,9 +87,9 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   }
 
   // create the RPC context.
-  HogDBDAO db(RAMDB(std::move(*ramdb)));
+  HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
   MerkleTriePrefix trie;
-  db.load_trie(trie);
+  db_tmp.load_trie(trie);
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -102,7 +102,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     warn("no coordinator address provided, skipping coordinator connection");
   }
 
-  RPCContext ctx(db, trie, std::move(sched_db_client));
+  RPCContext ctx(std::move(db_tmp), trie, std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
@@ -113,7 +113,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
-    if (auto cost_model = db.read_cost_model(); cost_model) {
+    if (auto cost_model = ctx.get_db().read_cost_model(); cost_model) {
       ctx.initialize_cost_model(*cost_model);
     }
     else {

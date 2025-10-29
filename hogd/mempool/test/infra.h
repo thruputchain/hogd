@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <exception>
 #include <format>
@@ -118,7 +119,7 @@ public:
 
     HogAge average;
     memset(&average, 0, sizeof(average));
-    HogDBStatus<HogAge> res = db_.read_address_average_hog_age(account);
+    HogDBStatus<HogAge> res = get_db().read_address_average_hog_age(account);
     if (res.has_value()) {
       average = *res;
     }
@@ -126,18 +127,20 @@ public:
     average.address = account;
     average.average_ages[group] = age;
     average.num_hogs[group] = to_xdr(num_hogs);
-    CHECK(db_.write_address_average_hog_age({average}).has_value());
+    CHECK(get_db().write_address_average_hog_age({average}).has_value());
   }
 
   void set_account_auth_data(const ContractAddress &account,
                              const AccountAuthData &auth_data)
   {
-    CHECK(db_.write_address_account_auth_data(account, auth_data).has_value());
+    CHECK(get_db()
+              .write_address_account_auth_data(account, auth_data)
+              .has_value());
   }
 
   void set_dbtip(const DbTip &db_tip)
   {
-    CHECK(db_.write_dbtip(db_tip).has_value());
+    CHECK(get_db().write_dbtip(db_tip).has_value());
     ctx_->get_tip() = db_tip;
   }
 
@@ -172,8 +175,9 @@ private:
         Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
     CHECK(ramdb.has_value());
 
-    db_ = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(db_, trie_, std::move(sched_db_client));
+    auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
+    ctx_ = std::make_unique<RPCContext>(std::move(db), trie_,
+                                        std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
@@ -183,6 +187,12 @@ private:
     }));
   }
 
+  HogDBDAO &get_db()
+  {
+    assert(ctx_);
+    return ctx_->get_db();
+  }
+
   void init_contracts()
   {
     std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
@@ -190,17 +200,18 @@ private:
     // Write contract to hogdb.
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(db_.write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
+    CHECK(get_db()
+              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
               .has_value());
 
     for (const ContractAddress &address : kAccountAddresses) {
       // Write deployment.
       uint32_t contract_size = bytes.size();
       CHECK(
-          db_.write_address_metadata(address,
-                                     DeployedContractHash{.hash = contract_hash,
-                                                          .contract_size =
-                                                              contract_size})
+          get_db()
+              .write_address_metadata(
+                  address, DeployedContractHash{.hash = contract_hash,
+                                                .contract_size = contract_size})
               .has_value());
       grant_initial_tokens_for_account(address);
     }
@@ -212,7 +223,9 @@ private:
     static_assert(kStorageTokenAmount <=
                   uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
-    CHECK(db_.write_address_balance(address, kStorageTokenAmount).has_value());
+    CHECK(get_db()
+              .write_address_balance(address, kStorageTokenAmount)
+              .has_value());
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
     // account unlimited hogs with UINT128_MAX.
     set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
@@ -270,7 +283,6 @@ private:
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
   // Various backend components required by the database.
   TmpDir db_dir_;
-  HogDBDAO db_;
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
 
