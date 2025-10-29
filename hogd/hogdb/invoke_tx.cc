@@ -26,9 +26,9 @@
 
 namespace hogd {
 
-
 HogDBStatus<int128_t>
-InvokeTX::lock(const ItemKey &key, ItemChange &change) {
+InvokeTX::lock(const ItemKey &key, ItemChange &change)
+{
   auto lock = get_item_lock(key);
   if (!lock.has_value()) {
     return lock.error();
@@ -38,17 +38,20 @@ InvokeTX::lock(const ItemKey &key, ItemChange &change) {
 }
 
 HogDBStatus<int128_t>
-InvokeTX::modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change) {
+InvokeTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
+                      const ItemChange &new_change)
+{
   auto lock = get_item_lock(key);
   if (!lock.has_value()) {
     return lock.error();
   }
   assert(lock.value() != nullptr);
-  return (*lock)->modify_lock(key,old_change, new_change);
+  return (*lock)->modify_lock(key, old_change, new_change);
 }
 
 void
-InvokeTX::unlock(const ItemKey &key, const ItemChange &change) {
+InvokeTX::unlock(const ItemKey &key, const ItemChange &change)
+{
   auto lock = get_item_lock(key);
   assert(lock.has_value());
   assert(lock.value() != nullptr);
@@ -56,7 +59,8 @@ InvokeTX::unlock(const ItemKey &key, const ItemChange &change) {
 }
 
 int128_t
-InvokeTX::commit_change(const ItemKey &key, const ItemChange &change) {
+InvokeTX::commit_change(const ItemKey &key, const ItemChange &change)
+{
   auto lock = get_item_lock(key);
   assert(lock.has_value());
   assert(lock.value() != nullptr);
@@ -91,15 +95,15 @@ InvokeTX::read_bytes(const ItemKey &key)
   return ret;
 }
 
-HogDBStatus<ItemLockMVar*>
-InvokeTX::get_item_lock(const ItemKey &key) {
+HogDBStatus<ItemLockMVar *>
+InvokeTX::get_item_lock(const ItemKey &key)
+{
   auto it = item_locks_.find(key);
   if (it != item_locks_.end()) {
     return it->second;
   }
-  auto* lock = block_.get().get_item_lock(key);
-  [[maybe_unused]]
-  auto [new_it, inserted] = item_locks_.emplace(key, lock);
+  auto *lock = block_.get().get_item_lock(key);
+  [[maybe_unused]] auto [new_it, inserted] = item_locks_.emplace(key, lock);
   assert(inserted);
   return new_it->second;
 }
@@ -249,10 +253,11 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
 }
 
 void
-InvokeTX::release_balance(const Address &addr, int128_t delta) {
+InvokeTX::release_balance(const Address &addr, int128_t delta)
+{
   assert(delta > 0);
   auto change = make_balance_change(block_.get().get_db(), addr, delta);
-  if (!change) [[unlikely]]{
+  if (!change) [[unlikely]] {
     throw std::runtime_error("failed to make balance change");
   }
   // change has snapshot cost already set to 0
@@ -260,7 +265,6 @@ InvokeTX::release_balance(const Address &addr, int128_t delta) {
   if (!status) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
-
 }
 
 void
@@ -321,7 +325,9 @@ InvokeTX::rollback_to_savepoint(int depth)
           modify_lock(key, tmp, vec.back().change);
       assert(ret);
       if (vec.back().locked_storage_cost < *ret) {
-        error("rollback_to_savepoint: locked cost {} is less than the marginal storage cost {} for key {}", vec.back().locked_storage_cost, *ret, key);
+        error("rollback_to_savepoint: locked cost {} is less than the marginal "
+              "storage cost {} for key {}",
+              vec.back().locked_storage_cost, *ret, key);
       }
       assert(vec.back().locked_storage_cost >= *ret);
       continue;
@@ -413,8 +419,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   // otherwise it is an existing change, so the item is already locked.
   ItemVersion &item = v.back();
   change.narrow(item.change);
-  HogDBStatus<int128_t> ret =
-      modify_lock(key, item.change, change);
+  HogDBStatus<int128_t> ret = modify_lock(key, item.change, change);
   if (!ret) {
     return ret.error();
   }

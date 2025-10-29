@@ -142,7 +142,7 @@ private:
   std::unordered_map<Address, std::vector<StorageBalanceVersion>>
       balance_deltas_;
 
-  std::unordered_map<ItemKey, ItemLockMVar*> item_locks_;
+  std::unordered_map<ItemKey, ItemLockMVar *> item_locks_;
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
@@ -166,9 +166,11 @@ private:
   HogDBStatus<std::pair<NNInt128, bool>>
   get_storage_balance_change(Address const &addr) const;
 
-  HogDBStatus<ItemLockMVar*> get_item_lock(const ItemKey &key);
+  HogDBStatus<ItemLockMVar *> get_item_lock(const ItemKey &key);
   HogDBStatus<int128_t> lock(const ItemKey &key, ItemChange &change);
-  HogDBStatus<int128_t> modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change);
+  HogDBStatus<int128_t> modify_lock(const ItemKey &key,
+                                    const ItemChange &old_change,
+                                    const ItemChange &new_change);
   void unlock(const ItemKey &key, const ItemChange &change);
   int128_t commit_change(const ItemKey &key, const ItemChange &change);
   void release_balance(const Address &addr, int128_t delta);

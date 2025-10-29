@@ -24,29 +24,36 @@ namespace hogd {
 
 class ItemLockMVar {
 public:
-  ItemLockMVar(std::mutex& mtx, StorageCostModel *cost_model) : mtx_(mtx), cost_model_(cost_model) {}
+  ItemLockMVar(std::mutex &mtx, StorageCostModel *cost_model)
+    : mtx_(mtx), cost_model_(cost_model)
+  {}
 
   // methods to modify the item
   //
   // lock reserves the right to apply change to an item.
   // Lock returns the amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> lock(const ItemKey &key, HogDBDAO& db, ItemChange &change);
+  HogDBStatus<int128_t> lock(const ItemKey &key, HogDBDAO &db,
+                             ItemChange &change);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
   // It returns an amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  // Takes the key parameter because key type (is_balance vs not is_balance) affects storage cost.
-  HogDBStatus<int128_t> modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change);
+  // Takes the key parameter because key type (is_balance vs not is_balance)
+  // affects storage cost.
+  HogDBStatus<int128_t> modify_lock(const ItemKey &key,
+                                    const ItemChange &old_change,
+                                    const ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemChange &change);
   // commit_change marks a change as committed.
-  // returns the increase in committed storage cost.  
+  // returns the increase in committed storage cost.
   int128_t commit_change(const ItemKey &key, const ItemChange &change);
 
   // This should only be called if there is some other synchronization mechanism
   // protecting the change from concurrent modification.
-  const ItemChange* unsafe_get_change() const { 
+  const ItemChange *unsafe_get_change() const
+  {
     if (lock_.ref == 0) {
       return nullptr;
     }
@@ -54,17 +61,17 @@ public:
   }
 
 private:
-
   struct ItemLock {
     ItemChange change;
     uint32_t ref{0};
   };
 
-  std::pair<ItemLock*, std::unique_lock<std::mutex>> acquire_local_mutex() {
+  std::pair<ItemLock *, std::unique_lock<std::mutex>> acquire_local_mutex()
+  {
     return std::make_pair(&lock_, std::unique_lock<std::mutex>(mtx_));
   }
   ItemLock lock_;
-  std::mutex& mtx_;
+  std::mutex &mtx_;
   StorageCostModel *cost_model_;
 
   static inline HogDBStatus<int128_t>
@@ -75,8 +82,7 @@ private:
                  const ItemChange &old_change, const ItemChange &new_change,
                  const StorageCostModel *cost_model);
   static inline void do_unlock(const std::unique_lock<std::mutex> &ul,
-                               ItemLock &lock,
-                               const ItemChange &change);
+                               ItemLock &lock, const ItemChange &change);
   static inline void do_commit_change(const std::unique_lock<std::mutex> &ul,
                                       const ItemKey &key, ItemLock &lock,
                                       const ItemChange &change);
@@ -108,12 +114,11 @@ public:
   // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
-  ItemLockMVar* get_item_lock(const ItemKey &key);
+  ItemLockMVar *get_item_lock(const ItemKey &key);
 
-  //void release_balance(const Address &addr, int128_t delta);
+  // void release_balance(const Address &addr, int128_t delta);
 
 private:
-
   HogDBDAO &db_;
   MerkleTriePrefix &trie_;
   StorageCostModel cost_model_;
@@ -122,7 +127,8 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  static std::mutex& get_mutex(const ItemKey &key) {
+  static std::mutex &get_mutex(const ItemKey &key)
+  {
     static MutexArray mutexes;
     static std::hash<ItemKey> hash_fn;
     return mutexes.get_mutex(hash_fn(key));

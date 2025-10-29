@@ -30,12 +30,10 @@
 
 namespace hogd {
 
-
-
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 ItemLockMVar::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                 ItemLock &lock, const ItemChange &change,
-                 const StorageCostModel *cost_model)
+                      ItemLock &lock, const ItemChange &change,
+                      const StorageCostModel *cost_model)
 {
   assert(ul.owns_lock());
   assert(lock.ref >= 0);
@@ -56,10 +54,10 @@ ItemLockMVar::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 }
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
-ItemLockMVar::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                        ItemLock &lock, const ItemChange &old_change,
-                        const ItemChange &new_change,
-                        const StorageCostModel *cost_model)
+ItemLockMVar::do_modify_lock(
+    [[maybe_unused]] const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+    const ItemChange &old_change, const ItemChange &new_change,
+    const StorageCostModel *cost_model)
 {
   assert(ul.owns_lock());
   assert(lock.ref > 0);
@@ -80,8 +78,7 @@ ItemLockMVar::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex>
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
-ItemLockMVar::do_unlock(const std::unique_lock<std::mutex> &ul,
-                        ItemLock &lock,
+ItemLockMVar::do_unlock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
                         const ItemChange &change)
 {
   assert(ul.owns_lock());
@@ -89,18 +86,21 @@ ItemLockMVar::do_unlock(const std::unique_lock<std::mutex> &ul,
 
   if (--lock.ref == 0) {
     // No need to remove the lock from the map;
-    // if the key is ever acquired again later, the item change will be overwritten.
+    // if the key is ever acquired again later, the item change will be
+    // overwritten.
     return;
   }
   lock.change.undo_merge(change);
 }
 
-HogDBStatus<int128_t> 
-ItemLockMVar::lock(const ItemKey &key, HogDBDAO& db, ItemChange &change) {
+HogDBStatus<int128_t>
+ItemLockMVar::lock(const ItemKey &key, HogDBDAO &db, ItemChange &change)
+{
   auto [lock, ul] = acquire_local_mutex();
   if (key.is_address_balance()) {
     change.set_snapshot_cost(0);
-  } else {
+  }
+  else {
     if (auto r = change.load_snapshot_cost(db, key, cost_model_); !r) {
       return r.error();
     }
@@ -108,11 +108,13 @@ ItemLockMVar::lock(const ItemKey &key, HogDBDAO& db, ItemChange &change) {
   return do_lock(ul, *lock, change, cost_model_);
 }
 
-HogDBStatus<int128_t> 
-ItemLockMVar::modify_lock(const ItemKey &key,const ItemChange &old_change, const ItemChange &new_change) {
+HogDBStatus<int128_t>
+ItemLockMVar::modify_lock(const ItemKey &key, const ItemChange &old_change,
+                          const ItemChange &new_change)
+{
   auto [lock, ul] = acquire_local_mutex();
   return do_modify_lock(ul, *lock, old_change, new_change, cost_model_)
-      .and_then([&key](int128_t released_cost) -> HogDBStatus<int128_t> { 
+      .and_then([&key](int128_t released_cost) -> HogDBStatus<int128_t> {
         if (key.is_address_balance()) {
           return 0;
         }
@@ -121,13 +123,15 @@ ItemLockMVar::modify_lock(const ItemKey &key,const ItemChange &old_change, const
 }
 
 void
-ItemLockMVar::unlock(const ItemChange &change) {
+ItemLockMVar::unlock(const ItemChange &change)
+{
   auto [lock, ul] = acquire_local_mutex();
   do_unlock(ul, *lock, change);
 }
 
 int128_t
-ItemLockMVar::commit_change(const ItemKey &key, const ItemChange &change) {
+ItemLockMVar::commit_change(const ItemKey &key, const ItemChange &change)
+{
   auto [lock, ul] = acquire_local_mutex();
   if (key.is_address_balance()) {
     lock->change.commit_change(change);
@@ -157,23 +161,26 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   }
 }*/
 
-ItemLockMVar*
-BlockTX::get_item_lock(const ItemKey &key) {
+ItemLockMVar *
+BlockTX::get_item_lock(const ItemKey &key)
+{
 
   if (key.is_address_balance()) {
     auto [lock, ul] = addr_balance_locks_.find(key.get_address());
-    if (lock) { 
+    if (lock) {
       return lock;
     }
     lock = new ItemLockMVar(get_mutex(key), &cost_model_);
-    return addr_balance_locks_.insert(key.get_address(), ItemLockMVar(get_mutex(key), &cost_model_), ul);
+    return addr_balance_locks_.insert(
+        key.get_address(), ItemLockMVar(get_mutex(key), &cost_model_), ul);
   }
 
   auto [lock, ul] = item_locks_.find(key);
   if (lock) {
     return lock;
   }
-  return item_locks_.insert(key, ItemLockMVar(get_mutex(key), &cost_model_), ul);
+  return item_locks_.insert(key, ItemLockMVar(get_mutex(key), &cost_model_),
+                            ul);
 }
 
 #if 0
@@ -270,7 +277,7 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLockMVar &> v) {
-        const ItemChange* change = v.second.unsafe_get_change();
+        const ItemChange *change = v.second.unsafe_get_change();
         if (!change) {
           return;
         }
@@ -288,7 +295,7 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address, const ItemLockMVar &> v) {
-        const ItemChange* change = v.second.unsafe_get_change();
+        const ItemChange *change = v.second.unsafe_get_change();
         if (!change) {
           return;
         }
