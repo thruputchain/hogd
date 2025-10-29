@@ -85,13 +85,14 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     // containing an iterator to the KV pair in the the [txs_] map along with a
     // boolean indicating whether the insertion was successful.
     //
-    // [inserted.first] is the iterator itself. We dereference the iterator to
-    // get the KV pair, which is an std::pair<SignedTransactionHash, TxValue>.
-    // We ultimately want to get a pointer to the [TxValue].
+    // [inserted.first] is the iterator itself. The iterator points to the KV
+    // pair, which is an std::pair<SignedTransactionHash, TxValue>. We
+    // ultimately want to get a pointer to the [TxValue].
     //
     // To get the [TxValue], we do [inserted.first->second]. We use the
-    // dereference operator because [inserted.first] is an iterator, and we
-    // access [second] because the [TxValue] is second in the pair.
+    // dereference operator because [inserted.first] is an iterator and thus
+    // requires it, and we access [second] because the [TxValue] is second in
+    // the pair.
     //
     // We then get the address of the [TxValue]: [&inserted.first->second].
     TxValue *value = &inserted.first->second;
