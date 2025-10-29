@@ -41,9 +41,12 @@ jobs:
       run: |
         rm -r ./work_dir/ || true
         mkdir -p work_dir/
+    - name: set port env vars
+      run: |
+        export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
     - name: run bench servers
       run: |
-        ./release/hogd/hogexec/bench/control_server -p 11111 -w work_dir/
+        ./release/hogd/hogexec/bench/control_server -p ${{ env.CI_CONTROL_PORT }} -w work_dir/
 
   build:
     runs-on: metrics # [metrics] is hog10
@@ -75,6 +78,9 @@ jobs:
     - uses: ./.github/actions/prepare_env
     - name: build
       run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+    - name: set port env vars
+      run: |
+        export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
     - uses: ./.github/actions/mempool_bench
       with:
         build-dir: release
@@ -85,7 +91,7 @@ jobs:
     - name: cleanup control servers
       if: always()
       run: |
-        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
-        ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
-        ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
-        ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
+        ./release/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} shutdown
+        ./release/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} shutdown
+        ./release/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} shutdown
+        ./release/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} shutdown

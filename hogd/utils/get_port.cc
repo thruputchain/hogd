@@ -29,6 +29,8 @@ usage(char *argv[])
   std::println("  kEventExecutorServerPort: {}",
                hogd::kEventExecutorServerPort);
   std::println("  kEventMempoolServerPort: {}", hogd::kEventMempoolServerPort);
+  // ci control
+  std::println("  kCIControlServerPort: {}", hogd::kCIControlServerPort);
   exit(EXIT_FAILURE);
 }
 
@@ -72,6 +74,11 @@ get_port(const std::string &port_name)
 
   if (port_name == "kEventMempoolServerPort") {
     return hogd::kEventMempoolServerPort;
+  }
+
+  // ci control
+  if (port_name == "kCIControlServerPort") {
+    return hogd::kCIControlServerPort;
   }
 
   std::println("Invalid port name: {}", port_name);
