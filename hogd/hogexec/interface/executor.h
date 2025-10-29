@@ -3,8 +3,10 @@
 #include <cassert>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <utility>
 
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"

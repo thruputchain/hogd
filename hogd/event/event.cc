@@ -15,6 +15,7 @@
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "port.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/sockio.h"
@@ -22,9 +23,6 @@
 namespace hogd {
 
 namespace {
-
-constexpr uint16_t kExecutorServerPort = 8090;
-constexpr uint16_t kSchedulerServerPort = 8091;
 
 std::string
 create_address(uint16_t port)
@@ -51,11 +49,12 @@ event_init(const std::string &mempool_address,
   // Start the event servers.
   EventRPCContext ctx(work_directory);
   EventExecServer exec_server(ctx);
-  EventSchedServer sched_server(ctx);
+  EventMempoolServer mempool_server(ctx);
 
-  CHECK_EQ(exec_server.start_server(kExecutorServerPort), kExecutorServerPort);
-  CHECK_EQ(sched_server.start_server(kSchedulerServerPort),
-           kSchedulerServerPort);
+  CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),
+           uint16_t{kEventExecutorServerPort});
+  CHECK_EQ(mempool_server.start_server(kEventMempoolServerPort),
+           uint16_t{kEventMempoolServerPort});
 
   // Register with the mempool.
   x23::HostPort host_port;
@@ -64,12 +63,12 @@ event_init(const std::string &mempool_address,
         std::format("Invalid mempool address: {}", mempool_address));
   }
   auto client = connect_to_event_sched_server(mempool_address);
-  std::string address_for_exec = create_address(kExecutorServerPort);
-  std::string address_for_sched = create_address(kSchedulerServerPort);
+  std::string address_for_exec = create_address(kEventExecutorServerPort);
+  std::string address_for_mempool = create_address(kEventMempoolServerPort);
   EventCard card{.protocol = version::kHogdProtocol,
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
-                 .address_for_sched = address_for_sched.c_str()};
+                 .address_for_sched = address_for_mempool.c_str()};
   CHECK_EQ(client.schedevent_intro_event(card), RPCError::kRPCNone);
 
   // The event server is initialized. Now block forever.

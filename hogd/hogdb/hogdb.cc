@@ -17,6 +17,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
+#include "port.hh"
 #include "sched_db.hh"
 
 #include "hogd/base/log.h"
@@ -41,10 +42,6 @@
 namespace hogd {
 
 namespace {
-
-// port numbers used by servers hosted inside hogdb.
-constexpr uint16_t kExecServerPort = 8080;
-constexpr uint16_t kSchedServerPort = 8081;
 
 std::string
 create_address(uint16_t port)
@@ -133,19 +130,21 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   // start the executor server.
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
-  exec_server.start_server(kExecServerPort);
+  CHECK_EQ(exec_server.start_server(kDbExecutorServerPort),
+           uint16_t{kDbExecutorServerPort});
 
-  // start the scheduler server.
-  info("starting scheduler server.");
-  HogDBSchedServer sched_server(ctx);
-  sched_server.start_server(kSchedServerPort);
+  // start the mempool server.
+  info("starting mempool server.");
+  HogDBSchedServer mempool_server(ctx);
+  CHECK_EQ(mempool_server.start_server(kDbMempoolServerPort),
+           uint16_t{kDbMempoolServerPort});
 
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();
     assert(client);
 
-    const std::string exec_address = create_address(kExecServerPort);
-    const std::string sched_address = create_address(kSchedServerPort);
+    const std::string exec_address = create_address(kDbExecutorServerPort);
+    const std::string sched_address = create_address(kDbMempoolServerPort);
     ShardCard card{.protocol = version::kHogdProtocol,
                    .upid = {},
                    .block_height = 0,

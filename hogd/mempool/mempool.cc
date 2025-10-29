@@ -16,15 +16,11 @@
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_exec.h"
+#include "port.hh"
 
 namespace hogd {
 
 namespace {
-
-constexpr uint16_t kCoordinatorServerPort = 8070;
-constexpr uint16_t kExecutorServerPort = 8071;
-constexpr uint16_t kDbServerPort = 8072;
-constexpr uint16_t kEventServerPort = 8073;
 
 int
 mempool_init(size_t num_db_shards, size_t num_exec_shards)
@@ -33,7 +29,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
-  CHECK_EQ(db.start_server(kDbServerPort), kDbServerPort);
+  CHECK_EQ(db.start_server(kMempoolDbServerPort),
+           uint16_t{kMempoolDbServerPort});
   info("Waiting for {} db shards to connect...", num_db_shards);
   while (registration.shards_registered(/*cards=*/nullptr) < num_db_shards) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -41,7 +38,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
 
   // Wait for the event subsystem to connect.
   RpcServer<MempoolEventRpc> event;
-  CHECK_EQ(event.start_server(kEventServerPort), kEventServerPort);
+  CHECK_EQ(event.start_server(kMempoolEventServerPort),
+           uint16_t{kMempoolEventServerPort});
   info("Waiting for event server to connect...");
   while (!registration.event_registered(/*card=*/nullptr)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -49,7 +47,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
 
   // Let the executors connect.
   RpcServer<MempoolExecutorRpc> exec;
-  CHECK_EQ(exec.start_server(kExecutorServerPort), kExecutorServerPort);
+  CHECK_EQ(exec.start_server(kMempoolExecutorServerPort),
+           uint16_t{kMempoolExecutorServerPort});
   info("Waiting for {} executors to connect...", num_exec_shards);
   while (registration.executors_registered(/*cards=*/nullptr) <
          num_exec_shards) {
@@ -58,7 +57,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
 
   RpcServer<MempoolCoordinatorRpc> coord(db.impl_);
   coord.max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
-  CHECK_EQ(coord.start_server(kCoordinatorServerPort), kCoordinatorServerPort);
+  CHECK_EQ(coord.start_server(kMempoolCoordinatorServerPort),
+           uint16_t{kMempoolCoordinatorServerPort});
   while (!coord.impl_.ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }

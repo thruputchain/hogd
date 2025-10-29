@@ -12,55 +12,63 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: set port env vars
+      run: |
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolExecutorServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_DB_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolDbServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EVENT_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolEventServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_COORDINATOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolCoordinatorServerPort)" >> $GITHUB_ENV
+      shell: bash
     - name: make sure bench servers are running
       run: |
-        ./scripts/wait-port.sh hog6 11111
-        ./scripts/wait-port.sh hog7 11111
-        ./scripts/wait-port.sh hog8 11111
-        ./scripts/wait-port.sh hog11 11111
+        ./scripts/wait-port.sh hog6 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog7 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog8 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog11 ${{ env.CI_CONTROL_PORT }}
       shell: bash
     - name: clear work dirs
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 clear_work_dir
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 clear_work_dir
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 clear_work_dir
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} clear_work_dir
       shell: bash
     - name: launch loadgen
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 start hogd/loadgen/loadgen_server -p 11222
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} start hogd/loadgen/loadgen_server -p 11222
       shell: bash
     - name: wait for loadgen
       run: ./scripts/wait-port.sh hog7 11222
       shell: bash
     - name: launch first hogexec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 start hogd/hogexec/hogexec hog10:8071
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
       # can't wait for hogexec: that's waiting on the coordinator
       shell: bash
     - name: launch second hogexec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/hogexec/hogexec hog10:8071
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
       # can't wait for hogexec: that's waiting on the coordinator
       shell: bash
     - name: check hogexec is running
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} expect_running
       shell: bash
     - name: launch event
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 start hogd/event/event_exec hog10:8073 ${{ inputs.work-dir }}/
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/event/event_exec hog10:${{ env.MEMPOOL_EVENT_PORT }} ${{ inputs.work-dir }}/
       shell: bash
     - name: launch hogdb
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 start hogd/hogdb/hogdb ${{ inputs.work-dir }}/ 10000000000 hog10:8072
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} start hogd/hogdb/hogdb ${{ inputs.work-dir }}/ 10000000000 hog10:${{ env.MEMPOOL_DB_PORT }}
       shell: bash
     - name: make sure procs are running
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 expect_running
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 expect_running
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 expect_running
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} expect_running
       shell: bash
     - name: launch fake coordinator and mempool
       run: |
-        ./${{ inputs.build-dir }}/hogd/mempool/test/coordinator hog10:8070 hog7:11222 > coordinator_output.txt 2>&1 &
+        ./${{ inputs.build-dir }}/hogd/mempool/test/coordinator hog10:${{ env.MEMPOOL_COORDINATOR_PORT }} hog7:11222 > coordinator_output.txt 2>&1 &
         bash -c 'timeout 90s ./${{ inputs.build-dir }}/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
       shell: bash
     - name: clone metrics history # This is idempotent
@@ -74,7 +82,7 @@ runs:
       if: always()
       shell: bash
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
