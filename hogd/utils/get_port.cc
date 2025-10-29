@@ -3,7 +3,6 @@
 #include <print>
 #include <string>
 
-#include "hogd/base/log.h"
 #include "hogd/init.h"
 #include "port.hh"
 
