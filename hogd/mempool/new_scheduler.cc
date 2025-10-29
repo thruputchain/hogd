@@ -39,8 +39,8 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 HogAge &
 NewScheduler::get_cached_hog_age(const ContractAddress &address)
 {
-  auto it = cached_hogs_.find(address);
-  CHECK(it != cached_hogs_.end());
+  auto it = accounts_.find(address);
+  CHECK(it != accounts_.end());
   return it->second;
 }
 
@@ -50,7 +50,7 @@ NewScheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
   for (const HogAge &age : res.hog_age_batch()) {
-    cached_hogs_[age.address] = age;
+    accounts_[age.address] = age;
   }
 }
 
@@ -64,7 +64,7 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
-    if (!cached_hogs_.contains(account)) {
+    if (!accounts_.contains(account)) {
       accounts_vec.push_back(account);
     }
   }
@@ -85,7 +85,7 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
-    if (!cached_hogs_.contains(account)) {
+    if (!accounts_.contains(account)) {
       accounts_vec.push_back(account);
     }
   }
@@ -168,7 +168,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     }
 
     const ContractAddress &account = delta.address;
-    const HogAge &averages = cached_hogs_[account];
+    const HogAge &averages = accounts_[account];
     HogAge new_averages = averages;
 
     uint128_t received_hogs = from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
@@ -218,16 +218,22 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
       new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
     }
 
-    cached_hogs_[account] = new_averages;
+    accounts_[account] = new_averages;
   }
 }
 
-x23::Async<
-    std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
-NewScheduler::schedule(BlockHeight /* block_height */, size_t /* block_size */)
+std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
+NewScheduler::schedule(BlockHeight block_height, size_t block_size)
 {
-  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret;
-  co_return ret;
+  x23::Vec<SignedTransactionHash> tx_hashes;
+  x23::Vec<SignedTransaction> txs;
+
+  size_t num_scheduled = 0;
+  while (num_scheduled < block_size && size_) {
+  }
+  size_ -= num_scheduled;
+
+  return {tx_hashes, txs};
 }
 
 x23::Vec<std::optional<SignedTransaction>>

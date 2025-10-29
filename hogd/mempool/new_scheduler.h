@@ -46,8 +46,7 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  static x23::Async<
-      std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
+  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(BlockHeight block_height, size_t block_size);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
@@ -124,16 +123,14 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
-  // Caches the number of hogs and hog ages for an account so that the scheduler
-  // does not need to make as many RPC calls to the database.
-  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
-
   // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::map<TxKey, TxValue *>>
       account_to_tx_;
 
   // Tx cache.
   std::unordered_map<SignedTransactionHash, TxValue> txs_;
+  // Account cache.
+  std::unordered_map<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
   size_t size_ = 0;
