@@ -130,11 +130,6 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
-  // The RPC client that the scheduler uses to talk to the database. The
-  // scheduler uses this to read/write the number of hogs and hog ages for
-  // accounts.
-  std::shared_ptr<db_sched_client_t> db_sched_client_;
-
   // Caches the number of hogs and hog ages for an account so that the scheduler
   // does not need to make as many RPC calls to the database.
   std::unordered_map<ContractAddress, HogAge> cached_hogs_;
@@ -148,6 +143,11 @@ private:
 
   // The number of txs on the runqueue.
   size_t size_ = 0;
+
+  // The RPC client that the scheduler uses to talk to the database. The
+  // scheduler uses this to read/write the number of hogs and hog ages for
+  // accounts.
+  std::shared_ptr<db_sched_client_t> db_sched_client_;
 };
 
 } // namespace hogd
