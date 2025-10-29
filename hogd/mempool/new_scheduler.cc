@@ -257,11 +257,14 @@ NewScheduler::account_is_ready(const ContractAddress &account)
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 NewScheduler::schedule(size_t block_size)
 {
-  x23::Vec<SignedTransactionHash> tx_hashes;
-  x23::Vec<SignedTransaction> txs;
+  x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
+  x23::Vec<SignedTransaction> txs_to_schedule;
 
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> accounts;
+  current_block_++;
+  const TxKey lower_bound = {.expiry_block_height = current_block_,
+                             .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
       // TODO(jhumphri): Cycle.
@@ -271,12 +274,34 @@ NewScheduler::schedule(size_t block_size)
     HogAge &hog_ages = get_cached_hog_age(account);
     std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
     while (true) {
-      // TODO(jhumphri): Look from [lower_bound()].
+      auto it = txs.lower_bound(lower_bound);
+      if (it == txs.end()) {
+        break;
+      }
+      const SignedTransactionHash &tx_hash = it->first.tx_hash;
+      SignedTransaction &tx = it->second->tx;
+      uint128_t hogs_available =
+          from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]);
+      if (tx.tx.invocation.gas_limit <= hogs_available) {
+        hogs_available -= tx.tx.invocation.gas_limit;
+        hog_ages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available);
+
+        tx_hashes_to_schedule.push_back(tx_hash);
+        txs_to_schedule.push_back(tx);
+        num_scheduled++;
+
+        // We are deleting [it] here, so do not access [tx_hash] or [tx] beyond
+        // this point!
+        it = txs.erase(it);
+      }
+      else {
+        // TODO(jhumphri): Discard all remaining txs and go to next account.
+      }
     }
   }
   // size_ -= num_scheduled;
 
-  return {tx_hashes, txs};
+  return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
 x23::Vec<std::optional<SignedTransaction>>
