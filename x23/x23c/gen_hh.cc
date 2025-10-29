@@ -210,6 +210,10 @@ concept is_{0} =)",
         "      {}\n"
         "  }};\n",
         vers.procs.size(), procnos);
+    top_ += "  enum class procs : std::uint32_t {\n";
+    for (const auto &proc : vers.procs)
+      top_ += std::format("    {} = {},\n", proc.id, proc.val);
+    top_ += "  };\n";
     if (!namespaces_.empty())
       bottom_ += format("\nnamespace {} {{", ns());
 
@@ -292,6 +296,9 @@ concept is_{0} =)",
       bottom_ += std::format("}} // namespace {}\n", ns());
     bottom_ +=
         std::format(R"(
+template<> struct x23::version_for_proc_enum<{0}::procs> {{
+  using type = {0};
+}};
 template<typename Server, template<typename> typename RetTrans,
          typename... ExtraArgs>
 struct x23::rpc_compatible<Server, {0}, RetTrans, ExtraArgs...>
