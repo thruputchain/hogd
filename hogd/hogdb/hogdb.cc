@@ -88,8 +88,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
-  MerkleTriePrefix trie;
-  db_tmp.load_trie(trie);
+  std::unique_ptr<MerkleTriePrefix> trie = std::make_unique<MerkleTriePrefix>();
+  db_tmp.load_trie(*trie);
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
       sched_db_client;
@@ -102,14 +102,15 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     warn("no coordinator address provided, skipping coordinator connection");
   }
 
-  RPCContext ctx(std::move(db_tmp), trie, std::move(sched_db_client));
+  RPCContext ctx(std::move(db_tmp), std::move(trie),
+                 std::move(sched_db_client));
 
   // load the tip metadata from the database (won't exist in a new database).
   HogDBStatus<DbTip> tip = ctx.get_db().read_dbtip();
   if (tip) {
-    if (trie.get_root_hash() != tip->hash) {
+    if (ctx.get_trie().get_root_hash() != tip->hash) {
       critical("Root hash doesn't match DbTip: expected '{}', got '{}'",
-               trie.get_root_hash(), tip->hash);
+               ctx.get_trie().get_root_hash(), tip->hash);
       return EXIT_FAILURE;
     }
     ctx.get_tip() = *tip;
@@ -122,7 +123,7 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     }
   }
   else {
-    CHECK_EQ(trie.size(), 0UL);
+    CHECK_EQ(ctx.get_trie().size(), 0UL);
     ctx.get_tip().height = 0;
     ctx.get_tip().id = std::numeric_limits<BlockTXID>::max();
   }
