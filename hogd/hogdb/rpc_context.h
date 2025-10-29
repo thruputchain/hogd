@@ -53,17 +53,19 @@ public:
   using sched_db_client_t =
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  RPCContext(HogDBDAO db, MerkleTriePrefix &trie,
+  RPCContext(HogDBDAO db, std::unique_ptr<MerkleTriePrefix> trie,
              std::unique_ptr<sched_db_client_t> sched_db_client)
-    : db_(std::move(db)), trie_(trie),
+    : db_(std::move(db)), trie_(std::move(trie)),
       sched_db_client_(std::move(sched_db_client))
-  {}
+  {
+    assert(trie_ != nullptr);
+  }
 
   ~RPCContext();
 
   // getters.
   HogDBDAO &get_db() { return db_; }
-  MerkleTriePrefix &get_trie() const { return trie_; }
+  MerkleTriePrefix &get_trie() { return *trie_; }
   DbTip &get_tip() { return tip_; }
   StorageCostModel const &get_cost_model()
   {
@@ -113,7 +115,7 @@ private:
   // the database used to persist state.
   HogDBDAO db_;
   // the merkle trie that generates hashes for the items in the database.
-  MerkleTriePrefix &trie_;
+  std::unique_ptr<MerkleTriePrefix> trie_;
   // tracks details about the last committed block.
   DbTip tip_ = DbTip{.id = UINT64_MAX};
   // the storage cost model for computing storage costs at the current block

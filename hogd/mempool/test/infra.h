@@ -176,7 +176,8 @@ private:
     CHECK(ramdb.has_value());
 
     auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
-    ctx_ = std::make_unique<RPCContext>(std::move(db), trie_,
+    ctx_ = std::make_unique<RPCContext>(std::move(db),
+                                        std::make_unique<MerkleTriePrefix>(),
                                         std::move(sched_db_client));
     ctx_->initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
@@ -277,14 +278,15 @@ private:
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
+  // Various backend components required by the database.
+  TmpDir db_dir_;
+  std::unique_ptr<RPCContext> ctx_;
+
+  // These hold references to ctx_, so they should be destroyed before ctx_.
   // The database server that the executor accesses.
   std::unique_ptr<HogDBExecutorServer> db_executor_server_;
   // The database server that the scheduler accesses.
   std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
-  // Various backend components required by the database.
-  TmpDir db_dir_;
-  MerkleTriePrefix trie_;
-  std::unique_ptr<RPCContext> ctx_;
 
   // The event server that the mempool accesses.
   TestEventAggregator event_server_;
