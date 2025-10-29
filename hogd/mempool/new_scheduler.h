@@ -65,9 +65,8 @@ public:
   // re-execute the txs to verify the block.
   //
   // This method fills in [ret] with the [SignedTransaction]s to verify.
-  static bool
-  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> *ret);
+  x23::Vec<std::optional<SignedTransaction>>
+  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

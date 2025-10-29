@@ -131,12 +131,33 @@ NewScheduler::schedule(BlockHeight /* block_height */, size_t /* block_size */)
   co_return ret;
 }
 
-bool
+x23::Vec<std::optional<SignedTransaction>>
 NewScheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> & /* hashes */,
-    x23::Vec<SignedTransaction> * /* ret */)
+    const x23::Vec<SignedTransactionHash> &hashes)
 {
-  return false;
+  x23::Vec<std::optional<SignedTransaction>> ret;
+  ret.reserve(hashes.size());
+
+  for (const SignedTransactionHash &tx_hash : hashes) {
+    auto it = txs_.find(tx_hash);
+    if (it == txs_.end()) {
+      ret.push_back(std::nullopt);
+      continue;
+    }
+
+    const SignedTransaction &tx = it->second.tx;
+    ret.push_back(tx);
+
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    const TxKey key = {.expiry_block_height =
+                           tx.tx.uniquifier.block_expiry_height,
+                       .tx_hash = tx_hash};
+    // TODO(jhumphri): [find_and_remove_from_runqueue] is only called during
+    // validation, so I think it is fine if the tx is not on the runqueue? Thus,
+    // I do not check the return value of [erase()] below.
+    account_to_tx_[account].erase(key);
+  }
+  return ret;
 }
 
 } // namespace hogd
