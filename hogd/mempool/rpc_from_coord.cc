@@ -64,6 +64,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   auto timer = std::make_unique<ElapsedTimer>();
 
   x23::CoroGuard cg;
+  info("cg acquire start");
   co_await cg(scheduler_->global_lock_);
 
   double get_lock_duration = timer->elapsed();
@@ -71,6 +72,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   co_await scheduler_->add_txs(batch);
   cg.reset();
+  info("cg acquire end");
 
   double add_txs_duration = timer->elapsed();
   info("mempool schedulercoord_submit_vetted get_lock_duration {}, "
@@ -344,7 +346,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   x23::Vec<SignedTransaction> txs;
 
   x23::CoroGuard cg;
+  auto timer2 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_duration = timer2->elapsed();
 
   std::tie(nomination.transaction_hashes, txs) = co_await scheduler_->schedule(
       /*block_height=*/nomination.block_height, kMaxBlockSize);
@@ -373,7 +377,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       propose_batch_in_chunks(block_id, txs, nomination.transaction_nominations,
                               kChunkSize);
 
-  auto timer3 = std::make_unique<ElapsedTimer>();
+  timer2 = std::make_unique<ElapsedTimer>();
   std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
       tx_hashes;
   // We need to track the failed txs themselves (not just the hashes) because we
@@ -385,14 +389,17 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     all_accounts.insert(address);
     tx_hashes[address].push_back(nomination.transaction_hashes[i]);
   }
+  auto timer3 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_again_duration = timer3->elapsed();
+
   for (const ContractAddress &account : all_accounts) {
     co_await scheduler_->mark_txs_finished(tx_hashes[account]);
   }
   cg.reset();
   double mark_txs_duration = timer3->elapsed();
 
-  auto timer2 = std::make_unique<ElapsedTimer>();
+  timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
   double just_wait_for_executor_duration = timer2->elapsed();
 
@@ -458,12 +465,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
        "mark_txs_duration {}, "
        "just_wait_for_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
-       "get_block_hash_duration {}, wait_for_handles_duration {}",
+       "get_block_hash_duration {}, wait_for_handles_duration {}, "
+       "wait_for_lock_duration {}, wait_for_lock_again_duration {}",
        wait_for_transfer_duration, create_snapshot_and_open_block_duration,
        schedule_duration, run_on_executor_duration, mark_txs_duration,
        just_wait_for_executor_duration, mark_failed_txs_duration,
        create_handles_duration, get_block_hash_duration,
-       wait_for_handles_duration);
+       wait_for_handles_duration, wait_for_lock_duration,
+       wait_for_lock_again_duration);
 
   co_return result;
 }
