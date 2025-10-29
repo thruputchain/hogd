@@ -93,7 +93,7 @@ int
 handle_stop_command(std::string const &host, std::string const &port)
 {
   try {
-    auto client = hogd::connect_to_control_server(host, port);
+    auto client = hogd::connect_to_control_server(host, port, false);
     client.stop_server();
     return 0;
   } catch (std::exception const &e) {
