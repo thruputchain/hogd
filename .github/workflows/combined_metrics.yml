@@ -83,10 +83,6 @@ jobs:
       uses: ./.github/actions/exec_scaling
       with:
         build-dir: release
-    - name: release hog6
-      if: always()
-      run: |
-        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
     - name: run mempool benchmarks
       id: mempool_bench
       continue-on-error: true
@@ -94,9 +90,10 @@ jobs:
       with:
         build-dir: release
         work-dir: ci_work_dir/
-    - name: release hog7 and hog8
+    - name: release hog6, hog7, and hog8
       if: always()
       run: |
+        ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog7 11111 shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
     - name: run event server benchmarks
