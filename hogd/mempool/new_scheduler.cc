@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -10,7 +11,9 @@
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -81,7 +84,7 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
   for (const Delta &delta : transfers.deltas) {
     accounts.insert(delta.address);
   }
-  // TODO(jhumphri: This is the same as the code above.
+  // TODO(jhumphri): This is the same as the code above.
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
@@ -187,7 +190,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     }
     else {
       CHECK_LT(num_received, 0);
-      uint128_t num_received_abs = static_cast<uint128_t>(num_received * -1);
+      auto num_received_abs = static_cast<uint128_t>(num_received * -1);
 
       uint128_t already_scheduled_hogs =
           from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
