@@ -253,8 +253,10 @@ NewScheduler::find_and_remove_from_runqueue(
                        .tx_hash = tx_hash};
     // TODO(jhumphri): [find_and_remove_from_runqueue] is only called during
     // validation, so I think it is fine if the tx is not on the runqueue? Thus,
-    // I do not check the return value of [erase()] below.
-    account_to_tx_[account].erase(key);
+    // it is ok if [erase()] returns 0 below.
+    if (account_to_tx_[account].erase(key)) {
+      size_--;
+    }
   }
   return ret;
 }
