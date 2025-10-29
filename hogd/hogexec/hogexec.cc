@@ -41,7 +41,7 @@ hogexec_init(const std::string &coordinator_addr, int nthreads)
   CHECK_EQ(get_hostname(hostname), 0);
   CHECK_EQ(executor.start(hostname, kExecutorMempoolServerPort,
                           coordinator_sockaddr),
-           kExecutorMempoolServerPort);
+           uint16_t{kExecutorMempoolServerPort});
 
   // block forever
   info("hogexec initialization complete.");

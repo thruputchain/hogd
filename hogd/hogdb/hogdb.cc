@@ -131,13 +131,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   info("starting executor server.");
   HogDBExecutorServer exec_server(ctx);
   CHECK_EQ(exec_server.start_server(kDbExecutorServerPort),
-           kDbExecutorServerPort);
+           uint16_t{kDbExecutorServerPort});
 
   // start the mempool server.
   info("starting mempool server.");
   HogDBSchedServer mempool_server(ctx);
   CHECK_EQ(mempool_server.start_server(kDbMempoolServerPort),
-           kDbMempoolServerPort);
+           uint16_t{kDbMempoolServerPort});
 
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();

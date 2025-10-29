@@ -52,9 +52,9 @@ event_init(const std::string &mempool_address,
   EventMempoolServer mempool_server(ctx);
 
   CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),
-           kEventExecutorServerPort);
+           uint16_t{kEventExecutorServerPort});
   CHECK_EQ(mempool_server.start_server(kEventMempoolServerPort),
-           kEventMempoolServerPort);
+           uint16_t{kEventMempoolServerPort});
 
   // Register with the mempool.
   x23::HostPort host_port;

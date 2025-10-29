@@ -8,12 +8,15 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: set port env vars
+      run: |
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
     - name: make sure bench servers are running
       run: |
-        ./scripts/wait-port.sh hog6 11111
-        ./scripts/wait-port.sh hog7 11111
-        ./scripts/wait-port.sh hog8 11111
-        ./scripts/wait-port.sh hog11 11111
+        ./scripts/wait-port.sh hog6 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog7 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog8 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog11 ${{ env.CI_CONTROL_PORT }}
       shell: bash
     - name: clone metrics history #idempotent
       run: ./scripts/clone_metrics_history.sh
@@ -34,8 +37,8 @@ runs:
     - name: cleanup control servers
       if: always()
       run: |
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 11111 stop
-        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 11111 stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
       shell: bash
