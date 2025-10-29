@@ -72,6 +72,7 @@ public:
           static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
 
       x23::CoroGuard cg;
+      info("cg acquire start");
       co_await cg(scheduler_->global_lock_);
       if (hog_delta >= 0L) {
         co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
@@ -80,6 +81,7 @@ public:
       else {
         co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
       }
+      info("cg acquire end");
     }
 
     CHECK(!scheduler_->transfer_finished_);

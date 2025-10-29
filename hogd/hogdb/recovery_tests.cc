@@ -51,16 +51,17 @@ TEST(RecoveryTests, RecoveryVaryingItems)
         Database::open(dir->get_path(), kDefaultHeapSize, 0);
     ASSERT_TRUE(db);
     auto dao = HogDBDAO(RAMDB(std::move(*db)));
-    MerkleTriePrefix trie;
-    dao.load_trie(trie);
-    EXPECT_EQ(trie.size(), 0UL);
+    std::unique_ptr<MerkleTriePrefix> trie =
+        std::make_unique<MerkleTriePrefix>();
+    dao.load_trie(*trie);
+    EXPECT_EQ(trie->size(), 0UL);
 
     // add some items to the database
     // some items that are not in the trie
     CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
     // some items that are in the trie
 
-    RPCContext ctx(std::move(dao), trie, nullptr);
+    RPCContext ctx(std::move(dao), std::move(trie), nullptr);
     ctx.initialize_cost_model(StorageCostModel(StorageCostModelXdr{
         .ext = ExtensionPoint(0),
         .base_data_item_cost = to_xdr(int128_t{12000}),
