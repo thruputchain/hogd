@@ -36,7 +36,8 @@ public:
   // lock(). It could still fail if new_change has a conflict.
   // It returns an amount of storage tokens at least as large as what will
   // be needed to support the change, if committed.
-  HogDBStatus<int128_t> modify_lock(const ItemChange &old_change, const ItemChange &new_change);
+  // Takes the key parameter because key type (is_balance vs not is_balance) affects storage cost.
+  HogDBStatus<int128_t> modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(const ItemChange &change);
   // commit_change marks a change as committed.
@@ -45,13 +46,18 @@ public:
 
   // This should only be called if there is some other synchronization mechanism
   // protecting the change from concurrent modification.
-  const ItemChange& unsafe_get_change() const { return lock_.change; }
+  const ItemChange* unsafe_get_change() const { 
+    if (lock_.ref == 0) {
+      return nullptr;
+    }
+    return &lock_.change;
+  }
 
 private:
 
   struct ItemLock {
     ItemChange change;
-    uint32_t ref;
+    uint32_t ref{0};
   };
 
   std::pair<ItemLock*, std::unique_lock<std::mutex>> acquire_local_mutex() {
@@ -102,7 +108,7 @@ public:
   // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
 
-  HogDBStatus<ItemLockMVar*> get_item_lock(const ItemKey &key);
+  ItemLockMVar* get_item_lock(const ItemKey &key);
 
   //void release_balance(const Address &addr, int128_t delta);
 
@@ -116,10 +122,10 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  static MutexArray mutexes_;
   static std::mutex& get_mutex(const ItemKey &key) {
+    static MutexArray mutexes;
     static std::hash<ItemKey> hash_fn;
-    return mutexes_.get_mutex(hash_fn(key));
+    return mutexes.get_mutex(hash_fn(key));
   }
 
   /*

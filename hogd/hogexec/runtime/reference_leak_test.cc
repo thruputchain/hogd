@@ -304,7 +304,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   ASSERT_TRUE(tx1.abort_transaction().has_value());
 
   // The bug test: now try to reserve a different type after the failed NNInt
-  // reservation This should succeed if the reference was properly released on
+  // reservation.  This should succeed if the reference was properly released on
   // the failure above
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
@@ -317,6 +317,8 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   // Clean up
   ASSERT_TRUE(tx2.abort_transaction().has_value());
   ASSERT_TRUE(tx3.commit_transaction({}).has_value());
+
+  advance_block();
 }
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)

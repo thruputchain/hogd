@@ -171,6 +171,7 @@ private:
   HogDBStatus<int128_t> modify_lock(const ItemKey &key, const ItemChange &old_change, const ItemChange &new_change);
   void unlock(const ItemKey &key, const ItemChange &change);
   int128_t commit_change(const ItemKey &key, const ItemChange &change);
+  void release_balance(const Address &addr, int128_t delta);
 };
 
 inline int

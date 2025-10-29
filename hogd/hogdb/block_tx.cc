@@ -4,7 +4,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -39,6 +38,7 @@ ItemLockMVar::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
                  const StorageCostModel *cost_model)
 {
   assert(ul.owns_lock());
+  assert(lock.ref >= 0);
 
   if (++lock.ref == 1) {
     lock.change = change;
@@ -47,6 +47,7 @@ ItemLockMVar::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
   HogDBStatus<int128_t> ret = lock.change.merge(change, cost_model);
   if (!ret) {
+    assert(lock.ref > 0);
     lock.ref--;
     return ret.error();
   }
@@ -104,14 +105,19 @@ ItemLockMVar::lock(const ItemKey &key, HogDBDAO& db, ItemChange &change) {
       return r.error();
     }
   }
-
   return do_lock(ul, *lock, change, cost_model_);
 }
 
 HogDBStatus<int128_t> 
-ItemLockMVar::modify_lock(const ItemChange &old_change, const ItemChange &new_change) {
+ItemLockMVar::modify_lock(const ItemKey &key,const ItemChange &old_change, const ItemChange &new_change) {
   auto [lock, ul] = acquire_local_mutex();
-  return do_modify_lock(ul, *lock, old_change, new_change, cost_model_);
+  return do_modify_lock(ul, *lock, old_change, new_change, cost_model_)
+      .and_then([&key](int128_t released_cost) -> HogDBStatus<int128_t> { 
+        if (key.is_address_balance()) {
+          return 0;
+        }
+        return released_cost;
+      });
 }
 
 void
@@ -151,7 +157,7 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   }
 }*/
 
-HogDBStatus<ItemLockMVar*> 
+ItemLockMVar*
 BlockTX::get_item_lock(const ItemKey &key) {
 
   if (key.is_address_balance()) {
@@ -264,8 +270,11 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLockMVar &> v) {
-        auto const& change = v.second.unsafe_get_change();
-        HogDBStatus<void> tmp = change.commit(db_, trie_, v.first);
+        const ItemChange* change = v.second.unsafe_get_change();
+        if (!change) {
+          return;
+        }
+        HogDBStatus<void> tmp = change->commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -279,11 +288,14 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address, const ItemLockMVar &> v) {
-        auto const& change = v.second.unsafe_get_change();
-        assert(change.get_raw_nnint128().has_value());
-        auto raw_nnint128 = change.get_raw_nnint128().value();
+        const ItemChange* change = v.second.unsafe_get_change();
+        if (!change) {
+          return;
+        }
+        assert(change->get_raw_nnint128().has_value());
+        auto raw_nnint128 = change->get_raw_nnint128().value();
         int128_t prev_val = raw_nnint128.base();
-        int128_t new_val = change.to_nnint128().value();
+        int128_t new_val = change->to_nnint128().value();
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, new_val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);

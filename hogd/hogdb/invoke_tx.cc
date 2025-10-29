@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -43,7 +44,7 @@ InvokeTX::modify_lock(const ItemKey &key, const ItemChange &old_change, const It
     return lock.error();
   }
   assert(lock.value() != nullptr);
-  return (*lock)->modify_lock(old_change, new_change);
+  return (*lock)->modify_lock(key,old_change, new_change);
 }
 
 void
@@ -96,12 +97,9 @@ InvokeTX::get_item_lock(const ItemKey &key) {
   if (it != item_locks_.end()) {
     return it->second;
   }
-  auto r = block_.get().get_item_lock(key);
-  if (!r) {
-    return r.error();
-  }
+  auto* lock = block_.get().get_item_lock(key);
   [[maybe_unused]]
-  auto [new_it, inserted] = item_locks_.emplace(key, r.value());
+  auto [new_it, inserted] = item_locks_.emplace(key, lock);
   assert(inserted);
   return new_it->second;
 }
@@ -251,6 +249,21 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
 }
 
 void
+InvokeTX::release_balance(const Address &addr, int128_t delta) {
+  assert(delta > 0);
+  auto change = make_balance_change(block_.get().get_db(), addr, delta);
+  if (!change) [[unlikely]]{
+    throw std::runtime_error("failed to make balance change");
+  }
+  // change has snapshot cost already set to 0
+  auto status = lock(make_address_balance_item_key(addr), *change);
+  if (!status) [[unlikely]] {
+    throw std::runtime_error("failed to lock balance");
+  }
+
+}
+
+void
 InvokeTX::commit()
 {
   assert_is_valid();
@@ -266,7 +279,7 @@ InvokeTX::commit()
       assert(released_cost >= 0);
 
       if (released_cost > 0) {
-        block_.get().release_balance(key.get_address(), released_cost);
+        release_balance(key.get_address(), released_cost);
       }
     }
   }
@@ -307,6 +320,9 @@ InvokeTX::rollback_to_savepoint(int depth)
       [[maybe_unused]] HogDBStatus<int128_t> ret =
           modify_lock(key, tmp, vec.back().change);
       assert(ret);
+      if (vec.back().locked_storage_cost < *ret) {
+        error("rollback_to_savepoint: locked cost {} is less than the marginal storage cost {} for key {}", vec.back().locked_storage_cost, *ret, key);
+      }
       assert(vec.back().locked_storage_cost >= *ret);
       continue;
     }
@@ -383,7 +399,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     assert(*ret >= 0 || change.is_permanent_exclusive());
     int128_t marginal_storage = *ret;
 
-    v.emplace_back(std::move(change), tx_depth_);
+    v.emplace_back(std::move(change), tx_depth_, 0);
 
     // now lock the storage
     if (marginal_storage != 0) {
