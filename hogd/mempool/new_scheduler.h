@@ -40,15 +40,7 @@ public:
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<void> add_txs(const SignedTransactionBatch &txs);
 
-  // Call this method when account [account_address] receives [num_received]
-  // hogs from another account in block [current_block]. This method adds the
-  // hogs to the [kHogAgeGroupReceived] group.
-  static x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                                uint128_t num_received,
-                                                BlockHeight current_block);
-
-  static x23::Async<void> process_deducted_hogs(const ContractAddress &account,
-                                                uint128_t num_deducted);
+  x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
@@ -74,7 +66,10 @@ public:
   HogAge &get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
+  read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
+  x23::Async<void>
   read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
+  x23::Async<void> read_average_hog_ages(const HogsTransferred &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:

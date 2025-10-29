@@ -18,12 +18,40 @@
 
 namespace hogd {
 
+namespace {
+
+BlockHeight
+compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
+                    uint128_t num_hogs_b, BlockHeight age_b)
+{
+  uint128_t numerator = (num_hogs_a * age_a) + (num_hogs_b * age_b);
+  uint128_t denominator = num_hogs_a + num_hogs_b;
+  CHECK_GT(denominator, 0UL);
+  // When doing division, we introduce imprecision into our calculations. Thus,
+  // we always round the result up to avoid benefitting the account. This helps
+  // to ensure that users are not incentivized to waste network storage or
+  // compute, such as by spreading HOGs among multiple accounts.
+  return (numerator / denominator) + ((numerator % denominator) ? 1 : 0);
+}
+
+} // namespace
+
 HogAge &
 NewScheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto it = cached_hogs_.find(address);
   CHECK(it != cached_hogs_.end());
   return it->second;
+}
+
+x23::Async<void>
+NewScheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
+{
+  auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
+  CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
+  for (const HogAge &age : res.hog_age_batch()) {
+    cached_hogs_[age.address] = age;
+  }
 }
 
 x23::Async<void>
@@ -43,12 +71,28 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
   if (accounts_vec.empty()) {
     co_return;
   }
+  co_await read_average_hog_ages(accounts_vec);
+}
 
-  auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts_vec);
-  CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  for (const HogAge &age : res.hog_age_batch()) {
-    cached_hogs_[age.address] = age;
+x23::Async<void>
+NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
+{
+  std::unordered_set<ContractAddress> accounts;
+  for (const Delta &delta : transfers.deltas) {
+    accounts.insert(delta.address);
   }
+  // TODO(jhumphri: This is the same as the code above.
+  x23::Vec<ContractAddress> accounts_vec;
+  accounts_vec.reserve(accounts.size());
+  for (const ContractAddress &account : accounts) {
+    if (!cached_hogs_.contains(account)) {
+      accounts_vec.push_back(account);
+    }
+  }
+  if (accounts_vec.empty()) {
+    co_return;
+  }
+  co_await read_average_hog_ages(accounts_vec);
 }
 
 x23::Async<void>
@@ -109,18 +153,73 @@ NewScheduler::dump_runqueue() const
 {}
 
 x23::Async<void>
-NewScheduler::process_received_hogs(const ContractAddress & /* account */,
-                                    uint128_t /* num_received */,
-                                    BlockHeight /* current_block */)
+NewScheduler::process_transfers(const HogsTransferred &transfers)
 {
-  co_return;
-}
+  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
+  // its overhead by removing the [co_await] below, doing other work, and then
+  // calling [co_await] on the handle. We instead need to execute
+  // [read_average_hog_ages] on a separate thread.
+  co_await read_average_hog_ages(transfers);
 
-x23::Async<void>
-NewScheduler::process_deducted_hogs(const ContractAddress & /* account */,
-                                    uint128_t /* num_deducted */)
-{
-  co_return;
+  for (const Delta &delta : transfers.deltas) {
+    int128_t num_received = from_xdr(delta.hog_delta);
+    if (!num_received) {
+      continue;
+    }
+
+    const ContractAddress &account = delta.address;
+    const HogAge &averages = cached_hogs_[account];
+    HogAge new_averages = averages;
+
+    uint128_t received_hogs = from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+    const BlockHeight received_age =
+        averages.average_ages[kHogAgeGroupReceived];
+    if (num_received > 0) {
+      new_averages.num_hogs[kHogAgeGroupReceived] =
+          to_xdr(received_hogs + num_received);
+      // See comment above for [compute_average_age()].
+      //
+      // Note that [compute_average_age()] will never divide by 0 because we
+      // check that [num_received] is not 0.
+      new_averages.average_ages[kHogAgeGroupReceived] =
+          compute_average_age(received_hogs, received_age, num_received,
+                              transfers.block);
+    }
+    else {
+      CHECK_LT(num_received, 0);
+      uint128_t num_received_abs = static_cast<uint128_t>(num_received * -1);
+
+      uint128_t already_scheduled_hogs =
+          from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+      uint128_t to_schedule_hogs =
+          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+      CHECK_LE(num_received_abs,
+               to_schedule_hogs + already_scheduled_hogs + received_hogs);
+
+      uint128_t to_deduct = std::min(num_received_abs, received_hogs);
+      num_received_abs -= to_deduct;
+      received_hogs -= to_deduct;
+
+      if (num_received_abs > 0) {
+        to_deduct = std::min(num_received_abs, already_scheduled_hogs);
+        num_received_abs -= to_deduct;
+        already_scheduled_hogs -= to_deduct;
+      }
+      if (num_received_abs > 0) {
+        to_deduct = std::min(num_received_abs, to_schedule_hogs);
+        num_received_abs -= to_deduct;
+        to_schedule_hogs -= to_deduct;
+      }
+      CHECK_EQ(num_received_abs, 0UL);
+
+      new_averages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule_hogs);
+      new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+          to_xdr(already_scheduled_hogs);
+      new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
+    }
+
+    cached_hogs_[account] = new_averages;
+  }
 }
 
 x23::Async<
