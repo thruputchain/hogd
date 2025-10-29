@@ -182,7 +182,7 @@ void
 HogdbWrapper::grant_storage_token(ContractAddress const &address,
                                   int128_t amount)
 {
-  auto ret = db_.write_address_balance(address, amount);
+  auto ret = ctx_.get_db().write_address_balance(address, amount);
   if (!ret) {
     throw std::runtime_error(
         "grant_storage_token: write_address_balance failed");
@@ -196,8 +196,9 @@ HogdbWrapper::write_item(AddressAndKey const &addrkey,
   switch (item->type()) {
   case StorageItemType::kItemTypeBytestring:
   {
-    auto ret = db_.write_bytes(make_item_key(addrkey),
-                               std::as_bytes(std::span(item->bytestring())));
+    auto ret =
+        ctx_.get_db().write_bytes(make_item_key(addrkey),
+                                  std::as_bytes(std::span(item->bytestring())));
     if (!ret) {
       throw std::runtime_error("write_item: write_bytes failed");
     }
@@ -205,7 +206,8 @@ HogdbWrapper::write_item(AddressAndKey const &addrkey,
   }
   case StorageItemType::kItemTypeNonnegativeInt:
   {
-    auto ret = db_.write_nnint128(make_item_key(addrkey), item->nnint());
+    auto ret =
+        ctx_.get_db().write_nnint128(make_item_key(addrkey), item->nnint());
     if (!ret) {
       throw std::runtime_error("write_item: write_wasm_code failed");
     }
@@ -214,7 +216,7 @@ HogdbWrapper::write_item(AddressAndKey const &addrkey,
   case StorageItemType::kItemTypeDeleted:
   {
     info("write_item: removing item");
-    auto ret = db_.remove_item(make_item_key(addrkey));
+    auto ret = ctx_.get_db().remove_item(make_item_key(addrkey));
     if (!ret) {
       throw std::runtime_error("write_item: remove_item failed");
     }
@@ -232,7 +234,8 @@ HogdbWrapper::write_contract(ContractAddress const &addr,
 {
   assert(contract);
   auto bytes = x23::serialize(*contract);
-  auto ret = db_.write_wasm_code(addr, std::as_bytes(std::span(bytes)));
+  auto ret =
+      ctx_.get_db().write_wasm_code(addr, std::as_bytes(std::span(bytes)));
   if (!ret) {
     throw std::runtime_error("write_contract: write_contract failed");
   }
@@ -243,7 +246,7 @@ HogdbWrapper::write_deployment(ContractAddress const &addr,
                                DeployedContractHash const &deployment,
                                StorageCostModel const * /*unused*/)
 {
-  auto ret = db_.write_address_metadata(addr, deployment);
+  auto ret = ctx_.get_db().write_address_metadata(addr, deployment);
   if (!ret) {
     throw std::runtime_error("write_deployment: write_deployment failed");
   }
