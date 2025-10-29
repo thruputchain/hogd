@@ -40,22 +40,13 @@ public:
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<void> add_txs(const SignedTransactionBatch &txs);
 
-  // Call this method when account [account_address] receives [num_received]
-  // hogs from another account in block [current_block]. This method adds the
-  // hogs to the [kHogAgeGroupReceived] group.
-  static x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                                uint128_t num_received,
-                                                BlockHeight current_block);
-
-  static x23::Async<void> process_deducted_hogs(const ContractAddress &account,
-                                                uint128_t num_deducted);
+  x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  static x23::Async<
-      std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
+  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(BlockHeight block_height, size_t block_size);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
@@ -65,9 +56,8 @@ public:
   // re-execute the txs to verify the block.
   //
   // This method fills in [ret] with the [SignedTransaction]s to verify.
-  static bool
-  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> *ret);
+  x23::Vec<std::optional<SignedTransaction>>
+  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -75,7 +65,10 @@ public:
   HogAge &get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
+  read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
+  x23::Async<void>
   read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
+  x23::Async<void> read_average_hog_ages(const HogsTransferred &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
@@ -130,16 +123,14 @@ private:
   // [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
-  // Caches the number of hogs and hog ages for an account so that the scheduler
-  // does not need to make as many RPC calls to the database.
-  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
-
   // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::map<TxKey, TxValue *>>
       account_to_tx_;
 
   // Tx cache.
   std::unordered_map<SignedTransactionHash, TxValue> txs_;
+  // Account cache.
+  std::unordered_map<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
   size_t size_ = 0;
