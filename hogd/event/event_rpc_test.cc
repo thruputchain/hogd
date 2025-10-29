@@ -74,7 +74,8 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EventMempoolRpc mempool_rpc(ctx);
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1), RPCError::kRPCNone);
-  EXPECT_EQ(mempool_rpc.eventsched_close_block(1)().error(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_close_block(1)().error(),
+            RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestFromRPC)
@@ -92,7 +93,7 @@ TEST_F(EventRpcTest, TestFromRPC)
   auto exec_client = x23::SRpcMulticlient<x23::RpcLogger>::make(exec_addr)
                          ->client<EventExecutor1>();
   auto mempool_client = x23::SRpcMulticlient<x23::RpcLogger>::make(mempool_addr)
-                          ->client<EventSched1>();
+                            ->client<EventSched1>();
 
   EXPECT_NE(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
@@ -101,7 +102,8 @@ TEST_F(EventRpcTest, TestFromRPC)
 
   EXPECT_EQ(exec_client.eventexecutor_emit_event(0, 0, TxEventLog{}),
             RPCError::kRPCNone);
-  EXPECT_EQ(mempool_client.eventsched_close_block(0).error(), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_client.eventsched_close_block(0).error(),
+            RPCError::kRPCNone);
 }
 
 } // namespace hogd

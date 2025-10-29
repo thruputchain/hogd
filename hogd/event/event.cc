@@ -51,7 +51,8 @@ event_init(const std::string &mempool_address,
   EventExecServer exec_server(ctx);
   EventMempoolServer mempool_server(ctx);
 
-  CHECK_EQ(exec_server.start_server(kEventExecutorServerPort), kEventExecutorServerPort);
+  CHECK_EQ(exec_server.start_server(kEventExecutorServerPort),
+           kEventExecutorServerPort);
   CHECK_EQ(mempool_server.start_server(kEventMempoolServerPort),
            kEventMempoolServerPort);
 

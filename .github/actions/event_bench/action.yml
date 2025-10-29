@@ -12,6 +12,10 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: set port env vars
+      run: |
+        export EVENT_EXECUTOR_PORT=8090
+        export EVENT_MEMPOOL_PORT=8091
     - name: make sure bench server is running
       run: |
         ./scripts/wait-port.sh hog11 11111
@@ -29,11 +33,11 @@ runs:
       shell: bash
     - name: wait for event server ports
       run: |
-        ./scripts/wait-port.sh hog11 8090
-        ./scripts/wait-port.sh hog11 8091
+        ./scripts/wait-port.sh hog11 ${{ env.EVENT_EXECUTOR_PORT }}
+        ./scripts/wait-port.sh hog11 ${{ env.EVENT_MEMPOOL_PORT }}
       shell: bash
     - name: run event server benchmark
-      run: ./${{ inputs.build-dir }}/hogd/event/event_server_bench -e hog11:8090 -s hog11:8091 -n 1000000 -c 40 -o 100 > event_server_bench_log
+      run: ./${{ inputs.build-dir }}/hogd/event/event_server_bench -e hog11:${{ env.EVENT_EXECUTOR_PORT }} -s hog11:${{ env.EVENT_MEMPOOL_PORT }} -n 1000000 -c 40 -o 100 > event_server_bench_log
       shell: bash
     - name: clone metrics history # This is idempotent
       run: ./scripts/clone_metrics_history.sh

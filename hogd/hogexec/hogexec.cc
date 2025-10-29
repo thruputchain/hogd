@@ -14,8 +14,8 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
-#include "x23/sockio.h"
 #include "port.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -39,7 +39,8 @@ hogexec_init(const std::string &coordinator_addr, int nthreads)
       host_port_to_sockaddr(coordinator_host, coordinator_port);
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
-  CHECK_EQ(executor.start(hostname, kExecutorMempoolServerPort, coordinator_sockaddr),
+  CHECK_EQ(executor.start(hostname, kExecutorMempoolServerPort,
+                          coordinator_sockaddr),
            kExecutorMempoolServerPort);
 
   // block forever
