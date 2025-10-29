@@ -58,7 +58,7 @@ NewScheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
   }
 }
 
-x23::Async<void>
+x23::Async<std::unordered_set<ContractAddress>>
 NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -72,13 +72,13 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
       accounts_vec.push_back(account);
     }
   }
-  if (accounts_vec.empty()) {
-    co_return;
+  if (!accounts_vec.empty()) {
+    co_await read_average_hog_ages(accounts_vec);
   }
-  co_await read_average_hog_ages(accounts_vec);
+  co_return accounts;
 }
 
-x23::Async<void>
+x23::Async<std::unordered_set<ContractAddress>>
 NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -93,10 +93,18 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
       accounts_vec.push_back(account);
     }
   }
-  if (accounts_vec.empty()) {
-    co_return;
+  if (!accounts_vec.empty()) {
+    co_await read_average_hog_ages(accounts_vec);
   }
-  co_await read_average_hog_ages(accounts_vec);
+  co_return accounts;
+}
+
+NewScheduler::AccountKey
+NewScheduler::get_account_key(const ContractAddress &account)
+{
+  const HogAge &hog_ages = get_cached_hog_age(account);
+  BlockHeight average_hog_age = hog_ages.average_ages[kHogAgeGroupToSchedule];
+  return {.average_hog_age = average_hog_age, .account = account};
 }
 
 x23::Async<void>
@@ -106,7 +114,8 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
   // its overhead by removing the [co_await] below, doing other work, and then
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  co_await read_average_hog_ages(txs);
+  std::unordered_set<ContractAddress> accounts =
+      co_await read_average_hog_ages(txs);
 
   for (const SignedTransaction &tx : txs) {
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
@@ -139,6 +148,12 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     // We then get the address of the [TxValue]: [&inserted.first->second].
     TxValue *value = &inserted.first->second;
     CHECK(account_to_tx_[account].insert({key, value}).second);
+  }
+  for (const ContractAddress &account : accounts) {
+    // TODO(jhumphri): Set [current_block] correctly.
+    if (account_is_ready(account)) {
+      ready_accounts_.insert(get_account_key(account));
+    }
   }
   size_ += txs.size();
 }
@@ -226,16 +241,40 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   }
 }
 
+// TODO(jhumphri): Call this function from [add_txs],
+// [find_and_remove_from_runqueue], and [schedule].
+bool
+NewScheduler::account_is_ready(const ContractAddress &account)
+{
+  const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+  const TxKey lower_bound{.expiry_block_height = current_block_ + 1,
+                          .tx_hash = {}};
+  // We just check if there is a tx to run for this account. We do not check if
+  // the account has enough gas units to run the tx.
+  return txs.lower_bound(lower_bound) != txs.end();
+}
+
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-NewScheduler::schedule(BlockHeight /* block_height */, size_t block_size)
+NewScheduler::schedule(size_t block_size)
 {
   x23::Vec<SignedTransactionHash> tx_hashes;
   x23::Vec<SignedTransaction> txs;
 
   size_t num_scheduled = 0;
+  std::unordered_set<ContractAddress> accounts;
   while (num_scheduled < block_size && size_) {
+    if (ready_accounts_.empty()) {
+      // TODO(jhumphri): Cycle.
+      continue;
+    }
+    const ContractAddress account = ready_accounts_.begin()->account;
+    HogAge &hog_ages = get_cached_hog_age(account);
+    std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    while (true) {
+      // TODO(jhumphri): Look from [lower_bound()].
+    }
   }
-  size_ -= num_scheduled;
+  // size_ -= num_scheduled;
 
   return {tx_hashes, txs};
 }
@@ -247,6 +286,7 @@ NewScheduler::find_and_remove_from_runqueue(
   x23::Vec<std::optional<SignedTransaction>> ret;
   ret.reserve(hashes.size());
 
+  std::unordered_set<ContractAddress> accounts;
   for (const SignedTransactionHash &tx_hash : hashes) {
     auto it = txs_.find(tx_hash);
     if (it == txs_.end()) {
@@ -266,6 +306,12 @@ NewScheduler::find_and_remove_from_runqueue(
     // it is ok if [erase()] returns 0 below.
     if (account_to_tx_[account].erase(key)) {
       size_--;
+    }
+    accounts.insert(account);
+  }
+  for (const ContractAddress &account : accounts) {
+    if (!account_is_ready(account)) {
+      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
   return ret;

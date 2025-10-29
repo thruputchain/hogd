@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -47,7 +48,7 @@ public:
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-  schedule(BlockHeight block_height, size_t block_size);
+  schedule(size_t block_size);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -66,9 +67,10 @@ public:
 
   x23::Async<void>
   read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
-  x23::Async<void>
+  x23::Async<std::unordered_set<ContractAddress>>
   read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
-  x23::Async<void> read_average_hog_ages(const HogsTransferred &transfers);
+  x23::Async<std::unordered_set<ContractAddress>>
+  read_average_hog_ages(const HogsTransferred &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
@@ -115,6 +117,23 @@ private:
     SignedTransaction tx;
   };
 
+  struct AccountKey {
+    BlockHeight average_hog_age;
+    ContractAddress account;
+
+    bool operator<(const AccountKey &other) const noexcept
+    {
+      if (average_hog_age != other.average_hog_age) {
+        return average_hog_age < other.average_hog_age;
+      }
+      // std::array defines lexicographic comparison.
+      return account < other.account;
+    }
+  };
+
+  AccountKey get_account_key(const ContractAddress &account);
+  bool account_is_ready(const ContractAddress &account);
+
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
   // the average age of the [kHogAgeGroupToSchedule] group or (2) no txs are
@@ -126,6 +145,7 @@ private:
   // Maps an account to the txs it has submitted.
   std::unordered_map<ContractAddress, std::map<TxKey, TxValue *>>
       account_to_tx_;
+  std::set<AccountKey> ready_accounts_;
 
   // Tx cache.
   std::unordered_map<SignedTransactionHash, TxValue> txs_;
@@ -134,6 +154,7 @@ private:
 
   // The number of txs on the runqueue.
   size_t size_ = 0;
+  BlockHeight current_block_ = 0;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
