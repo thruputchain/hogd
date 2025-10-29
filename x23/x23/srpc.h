@@ -106,8 +106,8 @@ public:
   void fail(std::format_string<Args...> fmt, Args &&...args)
   {
     Str msg = uformat("SRpcFd(fd {}): ", fd_.get()) +
-              uvformat(fmt.get(), std::make_format_args(args...)) + "\n";
-    ::write(2, msg.data(), msg.size());
+              uvformat(fmt.get(), std::make_format_args(args...));
+    debug.err("{}", msg);
     stop();
   }
 

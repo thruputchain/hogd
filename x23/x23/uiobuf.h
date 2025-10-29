@@ -143,122 +143,136 @@ static_assert(is_bytevec<VecQ<std::uint8_t>>);
 struct BufVec {
   static constexpr size_t kCopyThreshold = 4096;
 
-  VecQ<Buf> bufs_;
-  size_t skip_{};
+  struct Storage {
+    Buf bytes_;
+    size_t iovnum_; // can't destroy nconsumed_ > iovnum_
+    size_t room() const noexcept { return bytes_.capacity() - bytes_.size(); }
+    uint8_t *copy(const uint8_t *p, size_t sz)
+    {
+      x23assert(sz <= room());
+      size_t offset = bytes_.size();
+      bytes_.resize_uninitialized(offset + sz);
+      uint8_t *ret = bytes_.data() + offset;
+      memcpy(ret, p, sz);
+      return ret;
+    }
+  };
 
-  bool empty() const noexcept { return bufs_.empty(); }
-  size_t nbytes() const noexcept
+  VecQ<Storage> storage_;
+  VecQ<iovec> data_;
+  size_t nconsumed_{}; // number of iovecs consumed
+
+  BufVec() noexcept = default;
+  BufVec(BufVec &&other) noexcept { swap(other); }
+  BufVec &operator=(BufVec &&other) noexcept
   {
-    size_t ret = -skip_;
-    for (const auto &b : bufs_)
-      ret += b.size();
-    return ret;
+    if (this != &other) {
+      clear();
+      swap(other);
+    }
+    return *this;
   }
+
   void clear()
   {
-    bufs_.clear();
-    skip_ = 0;
+    data_.clear();
+    storage_.clear();
+    nconsumed_ = 0;
   }
+
+  bool empty() const noexcept { return data_.empty(); }
+
   void swap(BufVec &other) noexcept
   {
-    bufs_.swap(other.bufs_);
-    std::swap(skip_, other.skip_);
+    using std::swap;
+    swap(storage_, other.storage_);
+    swap(data_, other.data_);
+    swap(nconsumed_, other.nconsumed_);
+  }
+
+  size_t nbytes() const noexcept
+  {
+    size_t ret = 0;
+    for (const auto &v : data_)
+      ret += v.iov_len;
+    return ret;
   }
 
   void append(BufView b, size_t offset = 0)
   {
-    if (offset)
-      b = b.subspan(offset);
-    if (backfull(b.size())) {
-      Buf &back = bufs_.emplace_back();
-      back.reserve(std::max(chunk_size(), b.size()));
-      back.append_range(b);
+    const size_t nbytes = b.size() - offset;
+    if (storage_.empty())
+      storage_.emplace_back().bytes_.reserve(
+          std::max(2 * kCopyThreshold, nbytes));
+    else if (storage_.back().room() < nbytes)
+      storage_.emplace_back().bytes_.reserve(
+          std::max(nbytes,
+                   std::min<size_t>(PTRDIFF_MAX,
+                                    2 * storage_.back().bytes_.capacity())));
+    Storage &back = storage_.back();
+    auto *p = back.copy(b.data() + offset, nbytes);
+    if (!data_.empty() && p == static_cast<uint8_t *>(data_.back().iov_base) +
+                                   data_.back().iov_len)
+      data_.back().iov_len += nbytes;
+    else {
+      back.iovnum_ = iovnum();
+      data_.emplace_back(iovec{
+          .iov_base = p,
+          .iov_len = nbytes,
+      });
     }
-    else
-      bufs_.back().append_range(b);
   }
+
   void append(Buf &&b, size_t offset = 0)
   {
-    if (b.size() >= kCopyThreshold && (offset == 0 || empty())) {
-      bufs_.emplace_back(std::move(b));
-      if (offset)
-        trim(offset);
+    if (b.size() - offset < kCopyThreshold) {
+      append(BufView(b), offset);
+      return;
     }
-    else
-      append(BufView{b}, offset);
+    size_t backroom = 0;
+    if (!storage_.empty())
+      backroom = storage_.back().room();
+    Storage *newback = &storage_.emplace_back(std::move(b), iovnum());
+    data_.emplace_back(iovec{
+        .iov_base = newback->bytes_.data() + offset,
+        .iov_len = newback->bytes_.size() - offset,
+    });
+
+    // Keep the Storage with the most room at the back of the list.
+    // It's okay to have iovnum_ out of order.
+    if (backroom > newback->room())
+      std::swap(newback[0], newback[-1]);
   }
 
-  template<std::ranges::forward_range R>
-  void move_append_range(R &&r) requires requires {
-    { std::move(*r.begin()) } -> std::same_as<Buf &&>;
-  }
-  {
-    auto it = r.begin();
-    while (it != r.end() && !backfull(r.size())) {
-      bufs_.back().append_range(*it);
-      (*it).clear();
-      ++it;
-    }
-
-    while (it != r.end()) {
-      if ((*it).size() >= kCopyThreshold) {
-        bufs_.emplace_back(std::move(*it++));
-        continue;
-      }
-
-      size_t n = 0;
-      auto eit = it;
-      while (eit != r.end() && (*eit).size() < kCopyThreshold) {
-        n += (*eit).size();
-        ++eit;
-      }
-      if (eit == r.end())
-        n = std::max(n, chunk_size());
-      Buf &back = bufs_.emplace_back();
-      back.reserve(n);
-      while (it != eit) {
-        back.append_range(*it);
-        (*it).clear();
-        ++it;
-      }
-    }
-  }
+  std::span<const iovec> to_vec() const { return data_; }
 
   void trim(size_t n)
   {
-    while (!bufs_.empty()) {
-      size_t frontsize = bufs_.front().size();
-      if (n < frontsize - skip_) {
-        skip_ += n;
-        return;
+    while (n > 0) {
+      auto &v = data_.front();
+      if (n < v.iov_len) {
+        v.iov_base = static_cast<std::byte *>(v.iov_base) + n;
+        v.iov_len -= n;
+        break;
       }
-      n -= frontsize - skip_;
-      skip_ = 0;
-      bufs_.pop_front(1);
+      n -= v.iov_len;
+      data_.pop_front(1);
+      ++nconsumed_;
     }
-  }
-
-  Vec<iovec> to_vec()
-  {
-    Vec<iovec> ret;
-    if (!bufs_.empty()) {
-      ret.reserve(bufs_.size());
-      ret.emplace_back();
-      ret.back().iov_base = bufs_.front().data() + skip_;
-      ret.back().iov_len = bufs_.front().size() - skip_;
-      for (size_t i = 1, e = bufs_.size(); i < e; ++i) {
-        ret.emplace_back();
-        ret.back().iov_base = bufs_[i].data();
-        ret.back().iov_len = bufs_[i].size();
-      }
+    if (data_.empty()) {
+      clear();
+      return;
     }
-    return ret;
+    size_t nfree = 0, e = storage_.size();
+    while (nfree < e && storage_[nfree].iovnum_ < nconsumed_)
+      ++nfree;
+    storage_.pop_front(nfree);
   }
 
   std::expected<IoResult, Errno> write(BorrowedFd fd)
   {
     using enum IoResult;
-    while (!empty()) {
+    while (!data_.empty()) {
       auto iov{to_vec()};
       auto n =
           writev(fd.get(), iov.data(), std::min<size_t>(iov.size(), IOV_MAX));
@@ -266,6 +280,7 @@ struct BufVec {
         if (errno == EAGAIN)
           return kAgain;
         Errno ret;
+        debug("writev(fd {}, niov {}): {}", fd.get(), ret, iov.size());
         clear();
         return ret;
       }
@@ -274,47 +289,8 @@ struct BufVec {
     return kComplete;
   }
 
-  // Returns false on full write, true on EAGAIN, error otherwise.
-  template<typename Buf>
-  std::expected<IoResult, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
-      requires requires { append(std::forward<Buf>(buf)); }
-  {
-    using enum IoResult;
-    if (!empty() || buf.empty()) {
-      append(std::forward<Buf>(buf));
-      return kQueued;
-    }
-
-    for (size_t pos = 0, end = buf.size(); pos != end;) {
-      auto n = ::write(fd.get(), buf.data() + pos, end - pos);
-      if (n < 0) {
-        if (Errno err; err != EAGAIN) {
-          clear();
-          return err;
-        }
-        append(std::forward<Buf>(buf), pos);
-        return kAgain;
-      }
-      pos += n;
-    }
-    return kComplete;
-  }
-
 private:
-  bool backfull(size_t n) const
-  {
-    if (empty())
-      return true;
-    const auto &back = bufs_.back();
-    return back.capacity() - back.size() < n;
-  }
-
-  size_t chunk_size() const
-  {
-    static constexpr size_t kMinChunk = 2 * kCopyThreshold;
-    static constexpr size_t kMaxShift = 32 - std::bit_width(kMinChunk);
-    return kMinChunk << std::min(bufs_.size(), kMaxShift);
-  }
+  size_t iovnum() const { return nconsumed_ + data_.size(); }
 };
 
 } // namespace x23

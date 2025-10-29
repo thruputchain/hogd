@@ -83,6 +83,20 @@ template<FixedStr EnvVar> struct DebugFd {
       do_vfmt(fmt.get(), std::make_format_args(args...));
   }
 
+  static void verr(std::string_view fmt, std::format_args args)
+  {
+    std::string msg = std::vformat(fmt, args);
+    msg += '\n';
+    if (int f = fd(); f != -1 && f != 2)
+      write(fd(), msg.data(), msg.size());
+    write(2, msg.data(), msg.size());
+  }
+  template<typename... Args>
+  static void err(std::format_string<Args...> fmt, Args &&...args)
+  {
+    verr(fmt.get(), std::make_format_args(args...));
+  }
+
 private:
   static void do_vfmt(std::string_view fmt, std::format_args args)
   {
@@ -100,6 +114,17 @@ struct NullDebugFd {
   static void vfmt(std::string_view fmt, std::format_args args) {}
   static void fmt(auto &&...) {}
   static void operator()(auto &&...) {}
+  static void verr(std::string_view fmt, std::format_args args)
+  {
+    std::string msg = std::vformat(fmt, args);
+    msg += '\n';
+    write(2, msg.data(), msg.size());
+  }
+  template<typename... Args>
+  static void err(std::format_string<Args...> fmt, Args &&...args)
+  {
+    verr(fmt.get(), std::make_format_args(args...));
+  }
 };
 
 #ifdef NDEBUG
