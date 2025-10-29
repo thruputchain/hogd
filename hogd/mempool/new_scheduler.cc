@@ -1,19 +1,14 @@
 #include "hogd/mempool/new_scheduler.h"
 
-#include <algorithm>
-#include <functional>
 #include <map>
 #include <memory>
-#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include <vector>
 
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -102,12 +97,12 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
 }
 
 void
-NewScheduler::cycle_if_needed(const ContractAddress &account,
-                              GasAmount gas_limit)
+NewScheduler::cycle_if_needed(const ContractAddress & /* account */,
+                              GasAmount /* gas_limit */)
 {}
 
 void
-NewScheduler::cycle_groups(const ContractAddress &account)
+NewScheduler::cycle_groups(const ContractAddress & /* account */)
 {}
 
 void
@@ -115,23 +110,23 @@ NewScheduler::dump_runqueue() const
 {}
 
 x23::Async<void>
-NewScheduler::process_received_hogs(const ContractAddress &account,
-                                    uint128_t num_received,
-                                    BlockHeight current_block)
+NewScheduler::process_received_hogs(const ContractAddress & /* account */,
+                                    uint128_t /* num_received */,
+                                    BlockHeight /* current_block */)
 {
   co_return;
 }
 
 x23::Async<void>
-NewScheduler::process_deducted_hogs(const ContractAddress &account,
-                                    uint128_t num_deducted)
+NewScheduler::process_deducted_hogs(const ContractAddress & /* account */,
+                                    uint128_t /* num_deducted */)
 {
   co_return;
 }
 
 x23::Async<
     std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
-NewScheduler::schedule(BlockHeight block_height, size_t block_size)
+NewScheduler::schedule(BlockHeight /* block_height */, size_t /* block_size */)
 {
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>> ret;
   co_return ret;
@@ -139,8 +134,8 @@ NewScheduler::schedule(BlockHeight block_height, size_t block_size)
 
 bool
 NewScheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> &hashes,
-    x23::Vec<SignedTransaction> *ret)
+    const x23::Vec<SignedTransactionHash> & /* hashes */,
+    x23::Vec<SignedTransaction> * /* ret */)
 {
   return false;
 }

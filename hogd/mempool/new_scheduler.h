@@ -27,7 +27,7 @@ public:
     : db_sched_client_(std::move(db_sched_client))
   {}
 
-  x23::Async<void> shut_down() { co_return; }
+  static x23::Async<void> shut_down() { co_return; }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
@@ -43,18 +43,18 @@ public:
   // Call this method when account [account_address] receives [num_received]
   // hogs from another account in block [current_block]. This method adds the
   // hogs to the [kHogAgeGroupReceived] group.
-  x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                         uint128_t num_received,
-                                         BlockHeight current_block);
+  static x23::Async<void> process_received_hogs(const ContractAddress &account,
+                                                uint128_t num_received,
+                                                BlockHeight current_block);
 
-  x23::Async<void> process_deducted_hogs(const ContractAddress &account,
-                                         uint128_t num_deducted);
+  static x23::Async<void> process_deducted_hogs(const ContractAddress &account,
+                                                uint128_t num_deducted);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  x23::Async<
+  static x23::Async<
       std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
   schedule(BlockHeight block_height, size_t block_size);
 
@@ -65,7 +65,7 @@ public:
   // re-execute the txs to verify the block.
   //
   // This method fills in [ret] with the [SignedTransaction]s to verify.
-  bool
+  static bool
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
                                 x23::Vec<SignedTransaction> *ret);
 
@@ -90,7 +90,7 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  void cycle_groups(const ContractAddress &account);
+  static void cycle_groups(const ContractAddress &account);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
