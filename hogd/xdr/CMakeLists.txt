@@ -19,6 +19,7 @@ add_xdr(
   ../../protocol/genesis.x
   ../../protocol/loadgen.x
   ../../protocol/nomination.x
+  ../../protocol/port.x
   ../../protocol/precompiles.x
   ../../protocol/rpc_types.x
   ../../protocol/scp.x

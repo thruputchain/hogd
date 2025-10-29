@@ -8,11 +8,11 @@
 
 namespace hogd {
 
-class EventSchedRpc {
+class EventMempoolRpc {
 public:
   using rpc_service = EventSched1;
 
-  EventSchedRpc(EventRPCContext &ctx) : ctx_(ctx) {}
+  EventMempoolRpc(EventRPCContext &ctx) : ctx_(ctx) {}
 
   static void eventsched_null() {}
 
@@ -24,11 +24,11 @@ private:
   EventRPCContext &ctx_;
 };
 
-static_assert(is_EventSched1<EventSchedRpc *, x23::MaybeAsync>);
+static_assert(is_EventSched1<EventMempoolRpc *, x23::MaybeAsync>);
 
-class EventSchedServer : public RpcServer<EventSchedRpc> {
+class EventMempoolServer : public RpcServer<EventMempoolRpc> {
 public:
-  explicit EventSchedServer(EventRPCContext &ctx) : RpcServer(ctx) {}
+  explicit EventMempoolServer(EventRPCContext &ctx) : RpcServer(ctx) {}
 };
 
 } // namespace hogd

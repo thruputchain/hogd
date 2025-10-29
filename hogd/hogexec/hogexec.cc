@@ -15,12 +15,11 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/init.h"
 #include "x23/sockio.h"
+#include "port.hh"
 
 namespace hogd {
 
 namespace {
-
-constexpr uint16_t kExecServerPort = 8070;
 
 int
 hogexec_init(const std::string &coordinator_addr, int nthreads)
@@ -40,8 +39,8 @@ hogexec_init(const std::string &coordinator_addr, int nthreads)
       host_port_to_sockaddr(coordinator_host, coordinator_port);
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
-  CHECK_EQ(executor.start(hostname, kExecServerPort, coordinator_sockaddr),
-           kExecServerPort);
+  CHECK_EQ(executor.start(hostname, kExecutorMempoolServerPort, coordinator_sockaddr),
+           kExecutorMempoolServerPort);
 
   // block forever
   info("hogexec initialization complete.");

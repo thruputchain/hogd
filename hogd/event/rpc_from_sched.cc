@@ -28,7 +28,7 @@ to_rpc_error(EventErrorCode error_code)
 } // namespace
 
 RPCError
-EventSchedRpc::eventsched_open_block(BlockID block_id)
+EventMempoolRpc::eventsched_open_block(BlockID block_id)
 {
   auto r = ctx_.open_block(block_id);
   if (!r) {
@@ -38,7 +38,7 @@ EventSchedRpc::eventsched_open_block(BlockID block_id)
 }
 
 RPCError
-EventSchedRpc::eventsched_abandon_block(BlockID block_id)
+EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
 {
   auto r = ctx_.abandon_block(block_id);
   if (!r) {
@@ -48,7 +48,7 @@ EventSchedRpc::eventsched_abandon_block(BlockID block_id)
 }
 
 x23::Async<EventBlockResult>
-EventSchedRpc::eventsched_close_block(BlockID block_id)
+EventMempoolRpc::eventsched_close_block(BlockID block_id)
 {
   auto r = co_await ctx_.close_block(block_id);
   if (!r) {
