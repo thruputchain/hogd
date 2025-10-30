@@ -460,4 +460,8 @@ private:
   void debug_dump();
 };
 
+// If this returns true, we are in a coroutine thread pool and so
+// should not do anything that blocks.
+extern bool in_thread_pool();
+
 } // namespace x23

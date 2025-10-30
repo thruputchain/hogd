@@ -562,14 +562,14 @@ void
 tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
-  std::mutex m;
+  DestroyInhibit di;
   tcp_rpc_server(
       cp, port,
-      [cb = std::move(cb), _ul = std::unique_lock{m}](auto configurator) {
+      [cb = std::move(cb), _di = RefPtr(di)](auto configurator) {
         std::invoke(cb, std::move(configurator));
       },
       backlog);
-  std::unique_lock _ul(m);
+  di.destroy_wait();
 }
 
 } // namespace x23

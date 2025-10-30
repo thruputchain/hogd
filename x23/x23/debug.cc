@@ -34,7 +34,7 @@ stacktrace(unsigned indent, std::string ret)
 {
 #if HAVE_STD_STACKTRACE
   for (const auto &e : std::stacktrace::current())
-    uformat_to(&ret, "{:>{}}{}", "", indent, e);
+    uformat_to(&ret, "{:>{}}{}\n", "", indent, e);
 #elif HAVE_BACKTRACE_SYMBOLS
   void *bt[64];
   int n = ::backtrace(bt, 64);

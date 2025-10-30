@@ -462,10 +462,6 @@ template<typename R> struct callback_traits<CoroCB<R>> {
   using argument_type = R;
 };
 
-// If this returns true, we are in a coroutine thread pool and so
-// should not do anything that blocks.
-extern bool in_thread_pool();
-
 // An asynchronous result.  A function returning Async<R> can be
 // implemented as a coroutine.  A coroutine with an Async<R> a can
 // "co_await a" to get the result.  A non-coroutine can invoke an
@@ -533,6 +529,7 @@ template<typename R> struct [[nodiscard]] Async {
   // until the result is ready.
   R operator()(SLOC_DECL0)
   {
+    extern bool in_thread_pool();
     x23assert(!in_thread_pool());
     std::binary_semaphore wait(0);
     if constexpr (std::is_void_v<R>) {

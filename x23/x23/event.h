@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <mutex>
 #include <stop_token>
 #include <string>
 #include <sys/socket.h>
@@ -168,7 +167,7 @@ struct WriteBuffer : RefCount {
 
 private:
   std::atomic_bool want_write_{false};
-  std::mutex service_lock_;
+  TestLock service_lock_;
   MVar<BufVec> writer_;
 
   class Service;
@@ -555,7 +554,7 @@ private:
   WriteBuffer *wb_;
   CoroPoll *cp_;
   BorrowedFd fd_;
-  std::unique_lock<std::mutex> lk_;
+  std::unique_lock<TestLock> lk_;
   CoroPoll::WriteToken tok_;
 
   Service(Service &&) noexcept = default;

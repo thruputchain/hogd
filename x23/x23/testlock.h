@@ -13,13 +13,24 @@
 
 namespace x23 {
 
-// A simple futex-based mutex that, unlike std::mutex, lets you test
-// whether or not the lock is busy without acquiring the lock or
-// exclusively caching it.  Also provides a block_while_inhibited()
-// hook for derived types implementing shared locks.
+// A simple futex-based mutex with some features missing from
+// std::mutex:
 //
-// Has the same interface as std::mutex, so can be used with
-// std::lock_guard.
+// 1. As the name suggests, you can *test* whether or not the lock is
+//    busy without acquiring or exclusively caching it.  The busy()
+//    method tells you whether a TestLock is locked.
+//
+// 2. You can unlock the TestLock in a different thread from the one
+//    in which you acquired it, which is important for coroutines that
+//    may migrate across threads.  Note you still can't lock a
+//    TestLock in a coroutine exexuting in ThreadPool, as coroutines
+//    should never block, but it is safe to use try_lock().
+//
+// 3. There's a block_while_inhibited() hook for derived types
+//    implementing shared locks.
+//
+// TestLock has the same interface as std::mutex, so it can be used
+// with std::lock_guard or std::unique_lock.
 class TestLock {
 public:
   using Holder = std::unique_lock<TestLock>;
