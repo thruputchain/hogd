@@ -9,6 +9,7 @@ add_executable(
 target_link_libraries(
   container_test
   base
-  GTest::gtest_main
+  hogd
+  GTest::gtest
 )
 gtest_discover_tests(container_test)
