@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <map>
 #include <memory>
-#include <optional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_sched.hh"
 #include "exec_sched.hh"

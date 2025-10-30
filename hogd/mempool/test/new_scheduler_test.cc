@@ -8,10 +8,8 @@
 #include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/init.h"
+#include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "transaction.hh"
@@ -153,8 +151,7 @@ TEST(Scheduler, Fairness)
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     const auto &[scheduled_hashes, scheduled] = scheduler->schedule(kBlockSize);
-    for (size_t j = 0; j < scheduled.size(); j++) {
-      const SignedTransaction &tx = scheduled[j];
+    for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
   }

@@ -77,7 +77,7 @@ public:
     // I print the exception description followed by a [CHECK(false)]. This will
     // bring more attention to an exception when it is thrown.
     try {
-      mempool_coord_server_.impl_.scheduler()->shut_down()();
+      NewScheduler::shut_down()();
       mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
