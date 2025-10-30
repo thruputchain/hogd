@@ -404,7 +404,7 @@ NewScheduler::cycle_accounts_during_schedule_helper(
     const SignedTransaction &tx = it->second->tx;
     cycle_if_needed(account, tx.tx.invocation.gas_limit);
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      ready_accounts_.insert(get_account_key(account));
+      CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
 }
