@@ -38,7 +38,7 @@ public:
   // commit commits pending changes to the BlockTX.
   void commit();
   // abort rolls back pending changes to the BlockTX.
-  void abort();
+  void abort() noexcept;
 
   // create_savepoint creates a savepoint of the current transaction state. It
   // returns a depth that can be used to restore to this state later.
@@ -171,7 +171,7 @@ private:
   HogDBStatus<int128_t> modify_lock(const ItemKey &key,
                                     const ItemChange &old_change,
                                     const ItemChange &new_change);
-  void unlock(const ItemKey &key, const ItemChange &change);
+  void unlock(const ItemKey &key, const ItemChange &change) noexcept;
   int128_t commit_change(const ItemKey &key, const ItemChange &change);
   void release_balance(const Address &addr, int128_t delta);
 };
