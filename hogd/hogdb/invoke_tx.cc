@@ -49,16 +49,18 @@ InvokeTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   return (*lock)->modify_lock(key, old_change, new_change);
 }
 
+// NOLINTBEGIN(bugprone-exception-escape)
 void
 InvokeTX::unlock(const ItemKey &key, const ItemChange &change) noexcept
 {
   // Cannot throw, as unlock is only every called on items that already exist in
-  // the tx local cache. NOLINTNEXTLINE(bugprone-exception-escape)
+  // the tx local cache. 
   auto lock = get_item_lock(key);
   assert(lock.has_value());
   assert(lock.value() != nullptr);
   (*lock)->unlock(change);
 }
+// NOLINTEND(bugprone-exception-escape)
 
 int128_t
 InvokeTX::commit_change(const ItemKey &key, const ItemChange &change)
