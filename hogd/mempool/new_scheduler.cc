@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -58,7 +59,7 @@ NewScheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
   }
 }
 
-x23::Async<void>
+x23::Async<std::unordered_set<ContractAddress>>
 NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -72,13 +73,13 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
       accounts_vec.push_back(account);
     }
   }
-  if (accounts_vec.empty()) {
-    co_return;
+  if (!accounts_vec.empty()) {
+    co_await read_average_hog_ages(accounts_vec);
   }
-  co_await read_average_hog_ages(accounts_vec);
+  co_return accounts;
 }
 
-x23::Async<void>
+x23::Async<std::unordered_set<ContractAddress>>
 NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
   std::unordered_set<ContractAddress> accounts;
@@ -93,10 +94,18 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
       accounts_vec.push_back(account);
     }
   }
-  if (accounts_vec.empty()) {
-    co_return;
+  if (!accounts_vec.empty()) {
+    co_await read_average_hog_ages(accounts_vec);
   }
-  co_await read_average_hog_ages(accounts_vec);
+  co_return accounts;
+}
+
+NewScheduler::AccountKey
+NewScheduler::get_account_key(const ContractAddress &account)
+{
+  const HogAge &hog_ages = get_cached_hog_age(account);
+  BlockHeight average_hog_age = hog_ages.average_ages[kHogAgeGroupToSchedule];
+  return {.average_hog_age = average_hog_age, .account = account};
 }
 
 x23::Async<void>
@@ -106,7 +115,8 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
   // its overhead by removing the [co_await] below, doing other work, and then
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  co_await read_average_hog_ages(txs);
+  std::unordered_set<ContractAddress> accounts =
+      co_await read_average_hog_ages(txs);
 
   for (const SignedTransaction &tx : txs) {
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
@@ -140,17 +150,121 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     TxValue *value = &inserted.first->second;
     CHECK(account_to_tx_[account].insert({key, value}).second);
   }
+  for (const ContractAddress &account : accounts) {
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      ready_accounts_.insert(get_account_key(account));
+    }
+  }
   size_ += txs.size();
 }
 
 void
-NewScheduler::cycle_if_needed(const ContractAddress & /* account */,
-                              GasAmount /* gas_limit */)
-{}
+NewScheduler::cycle_if_needed(const ContractAddress &account,
+                              GasAmount gas_limit)
+{
+  for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
+    const HogAge &hog_age = get_cached_hog_age(account);
+
+    const uint128_t to_schedule =
+        from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+    const BlockHeight to_schedule_age =
+        hog_age.average_ages[kHogAgeGroupToSchedule];
+
+    const uint128_t already_scheduled =
+        from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+    const BlockHeight already_scheduled_age =
+        hog_age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+    const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
+    const BlockHeight received_age = hog_age.average_ages[kHogAgeGroupReceived];
+
+    bool already_scheduled_average_older = false;
+    bool combined_averages_older = false;
+    if (already_scheduled > 0) {
+      already_scheduled_average_older =
+          (already_scheduled_age < to_schedule_age);
+      combined_averages_older =
+          (received > 0) &&
+          (compute_average_age(already_scheduled, already_scheduled_age,
+                               received, received_age) < to_schedule_age);
+    }
+    else {
+      combined_averages_older =
+          (received > 0) && (received_age < to_schedule_age);
+    }
+
+    // We should cycle if either of the following is true:
+    // 1. Cycling will increase the average age of the
+    //    [kHogAgeGroupToSchedule] group. These are the first two operands of
+    //    the boolean OR statement.
+    //
+    // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
+    //    schedule a tx that requires [gas_limit] hogs, but cycling will add
+    //    enough hogs to the group to schedule it. This is the third operand of
+    //    the boolean OR statement.
+    if (already_scheduled_average_older || combined_averages_older ||
+        gas_limit > to_schedule) {
+      cycle_groups(account);
+    }
+    else {
+      break;
+    }
+  }
+}
 
 void
-NewScheduler::cycle_groups(const ContractAddress & /* account */)
-{}
+NewScheduler::cycle_groups(const ContractAddress &account)
+{
+  const HogAge &averages = get_cached_hog_age(account);
+
+  HogAge new_averages{};
+  new_averages.address = averages.address;
+
+  const uint128_t to_schedule_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+  const BlockHeight to_schedule_age =
+      averages.average_ages[kHogAgeGroupToSchedule];
+
+  const uint128_t already_scheduled_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const BlockHeight already_scheduled_age =
+      averages.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  const uint128_t received_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
+
+  // Update [kGroupToSchedule].
+  new_averages.num_hogs[kHogAgeGroupToSchedule] =
+      to_xdr(to_schedule_hogs + already_scheduled_hogs);
+  if (to_schedule_hogs) {
+    // See comment above for [compute_average_age()].
+    new_averages.average_ages[kHogAgeGroupToSchedule] =
+        compute_average_age(to_schedule_hogs, to_schedule_age,
+                            already_scheduled_hogs, already_scheduled_age);
+  }
+  else {
+    new_averages.average_ages[kHogAgeGroupToSchedule] = already_scheduled_age;
+  }
+
+  // Update [kGroupAlreadyScheduled].
+  if (received_hogs) {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] = to_xdr(received_hogs);
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = received_age;
+  }
+  else {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+        to_xdr(static_cast<uint128_t>(0));
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = 0;
+  }
+
+  // Update [kGroupReceived].
+  new_averages.num_hogs[kHogAgeGroupReceived] =
+      to_xdr(static_cast<uint128_t>(0));
+  new_averages.average_ages[kHogAgeGroupReceived] = 0;
+
+  accounts_[account] = new_averages;
+}
 
 void
 NewScheduler::dump_runqueue() const
@@ -226,18 +340,171 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   }
 }
 
-std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-NewScheduler::schedule(BlockHeight /* block_height */, size_t block_size)
+bool
+NewScheduler::account_is_ready(const ContractAddress &account,
+                               bool remove_expired_txs)
 {
-  x23::Vec<SignedTransactionHash> tx_hashes;
-  x23::Vec<SignedTransaction> txs;
+  std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+  const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
+  auto it = txs.lower_bound(lower_bound);
+  // We just check if there is a tx to run for this account. We do not check if
+  // the account has enough gas units to run the tx.
+  bool ret = (it != txs.end());
+  if (remove_expired_txs) {
+    txs.erase(txs.begin(), it);
+  }
+  return ret;
+}
+
+void
+NewScheduler::move_hogs_to_already_scheduled_group(
+    const ContractAddress &account, uint128_t num_hogs,
+    BlockHeight block_height)
+{
+  HogAge &age = get_cached_hog_age(account);
+  const uint128_xdr already_scheduled_hogs =
+      age.num_hogs[kHogAgeGroupAlreadyScheduled];
+  const BlockHeight already_scheduled_age =
+      age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
+  bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(num_hogs + from_xdr(already_scheduled_hogs));
+  if (empty) {
+    age.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
+  }
+  else {
+    // See comment above for [compute_average_age()].
+    age.average_ages[kHogAgeGroupAlreadyScheduled] =
+        compute_average_age(num_hogs, block_height,
+                            from_xdr(already_scheduled_hogs),
+                            already_scheduled_age);
+  }
+}
+
+std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
+NewScheduler::schedule(size_t block_size)
+{
+  x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
+  x23::Vec<SignedTransaction> txs_to_schedule;
+
+  // TODO(jhumphri): Efficiently erase expired txs with [erase()] and specify a
+  // range of [begin(), lower_bound()]. We can do this in the loop below when an
+  // account is runnable. Do not forget to deduct the erased txs from [size_]!
 
   size_t num_scheduled = 0;
-  while (num_scheduled < block_size && size_) {
-  }
-  size_ -= num_scheduled;
+  bool cycled = false;
+  std::unordered_map<ContractAddress, uint128_t> scheduled_accounts;
+  // I would prefer to make [accounts_excluded_from_block] an
+  // [std::unordered_set], but I have not implemented a hash function for
+  // [AccountKey], so I need to use an [std::set] instead.
+  std::set<AccountKey> accounts_excluded_from_block;
 
-  return {tx_hashes, txs};
+  const TxKey lower_bound = {.expiry_block_height = current_block_,
+                             .tx_hash = {}};
+  while (num_scheduled < block_size && size_) {
+    if (ready_accounts_.empty()) {
+      // [cycle_if_needed()] will cycle the account either once or twice,
+      // depending on which is better for the account. Thus, we only call
+      // [cycle_if_needed()] once in total--we should not call it twice!
+      if (cycled) {
+        break;
+      }
+      cycled = true;
+
+      for (const auto &[account, _] : scheduled_accounts) {
+        const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+        auto it = txs.lower_bound(lower_bound);
+        if (it == txs.end()) {
+          continue;
+        }
+        const SignedTransaction &tx = it->second->tx;
+        cycle_if_needed(account, tx.tx.invocation.gas_limit);
+      }
+    }
+
+    // TODO(jhumphri): This is a good place to parallelize. Each thread can
+    // handle its own chunk of accounts from [ready_accounts_].
+    const AccountKey account_key = *ready_accounts_.begin();
+    const ContractAddress account = account_key.account;
+    HogAge &hog_ages = get_cached_hog_age(account);
+    std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    uint128_t hogs_spent_by_account = 0;
+    while (true) {
+      auto it = txs.lower_bound(lower_bound);
+      if (it != txs.begin()) {
+        // This removes expired txs.
+        it = txs.erase(txs.begin(), it);
+      }
+      if (it == txs.end()) {
+        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        break;
+      }
+      const SignedTransactionHash &tx_hash = it->first.tx_hash;
+      SignedTransaction &tx = it->second->tx;
+      const uint128_t hogs_available =
+          from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]);
+      if (tx.tx.invocation.gas_limit <= hogs_available) {
+        hog_ages.num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(hogs_available - tx.tx.invocation.gas_limit);
+        hogs_spent_by_account += tx.tx.invocation.gas_limit;
+
+        tx_hashes_to_schedule.push_back(tx_hash);
+        txs_to_schedule.push_back(tx);
+
+        // We are deleting [it] here, so do not access [tx_hash] or [tx] beyond
+        // this point!
+        it = txs.erase(it);
+        num_scheduled++;
+        size_--;
+      }
+      else {
+        const uint128_t all_hogs_available =
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]) +
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) +
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupReceived]);
+        if (tx.tx.invocation.gas_limit > all_hogs_available) {
+          // This account does not have enough hogs across all three of its
+          // groups to schedule the tx, so we discard the tx.
+          // We want to discourage accounts from submitting txs that cannot be
+          // executed, so exclude the account from being scheduled for the
+          // remainder of the block. Note that if any txs for the account are
+          // already included in the block, those txs will still be executed.
+          //
+          // TODO(jhumphri): Do we want to penalize the account more severely?
+          it = txs.erase(it);
+          size_--;
+          CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+          if (it != txs.end()) {
+            CHECK(accounts_excluded_from_block.insert(account_key).second);
+          }
+        }
+        else {
+          // The account has enough hogs in total to run this tx, but the
+          // account is going to have to be cycled once or twice. For now, we
+          // just skip over this account and revisit it once it has been cycled.
+        }
+        break;
+      }
+      if (hogs_spent_by_account) {
+        scheduled_accounts[account] += hogs_spent_by_account;
+      }
+    }
+  }
+  for (const AccountKey &account_key : accounts_excluded_from_block) {
+    CHECK(ready_accounts_.insert(account_key).second);
+  }
+  // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for each
+  // scheduled account.
+  //
+  // TODO(jhumphri): This is a good place to parallelize.
+  for (const auto &[account, spent_hogs] : scheduled_accounts) {
+    move_hogs_to_already_scheduled_group(account, spent_hogs, current_block_);
+  }
+
+  increment_current_block();
+  return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
 x23::Vec<std::optional<SignedTransaction>>
@@ -247,6 +514,7 @@ NewScheduler::find_and_remove_from_runqueue(
   x23::Vec<std::optional<SignedTransaction>> ret;
   ret.reserve(hashes.size());
 
+  std::unordered_set<ContractAddress> accounts;
   for (const SignedTransactionHash &tx_hash : hashes) {
     auto it = txs_.find(tx_hash);
     if (it == txs_.end()) {
@@ -266,6 +534,12 @@ NewScheduler::find_and_remove_from_runqueue(
     // it is ok if [erase()] returns 0 below.
     if (account_to_tx_[account].erase(key)) {
       size_--;
+    }
+    accounts.insert(account);
+  }
+  for (const ContractAddress &account : accounts) {
+    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
   return ret;
