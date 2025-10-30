@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <span>
 #include <variant>
 #include <vector>
@@ -219,14 +220,15 @@ private:
 
 } // namespace detail
 
-template<typename Value> class ConcurrentMap {
+template<typename Value, typename Hasher = std::hash<std::span<const uint8_t>>> class ConcurrentMap {
 public:
-  ConcurrentMap() : root_(typename detail::Node<Value>::root_t{}) {}
+  ConcurrentMap(Hasher hasher = Hasher()) : root_(typename detail::Node<Value>::root_t{}), hasher_(hasher) {}
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  Value *insert_or_get(uint32_t shortkey, std::span<const uint8_t> key,
+  Value *insert_or_get(std::span<const uint8_t> key,
                        Args &&...args)
   {
+    uint32_t shortkey = hasher_(key);
     using node_t = typename detail::Node<Value>;
     node_t *current_node = &root_;
 
@@ -281,6 +283,7 @@ public:
 
 private:
   detail::Node<Value> root_;
+  Hasher hasher_;
 };
 
 } // namespace hogd
