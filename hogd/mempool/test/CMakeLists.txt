@@ -14,7 +14,7 @@ add_dependencies(mempool_test_infra
 )
 
 add_library(mempool_test_objects OBJECT
-  # auth_test.cc
+  auth_test.cc
   mempool_test.cc
   new_scheduler_test.cc
 )

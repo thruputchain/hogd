@@ -388,6 +388,27 @@ NewScheduler::move_hogs_to_already_scheduled_group(
   }
 }
 
+void
+NewScheduler::cycle_accounts_during_schedule_helper(
+    const std::unordered_set<ContractAddress> &accounts,
+    const TxKey &lower_bound)
+{
+  for (const ContractAddress &account : accounts) {
+    // TODO(jhumphri): This is the same code as in [account_is_ready], but
+    // we have it here because we need the iterator. Clean this up.
+    const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    auto it = txs.lower_bound(lower_bound);
+    if (it == txs.end()) {
+      continue;
+    }
+    const SignedTransaction &tx = it->second->tx;
+    cycle_if_needed(account, tx.tx.invocation.gas_limit);
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      ready_accounts_.insert(get_account_key(account));
+    }
+  }
+}
+
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 NewScheduler::schedule(size_t block_size)
 {
@@ -399,8 +420,7 @@ NewScheduler::schedule(size_t block_size)
   // account is runnable. Do not forget to deduct the erased txs from [size_]!
 
   size_t num_scheduled = 0;
-  bool cycled = false;
-  std::unordered_map<ContractAddress, uint128_t> scheduled_accounts;
+  std::unordered_set<ContractAddress> scheduled_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
   // [std::unordered_set], but I have not implemented a hash function for
   // [AccountKey], so I need to use an [std::set] instead.
@@ -410,22 +430,11 @@ NewScheduler::schedule(size_t block_size)
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
-      // [cycle_if_needed()] will cycle the account either once or twice,
-      // depending on which is better for the account. Thus, we only call
-      // [cycle_if_needed()] once in total--we should not call it twice!
-      if (cycled) {
+      cycle_accounts_during_schedule_helper(scheduled_accounts, lower_bound);
+      scheduled_accounts.clear();
+      if (ready_accounts_.empty()) {
+        // If there are still no ready accounts, then break.
         break;
-      }
-      cycled = true;
-
-      for (const auto &[account, _] : scheduled_accounts) {
-        const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
-        auto it = txs.lower_bound(lower_bound);
-        if (it == txs.end()) {
-          continue;
-        }
-        const SignedTransaction &tx = it->second->tx;
-        cycle_if_needed(account, tx.tx.invocation.gas_limit);
       }
     }
 
@@ -436,7 +445,7 @@ NewScheduler::schedule(size_t block_size)
     HogAge &hog_ages = get_cached_hog_age(account);
     std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
-    while (true) {
+    while (num_scheduled < block_size && size_) {
       auto it = txs.lower_bound(lower_bound);
       if (it != txs.begin()) {
         // This removes expired txs.
@@ -458,14 +467,15 @@ NewScheduler::schedule(size_t block_size)
         tx_hashes_to_schedule.push_back(tx_hash);
         txs_to_schedule.push_back(tx);
 
-        // We are deleting [it] here, so do not access [tx_hash] or [tx] beyond
-        // this point!
+        // We are deleting [it] here, so do not access [tx_hash] or [tx]
+        // beyond this point!
         it = txs.erase(it);
         num_scheduled++;
         size_--;
       }
       else {
         const uint128_t all_hogs_available =
+            hogs_spent_by_account +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]) +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupReceived]);
@@ -480,32 +490,32 @@ NewScheduler::schedule(size_t block_size)
           // TODO(jhumphri): Do we want to penalize the account more severely?
           it = txs.erase(it);
           size_--;
-          CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
-          if (it != txs.end()) {
-            CHECK(accounts_excluded_from_block.insert(account_key).second);
-          }
+          CHECK(accounts_excluded_from_block.insert(account_key).second);
         }
         else {
           // The account has enough hogs in total to run this tx, but the
           // account is going to have to be cycled once or twice. For now, we
-          // just skip over this account and revisit it once it has been cycled.
+          // just skip over this account and revisit it once it has been
+          // cycled.
         }
+        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         break;
       }
-      if (hogs_spent_by_account) {
-        scheduled_accounts[account] += hogs_spent_by_account;
-      }
+    }
+    if (hogs_spent_by_account) {
+      // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
+      // this account.
+      move_hogs_to_already_scheduled_group(account, hogs_spent_by_account,
+                                           current_block_);
+      scheduled_accounts.insert(account);
     }
   }
+  // Add [scheduled_accounts] back to [ready_accounts_] for each account that is
+  // still ready.
+  cycle_accounts_during_schedule_helper(scheduled_accounts, lower_bound);
+
   for (const AccountKey &account_key : accounts_excluded_from_block) {
     CHECK(ready_accounts_.insert(account_key).second);
-  }
-  // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for each
-  // scheduled account.
-  //
-  // TODO(jhumphri): This is a good place to parallelize.
-  for (const auto &[account, spent_hogs] : scheduled_accounts) {
-    move_hogs_to_already_scheduled_group(account, spent_hogs, current_block_);
   }
 
   increment_current_block();

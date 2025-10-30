@@ -140,6 +140,11 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  // TODO(jhumphri): Give this a better name.
+  void cycle_accounts_during_schedule_helper(
+      const std::unordered_set<ContractAddress> &accounts,
+      const TxKey &lower_bound);
+
   void move_hogs_to_already_scheduled_group(const ContractAddress &account,
                                             uint128_t num_hogs,
                                             BlockHeight block_height);
