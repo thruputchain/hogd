@@ -190,9 +190,12 @@ function(add_spec_and_types_generation)
               ${target_name})
   endforeach()
   
+  # Use a stamp file to ensure this runs exactly once
+  set(stamp_file ${CMAKE_CURRENT_BINARY_DIR}/all_specs_and_types.stamp)
+  
   # Single custom command that builds all binaries and generates all outputs
   add_custom_command(
-    OUTPUT ${all_outputs}
+    OUTPUT ${stamp_file}
     # First, build all spec/types binaries in one cargo invocation
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
         cargo build
@@ -205,13 +208,14 @@ function(add_spec_and_types_generation)
         ${all_bins}
     # Then run each binary to generate its output
     ${gen_commands}
+    COMMAND ${CMAKE_COMMAND} -E touch ${stamp_file}
     DEPENDS ${all_depends}
     COMMENT "Building all spec/types binaries and generating outputs in one step"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
   
-  # Create ONE target (NOT ALL) that depends on all outputs
-  add_custom_target(all_spec_and_types DEPENDS ${all_outputs})
+  # Create ONE target (NOT ALL) that depends on the stamp file
+  add_custom_target(all_spec_and_types DEPENDS ${stamp_file})
   
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
@@ -242,6 +246,7 @@ function(add_contract_header target_name)
 
   add_custom_target(${target_name}_header
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h)
+  # Ensure spec is generated before trying to generate header from it
   add_dependencies(${target_name}_header all_spec_and_types)
 
   # make sure that other targets can depend on the generated headers,
@@ -263,6 +268,9 @@ add_spec_and_types_generation(
 
 # Make spec generation depend on XDR-generated Rust files (target deps, not file deps)
 add_dependencies(all_spec_and_types cxs_roundtrip_rs txs_roundtrip_rs)
+
+# Make all headers wait for all specs to be generated
+add_dependencies(all_wasm_headers all_spec_and_types)
 
 # Generate contract headers
 add_contract_header(fibonacci)
