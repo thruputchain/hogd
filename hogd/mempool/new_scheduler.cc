@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -150,7 +151,6 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     CHECK(account_to_tx_[account].insert({key, value}).second);
   }
   for (const ContractAddress &account : accounts) {
-    // TODO(jhumphri): Set [current_block] correctly.
     if (account_is_ready(account)) {
       ready_accounts_.insert(get_account_key(account));
     }
@@ -159,9 +159,58 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
 }
 
 void
-NewScheduler::cycle_if_needed(const ContractAddress & /* account */,
-                              GasAmount /* gas_limit */)
-{}
+NewScheduler::cycle_if_needed(const ContractAddress &account,
+                              GasAmount gas_limit)
+{
+  for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
+    const HogAge &hog_age = get_cached_hog_age(account);
+
+    const uint128_t to_schedule =
+        from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+    const BlockHeight to_schedule_age =
+        hog_age.average_ages[kHogAgeGroupToSchedule];
+
+    const uint128_t already_scheduled =
+        from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+    const BlockHeight already_scheduled_age =
+        hog_age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+    const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
+    const BlockHeight received_age = hog_age.average_ages[kHogAgeGroupReceived];
+
+    bool already_scheduled_average_older = false;
+    bool combined_averages_older = false;
+    if (already_scheduled > 0) {
+      already_scheduled_average_older =
+          (already_scheduled_age < to_schedule_age);
+      combined_averages_older =
+          (received > 0) &&
+          (compute_average_age(already_scheduled, already_scheduled_age,
+                               received, received_age) < to_schedule_age);
+    }
+    else {
+      combined_averages_older =
+          (received > 0) && (received_age < to_schedule_age);
+    }
+
+    // We should cycle if either of the following is true:
+    // 1. Cycling will increase the average age of the
+    //    [kHogAgeGroupToSchedule] group. These are the first two operands of
+    //    the boolean OR statement.
+    //
+    // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to
+    //    schedule a tx that requires [gas_limit] hogs, but cycling will add
+    //    enough hogs to the group to schedule it. This is the third operand of
+    //    the boolean OR statement.
+    if (already_scheduled_average_older || combined_averages_older ||
+        gas_limit > to_schedule) {
+      cycle_groups(account);
+    }
+    else {
+      break;
+    }
+  }
+}
 
 void
 NewScheduler::cycle_groups(const ContractAddress &account)
@@ -291,8 +340,6 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   }
 }
 
-// TODO(jhumphri): Call this function from [add_txs],
-// [find_and_remove_from_runqueue], and [schedule].
 bool
 NewScheduler::account_is_ready(const ContractAddress &account)
 {
@@ -337,8 +384,12 @@ NewScheduler::schedule(size_t block_size)
   x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
   x23::Vec<SignedTransaction> txs_to_schedule;
 
+  // TODO(jhumphri): Efficiently erase expired txs with [erase()] and specify a
+  // range of [begin(), lower_bound()]. We can do this in the loop below when an
+  // account is runnable. Do not forget to deduct the erased txs from [size_]!
+
   size_t num_scheduled = 0;
-  size_t num_cycles = 0;
+  bool cycled = false;
   std::unordered_map<ContractAddress, uint128_t> scheduled_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
   // [std::unordered_set], but I have not implemented a hash function for
@@ -350,9 +401,13 @@ NewScheduler::schedule(size_t block_size)
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
-      if (num_cycles++ >= 2) {
+      // [cycle_if_needed()] will cycle the account either once or twice,
+      // depending on which is better for the account. Thus, we only call
+      // [cycle_if_needed()] once in total--we should not call it twice!
+      if (cycled) {
         break;
       }
+      cycled = true;
 
       for (const auto &[account, _] : scheduled_accounts) {
         const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
@@ -389,11 +444,12 @@ NewScheduler::schedule(size_t block_size)
 
         tx_hashes_to_schedule.push_back(tx_hash);
         txs_to_schedule.push_back(tx);
-        num_scheduled++;
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx] beyond
         // this point!
         it = txs.erase(it);
+        num_scheduled++;
+        size_--;
       }
       else {
         const uint128_t all_hogs_available =
