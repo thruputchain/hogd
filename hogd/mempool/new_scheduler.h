@@ -85,7 +85,7 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  static void cycle_groups(const ContractAddress &account);
+  void cycle_groups(const ContractAddress &account);
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.

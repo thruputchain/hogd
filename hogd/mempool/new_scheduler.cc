@@ -164,8 +164,58 @@ NewScheduler::cycle_if_needed(const ContractAddress & /* account */,
 {}
 
 void
-NewScheduler::cycle_groups(const ContractAddress & /* account */)
-{}
+NewScheduler::cycle_groups(const ContractAddress &account)
+{
+  const HogAge &averages = get_cached_hog_age(account);
+
+  HogAge new_averages{};
+  new_averages.address = averages.address;
+
+  const uint128_t to_schedule_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+  const BlockHeight to_schedule_age =
+      averages.average_ages[kHogAgeGroupToSchedule];
+
+  const uint128_t already_scheduled_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const BlockHeight already_scheduled_age =
+      averages.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  const uint128_t received_hogs =
+      from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
+
+  // Update [kGroupToSchedule].
+  new_averages.num_hogs[kHogAgeGroupToSchedule] =
+      to_xdr(to_schedule_hogs + already_scheduled_hogs);
+  if (to_schedule_hogs) {
+    // See comment above for [compute_average_age()].
+    new_averages.average_ages[kHogAgeGroupToSchedule] =
+        compute_average_age(to_schedule_hogs, to_schedule_age,
+                            already_scheduled_hogs, already_scheduled_age);
+  }
+  else {
+    new_averages.average_ages[kHogAgeGroupToSchedule] = already_scheduled_age;
+  }
+
+  // Update [kGroupAlreadyScheduled].
+  if (received_hogs) {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] = to_xdr(received_hogs);
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = received_age;
+  }
+  else {
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+        to_xdr(static_cast<uint128_t>(0));
+    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = 0;
+  }
+
+  // Update [kGroupReceived].
+  new_averages.num_hogs[kHogAgeGroupReceived] =
+      to_xdr(static_cast<uint128_t>(0));
+  new_averages.average_ages[kHogAgeGroupReceived] = 0;
+
+  accounts_[account] = new_averages;
+}
 
 void
 NewScheduler::dump_runqueue() const
