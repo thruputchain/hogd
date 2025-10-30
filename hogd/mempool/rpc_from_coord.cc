@@ -383,7 +383,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> failed_txs;
   for (size_t i = 0; i < txs.size(); i++) {
-    const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     if (!statuses[i]) {
       failed_txs.push_back(txs[i]);
     }
