@@ -254,6 +254,33 @@ NewScheduler::account_is_ready(const ContractAddress &account)
   return txs.lower_bound(lower_bound) != txs.end();
 }
 
+void
+NewScheduler::move_hogs_to_already_scheduled_group(
+    const ContractAddress &account, uint128_t num_hogs,
+    BlockHeight block_height)
+{
+  HogAge &age = get_cached_hog_age(account);
+  const uint128_xdr already_scheduled_hogs =
+      age.num_hogs[kHogAgeGroupAlreadyScheduled];
+  const BlockHeight already_scheduled_age =
+      age.average_ages[kHogAgeGroupAlreadyScheduled];
+
+  // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
+  bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(num_hogs + from_xdr(already_scheduled_hogs));
+  if (empty) {
+    age.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
+  }
+  else {
+    // See comment above for [compute_average_age()].
+    age.average_ages[kHogAgeGroupAlreadyScheduled] =
+        compute_average_age(num_hogs, block_height,
+                            from_xdr(already_scheduled_hogs),
+                            already_scheduled_age);
+  }
+}
+
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 NewScheduler::schedule(size_t block_size)
 {
@@ -261,30 +288,54 @@ NewScheduler::schedule(size_t block_size)
   x23::Vec<SignedTransaction> txs_to_schedule;
 
   size_t num_scheduled = 0;
-  std::unordered_set<ContractAddress> accounts;
+  size_t num_cycles = 0;
+  std::unordered_map<ContractAddress, uint128_t> scheduled_accounts;
+  // I would prefer to make [accounts_excluded_from_block] an
+  // [std::unordered_set], but I have not implemented a hash function for
+  // [AccountKey], so I need to use an [std::set] instead.
+  std::set<AccountKey> accounts_excluded_from_block;
+
   current_block_++;
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
-      // TODO(jhumphri): Cycle.
-      continue;
+      if (num_cycles++ >= 2) {
+        break;
+      }
+
+      for (const auto &[account, _] : scheduled_accounts) {
+        const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+        auto it = txs.lower_bound(lower_bound);
+        if (it == txs.end()) {
+          continue;
+        }
+        const SignedTransaction &tx = it->second->tx;
+        cycle_if_needed(account, tx.tx.invocation.gas_limit);
+      }
     }
-    const ContractAddress account = ready_accounts_.begin()->account;
+
+    // TODO(jhumphri): This is a good place to parallelize. Each thread can
+    // handle its own chunk of accounts from [ready_accounts_].
+    const AccountKey account_key = *ready_accounts_.begin();
+    const ContractAddress account = account_key.account;
     HogAge &hog_ages = get_cached_hog_age(account);
     std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    uint128_t hogs_spent_by_account = 0;
     while (true) {
       auto it = txs.lower_bound(lower_bound);
       if (it == txs.end()) {
+        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         break;
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
-      uint128_t hogs_available =
+      const uint128_t hogs_available =
           from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= hogs_available) {
-        hogs_available -= tx.tx.invocation.gas_limit;
-        hog_ages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(hogs_available);
+        hog_ages.num_hogs[kHogAgeGroupToSchedule] =
+            to_xdr(hogs_available - tx.tx.invocation.gas_limit);
+        hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes_to_schedule.push_back(tx_hash);
         txs_to_schedule.push_back(tx);
@@ -295,15 +346,48 @@ NewScheduler::schedule(size_t block_size)
         it = txs.erase(it);
       }
       else {
-        // TODO(jhumphri): Discard all remaining txs and go to next account. Or
-        // actually, maybe we should not discard the txs because we will have
-        // enough hogs if we cycle the account.
+        const uint128_t all_hogs_available =
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]) +
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) +
+            from_xdr(hog_ages.num_hogs[kHogAgeGroupReceived]);
+        if (tx.tx.invocation.gas_limit > all_hogs_available) {
+          // This account does not have enough hogs across all three of its
+          // groups to schedule the tx, so we discard the tx.
+          // We want to discourage accounts from submitting txs that cannot be
+          // executed, so exclude the account from being scheduled for the
+          // remainder of the block. Note that if any txs for the account are
+          // already included in the block, those txs will still be executed.
+          //
+          // TODO(jhumphri): Do we want to penalize the account more severely?
+          it = txs.erase(it);
+          size_--;
+          CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+          if (it != txs.end()) {
+            CHECK(accounts_excluded_from_block.insert(account_key).second);
+          }
+        }
+        else {
+          // The account has enough hogs in total to run this tx, but the
+          // account is going to have to be cycled once or twice. For now, we
+          // just skip over this account and revisit it once it has been cycled.
+        }
+        break;
+      }
+      if (hogs_spent_by_account) {
+        scheduled_accounts[account] += hogs_spent_by_account;
       }
     }
-    // TODO(jhumphri): Check if we should remove [account] from
-    // [ready_accounts_].
   }
-  // size_ -= num_scheduled;
+  for (const AccountKey &account_key : accounts_excluded_from_block) {
+    CHECK(ready_accounts_.insert(account_key).second);
+  }
+  // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for each
+  // scheduled account.
+  //
+  // TODO(jhumphri): This is a good place to parallelize.
+  for (const auto &[account, spent_hogs] : scheduled_accounts) {
+    move_hogs_to_already_scheduled_group(account, spent_hogs, current_block_);
+  }
 
   return {tx_hashes_to_schedule, txs_to_schedule};
 }

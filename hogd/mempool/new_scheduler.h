@@ -132,7 +132,12 @@ private:
   };
 
   AccountKey get_account_key(const ContractAddress &account);
+
   bool account_is_ready(const ContractAddress &account);
+
+  void move_hogs_to_already_scheduled_group(const ContractAddress &account,
+                                            uint128_t num_hogs,
+                                            BlockHeight block_height);
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
