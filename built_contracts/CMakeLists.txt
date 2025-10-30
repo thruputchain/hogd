@@ -265,7 +265,7 @@ add_wasm_builds(fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_t
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
 add_spec_and_types_generation(
   SPEC_TARGETS fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20
-  TYPES_TARGETS itc_erc20
+  TYPES_TARGETS itc_erc20 manual_revert_test
 )
 
 # Generate contract headers
@@ -274,7 +274,7 @@ add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip)
 add_contract_header(txs_roundtrip)
 add_contract_header(read_only_test)
-add_contract_header(manual_revert_test)
+add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)
 add_contract_header(simple_wallet)
 add_contract_header(initial_token_claim)

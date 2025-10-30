@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
+#include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -70,7 +70,7 @@ protected:
 //
 TEST_P(ManualRevertWasmTest, BasicManualRevert)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Create a native contract that calls the WASM contract to test manual revert
