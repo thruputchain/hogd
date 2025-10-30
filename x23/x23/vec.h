@@ -254,9 +254,11 @@ private:
 } // namespace detail
 
 // This is a copy of std::span, purely for purposes of ADL, so we can
-// add functions like xdr_size(span<...>).  We do this because it's illegal
-// to open up the std namespace to define a
-// std::xdr_size(std::span<...>) function.
+// add functions like xdr_size(span<...>).  We do this because it's
+// illegal to open up the std namespace to define a
+// std::xdr_size(std::span<...>) function.  For types derived from
+// span<T, std::dynamic_extent>, the dynamic first/last/subspan return
+// the derived type instead of span.
 template<typename T, size_t E = std::dynamic_extent>
 struct span : std::span<T, E> {
   using super = std::span<T, E>;
@@ -278,9 +280,10 @@ struct span : std::span<T, E> {
     else
       return span<element_type>(self.get_super().first(count));
   }
+
   template<size_t Count> constexpr span<element_type, Count> last() const
   {
-    return get_super().template first<Count>();
+    return get_super().template last<Count>();
   }
   template<typename Self>
   constexpr auto last(this const Self &self, size_type count)
@@ -292,12 +295,10 @@ struct span : std::span<T, E> {
   }
 
   template<size_type Offset, size_type Count = std::dynamic_extent>
-  auto subspan() const
+  span<element_type, Count> subspan() const
   {
-    auto s = get_super().template subspan<Offset, Count>();
-    return span<element_type, decltype(s)::extent>(s);
+    return get_super().template subspan<Offset, Count>();
   }
-
   template<typename Self>
   auto subspan(this const Self &self, size_type offset,
                size_type count = std::dynamic_extent)
