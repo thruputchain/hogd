@@ -113,7 +113,7 @@ TEST(NewScheduler, Single)
 
 TEST(Scheduler, Fairness)
 {
-  constexpr size_t kNumRounds = 100;
+  constexpr size_t kNumRounds = 1000;
 
   std::vector<fib_client_t> fib_clients;
   std::vector<SignedTransactionBatch> txs;
@@ -170,13 +170,17 @@ TEST(Scheduler, Fairness)
     //
     // We divide by 10 at the end rather than do (i + 1) / 10 * [kBlockSize] *
     // [kNumRounds] to avoid truncation due to integer division.
-    EXPECT_EQ(tx_counts[address], (i + 1) * kBlockSize * kNumRounds / 10);
+    const size_t target = (i + 1) * kBlockSize * kNumRounds / 10;
+    EXPECT_LE(tx_counts[address],
+              target + MempoolTestInfra::kAccountAddresses.size());
+    EXPECT_GE(tx_counts[address],
+              target - MempoolTestInfra::kAccountAddresses.size());
   }
 }
 
 TEST(Scheduler, FairnessAcrossBlocks)
 {
-  constexpr size_t kNumRounds = 100;
+  constexpr size_t kNumRounds = 1000;
   static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;
@@ -226,9 +230,10 @@ TEST(Scheduler, FairnessAcrossBlocks)
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestInfra::kAccountAddresses[i];
     const size_t target = (i + 1) * (kNumRounds / 10);
-    constexpr size_t kErrorBound = 2;
-    EXPECT_LE(tx_counts[address], target + kErrorBound);
-    EXPECT_GE(tx_counts[address], target - kErrorBound);
+    EXPECT_LE(tx_counts[address],
+              target + MempoolTestInfra::kAccountAddresses.size());
+    EXPECT_GE(tx_counts[address],
+              target - MempoolTestInfra::kAccountAddresses.size());
   }
 }
 

@@ -420,7 +420,7 @@ NewScheduler::schedule(size_t block_size)
   // account is runnable. Do not forget to deduct the erased txs from [size_]!
 
   size_t num_scheduled = 0;
-  std::unordered_set<ContractAddress> scheduled_accounts;
+  std::unordered_set<ContractAddress> removed_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
   // [std::unordered_set], but I have not implemented a hash function for
   // [AccountKey], so I need to use an [std::set] instead.
@@ -430,8 +430,8 @@ NewScheduler::schedule(size_t block_size)
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
-      cycle_accounts_during_schedule_helper(scheduled_accounts, lower_bound);
-      scheduled_accounts.clear();
+      cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+      removed_accounts.clear();
       if (ready_accounts_.empty()) {
         // If there are still no ready accounts, then break.
         break;
@@ -499,6 +499,7 @@ NewScheduler::schedule(size_t block_size)
           // cycled.
         }
         CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        CHECK(removed_accounts.insert(account).second);
         break;
       }
     }
@@ -507,12 +508,11 @@ NewScheduler::schedule(size_t block_size)
       // this account.
       move_hogs_to_already_scheduled_group(account, hogs_spent_by_account,
                                            current_block_);
-      scheduled_accounts.insert(account);
     }
   }
-  // Add [scheduled_accounts] back to [ready_accounts_] for each account that is
+  // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
-  cycle_accounts_during_schedule_helper(scheduled_accounts, lower_bound);
+  cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   for (const AccountKey &account_key : accounts_excluded_from_block) {
     CHECK(ready_accounts_.insert(account_key).second);
