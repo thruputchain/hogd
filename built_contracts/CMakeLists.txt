@@ -57,14 +57,17 @@ add_xdr(roundtrip_hh
   ./integration_test_contracts/xdr/roundtrip.x
 )
 
+add_custom_target(build_roundtrip_rs DEPENDS ${generated_rs_files})
+
 # Build all WASM targets with separate cargo commands in one custom command
 function(add_wasm_builds)
   # ARGN contains all the target names passed to the function
   
-  # Common dependencies (don't include generated_rs_files here - use target deps instead)
+  # Common dependencies (no generated_rs_files - use target deps to avoid parallel generation)
   set(common_depends 
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+    build_roundtrip_rs)
   
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
@@ -170,7 +173,7 @@ function(add_spec_and_types_generation)
     list(APPEND all_bins "--bin" "generate_types_${target_name}")
   endforeach()
   
-  # Add common dependencies (don't include generated_rs_files here - use target deps instead)
+  # Add common dependencies (no generated_rs_files - use target deps to avoid parallel generation)
   list(APPEND all_depends 
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
@@ -219,7 +222,7 @@ function(add_spec_and_types_generation)
   
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
-    add_custom_target(${target_name}_types_xdr DEPENDS ${target_name}_hh)
+    add_custom_target(${target_name}_types_xdr DEPENDS all_spec_and_types)
   endforeach()
 endfunction()
 
@@ -257,7 +260,7 @@ endfunction()
 # Build all WASMs in one cargo invocation
 add_wasm_builds(fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20)
 
-# Make WASM builds depend on XDR-generated Rust files (target deps, not file deps)
+# Make WASM builds wait for XDR generation (can run in parallel with spec)
 add_dependencies(all_unoptimized_wasms cxs_roundtrip_rs txs_roundtrip_rs)
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
@@ -266,7 +269,7 @@ add_spec_and_types_generation(
   TYPES_TARGETS itc_erc20
 )
 
-# Make spec generation depend on XDR-generated Rust files (target deps, not file deps)
+# Make spec builds wait for XDR generation (can run in parallel with WASM)
 add_dependencies(all_spec_and_types cxs_roundtrip_rs txs_roundtrip_rs)
 
 # Make all headers wait for all specs to be generated
