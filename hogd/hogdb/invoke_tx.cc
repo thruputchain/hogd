@@ -54,7 +54,7 @@ void
 InvokeTX::unlock(const ItemKey &key, const ItemChange &change) noexcept
 {
   // Cannot throw, as unlock is only every called on items that already exist in
-  // the tx local cache. 
+  // the tx local cache.
   auto lock = get_item_lock(key);
   assert(lock.has_value());
   assert(lock.value() != nullptr);
