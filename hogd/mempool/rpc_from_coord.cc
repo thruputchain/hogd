@@ -387,12 +387,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     all_accounts.insert(address);
     tx_hashes[address].push_back(nomination.transaction_hashes[i]);
   }
-  auto timer3 = std::make_unique<ElapsedTimer>();
-  co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_again_duration = timer3->elapsed();
-
-  cg.reset();
-  double mark_txs_duration = timer3->elapsed();
 
   timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
@@ -457,17 +451,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   info("wait_for_transfer_duration {}, create_snapshot_and_open_block_duration "
        "{}, schedule_duration {}, run_on_executor_duration {}, "
-       "mark_txs_duration {}, "
        "just_wait_for_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
-       "wait_for_lock_duration {}, wait_for_lock_again_duration {}",
+       "wait_for_lock_duration {}",
        wait_for_transfer_duration, create_snapshot_and_open_block_duration,
-       schedule_duration, run_on_executor_duration, mark_txs_duration,
+       schedule_duration, run_on_executor_duration,
        just_wait_for_executor_duration, mark_failed_txs_duration,
        create_handles_duration, get_block_hash_duration,
-       wait_for_handles_duration, wait_for_lock_duration,
-       wait_for_lock_again_duration);
+       wait_for_handles_duration, wait_for_lock_duration);
 
   co_return result;
 }
