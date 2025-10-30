@@ -87,6 +87,8 @@ public:
   // between them.
   void cycle_groups(const ContractAddress &account);
 
+  void increment_current_block() { current_block_++; }
+
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   size_t size() const { return size_; }
@@ -133,7 +135,8 @@ private:
 
   AccountKey get_account_key(const ContractAddress &account);
 
-  bool account_is_ready(const ContractAddress &account);
+  bool account_is_ready(const ContractAddress &account,
+                        bool remove_expired_txs);
 
   void move_hogs_to_already_scheduled_group(const ContractAddress &account,
                                             uint128_t num_hogs,
@@ -153,6 +156,9 @@ private:
   std::set<AccountKey> ready_accounts_;
 
   // Tx cache.
+  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
+  // free them automatically without too much overhead/garbage collection with
+  // smart pointers (e.g., [std::shared_ptr<>]).
   std::unordered_map<SignedTransactionHash, TxValue> txs_;
   // Account cache.
   std::unordered_map<ContractAddress, HogAge> accounts_;

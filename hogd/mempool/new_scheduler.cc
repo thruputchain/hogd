@@ -151,7 +151,7 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     CHECK(account_to_tx_[account].insert({key, value}).second);
   }
   for (const ContractAddress &account : accounts) {
-    if (account_is_ready(account)) {
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
@@ -341,14 +341,19 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
 }
 
 bool
-NewScheduler::account_is_ready(const ContractAddress &account)
+NewScheduler::account_is_ready(const ContractAddress &account,
+                               bool remove_expired_txs)
 {
-  const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
-  const TxKey lower_bound{.expiry_block_height = current_block_ + 1,
-                          .tx_hash = {}};
+  std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+  const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
+  auto it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check if
   // the account has enough gas units to run the tx.
-  return txs.lower_bound(lower_bound) != txs.end();
+  bool ret = (it != txs.end());
+  if (remove_expired_txs) {
+    txs.erase(txs.begin(), it);
+  }
+  return ret;
 }
 
 void
@@ -396,7 +401,6 @@ NewScheduler::schedule(size_t block_size)
   // [AccountKey], so I need to use an [std::set] instead.
   std::set<AccountKey> accounts_excluded_from_block;
 
-  current_block_++;
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
@@ -429,6 +433,10 @@ NewScheduler::schedule(size_t block_size)
     uint128_t hogs_spent_by_account = 0;
     while (true) {
       auto it = txs.lower_bound(lower_bound);
+      if (it != txs.begin()) {
+        // This removes expired txs.
+        it = txs.erase(txs.begin(), it);
+      }
       if (it == txs.end()) {
         CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         break;
@@ -495,6 +503,7 @@ NewScheduler::schedule(size_t block_size)
     move_hogs_to_already_scheduled_group(account, spent_hogs, current_block_);
   }
 
+  increment_current_block();
   return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
@@ -529,7 +538,7 @@ NewScheduler::find_and_remove_from_runqueue(
     accounts.insert(account);
   }
   for (const ContractAddress &account : accounts) {
-    if (!account_is_ready(account)) {
+    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
