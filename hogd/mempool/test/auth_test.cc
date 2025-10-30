@@ -9,7 +9,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/init.h"
 #include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"

@@ -376,38 +376,24 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
                               kChunkSize);
 
   timer2 = std::make_unique<ElapsedTimer>();
-  std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>>
-      tx_hashes;
-  // We need to track the failed txs themselves (not just the hashes) because we
-  // re-enqueue these txs in the scheduler.
-  std::unordered_map<ContractAddress, SignedTransactionBatch> failed_txs;
-  std::unordered_set<ContractAddress> all_accounts;
-  for (size_t i = 0; i < txs.size(); i++) {
-    const ContractAddress &address = txs[i].tx.invocation.invoked_address;
-    all_accounts.insert(address);
-    tx_hashes[address].push_back(nomination.transaction_hashes[i]);
-  }
-
-  timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
   double just_wait_for_executor_duration = timer2->elapsed();
-
   double run_on_executor_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
+  x23::Vec<SignedTransaction> failed_txs;
   for (size_t i = 0; i < txs.size(); i++) {
     const ContractAddress &address = txs[i].tx.invocation.invoked_address;
     if (!statuses[i]) {
-      failed_txs[address].push_back(txs[i]);
+      failed_txs.push_back(txs[i]);
     }
   }
-  co_await cg(scheduler_->global_lock_);
-  for (const ContractAddress &account : all_accounts) {
-    if (!failed_txs[account].empty()) {
-      co_await scheduler_->add_txs(failed_txs[account]);
-    }
+  if (!failed_txs.empty()) {
+    co_await cg(scheduler_->global_lock_);
+    co_await scheduler_->add_txs(failed_txs);
   }
-  cg.reset();
+  double mark_failed_txs_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   if (nomination.transaction_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
@@ -419,9 +405,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-
-  double mark_failed_txs_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   x23::Vec<x23::Async<void>> finish_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
