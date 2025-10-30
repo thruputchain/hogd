@@ -123,7 +123,11 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     // expensive to compute.
     const SignedTransactionHash tx_hash = sha256(tx);
     auto inserted = txs_.insert({tx_hash, {.tx = tx}});
-    CHECK(inserted.second);
+    // We do not CHECK that [inserted.second] is true because it is okay to add
+    // a tx back into the scheduler again. This can happen if the tx was
+    // originally added to the scheduler, the tx was removed during validation
+    // by [find_and_remove_from_runqueue()], validation failed, and the tx was
+    // added back to the scheduler.
 
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -148,14 +152,17 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     //
     // We then get the address of the [TxValue]: [&inserted.first->second].
     TxValue *value = &inserted.first->second;
-    CHECK(account_to_tx_[account].insert({key, value}).second);
+    // Check if the tx is already present in [account_to_tx_[account]]. If it
+    // is, we are adding a duplicate tx, so we do not want to increment [size_].
+    if (account_to_tx_[account].insert({key, value}).second) {
+      size_++;
+    }
   }
   for (const ContractAddress &account : accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
-  size_ += txs.size();
 }
 
 void

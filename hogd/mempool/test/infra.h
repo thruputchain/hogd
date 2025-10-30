@@ -230,7 +230,7 @@ private:
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
     // account unlimited hogs with UINT128_MAX.
     set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
-             /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
+             /*age=*/0, /*num_hogs=*/5'000'000'000 * 10);
   }
 
   void register_db_with_mempool()
