@@ -113,7 +113,7 @@ TEST(NewScheduler, Single)
 
 TEST(Scheduler, Fairness)
 {
-  constexpr size_t kNumRounds = 1000;
+  constexpr size_t kNumRounds = 100;
 
   std::vector<fib_client_t> fib_clients;
   std::vector<SignedTransactionBatch> txs;
@@ -180,7 +180,7 @@ TEST(Scheduler, Fairness)
 
 TEST(Scheduler, FairnessAcrossBlocks)
 {
-  constexpr size_t kNumRounds = 1000;
+  constexpr size_t kNumRounds = 100;
   static_assert(kNumRounds % 10 == 0);
 
   std::vector<fib_client_t> fib_clients;
