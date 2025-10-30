@@ -357,8 +357,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // TODO(jhumphri): Return the txs to the scheduler *and reset the hog ages*
     // and recover expired txs!
     // Maybe we actually do not need to reset the hog ages since failure is rare
-    // and one failure will not impact long term fairness. But we really should
-    // recover the expired txs...
+    // and one failure will not impact long term fairness. Do we need to recover
+    // the expired txs either? A failure is pretty bad and unexpected, and I do
+    // not think it is worth adding complexity and overhead for recovery here
+    // for a rare event.
+    scheduler_->decrement_current_block();
     co_await scheduler_->add_txs(txs);
 
     co_return SchedulerNominationResult(
