@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <map>
 #include <memory>
-#include <optional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_sched.hh"
 #include "exec_sched.hh"
@@ -123,7 +123,11 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     // expensive to compute.
     const SignedTransactionHash tx_hash = sha256(tx);
     auto inserted = txs_.insert({tx_hash, {.tx = tx}});
-    CHECK(inserted.second);
+    // We do not CHECK that [inserted.second] is true because it is okay to add
+    // a tx back into the scheduler again. This can happen if the tx was
+    // originally added to the scheduler, the tx was removed during validation
+    // by [find_and_remove_from_runqueue()], validation failed, and the tx was
+    // added back to the scheduler.
 
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -148,14 +152,17 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     //
     // We then get the address of the [TxValue]: [&inserted.first->second].
     TxValue *value = &inserted.first->second;
-    CHECK(account_to_tx_[account].insert({key, value}).second);
+    // Check if the tx is already present in [account_to_tx_[account]]. If it
+    // is, we are adding a duplicate tx, so we do not want to increment [size_].
+    if (account_to_tx_[account].insert({key, value}).second) {
+      size_++;
+    }
   }
   for (const ContractAddress &account : accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
-  size_ += txs.size();
 }
 
 void
@@ -281,9 +288,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
 
   for (const Delta &delta : transfers.deltas) {
     int128_t num_received = from_xdr(delta.hog_delta);
-    if (!num_received) {
-      continue;
-    }
+    CHECK_NE(num_received, static_cast<int128_t>(0));
 
     const ContractAddress &account = delta.address;
     const HogAge &averages = accounts_[account];
@@ -383,6 +388,27 @@ NewScheduler::move_hogs_to_already_scheduled_group(
   }
 }
 
+void
+NewScheduler::cycle_accounts_during_schedule_helper(
+    const std::unordered_set<ContractAddress> &accounts,
+    const TxKey &lower_bound)
+{
+  for (const ContractAddress &account : accounts) {
+    // TODO(jhumphri): This is the same code as in [account_is_ready], but
+    // we have it here because we need the iterator. Clean this up.
+    const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    auto it = txs.lower_bound(lower_bound);
+    if (it == txs.end()) {
+      continue;
+    }
+    const SignedTransaction &tx = it->second->tx;
+    cycle_if_needed(account, tx.tx.invocation.gas_limit);
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+    }
+  }
+}
+
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 NewScheduler::schedule(size_t block_size)
 {
@@ -394,8 +420,7 @@ NewScheduler::schedule(size_t block_size)
   // account is runnable. Do not forget to deduct the erased txs from [size_]!
 
   size_t num_scheduled = 0;
-  bool cycled = false;
-  std::unordered_map<ContractAddress, uint128_t> scheduled_accounts;
+  std::unordered_set<ContractAddress> removed_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
   // [std::unordered_set], but I have not implemented a hash function for
   // [AccountKey], so I need to use an [std::set] instead.
@@ -405,22 +430,11 @@ NewScheduler::schedule(size_t block_size)
                              .tx_hash = {}};
   while (num_scheduled < block_size && size_) {
     if (ready_accounts_.empty()) {
-      // [cycle_if_needed()] will cycle the account either once or twice,
-      // depending on which is better for the account. Thus, we only call
-      // [cycle_if_needed()] once in total--we should not call it twice!
-      if (cycled) {
+      cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+      removed_accounts.clear();
+      if (ready_accounts_.empty()) {
+        // If there are still no ready accounts, then break.
         break;
-      }
-      cycled = true;
-
-      for (const auto &[account, _] : scheduled_accounts) {
-        const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
-        auto it = txs.lower_bound(lower_bound);
-        if (it == txs.end()) {
-          continue;
-        }
-        const SignedTransaction &tx = it->second->tx;
-        cycle_if_needed(account, tx.tx.invocation.gas_limit);
       }
     }
 
@@ -431,7 +445,7 @@ NewScheduler::schedule(size_t block_size)
     HogAge &hog_ages = get_cached_hog_age(account);
     std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
-    while (true) {
+    while (num_scheduled < block_size && size_) {
       auto it = txs.lower_bound(lower_bound);
       if (it != txs.begin()) {
         // This removes expired txs.
@@ -453,14 +467,15 @@ NewScheduler::schedule(size_t block_size)
         tx_hashes_to_schedule.push_back(tx_hash);
         txs_to_schedule.push_back(tx);
 
-        // We are deleting [it] here, so do not access [tx_hash] or [tx] beyond
-        // this point!
+        // We are deleting [it] here, so do not access [tx_hash] or [tx]
+        // beyond this point!
         it = txs.erase(it);
         num_scheduled++;
         size_--;
       }
       else {
         const uint128_t all_hogs_available =
+            hogs_spent_by_account +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]) +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) +
             from_xdr(hog_ages.num_hogs[kHogAgeGroupReceived]);
@@ -475,66 +490,80 @@ NewScheduler::schedule(size_t block_size)
           // TODO(jhumphri): Do we want to penalize the account more severely?
           it = txs.erase(it);
           size_--;
-          CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
-          if (it != txs.end()) {
-            CHECK(accounts_excluded_from_block.insert(account_key).second);
-          }
+          CHECK(accounts_excluded_from_block.insert(account_key).second);
         }
         else {
           // The account has enough hogs in total to run this tx, but the
           // account is going to have to be cycled once or twice. For now, we
-          // just skip over this account and revisit it once it has been cycled.
+          // just skip over this account and revisit it once it has been
+          // cycled.
         }
+        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        CHECK(removed_accounts.insert(account).second);
         break;
       }
-      if (hogs_spent_by_account) {
-        scheduled_accounts[account] += hogs_spent_by_account;
-      }
+    }
+    if (hogs_spent_by_account) {
+      // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
+      // this account.
+      move_hogs_to_already_scheduled_group(account, hogs_spent_by_account,
+                                           current_block_);
     }
   }
+  // Add [removed_accounts] back to [ready_accounts_] for each account that is
+  // still ready.
+  cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+
   for (const AccountKey &account_key : accounts_excluded_from_block) {
     CHECK(ready_accounts_.insert(account_key).second);
-  }
-  // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for each
-  // scheduled account.
-  //
-  // TODO(jhumphri): This is a good place to parallelize.
-  for (const auto &[account, spent_hogs] : scheduled_accounts) {
-    move_hogs_to_already_scheduled_group(account, spent_hogs, current_block_);
   }
 
   increment_current_block();
   return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
-x23::Vec<std::optional<SignedTransaction>>
+bool
 NewScheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> &hashes)
+    const x23::Vec<SignedTransactionHash> &hashes,
+    x23::Vec<SignedTransaction> &txs)
 {
-  x23::Vec<std::optional<SignedTransaction>> ret;
-  ret.reserve(hashes.size());
+  CHECK(txs.empty());
+
+  std::vector<TxKey> keys;
+  std::vector<TxValue *> values;
+  keys.reserve(hashes.size());
+  values.reserve(values.size());
+  txs.reserve(hashes.size());
 
   std::unordered_set<ContractAddress> accounts;
   for (const SignedTransactionHash &tx_hash : hashes) {
     auto it = txs_.find(tx_hash);
     if (it == txs_.end()) {
-      ret.push_back(std::nullopt);
-      continue;
+      // We could not find all of the txs, so we put the txs we did find back
+      // and return false.
+      CHECK_EQ(keys.size(), values.size());
+      CHECK_EQ(keys.size(), txs.size());
+      CHECK_LT(keys.size(), hashes.size());
+      for (size_t i = 0; i < keys.size(); i++) {
+        std::map<TxKey, TxValue *> &per_account_txs =
+            account_to_tx_[txs[i].tx.invocation.invoked_address];
+        CHECK(per_account_txs.insert({keys[i], values[i]}).second);
+      }
+      size_ += keys.size();
+      txs.clear();
+      return false;
     }
 
     const SignedTransaction &tx = it->second.tx;
-    ret.push_back(tx);
-
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key = {.expiry_block_height =
                            tx.tx.uniquifier.block_expiry_height,
                        .tx_hash = tx_hash};
-    // TODO(jhumphri): [find_and_remove_from_runqueue] is only called during
-    // validation, so I think it is fine if the tx is not on the runqueue? Thus,
-    // it is ok if [erase()] returns 0 below.
-    if (account_to_tx_[account].erase(key)) {
-      size_--;
-    }
+    keys.push_back(key);
+    values.push_back(&it->second);
+    txs.push_back(tx);
+    CHECK_EQ(account_to_tx_[account].erase(key), 1UL);
+    size_--;
     accounts.insert(account);
   }
   for (const ContractAddress &account : accounts) {
@@ -542,7 +571,7 @@ NewScheduler::find_and_remove_from_runqueue(
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
-  return ret;
+  return true;
 }
 
 } // namespace hogd
