@@ -57,8 +57,9 @@ public:
   // re-execute the txs to verify the block.
   //
   // This method fills in [ret] with the [SignedTransaction]s to verify.
-  x23::Vec<std::optional<SignedTransaction>>
-  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes);
+  bool
+  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
+                                x23::Vec<SignedTransaction> &txs);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -96,7 +97,8 @@ public:
   // Debug.
   void dump_runqueue() const;
 
-  x23::CoroSem transfer_finished_;
+  // TODO(jhumphri): Replace with [CoroSem].
+  std::atomic<bool> transfer_finished_;
   x23::CoroLock global_lock_;
 
 private:

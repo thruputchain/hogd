@@ -281,9 +281,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
 
   for (const Delta &delta : transfers.deltas) {
     int128_t num_received = from_xdr(delta.hog_delta);
-    if (!num_received) {
-      continue;
-    }
+    CHECK_NE(num_received, static_cast<int128_t>(0));
 
     const ContractAddress &account = delta.address;
     const HogAge &averages = accounts_[account];
@@ -507,34 +505,48 @@ NewScheduler::schedule(size_t block_size)
   return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
-x23::Vec<std::optional<SignedTransaction>>
+bool
 NewScheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> &hashes)
+    const x23::Vec<SignedTransactionHash> &hashes,
+    x23::Vec<SignedTransaction> &txs)
 {
-  x23::Vec<std::optional<SignedTransaction>> ret;
-  ret.reserve(hashes.size());
+  CHECK(txs.empty());
+
+  std::vector<TxKey> keys;
+  std::vector<TxValue *> values;
+  keys.reserve(hashes.size());
+  values.reserve(values.size());
+  txs.reserve(hashes.size());
 
   std::unordered_set<ContractAddress> accounts;
   for (const SignedTransactionHash &tx_hash : hashes) {
     auto it = txs_.find(tx_hash);
     if (it == txs_.end()) {
-      ret.push_back(std::nullopt);
-      continue;
+      // We could not find all of the txs, so we put the txs we did find back
+      // and return false.
+      CHECK_EQ(keys.size(), values.size());
+      CHECK_EQ(keys.size(), txs.size());
+      CHECK_LT(keys.size(), hashes.size());
+      for (size_t i = 0; i < keys.size(); i++) {
+        std::map<TxKey, TxValue *> &per_account_txs =
+            account_to_tx_[txs[i].tx.invocation.invoked_address];
+        CHECK(per_account_txs.insert({keys[i], values[i]}).second);
+      }
+      size_ += keys.size();
+      txs.clear();
+      return false;
     }
 
     const SignedTransaction &tx = it->second.tx;
-    ret.push_back(tx);
-
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key = {.expiry_block_height =
                            tx.tx.uniquifier.block_expiry_height,
                        .tx_hash = tx_hash};
-    // TODO(jhumphri): [find_and_remove_from_runqueue] is only called during
-    // validation, so I think it is fine if the tx is not on the runqueue? Thus,
-    // it is ok if [erase()] returns 0 below.
-    if (account_to_tx_[account].erase(key)) {
-      size_--;
-    }
+    keys.push_back(key);
+    values.push_back(&it->second);
+    txs.push_back(tx);
+    CHECK_EQ(account_to_tx_[account].erase(key), 1UL);
+    size_--;
     accounts.insert(account);
   }
   for (const ContractAddress &account : accounts) {
@@ -542,7 +554,7 @@ NewScheduler::find_and_remove_from_runqueue(
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
-  return ret;
+  return true;
 }
 
 } // namespace hogd

@@ -350,17 +350,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await cg(scheduler_->global_lock_);
   double wait_for_lock_duration = timer2->elapsed();
 
-  std::tie(nomination.transaction_hashes, txs) = co_await scheduler_->schedule(
-      /*block_height=*/nomination.block_height, kMaxBlockSize);
-  size_t num_on_runqueue = scheduler_->num_on_runqueue();
-  size_t num_stranded = scheduler_->num_stranded();
+  std::tie(nomination.transaction_hashes, txs) =
+      scheduler_->schedule(kMaxBlockSize);
+  size_t num_on_runqueue = scheduler_->size();
   cg.reset();
 
   double schedule_duration = timer->elapsed();
 
-  info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable, "
-       "{} are stranded",
-       txs.size(), num_on_runqueue, num_stranded);
+  info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
+       txs.size(), num_on_runqueue);
   if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -393,9 +391,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await cg(scheduler_->global_lock_);
   double wait_for_lock_again_duration = timer3->elapsed();
 
-  for (const ContractAddress &account : all_accounts) {
-    co_await scheduler_->mark_txs_finished(tx_hashes[account]);
-  }
   cg.reset();
   double mark_txs_duration = timer3->elapsed();
 
@@ -565,7 +560,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   x23::Vec<SignedTransaction> signed_txs;
   {
     if (!scheduler_->find_and_remove_from_runqueue(
-            nomination.transaction_hashes, &signed_txs)) {
+            nomination.transaction_hashes, signed_txs)) {
       for (size_t i = 0; i < exec_clients_.size(); i++) {
         co_await finish_block(block_id, /*executor_idx=*/i);
       }
@@ -587,7 +582,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   // Careful--[validate_batch()] is calling co_await in its function body.
   bool validated = co_await validate_batch(block_id, txs, /*executor_idx=*/0);
-  co_await scheduler_->mark_txs_finished(nomination.transaction_hashes);
 
   // Check [validated] and verify the block hash. It is safe to directly use
   // [nomination.transaction_hashes] here because we already checked above

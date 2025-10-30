@@ -10,14 +10,13 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/registration.h"
-#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_exec.hh"
-#include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -64,31 +63,16 @@ public:
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
-    for (const Delta &d : transfers.deltas) {
-      int128_t hog_delta = from_xdr(d.hog_delta);
-      CHECK_NE(hog_delta, 0L);
-
-      auto hog_delta_abs =
-          static_cast<uint128_t>(hog_delta < 0 ? -hog_delta : hog_delta);
-
-      x23::CoroGuard cg;
-      info("cg acquire start");
-      co_await cg(scheduler_->global_lock_);
-      if (hog_delta >= 0L) {
-        co_await scheduler_->process_received_hogs(d.address, hog_delta_abs,
-                                                   transfers.block);
-      }
-      else {
-        co_await scheduler_->process_deducted_hogs(d.address, hog_delta_abs);
-      }
-      info("cg acquire end");
-    }
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
+    CHECK_PTR(scheduler_.get());
+    co_await scheduler_->process_transfers(transfers);
 
     CHECK(!scheduler_->transfer_finished_);
     scheduler_->transfer_finished_ = true;
   }
 
-  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
+  void register_scheduler(std::shared_ptr<NewScheduler> scheduler)
   {
     CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
@@ -121,7 +105,7 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
-  std::shared_ptr<Scheduler> scheduler_;
+  std::shared_ptr<NewScheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 
