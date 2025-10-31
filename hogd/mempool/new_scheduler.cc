@@ -356,6 +356,9 @@ NewScheduler::account_is_ready(const ContractAddress &account,
   // the account has enough gas units to run the tx.
   bool ret = (it != txs.end());
   if (remove_expired_txs) {
+    size_t to_remove = std::distance(txs.begin(), it);
+    CHECK_LE(to_remove, size_);
+    size_ -= to_remove;
     txs.erase(txs.begin(), it);
   }
   return ret;
@@ -415,10 +418,6 @@ NewScheduler::schedule(size_t block_size)
   x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
   x23::Vec<SignedTransaction> txs_to_schedule;
 
-  // TODO(jhumphri): Efficiently erase expired txs with [erase()] and specify a
-  // range of [begin(), lower_bound()]. We can do this in the loop below when an
-  // account is runnable. Do not forget to deduct the erased txs from [size_]!
-
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> removed_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
@@ -449,6 +448,9 @@ NewScheduler::schedule(size_t block_size)
       auto it = txs.lower_bound(lower_bound);
       if (it != txs.begin()) {
         // This removes expired txs.
+        size_t to_remove = std::distance(txs.begin(), it);
+        CHECK_LE(to_remove, size_);
+        size_ -= to_remove;
         it = txs.erase(txs.begin(), it);
       }
       if (it == txs.end()) {
