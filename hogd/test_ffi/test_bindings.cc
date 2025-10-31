@@ -261,6 +261,7 @@ try_commit_transaction(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->to_handler().try_commit_transaction();
+    context->mark_committed_or_aborted();
     if (!res.has_value()) {
       error("try_commit_transaction encountered system error {}", res.error());
       return ForeignTryCommitResult{.result_code = 0,
@@ -282,7 +283,17 @@ abort_transaction(void *syscall_handler) noexcept
     return kTestFFIErrorCodeInvalidPointer;
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  context->to_handler().abort_transaction();
+  auto res = context->to_handler().abort_transaction();
+  context->mark_committed_or_aborted();
+  if (!res.has_value()) {
+    try {
+      error("failed to abort transaction: {}", res.error());
+      return kTestFFIErrorCodeUnrecoverableError;
+    } catch (std::exception const &e) {
+      log_error("error during abort_transaction: {}", e);
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+  }
   return kTestFFIErrorCodeNone;
 }
 
