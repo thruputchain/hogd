@@ -54,7 +54,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 
   // If this fails, you forgot to call {read,write}_clear before
   // calling {read,write}_wait.
+#if X23_FD_TRACE
+  if (mode == kFree)
+    panic("Mode was kFree when setting {} callback on fd {}\n{}", int(mode),
+          write ? "write" : "read", fd.get(), *fdp->info_.take());
+#else  // !X23_FD_TRACE
   x23assert(mode != kFree);
+#endif // !X23_FD_TRACE
 
   if ((fdp->ready_ & epflags[write]) && mode == kActive) {
     wi(0);
@@ -154,6 +160,10 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   // debug("setmode fd {}: {} -> {}", fd, int(old_mode), int(mode));
 
   if (mode == kActive) {
+#if X23_FD_TRACE
+    *fdp->info_.take() =
+        std::format("fd {} activation stack trace\n{}", fd, stacktrace());
+#endif // X23_FD_TRACE
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
@@ -292,13 +302,22 @@ CoroPollImpl::reset(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
   fdp->buf_clear();
+#if X23_FD_TRACE
+  *fdp->info_.take() =
+      std::format("fd {} reset stack trace\n{}", fd.get(), stacktrace());
+#endif // X23_FD_TRACE
   setmode(fdp, FdState::Mode::kFree);
 }
 
 void
 CoroPollImpl::poison(BorrowedFd fd)
 {
-  setmode(getfd(fd), FdState::Mode::kPoisoned);
+  auto fdp = getfd(fd);
+#if X23_FD_TRACE
+  *fdp->info_.take() =
+      std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
+#endif // X23_FD_TRACE
+  setmode(fdp, FdState::Mode::kPoisoned);
 }
 
 void

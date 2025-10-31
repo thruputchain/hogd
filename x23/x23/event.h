@@ -39,6 +39,18 @@
 #include <unordered_map>
 #endif // !USE_EPOLL
 
+#ifndef X23_FD_TRACE
+#ifdef DEBUG
+#define X23_FD_TRACE 1
+#else // !DEBUG
+#define X23_FD_TRACE 0
+#endif // !DEBUG
+#endif // !X23_FD_TRACE
+#ifdef NDEBUG
+#undef X23_FD_TRACE
+#define X23_FD_TRACE 0
+#endif // NDEBUG
+
 namespace x23 {
 
 // Should just fix Async<T>::return_value to take a T instead of a
@@ -331,9 +343,17 @@ private:
     std::atomic<std::uint32_t> ready_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
+#if X23_FD_TRACE
+    MVar<std::string> info_;
+#endif // X23_FD_TRACE
 
     FdState() noexcept = default;
-    FdState(FdState &&other) noexcept : BufHolder(std::move(other))
+    FdState(FdState &&other) noexcept
+      : BufHolder(std::move(other))
+#if X23_FD_TRACE
+        ,
+        info_(std::move(*other.info_.take()))
+#endif // X23_FD_TRACE
     {
       copy_fields(other);
     }
