@@ -4,19 +4,52 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <thread>
 #include <utility>
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include "x23/config.h"
 #include "x23/debug.h"
 #include "x23/progname.h"
+#include "x23/signal.h"
+#include "x23/vec.h"
+
+#if HAVE_STD_STACKTRACE
+#include <stacktrace>
+#elif HAVE_BACKTRACE_SYMBOLS
+#include <execinfo.h>
+#endif // HAVE_BACKTRACE_SYMBOLS
 
 namespace x23 {
 
 bool ignore_debug_env;
+
+std::string
+stacktrace(unsigned indent, std::string ret)
+{
+#if HAVE_STD_STACKTRACE
+  for (const auto &e : std::stacktrace::current())
+    uformat_to(&ret, "{:>{}}{}\n", "", indent, e);
+#elif HAVE_BACKTRACE_SYMBOLS
+  void *bt[64];
+  int n = ::backtrace(bt, 64);
+  if (n > 0) {
+    char **syms = ::backtrace_symbols(bt, n);
+    for (int i = 0; i < n; ++i) {
+      ret += "  ";
+      ret += syms[i];
+      ret += '\n';
+    }
+    free(syms);
+  }
+#endif // HAVE_BACKTRACE_SYMBOLS
+  return ret;
+}
 
 std::string
 replace_percent(std::string_view target,
@@ -136,5 +169,32 @@ dump_rusage(int fd)
     ::write(fd, msg.data(), msg.size());
   };
 }
+
+#ifndef NDEBUG
+std::atomic_bool panicking_flag{false};
+
+namespace detail {
+void
+do_panic(std::string_view fmt, std::format_args args,
+         std::source_location sloc) noexcept
+{
+  std::string msg = std::vformat(fmt, args);
+  uformat_to(&msg, "\n  in {}\n  function {}\n  at  {}:{}\n", getprogpath(),
+             sloc.function_name(), sloc.file_name(), sloc.line());
+  if (auto st = stacktrace(4); !st.empty()) {
+    msg += "  Strack trace:\n";
+    msg += st;
+  }
+  write(2, msg.data(), msg.size());
+  if (int fd = debug.fd(); fd != 2 && fd != -1)
+    write(fd, msg.data(), msg.size());
+  panicking_flag = true;
+  signal_handler(SIGUSR1);
+  // Give signal handlers a chance to report debug info.
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::abort();
+}
+} // namespace detail
+#endif // NDEBUG
 
 } // namespace x23

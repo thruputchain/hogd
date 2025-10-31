@@ -38,7 +38,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -60,6 +59,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/debug.h>
 #include <x23/typename.h>
 #include <x23/utility.h>
 
@@ -253,6 +253,71 @@ private:
 
 } // namespace detail
 
+// This is a copy of std::span, purely for purposes of ADL, so we can
+// add functions like xdr_size(span<...>).  We do this because it's
+// illegal to open up the std namespace to define a
+// std::xdr_size(std::span<...>) function.  For types derived from
+// span<T, std::dynamic_extent>, the dynamic first/last/subspan return
+// the derived type instead of span.
+template<typename T, size_t E = std::dynamic_extent>
+struct span : std::span<T, E> {
+  using super = std::span<T, E>;
+  using typename super::element_type;
+  using typename super::size_type;
+
+  using super::span;
+  span(const super &s) : super(s) {}
+
+  template<size_t Count> constexpr span<element_type, Count> first() const
+  {
+    return get_super().template first<Count>();
+  }
+  template<typename Self>
+  constexpr auto first(this const Self &self, size_type count)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.get_super().first(count));
+    else
+      return span<element_type>(self.get_super().first(count));
+  }
+
+  template<size_t Count> constexpr span<element_type, Count> last() const
+  {
+    return get_super().template last<Count>();
+  }
+  template<typename Self>
+  constexpr auto last(this const Self &self, size_type count)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.get_super().last(count));
+    else
+      return span<element_type>(self.get_super().last(count));
+  }
+
+  template<size_type Offset, size_type Count = std::dynamic_extent>
+  span<element_type, Count> subspan() const
+  {
+    return get_super().template subspan<Offset, Count>();
+  }
+  template<typename Self>
+  auto subspan(this const Self &self, size_type offset,
+               size_type count = std::dynamic_extent)
+  {
+    if constexpr (E == std::dynamic_extent)
+      return Self(self.get_super().subspan(offset, count));
+    else
+      return span<element_type>(self.get_super().subspan(offset, count));
+  }
+
+private:
+  super &get_super() { return *this; }
+  const super &get_super() const { return *this; }
+};
+template<typename... Args>
+span(Args &&...args) -> span<
+    typename decltype(std::span(std::forward<Args>(args)...))::element_type,
+    decltype(std::span(std::forward<Args>(args)...))::extent>;
+
 template<typename T> constexpr size_t kMaxArraySize = PTRDIFF_MAX / sizeof(T);
 // The XDR spec requires that vectors with an unspecified length default to a
 // length of [2^32 - 1], which is also the maximum size permitted by XDR for a
@@ -429,7 +494,7 @@ public:
   }
   constexpr decltype(auto) operator[](this auto &&self, size_type i) noexcept
   {
-    assert(i < self.size());
+    x23assert(i < self.size());
     return (self.data()[i]);
   }
   constexpr decltype(auto) front(this auto &&self) { return (self[0]); }
@@ -571,8 +636,8 @@ public:
     append(std::ranges::begin(rg), std::ranges::end(rg));
   }
 
-  constexpr std::span<value_type> subspan(size_type offset = 0,
-                                          size_type count = std::dynamic_extent)
+  constexpr span<value_type> subspan(size_type offset = 0,
+                                     size_type count = std::dynamic_extent)
   {
     size_type new_size = size();
     if (offset >= new_size)
@@ -765,7 +830,7 @@ concept is_vec = std::derived_from<
 // std::span of 1-byte trivial types.
 template<typename T>
 concept is_bytespan = std::ranges::contiguous_range<T> &&
-                      std::is_trivial_v<typename T::value_type> &&
+                      std::is_scalar_v<typename T::value_type> &&
                       sizeof(typename T::value_type) == 1;
 
 // Vectors of byte-like types that can be extended with the
@@ -781,8 +846,8 @@ using Buf = Vec<uint8_t>;
 
 // Analogous to std::string_view, but can be initialized from a
 // variety of containers of std::uint8_t or char.
-struct BufView : std::span<const uint8_t> {
-  using super = std::span<const uint8_t>;
+struct BufView : span<const uint8_t> {
+  using super = span<const uint8_t>;
   BufView() noexcept : super() {}
   template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
   BufView(BS &&s) noexcept
@@ -855,7 +920,7 @@ public:
         self.resize(new_size);
         return std::move(self);
       }
-      if constexpr (std::is_trivial_v<typename Self::value_type>) {
+      if constexpr (std::is_trivially_copyable_v<typename Self::value_type>) {
         memmove(self.data(), self.data() + pos,
                 new_size * sizeof(typename Self::value_type));
         self.resize(new_size);

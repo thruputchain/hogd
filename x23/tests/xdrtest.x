@@ -201,3 +201,10 @@ struct TxEventLog {
   TxEmittedEvent events<>;
 };
 
+typedef int NotEnum;
+
+union NonEnumTag switch (NotEnum d)
+{
+case 0:
+  void;
+};

@@ -38,6 +38,9 @@ endif()
 set(X23_CPUSET_NCPUS 0 CACHE STRING
     "Number of CPUs in fixed CpuSet (0 means use system CPU_SETSIZE)")
 
+set(X23_FD_TRACE "" CACHE STRING
+  "Enable coroutine tracing (0=off, 1=on, empty=auto based on DEBUG)")
+
 set(X23_CORO_TRACE "" CACHE STRING
   "Enable coroutine tracing (0=off, 1=on, empty=auto based on NDEBUG)")
 

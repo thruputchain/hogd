@@ -69,4 +69,8 @@ public:
 // software installing a handler for any signals it is managing.
 RawSignalCbHandle signal_cb(int signal, std::function<void()> cb);
 
+// Function actually called to handle signal.  You can call this to
+// emulate a signal.
+void signal_handler(int sig);
+
 } // namespace x23

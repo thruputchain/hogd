@@ -187,7 +187,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
   }
   auto ptr = state_.take();
   auto &f = (*ptr)[fd.get()];
-  assert(!f.callbacks[write]);
+  x23assert(!f.callbacks[write]);
   if (f.poisoned) {
     pool_.make_callback(cb, EBADF);
     return;

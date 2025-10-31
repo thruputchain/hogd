@@ -213,6 +213,10 @@ concept is_{0} =)",
         "      {}\n"
         "  }};\n",
         vers.procs.size(), procnos);
+    top_ += "  enum class procs : std::uint32_t {\n";
+    for (const auto &proc : vers.procs)
+      top_ += std::format("    {} = {},\n", proc.id, proc.val);
+    top_ += "  };\n";
     if (!namespaces_.empty())
       bottom_ += format("\nnamespace {} {{", ns());
 
@@ -295,6 +299,9 @@ concept is_{0} =)",
       bottom_ += std::format("}} // namespace {}\n", ns());
     bottom_ +=
         std::format(R"(
+template<> struct x23::version_for_proc_enum<{0}::procs> {{
+  using type = {0};
+}};
 template<typename Server, template<typename> typename RetTrans,
          typename... ExtraArgs>
 struct x23::rpc_compatible<Server, {0}, RetTrans, ExtraArgs...>
@@ -445,7 +452,7 @@ Gen::show_type(const UnionBody &b, string t)
 
   if (non_enum_switch_types.find(b.switch_type) ==
       non_enum_switch_types.end()) {
-    prtop("using enum {};\n", switch_type);
+    prtop("using enum x23::AlwaysEnum<{}>::type;\n", switch_type);
   }
   prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
   prtop("inline explicit {0}({1}) noexcept;\n", t, switch_type);
@@ -591,7 +598,6 @@ struct x23::xdr_meta<struct {0}> {{
   bottom_ += std::format(R"(constexpr int
 {1}::__xdr_union_arm_number({0} discriminant)
 {{
-  using enum x23::AlwaysEnum<{0}>::type;
   switch (x23::unbool(discriminant)) {{
 )",
                          switch_type, scope(false));
