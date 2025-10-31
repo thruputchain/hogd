@@ -252,7 +252,9 @@ function(add_spec_and_types_generation)
   
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
-    add_custom_target(${target_name}_types_xdr DEPENDS ${stamp_file})
+    add_custom_target(${target_name}_types_xdr DEPENDS ${target_name}_hh)
+    # Make sure XDR generation waits for the .x file to be generated
+    add_dependencies(${target_name}_hh all_spec_and_types)
   endforeach()
 endfunction()
 
