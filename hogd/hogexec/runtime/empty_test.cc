@@ -20,9 +20,11 @@ TEST(EmptyTest, RepeatedInstantiate)
   }
 }
 
-struct EmptyTestStruct : public NativeContractTestFramework, public ::testing::TestWithParam<TestDB> {
+struct EmptyTestStruct : public NativeContractTestFramework,
+                         public ::testing::TestWithParam<TestDB> {
   EmptyTestStruct()
-    : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 };
 
@@ -77,8 +79,8 @@ TEST_P(EmptyTestStruct, Basic10)
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, EmptyTestStruct,
-    ::testing::Values(TestDB::kMockInMemory,
-                      TestDB::kHogDB),
-    test_db_to_string);
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd
