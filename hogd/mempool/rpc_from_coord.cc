@@ -245,9 +245,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   std::atomic<size_t> num_threads_done = 0;
   for (size_t thread_idx = 0; thread_idx < kNumProposalThreads; thread_idx++) {
     futures.push_back(worker_pool.submit(
-        [cb = x23::CoroCB(done), &num_threads_done, thread_idx,
-         total_num_chunks, chunks_per_thread, &ret, &transaction_nominations,
-         chunk_size, &txs, block_id, this] {
+        [cb = x23::CpuHinted(x23::CoroCB(done), x23::cpuid()),
+         &num_threads_done, thread_idx, total_num_chunks, chunks_per_thread,
+         &ret, &transaction_nominations, chunk_size, &txs, block_id, this] {
           auto timer = std::make_unique<ElapsedTimer>();
 
           // Create the chunks.
@@ -323,8 +323,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
             // `future.get()` for this thread because this thread will never
             // exit. We get around this deadlock by moving the coroutine to
             // another thread with [co_await default_coropoll().pool_.bg()].
-            // default_coropoll().pool_.make_callback(cb);
-            cb();
+            default_coropoll().pool_.make_callback(cb);
+            // cb();
           }
         }));
   }
