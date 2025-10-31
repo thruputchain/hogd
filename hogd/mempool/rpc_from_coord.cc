@@ -244,9 +244,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   std::atomic<size_t> num_threads_done = 0;
   for (size_t thread_idx = 0; thread_idx < kNumProposalThreads; thread_idx++) {
     futures.push_back(worker_pool.submit(
-        [&num_threads_done, thread_idx, kNumProposalThreads, total_num_chunks,
-         chunks_per_thread, &ret, &transaction_nominations, chunk_size, &txs,
-         block_id, this] {
+        [&num_threads_done, thread_idx, total_num_chunks, chunks_per_thread,
+         &ret, &transaction_nominations, chunk_size, &txs, block_id, this] {
           auto timer = std::make_unique<ElapsedTimer>();
 
           // Create the chunks.

@@ -157,9 +157,10 @@ private:
     // distributed across shards?
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients()[0]));
+    // We create enough executor clients such that there is one per proposal
+    // thread in [propose_batch_in_chunks()].
     exec_clients_ = MempoolExecutorRpc::get_clients(
         /*num_per_executor=*/kNumProposalThreads);
-    info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
