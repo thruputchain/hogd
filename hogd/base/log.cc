@@ -24,33 +24,6 @@
 
 namespace hogd {
 
-namespace {
-
-// log_level_to_char converts a log severity to a single character identifier
-constexpr char
-log_level_to_char(LogLevel level)
-{
-  using enum LogLevel;
-  switch (level) {
-  case kCritical:
-    return 'C';
-  case kError:
-    return 'E';
-  case kWarn:
-    return 'W';
-  case kInfo:
-    return 'I';
-  case kDebug:
-    return 'D';
-  case kTrace:
-    return 'T';
-  default:
-    return 'U';
-  }
-}
-
-} // namespace
-
 namespace detail {
 
 // logger is the logging implementation currently in use.

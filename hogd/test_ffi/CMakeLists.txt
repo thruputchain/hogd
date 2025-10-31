@@ -2,6 +2,7 @@ add_library(
     test_ffi
     SHARED
     db_context_wrapper.cc
+    logger.cc
     mock_contract.cc
     mock_runtime.cc
     syscall_handler_wrapper.cc
