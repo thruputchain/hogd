@@ -20,4 +20,65 @@ TEST(EmptyTest, RepeatedInstantiate)
   }
 }
 
+struct EmptyTestStruct : public NativeContractTestFramework, public ::testing::TestWithParam<TestDB> {
+  EmptyTestStruct()
+    : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
+};
+
+TEST_P(EmptyTestStruct, Basic1)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic2)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic3)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic4)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic5)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic6)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic7)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic8)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic9)
+{
+  // Do nothing at all
+}
+
+TEST_P(EmptyTestStruct, Basic10)
+{
+  // Do nothing at all
+}
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, EmptyTestStruct,
+    ::testing::Values(TestDB::kMockInMemory,
+                      TestDB::kHogDB),
+    test_db_to_string);
+
 } // namespace hogd
