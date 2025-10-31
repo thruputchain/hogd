@@ -317,7 +317,15 @@ public:
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop() { ss_.request_stop(); }
+  void request_stop()
+  {
+#if USE_EPOLL
+    std::lock_guard _lk(resize_lock_);
+#else  // !USE_EPOLL
+    auto _s = state_.take();
+#endif // !USE_EPOLL
+    ss_.request_stop();
+  }
   bool time_to_stop();
   int get_max_fd();
   void wake();
