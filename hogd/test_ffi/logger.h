@@ -1,32 +1,25 @@
 #pragma once
 
-#include <format>
-#include <source_location>
-#include <string_view>
-
 #include "hogd/base/log.h"
-#include "hogd/base/perthread.h"
 
 namespace hogd {
 
-class PerThreadLogger : public Logger {
+class ThreadsafeLogger : public Logger {
 public:
-  PerThreadLogger() = default;
-  ~PerThreadLogger() = default;
+  ThreadsafeLogger() : max_level_(LogLevel::kInfo) {}
+
+  ~ThreadsafeLogger() = default;
 
   void vlog(LogLevel level, std::string_view fmt,
             const std::source_location &loc, std::format_args args) override;
   void flush() override;
 
-  LogLevel get_max_log_level() const override
-  {
-    return logger_->get_max_log_level();
-  }
+  LogLevel get_max_log_level() const override { return max_level_.load(); }
 
-  void set_log_level(LogLevel level) { logger_->set_log_level(level); }
+  void set_log_level(LogLevel level) { max_level_.store(level); }
 
 private:
-  PerThread<ConsoleLogger> logger_;
+  std::atomic<LogLevel> max_level_;
 };
 
 } // namespace hogd

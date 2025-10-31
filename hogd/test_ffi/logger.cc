@@ -1,24 +1,54 @@
 #include "hogd/test_ffi/logger.h"
 
 #include <format>
+#include <iostream>
 #include <source_location>
 #include <string_view>
+#include <syncstream>
 
+#include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 
 namespace hogd {
 
 void
-PerThreadLogger::vlog(LogLevel level, std::string_view fmt,
-                      const std::source_location &loc, std::format_args args)
+ThreadsafeLogger::vlog(LogLevel level, std::string_view fmt,
+                       const std::source_location &loc, std::format_args args)
 {
-  logger_->vlog(level, fmt, loc, args);
+  // copied from ConsoleLogger::vlog
+  // check if the severity is high enough
+  if (level > max_level_)
+    return;
+
+  // record the current timestamp
+  const auto now = std::chrono::system_clock::now();
+
+  // extract the filename
+  std::vector<std::string_view> tokens = split(loc.file_name(), '/');
+  std::string_view filename = tokens.back();
+
+  // generate the log message
+  std::string buf;
+  std::format_to(std::back_inserter(buf), "{}{}{}[{:%m%d %H:%M:%OS} {}:{}]{} ",
+                 ansi_color(Style::kBold), log_level_to_char(level),
+                 ansi_color(Style::kNormal, Color::kBlue), now, filename,
+                 loc.line(), ansi_reset());
+  std::vformat_to(std::back_inserter(buf), fmt, args);
+  std::format_to(std::back_inserter(buf), "\n");
+
+  // write to stderr
+  // todo(amb): maybe write to the fd directly.
+  std::osyncstream(std::cerr) << buf;
 }
 
 void
-PerThreadLogger::flush()
+ThreadsafeLogger::flush()
 {
-  logger_->flush();
+  // copied from ConsoleLogger::flush
+  // Note: cerr doesn't buffer by default, but flush just in case it was
+  // configured differently.
+  std::cerr.flush();
 }
 
 } // namespace hogd

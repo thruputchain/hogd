@@ -66,7 +66,7 @@ log_error(std::format_string<const char *> message, std::exception const &e)
   }
 }
 
-static PerThreadLogger *global_logger = nullptr;
+ThreadsafeLogger *global_logger;
 
 void
 lazy_init()
@@ -75,7 +75,7 @@ lazy_init()
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
   if (!initialized) {
-    auto logger = std::make_unique<PerThreadLogger>();
+    auto logger = std::make_unique<ThreadsafeLogger>();
     global_logger = logger.get();
     hogd::swap_logger(std::move(logger));
     hogd_init(0, nullptr, false);
