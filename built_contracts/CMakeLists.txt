@@ -112,6 +112,7 @@ function(add_wasm_builds)
           --release
           --locked
           --frozen
+          -F guest
           ${WASM_FLAGS}
           --offline
           --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
