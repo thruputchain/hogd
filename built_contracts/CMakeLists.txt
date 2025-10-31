@@ -253,7 +253,7 @@ function(add_spec_and_types_generation)
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
     # Make sure XDR generation waits for the .x file to be generated
-    add_dependencies(${target_name}_hh all_spec_and_types)
+    add_dependencies(build_${target_name}_hh all_spec_and_types)
   endforeach()
 endfunction()
 
