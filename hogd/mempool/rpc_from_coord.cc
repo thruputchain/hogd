@@ -230,22 +230,21 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   CHECK_GT(chunk_size, 0UL);
 
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  size_t num_threads = exec_clients_.size(); // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
-  futures.reserve(num_threads);
+  futures.reserve(kNumProposalThreads);
 
   size_t total_num_chunks = (txs.size() / chunk_size);
   if (txs.size() % chunk_size) {
     total_num_chunks++;
   }
-  size_t chunks_per_thread = total_num_chunks / num_threads;
+  size_t chunks_per_thread = total_num_chunks / kNumProposalThreads;
   x23::Vec<bool> ret(txs.size(), false);
   transaction_nominations.resize(txs.size());
 
   std::atomic<size_t> num_threads_done = 0;
-  for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+  for (size_t thread_idx = 0; thread_idx < kNumProposalThreads; thread_idx++) {
     futures.push_back(worker_pool.submit(
-        [&num_threads_done, thread_idx, num_threads, total_num_chunks,
+        [&num_threads_done, thread_idx, kNumProposalThreads, total_num_chunks,
          chunks_per_thread, &ret, &transaction_nominations, chunk_size, &txs,
          block_id, this] {
           auto timer = std::make_unique<ElapsedTimer>();
@@ -253,10 +252,10 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
           // Create the chunks.
           x23::Vec<x23::Vec<SignedTransaction>> chunks;
           size_t my_num_chunks = chunks_per_thread;
-          if (total_num_chunks % num_threads != 0 &&
-              thread_idx == num_threads - 1) {
+          if (total_num_chunks % kNumProposalThreads != 0 &&
+              thread_idx == kNumProposalThreads - 1) {
             // Give the extra chunks to the last thread.
-            my_num_chunks += total_num_chunks % num_threads;
+            my_num_chunks += total_num_chunks % kNumProposalThreads;
           }
           chunks.reserve(my_num_chunks);
           for (size_t i = 0; i < my_num_chunks; i++) {
@@ -277,9 +276,11 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
               chunks.size(), {});
           async_handles.reserve(chunks.size());
           for (size_t i = 0; i < chunks.size(); i++) {
+            size_t executor_idx =
+                (thread_idx + (i * kNumProposalThreads)) % exec_clients_.size();
             async_handles.push_back(propose_batch(block_id, chunks[i],
                                                   nomination_chunks[i],
-                                                  /*executor_idx=*/thread_idx));
+                                                  executor_idx));
           }
 
           double send_rpcs_duration = timer->elapsed();
@@ -319,7 +320,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   }
 
   // TODO(jhumphri): This is a hack.
-  while (num_threads_done < num_threads) {
+  while (num_threads_done < kNumProposalThreads) {
     co_await default_coropoll().pool_.bg();
   }
 

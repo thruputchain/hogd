@@ -43,6 +43,7 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 100'000;
   static constexpr size_t kChunkSize = 10;
+  static constexpr size_t kNumProposalThreads = 4;
 
   MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
@@ -156,7 +157,8 @@ private:
     // distributed across shards?
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients()[0]));
-    exec_clients_ = MempoolExecutorRpc::get_clients(/*num_per_executor=*/2);
+    exec_clients_ = MempoolExecutorRpc::get_clients(
+        /*num_per_executor=*/kNumProposalThreads);
     info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
