@@ -231,6 +231,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   std::vector<std::future<void>> futures;
+  x23::Awaitable<void> done;
   futures.reserve(kNumProposalThreads);
 
   size_t total_num_chunks = (txs.size() / chunk_size);
@@ -244,8 +245,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   std::atomic<size_t> num_threads_done = 0;
   for (size_t thread_idx = 0; thread_idx < kNumProposalThreads; thread_idx++) {
     futures.push_back(worker_pool.submit(
-        [&num_threads_done, thread_idx, total_num_chunks, chunks_per_thread,
-         &ret, &transaction_nominations, chunk_size, &txs, block_id, this] {
+        [cb = x23::CoroCB(done), &num_threads_done, thread_idx,
+         total_num_chunks, chunks_per_thread, &ret, &transaction_nominations,
+         chunk_size, &txs, block_id, this] {
           auto timer = std::make_unique<ElapsedTimer>();
 
           // Create the chunks.
@@ -314,15 +316,24 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
                  create_chunks_duration, send_rpcs_duration,
                  wait_for_response_duration, fold_results_duration);
           }
-          num_threads_done++;
+          if (++num_threads_done == kNumProposalThreads) {
+            // When we execute [cb()] below, this thread picks up execution
+            // after the `co_await done` below--it will literally run the rest
+            // of the outer function. It would then deadlock on the call to
+            // `future.get()` for this thread because this thread will never
+            // exit. We get around this deadlock by moving the coroutine to
+            // another thread with [co_await default_coropoll().pool_.bg()].
+            // default_coropoll().pool_.make_callback(cb);
+            cb();
+          }
         }));
   }
 
   // TODO(jhumphri): This is a hack.
-  while (num_threads_done < kNumProposalThreads) {
-    co_await default_coropoll().pool_.bg();
-  }
-
+  co_await done;
+  co_await default_coropoll().pool_.bg();
+  CHECK_EQ(num_threads_done.load(std::memory_order_relaxed),
+           kNumProposalThreads);
   for (std::future<void> &future : futures) {
     future.get();
   }
