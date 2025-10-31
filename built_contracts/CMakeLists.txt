@@ -252,7 +252,6 @@ function(add_spec_and_types_generation)
   
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
-    add_custom_target(${target_name}_types_xdr DEPENDS ${target_name}_hh)
     # Make sure XDR generation waits for the .x file to be generated
     add_dependencies(${target_name}_hh all_spec_and_types)
   endforeach()
@@ -312,6 +311,7 @@ add_contract_header(manual_revert_caller)
 add_contract_header(simple_wallet)
 add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+add_dependencies(itc_erc20_header itc_erc20_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)
