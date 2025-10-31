@@ -142,9 +142,9 @@ struct RpcDispatcher : RpcService {
   MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd argdata) override
   {
     using enum msg_type;
-    assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
-           msg.body.cbody().prog == program() &&
-           msg.body.cbody().vers == version());
+    x23assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
+              msg.body.cbody().prog == program() &&
+              msg.body.cbody().vers == version());
     return with_proc_meta<version_meta, MaybeAsync<Buf>>(
         msg.body.cbody().proc, [&]<typename ProcMeta>() -> MaybeAsync<Buf> {
           if constexpr (std::is_void_v<ProcMeta>)
@@ -562,14 +562,14 @@ void
 tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>
 {
-  std::mutex m;
+  DestroyInhibit di;
   tcp_rpc_server(
       cp, port,
-      [cb = std::move(cb), _ul = std::unique_lock{m}](auto configurator) {
+      [cb = std::move(cb), _di = RefPtr(di)](auto configurator) {
         std::invoke(cb, std::move(configurator));
       },
       backlog);
-  std::unique_lock _ul(m);
+  di.destroy_wait();
 }
 
 } // namespace x23

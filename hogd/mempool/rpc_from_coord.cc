@@ -305,6 +305,36 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         open_proposal_block(block_id, /*executor_idx=*/i));
   }
 
+  // Scheduler ---
+  auto timer2 = std::make_unique<ElapsedTimer>();
+
+  SchedulerNominationResult result(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  result.scheduler_nomination().block_id = block_id;
+  Nomination &nomination = result.scheduler_nomination().nomination;
+  nomination.block_height = db_tip.height + 1;
+  nomination.prev_block_hash = db_tip.hash;
+  // [nomination.block_hash], [nomination.transaction_hashes], and
+  // [nomination.transaction_nominations] are filled in below.
+  nomination.transaction_hashes.reserve(kMaxBlockSize);
+  nomination.transaction_nominations.reserve(kMaxBlockSize);
+
+  x23::Vec<SignedTransaction> txs;
+
+  x23::CoroGuard cg;
+  auto timer3 = std::make_unique<ElapsedTimer>();
+  co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_duration = timer3->elapsed();
+
+  std::tie(nomination.transaction_hashes, txs) =
+      scheduler_->schedule(kMaxBlockSize);
+  size_t num_on_runqueue = scheduler_->size();
+  cg.reset();
+
+  double schedule_duration = timer2->elapsed();
+  // Scheduler ---
+
+  timer2 = std::make_unique<ElapsedTimer>();
   bool create_snapshot_handler_ret = co_await create_snapshot_handler;
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
@@ -323,37 +353,25 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         co_await finish_block(block_id, /*executor_idx=*/i);
       }
     }
+
+    // TODO(jhumphri): Return the txs to the scheduler *and reset the hog ages*
+    // and recover expired txs!
+    // Maybe we actually do not need to reset the hog ages since failure is rare
+    // and one failure will not impact long term fairness. Do we need to recover
+    // the expired txs either? A failure is pretty bad and unexpected, and I do
+    // not think it is worth adding complexity and overhead for recovery here
+    // for a rare event.
+    scheduler_->decrement_current_block();
+    co_await scheduler_->add_txs(txs);
+
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  double create_snapshot_and_open_block_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  SchedulerNominationResult result(
-      SchedulerNominationOutcome::SchedulerNominationOK);
-  result.scheduler_nomination().block_id = block_id;
-  Nomination &nomination = result.scheduler_nomination().nomination;
-  nomination.block_height = db_tip.height + 1;
-  nomination.prev_block_hash = db_tip.hash;
-  // [nomination.block_hash], [nomination.transaction_hashes], and
-  // [nomination.transaction_nominations] are filled in below.
-  nomination.transaction_hashes.reserve(kMaxBlockSize);
-  nomination.transaction_nominations.reserve(kMaxBlockSize);
-
-  x23::Vec<SignedTransaction> txs;
-
-  x23::CoroGuard cg;
-  auto timer2 = std::make_unique<ElapsedTimer>();
-  co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_duration = timer2->elapsed();
-
-  std::tie(nomination.transaction_hashes, txs) =
-      scheduler_->schedule(kMaxBlockSize);
-  size_t num_on_runqueue = scheduler_->size();
-  cg.reset();
-
-  double schedule_duration = timer->elapsed();
+  double wait_for_create_snapshot_and_open_block_handlers_duration =
+      timer2->elapsed();
+  double create_snapshot_and_open_block_and_schedule_duration =
+      timer->elapsed();
 
   info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
        txs.size(), num_on_runqueue);
@@ -429,13 +447,17 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   double wait_for_handles_duration = timer->elapsed();
 
-  info("wait_for_transfer_duration {}, create_snapshot_and_open_block_duration "
-       "{}, schedule_duration {}, run_on_executor_duration {}, "
+  info("wait_for_transfer_duration {}, "
+       "create_snapshot_and_open_block_and_schedule_duration "
+       "{}, wait_for_create_snapshot_and_open_block_handlers_duration {}, "
+       "schedule_duration {}, run_on_executor_duration {}, "
        "just_wait_for_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
        "wait_for_lock_duration {}",
-       wait_for_transfer_duration, create_snapshot_and_open_block_duration,
+       wait_for_transfer_duration,
+       create_snapshot_and_open_block_and_schedule_duration,
+       wait_for_create_snapshot_and_open_block_handlers_duration,
        schedule_duration, run_on_executor_duration,
        just_wait_for_executor_duration, mark_failed_txs_duration,
        create_handles_duration, get_block_hash_duration,

@@ -5,6 +5,187 @@
 
 #include <x23/uiobuf.h>
 
+namespace x23 {
+struct AltBufVec {
+  static constexpr size_t kCopyThreshold = 4096;
+
+  VecQ<Buf> bufs_;
+  size_t skip_{};
+
+  bool empty() const noexcept { return bufs_.empty(); }
+  size_t nbytes() const noexcept
+  {
+    size_t ret = -skip_;
+    for (const auto &b : bufs_)
+      ret += b.size();
+    return ret;
+  }
+  void clear()
+  {
+    bufs_.clear();
+    skip_ = 0;
+  }
+  void swap(AltBufVec &other) noexcept
+  {
+    bufs_.swap(other.bufs_);
+    std::swap(skip_, other.skip_);
+  }
+
+  void append(BufView b, size_t offset = 0)
+  {
+    if (offset)
+      b = b.subspan(offset);
+    if (backfull(b.size())) {
+      Buf &back = bufs_.emplace_back();
+      back.reserve(std::max(chunk_size(), b.size()));
+      back.append_range(b);
+    }
+    else
+      bufs_.back().append_range(b);
+  }
+  void append(Buf &&b, size_t offset = 0)
+  {
+    if (b.size() >= kCopyThreshold && (offset == 0 || empty())) {
+      bufs_.emplace_back(std::move(b));
+      if (offset)
+        trim(offset);
+    }
+    else
+      append(BufView{b}, offset);
+  }
+
+  template<std::ranges::forward_range R>
+  void move_append_range(R &&r) requires requires {
+    { std::move(*r.begin()) } -> std::same_as<Buf &&>;
+  }
+  {
+    auto it = r.begin();
+    while (it != r.end() && !backfull(r.size())) {
+      bufs_.back().append_range(*it);
+      (*it).clear();
+      ++it;
+    }
+
+    while (it != r.end()) {
+      if ((*it).size() >= kCopyThreshold) {
+        bufs_.emplace_back(std::move(*it++));
+        continue;
+      }
+
+      size_t n = 0;
+      auto eit = it;
+      while (eit != r.end() && (*eit).size() < kCopyThreshold) {
+        n += (*eit).size();
+        ++eit;
+      }
+      if (eit == r.end())
+        n = std::max(n, chunk_size());
+      Buf &back = bufs_.emplace_back();
+      back.reserve(n);
+      while (it != eit) {
+        back.append_range(*it);
+        (*it).clear();
+        ++it;
+      }
+    }
+  }
+
+  void trim(size_t n)
+  {
+    while (!bufs_.empty()) {
+      size_t frontsize = bufs_.front().size();
+      if (n < frontsize - skip_) {
+        skip_ += n;
+        return;
+      }
+      n -= frontsize - skip_;
+      skip_ = 0;
+      bufs_.pop_front(1);
+    }
+  }
+
+  Vec<iovec> to_vec()
+  {
+    Vec<iovec> ret;
+    if (!bufs_.empty()) {
+      ret.reserve(bufs_.size());
+      ret.emplace_back();
+      ret.back().iov_base = bufs_.front().data() + skip_;
+      ret.back().iov_len = bufs_.front().size() - skip_;
+      for (size_t i = 1, e = bufs_.size(); i < e; ++i) {
+        ret.emplace_back();
+        ret.back().iov_base = bufs_[i].data();
+        ret.back().iov_len = bufs_[i].size();
+      }
+    }
+    return ret;
+  }
+
+  std::expected<IoResult, Errno> write(BorrowedFd fd)
+  {
+    using enum IoResult;
+    while (!empty()) {
+      auto iov{to_vec()};
+      auto n =
+          writev(fd.get(), iov.data(), std::min<size_t>(iov.size(), IOV_MAX));
+      if (n < 0) {
+        if (errno == EAGAIN)
+          return kAgain;
+        Errno ret;
+        clear();
+        return ret;
+      }
+      trim(n);
+    }
+    return kComplete;
+  }
+
+  // Returns false on full write, true on EAGAIN, error otherwise.
+  template<typename Buf>
+  std::expected<IoResult, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
+      requires requires { append(std::forward<Buf>(buf)); }
+  {
+    using enum IoResult;
+    if (!empty() || buf.empty()) {
+      append(std::forward<Buf>(buf));
+      return kQueued;
+    }
+
+    for (size_t pos = 0, end = buf.size(); pos != end;) {
+      auto n = ::write(fd.get(), buf.data() + pos, end - pos);
+      if (n < 0) {
+        if (Errno err; err != EAGAIN) {
+          clear();
+          return err;
+        }
+        append(std::forward<Buf>(buf), pos);
+        return kAgain;
+      }
+      pos += n;
+    }
+    return kComplete;
+  }
+
+private:
+  bool backfull(size_t n) const
+  {
+    if (empty())
+      return true;
+    const auto &back = bufs_.back();
+    return back.capacity() - back.size() < n;
+  }
+
+  size_t chunk_size() const
+  {
+    static constexpr size_t kMinChunk = 2 * kCopyThreshold;
+    if (bufs_.empty())
+      return kMinChunk;
+    return std::max(kMinChunk,
+                    std::min<size_t>(2 * bufs_.back().size(), PTRDIFF_MAX));
+  }
+};
+} // namespace x23
+
 namespace {
 
 std::default_random_engine rnd;
@@ -22,7 +203,7 @@ random_buf()
 }
 
 bool
-buf_eq(x23::BufView flat, const x23::Vec<iovec> &iov)
+buf_eq(x23::BufView flat, const auto &iov)
 {
   for (const auto &v : iov) {
     if (flat.size() < v.iov_len)

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +12,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <x23/debug.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
@@ -157,7 +157,7 @@ load_cxs_uint(std::span<const uint8_t> &data)
     return first_byte;
   }
 
-  assert((first_byte & 0b0011'1111) == 63);
+  x23assert((first_byte & 0b0011'1111) == 63);
   uint8_t header = first_byte >> 6;
 
   constexpr std::array<T (*)(std::span<const uint8_t> &), 4> kCxsLoadUInt = {
@@ -166,14 +166,14 @@ load_cxs_uint(std::span<const uint8_t> &data)
       &load_cxs_integral_impl<uint32_t, T>,
       &load_cxs_integral_impl<uint64_t, T>,
   };
-  assert(header < kCxsLoadUInt.size());
+  x23assert(header < kCxsLoadUInt.size());
   return kCxsLoadUInt[header](data);
 }
 
 inline void
 store_cxs_int8_0_extra_byte(x23::Buf &buf, int64_t value)
 {
-  assert(value >= kCxsInt81ByteMin && value <= kCxsInt81ByteMax);
+  x23assert(value >= kCxsInt81ByteMin && value <= kCxsInt81ByteMax);
   // use 1 byte representation
   if (value >= 0) {
     buf.push_back(value);
@@ -189,9 +189,9 @@ template<size_t N> requires (N > 0)
 void
 store_cxs_int_extra_bytes(x23::Buf &buf, int64_t value)
 {
-  assert(value < int_canonical_bounds<N / 2>().first ||
-         value > int_canonical_bounds<N / 2>()
-                     .second); // value is in canonical range for this size
+  x23assert(value < int_canonical_bounds<N / 2>().first ||
+            value > int_canonical_bounds<N / 2>()
+                        .second); // value is in canonical range for this size
   buf.push_back(lookup_header_byte<N>());
   buf.resize_uninitialized(buf.size() + N);
   std::memcpy(buf.data() + buf.size() - N, &value, N);
@@ -229,7 +229,7 @@ cxs_int_get_function_index(T value)
 inline void
 store_cxs_uint8_0_extra_byte(x23::Buf &buf, uint64_t value)
 {
-  assert(value <= kCxsUInt81ByteMax);
+  x23assert(value <= kCxsUInt81ByteMax);
   buf.push_back(value);
 }
 
@@ -237,8 +237,9 @@ template<size_t N> requires (N > 0)
 void
 store_cxs_uint_extra_bytes(x23::Buf &buf, uint64_t value)
 {
-  assert(value > uint_canonical_upper_bound<N / 2>()); // value is in canonical
-                                                       // range for this size
+  x23assert(value >
+            uint_canonical_upper_bound<N / 2>()); // value is in canonical
+                                                  // range for this size
   buf.push_back(lookup_header_byte<N>());
   buf.resize_uninitialized(buf.size() + N);
   std::memcpy(buf.data() + buf.size() - N, &value, N);
@@ -308,13 +309,13 @@ load_cxs_int(std::span<const uint8_t> &data)
   if (first_byte <= kCxsUInt81ByteMax) {
     data = data.subspan(1);
     if (first_byte <= kCxsInt81ByteMax) {
-      assert(!(first_byte & 0b0010'0000));
+      x23assert(!(first_byte & 0b0010'0000));
       return first_byte;
     }
     int8_t signed_byte = first_byte;
     return -(((~signed_byte) & 0b0001'1111));
   }
-  assert((first_byte & 0b0011'1111) == 63);
+  x23assert((first_byte & 0b0011'1111) == 63);
   uint8_t header = first_byte >> 6;
 
   constexpr std::array<T (*)(std::span<const uint8_t> &), 4> kCxsLoadInt = {
@@ -323,7 +324,7 @@ load_cxs_int(std::span<const uint8_t> &data)
       &load_cxs_integral_impl<int32_t, T>,
       &load_cxs_integral_impl<int64_t, T>,
   };
-  assert(header < kCxsLoadInt.size());
+  x23assert(header < kCxsLoadInt.size());
   return kCxsLoadInt[header](data);
 }
 

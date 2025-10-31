@@ -37,6 +37,29 @@ enum class LogLevel {
   kTrace,    // Exact steps performed in a program (might flood the log).
 };
 
+// log_level_to_char converts a log severity to a single character identifier
+constexpr char
+log_level_to_char(LogLevel level)
+{
+  using enum LogLevel;
+  switch (level) {
+  case kCritical:
+    return 'C';
+  case kError:
+    return 'E';
+  case kWarn:
+    return 'W';
+  case kInfo:
+    return 'I';
+  case kDebug:
+    return 'D';
+  case kTrace:
+    return 'T';
+  default:
+    return 'U';
+  }
+}
+
 // kMaxLogLevel specifies which log severity should be printed at compile time
 // based on the build type.
 inline constexpr LogLevel kMaxLogLevel =

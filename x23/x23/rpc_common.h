@@ -38,7 +38,7 @@ struct XdrCallFailed : XdrException {
   static std::string make_message(const rpc_msg &m)
   {
     using enum reply_stat;
-    assert(m.body.mtype() == REPLY);
+    x23assert(m.body.mtype() == REPLY);
     if (m.body.rbody().stat() == MSG_ACCEPTED) {
       auto stat = m.body.rbody().areply().reply_data.stat();
       return std::format("RPC call failed ({})", stat);
@@ -102,7 +102,7 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  assert(ret.size() <= 0x80000003UZ);
+  x23assert(ret.size() <= 0x80000003UZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
@@ -378,9 +378,12 @@ struct RpcTraceMode {
   // doesn't exists, then checks ENV_VAR.  The contents of the
   // environment variable is as follows:
   //
-  //   * The first character of the enrivonment variable is a ','
+  //   * If the first character of the enrivonment variable is a ','
   //     character, then the more abbreviated CSV mode is selected,
   //     and the remaining characters are parsed as usual.
+  //
+  //   * If the environment variable starts "-," (minus, comma), then
+  //     no per-call logging will take place.
   //
   //   * If the environment variable is a decimal number, this is
   //     taken as a file descriptor number and logged output is
@@ -400,8 +403,11 @@ struct RpcTraceMode {
     RpcTraceMode ret;
     ret.fd = DebugFd<EnvVar>::fd();
     if (ret.fd >= 0) {
-      if (*DebugFd<EnvVar>::env_val.c_str() == ',')
+      const char *env_val = DebugFd<EnvVar>::env_val.c_str();
+      if (*env_val == ',')
         ret.mode = kCsv;
+      else if (*env_val == '-' && env_val[1] == ',')
+        ret.mode = kNone;
       else
         ret.mode = kTrace;
     }

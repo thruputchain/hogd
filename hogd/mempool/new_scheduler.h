@@ -89,6 +89,7 @@ public:
   void cycle_groups(const ContractAddress &account);
 
   void increment_current_block() { current_block_++; }
+  void decrement_current_block() { current_block_--; }
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.

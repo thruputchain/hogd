@@ -595,4 +595,13 @@ template<typename Server, typename VersMeta,
 concept implements_rpc =
     rpc_compatible<Server, VersMeta, RetTrans, ExtraArgs...>::value;
 
+// A type allowing version metadata to be associated with an enum
+// representing proc numbers in an RPC interface.
+template<typename ProcEnum> requires std::is_enum_v<ProcEnum>
+struct version_for_proc_enum;
+
+// True if E represents procedures in a RPC program/version interface.
+template<typename E>
+concept is_proc_enum = requires { typename version_for_proc_enum<E>::type; };
+
 } // namespace x23
