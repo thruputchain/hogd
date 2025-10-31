@@ -157,6 +157,11 @@ private:
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients()[0]));
     exec_clients_ = MempoolExecutorRpc::get_clients();
+    x23::Vec<exec_sched_client_t> more_clients =
+        MempoolExecutorRpc::get_clients();
+    for (exec_sched_client_t &c : more_clients) {
+      exec_clients_.push_back(c);
+    }
     info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
