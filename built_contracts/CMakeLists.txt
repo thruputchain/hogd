@@ -57,17 +57,24 @@ add_xdr(roundtrip_hh
   ./integration_test_contracts/xdr/roundtrip.x
 )
 
-add_custom_target(build_roundtrip_rs DEPENDS ${generated_rs_files})
+set(roundtrip_rs_stamp ${CMAKE_CURRENT_BINARY_DIR}/roundtrip_rs.stamp)
+add_custom_command(
+  OUTPUT ${roundtrip_rs_stamp}
+  COMMAND ${CMAKE_COMMAND} -E touch ${roundtrip_rs_stamp}
+  DEPENDS ${generated_rs_files}
+  COMMENT "Roundtrip RS files generated"
+)
+add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
 # Build all WASM targets with separate cargo commands in one custom command
 function(add_wasm_builds)
   # ARGN contains all the target names passed to the function
   
-  # Common dependencies (no generated_rs_files - use target deps to avoid parallel generation)
+  # Common dependencies (use stamp file to ensure roundtrip.rs files exist)
   set(common_depends 
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
-    build_roundtrip_rs)
+    ${roundtrip_rs_stamp})
   
   # If you update the contracts (i.e. add new contracts, or change dependencies)
   # then Cargo.lock will change, and the build will fail.  If that happens,
@@ -86,9 +93,15 @@ function(add_wasm_builds)
   foreach(target_name ${ARGN})
     list(APPEND all_unoptimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm)
     list(APPEND all_optimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+    
+    # Get all .rs files but filter out generated roundtrip.rs
+    file(GLOB target_rs_files 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+    
     list(APPEND all_depends
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+      ${target_rs_files})
     
     # Add individual cargo build command for this target
     list(APPEND build_commands
@@ -156,27 +169,44 @@ function(add_spec_and_types_generation)
   # Build lists for spec targets
   foreach(target_name ${ARG_SPEC_TARGETS})
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
+    
+    # Get all .rs files but filter out generated roundtrip.rs
+    file(GLOB target_src_rs_files 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_src_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+    file(GLOB target_bin_rs_files 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
+    
     list(APPEND all_depends 
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
+      ${target_src_rs_files}
+      ${target_bin_rs_files})
     list(APPEND all_bins "--bin" "generate_spec_${target_name}")
   endforeach()
   
   # Build lists for types targets
   foreach(target_name ${ARG_TYPES_TARGETS})
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.x)
+    
+    # Get all .rs files but filter out generated roundtrip.rs
+    file(GLOB target_src_rs_files 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+    list(FILTER target_src_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
+    file(GLOB target_bin_rs_files 
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
+    
     list(APPEND all_depends 
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/bin/*.rs)
+      ${target_src_rs_files}
+      ${target_bin_rs_files})
     list(APPEND all_bins "--bin" "generate_types_${target_name}")
   endforeach()
   
-  # Add common dependencies (no generated_rs_files - use target deps to avoid parallel generation)
+  # Add common dependencies (use stamp file to ensure roundtrip.rs files exist)
   list(APPEND all_depends 
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
-    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+    ${roundtrip_rs_stamp})
   
   # Build the generation commands list first
   set(gen_commands "")
@@ -260,17 +290,11 @@ endfunction()
 # Build all WASMs in one cargo invocation
 add_wasm_builds(fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20)
 
-# Make WASM builds wait for XDR generation (can run in parallel with spec)
-add_dependencies(all_unoptimized_wasms cxs_roundtrip_rs txs_roundtrip_rs)
-
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
 add_spec_and_types_generation(
   SPEC_TARGETS fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20
   TYPES_TARGETS itc_erc20
 )
-
-# Make spec builds wait for XDR generation (can run in parallel with WASM)
-add_dependencies(all_spec_and_types cxs_roundtrip_rs txs_roundtrip_rs)
 
 # Make all headers wait for all specs to be generated
 add_dependencies(all_wasm_headers all_spec_and_types)
