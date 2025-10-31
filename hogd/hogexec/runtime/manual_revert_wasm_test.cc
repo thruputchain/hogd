@@ -7,6 +7,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_test.h"
+#include "built_contracts/manual_revert_test.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -17,6 +18,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -95,17 +97,44 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                ADD_FAILURE() << "Function call should have succeeded";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             if (res.value().value().is_ok()) {
+               ADD_FAILURE()
+                   << "Function call should have returned a contract error";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             auto err = res.value().value().err();
+             auto expected_err = manual_revert_test::Error(
+                 manual_revert_test::ErrorType::Contract);
+             expected_err.contract_error() = manual_revert_test::ContractError(
+                 manual_revert_test::ContractErrorType::Syscall);
+             // Error code is arbitrarily chosen, but set specifically within
+             // the manual_revert_test wasm
+             expected_err.contract_error().syscall_error() = std::to_underlying(
+                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+             if (err != expected_err) {
+               ADD_FAILURE()
+                   << "Function call should have returned a contract error";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
 
              // The manual revert should have succeeded (no error)
              // and storage should be reverted (tested by check_storage_exists)
              auto [storage_check, _gas2] =
                  client.invoke<"check_storage_exists">(handler);
              if (!storage_check.has_value()) {
+               ADD_FAILURE()
+                   << "Function call should have succeeded and returned a bool";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Storage should not exist due to manual revert
-             if (storage_check.value().value()) {
+             if (!storage_check.value().value().is_ok()) {
+               ADD_FAILURE() << "Function call encountered unexpected error";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (storage_check.value().value().ok()) {
+               ADD_FAILURE() << "Storage check should have returned false "
+                                "(revert should wipe changes)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -161,7 +190,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
 //
 TEST_P(ManualRevertWasmTest, BasicNoRevert)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Create a native contract that calls the WASM contract without revert
@@ -189,7 +218,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
              }
 
              // Storage should exist (no revert)
-             if (!storage_check.value().value()) {
+             if (!storage_check.value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -243,7 +272,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
 //
 TEST_P(ManualRevertWasmTest, NestedManualRevert)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Create a native contract that tests nested manual revert
@@ -314,7 +343,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
 //
 TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Test error types 1-4 (should all trigger manual revert)
@@ -391,7 +420,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 //
 TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Create a native contract that calls test_error_type_revert with
@@ -460,7 +489,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 //
 TEST_P(ManualRevertWasmTest, StorageManualRevert)
 {
-  using client_t = ContractTraitClient<ManualRevertTest>;
+  using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
   // Test with should_revert=true (storage should be reverted)
