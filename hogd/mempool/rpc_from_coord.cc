@@ -230,7 +230,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   CHECK_GT(chunk_size, 0UL);
 
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  size_t num_threads = 1; // worker_pool.worker_count();
+  size_t num_threads = 2; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
