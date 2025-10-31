@@ -37,7 +37,7 @@ public:
 
   bool try_lock(this auto &&self, bool want_notify = false) noexcept
   {
-    int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
+    auto prev = self.status_.exchange(kLocked, std::memory_order_acquire);
     x23assert(prev == kUnlocked || prev == kLocked ||
               prev == kLockedWantNotify);
     if (prev == kLockedWantNotify || (prev == kLocked && want_notify))
@@ -56,7 +56,7 @@ public:
   }
   void unlock() noexcept
   {
-    if (int old = status_.exchange(kUnlocked); old == kLockedWantNotify)
+    if (auto old = status_.exchange(kUnlocked); old == kLockedWantNotify)
       status_.notify_all();
     else
       x23assert(old == kLocked);
@@ -69,7 +69,7 @@ public:
   void block_until_free() noexcept
   {
     for (;;) {
-      int prev = status_.load(std::memory_order_acquire);
+      auto prev = status_.load(std::memory_order_acquire);
       if (prev == kLocked)
         status_.compare_exchange_weak(prev, kLockedWantNotify,
                                       std::memory_order_acquire);
@@ -83,15 +83,15 @@ public:
 
 private:
 #ifdef NDEBUG
-  static constexpr int kUnlocked = 0;
-  static constexpr int kLocked = 1;
-  static constexpr int kLockedWantNotify = 2;
+  static constexpr uint8_t kUnlocked = 0;
+  static constexpr uint8_t kLocked = 1;
+  static constexpr uint8_t kLockedWantNotify = 2;
 #else  // !NDEBUG
-  static constexpr int kUnlocked = 0x4e3b3298;
-  static constexpr int kLocked = 0x309eba84;
-  static constexpr int kLockedWantNotify = 0x24ee0ff5;
+  static constexpr uint8_t kUnlocked = 0x3b;
+  static constexpr uint8_t kLocked = 0x9e;
+  static constexpr uint8_t kLockedWantNotify = 0xf5;
 #endif // !NDEBUG
-  std::atomic_int status_{kUnlocked};
+  std::atomic_uint8_t status_{kUnlocked};
 };
 
 // A shared version of TestLock.  The constructor argument describes
