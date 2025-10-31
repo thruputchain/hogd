@@ -1,9 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <format>
 #include <source_location>
 #include <string_view>
-#include <format>
 
 #include "hogd/base/log.h"
 
