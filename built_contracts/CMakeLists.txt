@@ -252,7 +252,7 @@ function(add_spec_and_types_generation)
   
   foreach(target_name ${ARG_TYPES_TARGETS})
     add_xdr(${target_name}_hh ./${target_name}.x)
-    add_custom_target(${target_name}_types_xdr DEPENDS all_spec_and_types)
+    add_custom_target(${target_name}_types_xdr DEPENDS ${stamp_file})
   endforeach()
 endfunction()
 
