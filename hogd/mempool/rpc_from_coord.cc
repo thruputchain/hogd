@@ -230,7 +230,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   CHECK_GT(chunk_size, 0UL);
 
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  size_t num_threads = 4; // worker_pool.worker_count();
+  size_t num_threads = exec_clients_.size(); // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
@@ -277,9 +277,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
               chunks.size(), {});
           async_handles.reserve(chunks.size());
           for (size_t i = 0; i < chunks.size(); i++) {
-            async_handles.push_back(
-                propose_batch(block_id, chunks[i], nomination_chunks[i],
-                              /*executor_idx=*/i % exec_clients_.size()));
+            async_handles.push_back(propose_batch(block_id, chunks[i],
+                                                  nomination_chunks[i],
+                                                  /*executor_idx=*/thread_idx));
           }
 
           double send_rpcs_duration = timer->elapsed();

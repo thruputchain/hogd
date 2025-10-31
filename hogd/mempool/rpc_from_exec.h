@@ -54,7 +54,7 @@ public:
                               .event = event_card};
   }
 
-  static x23::Vec<exec_sched_client_t> get_clients()
+  static x23::Vec<exec_sched_client_t> get_clients(size_t num_per_executor)
   {
     x23::Vec<ExecCard> cards;
     Registration::registration().executors_registered(&cards);
@@ -63,9 +63,11 @@ public:
     ret.reserve(cards.size());
 
     for (const ExecCard &card : cards) {
-      ret.push_back(create_client<ExecutorSched1>(
-          server_address_to_sockaddr(card.address), /*retry=*/false,
-          /*max_message_size=*/Executor::kMessageSize));
+      for (size_t i = 0; i < num_per_executor; i++) {
+        ret.push_back(create_client<ExecutorSched1>(
+            server_address_to_sockaddr(card.address), /*retry=*/false,
+            /*max_message_size=*/Executor::kMessageSize));
+      }
     }
     return ret;
   }
