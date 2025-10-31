@@ -88,7 +88,7 @@ public:
       coordinator_sched_server_.shut_down();
 
       event_exec_server_.shut_down();
-      event_sched_server_.shut_down();
+      // event_sched_server_.shut_down();
 
       db_scheduler_server_->shut_down();
       db_scheduler_server_.reset();

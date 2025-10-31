@@ -128,10 +128,10 @@ private:
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);
 
 class TestEventAggregatorSchedServer
-  : public RpcServer<TestEventAggregatorSchedRpc> {
+  : public RpcSvc<TestEventAggregatorSchedRpc> {
 public:
   TestEventAggregatorSchedServer(TestEventAggregator &event_aggregator)
-    : RpcServer(event_aggregator)
+    : RpcSvc(event_aggregator)
   {}
 };
 
