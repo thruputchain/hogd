@@ -1,5 +1,10 @@
 #pragma once
 
+#include <atomic>
+#include <source_location>
+#include <string_view>
+#include <format>
+
 #include "hogd/base/log.h"
 
 namespace hogd {

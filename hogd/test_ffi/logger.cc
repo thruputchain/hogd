@@ -1,10 +1,14 @@
 #include "hogd/test_ffi/logger.h"
 
+#include <chrono>
 #include <format>
 #include <iostream>
+#include <iterator>
 #include <source_location>
+#include <string>
 #include <string_view>
 #include <syncstream>
+#include <vector>
 
 #include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
