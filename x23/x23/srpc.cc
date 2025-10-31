@@ -62,7 +62,7 @@ void
 SRpcFd::go(const CpuSet *cpus)
 {
   // If this fails, you have neither clients nor servers.
-  assert(refcount() || !srvmap_.empty());
+  x23assert(refcount() || !srvmap_.empty());
 
   if (ignore_sigpipe) {
     ignore_sigpipe = false;
@@ -207,11 +207,11 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
     }
 
     auto calls = calls_.take();
-    for (auto &it : q)
+    for (auto &it : q) {
       if (it.replycb_) {
-        assert(it.data_.size() >= 36 &&
-               getbe<uint32_t>(it.data_.data() + 8) == uint32_t(CALL) &&
-               getbe<uint32_t>(it.data_.data() + 12) == 2);
+        x23assert(it.data_.size() >= 36 &&
+                  getbe<uint32_t>(it.data_.data() + 8) == uint32_t(CALL) &&
+                  getbe<uint32_t>(it.data_.data() + 12) == 2);
         Xid xid = getbe<uint32_t>(it.data_.data() + 4);
         if (!xid)
           putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
@@ -220,10 +220,11 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
         while (!calls->cbmap_.try_emplace(xid, std::move(it.replycb_)).second)
           putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
       }
+    }
     calls.reset();
 
-    wrbuf.move_append_range(
-        q | std::views::transform(std::mem_fn(&WriteItem::data_)));
+    for (auto &it : q)
+      wrbuf.append(std::move(it.data_));
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {

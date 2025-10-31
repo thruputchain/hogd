@@ -620,17 +620,16 @@ main()
 {
   // You only need this if you want to block the main thread while
   // RPCs are being serviced.
-  std::mutex m;
+  x23:DestroyInhibit di;
 
   auto [port, lfd] =
-      tcp_rpc_server(cp, 5665, [lk=std::unique_lock{m}](auto c) {
+      tcp_rpc_server(cp, 5665, [lk=RefPtr(di)](auto c) {
         c->server(&impl, myvers{});
       });
 
   // Wait until moved lambda is destroyed (will happen if accept
   // returns an error or cp is destroyed).
-  m.lock();
-  m.unlock();
+  di.destroy_wait();
 }
 ```
 

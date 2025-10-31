@@ -3,31 +3,43 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <mutex>
 #include <utility>
 
+#include <x23/debug.h>
 #include <x23/refcnt.h>
 #include <x23/threadpool.h>
 #include <x23/utility.h>
 
 namespace x23 {
 
-// A simple futex-based mutex that, unlike std::mutex, lets you test
-// whether or not the lock is busy without acquiring the lock or
-// exclusively caching it.  Also provides a block_while_inhibited()
-// hook for derived types implementing shared locks.
+// A simple futex-based mutex with some features missing from
+// std::mutex:
 //
-// Has the same interface as std::mutex, so can be used with
-// std::lock_guard.
+// 1. As the name suggests, you can *test* whether or not the lock is
+//    busy without acquiring or exclusively caching it.  The busy()
+//    method tells you whether a TestLock is locked.
+//
+// 2. You can unlock the TestLock in a different thread from the one
+//    in which you acquired it, which is important for coroutines that
+//    may migrate across threads.  Note you still can't lock a
+//    TestLock in a coroutine exexuting in ThreadPool, as coroutines
+//    should never block, but it is safe to use try_lock().
+//
+// 3. There's a block_while_inhibited() hook for derived types
+//    implementing shared locks.
+//
+// TestLock has the same interface as std::mutex, so it can be used
+// with std::lock_guard or std::unique_lock.
 class TestLock {
 public:
   using Holder = std::unique_lock<TestLock>;
 
   bool try_lock(this auto &&self, bool want_notify = false) noexcept
   {
-    int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
-    assert(prev == kUnlocked || prev == kLocked || prev == kLockedWantNotify);
+    auto prev = self.status_.exchange(kLocked, std::memory_order_acquire);
+    x23assert(prev == kUnlocked || prev == kLocked ||
+              prev == kLockedWantNotify);
     if (prev == kLockedWantNotify || (prev == kLocked && want_notify))
       prev =
           self.status_.exchange(kLockedWantNotify, std::memory_order_acquire);
@@ -44,10 +56,10 @@ public:
   }
   void unlock() noexcept
   {
-    if (int old = status_.exchange(kUnlocked); old == kLockedWantNotify)
+    if (auto old = status_.exchange(kUnlocked); old == kLockedWantNotify)
       status_.notify_all();
     else
-      assert(old == kLocked);
+      x23assert(old == kLocked);
   }
 
   bool busy() const noexcept
@@ -57,12 +69,12 @@ public:
   void block_until_free() noexcept
   {
     for (;;) {
-      int prev = status_.load(std::memory_order_acquire);
+      auto prev = status_.load(std::memory_order_acquire);
       if (prev == kLocked)
         status_.compare_exchange_weak(prev, kLockedWantNotify,
                                       std::memory_order_acquire);
       else
-        assert(prev == kUnlocked || prev == kLockedWantNotify);
+        x23assert(prev == kUnlocked || prev == kLockedWantNotify);
       if (prev == kUnlocked)
         return;
       status_.wait(kLockedWantNotify);
@@ -71,15 +83,15 @@ public:
 
 private:
 #ifdef NDEBUG
-  static constexpr int kUnlocked = 0;
-  static constexpr int kLocked = 1;
-  static constexpr int kLockedWantNotify = 2;
+  static constexpr uint8_t kUnlocked = 0;
+  static constexpr uint8_t kLocked = 1;
+  static constexpr uint8_t kLockedWantNotify = 2;
 #else  // !NDEBUG
-  static constexpr int kUnlocked = 0x4e3b3298;
-  static constexpr int kLocked = 0x309eba84;
-  static constexpr int kLockedWantNotify = 0x24ee0ff5;
+  static constexpr uint8_t kUnlocked = 0x3b;
+  static constexpr uint8_t kLocked = 0x9e;
+  static constexpr uint8_t kLockedWantNotify = 0xf5;
 #endif // !NDEBUG
-  std::atomic_int status_{kUnlocked};
+  std::atomic_uint8_t status_{kUnlocked};
 };
 
 // A shared version of TestLock.  The constructor argument describes

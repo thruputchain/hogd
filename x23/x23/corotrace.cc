@@ -1,13 +1,4 @@
 
-#include "x23/config.h"
-
-#if HAVE_STD_STACKTRACE
-#include <stacktrace>
-#elif HAVE_BACKTRACE_SYMBOLS
-#include <execinfo.h>
-#include <stdlib.h>
-#endif // HAVE_BACKTRACE_SYMBOLS
-
 #include <unistd.h>
 
 #include "x23/corotrace.h"
@@ -46,22 +37,14 @@ trace_unhandled_exception(const PromiseBase *pb) noexcept
   } catch (...) {
     msg += "Exception type not derived from std::exception\n";
   }
-#if HAVE_STD_STACKTRACE
-  uformat_to(&msg, "Stack trace:\n{}", std::stacktrace::current());
-#elif HAVE_BACKTRACE_SYMBOLS
-  void *bt[64];
-  int n = backtrace(bt, 64);
-  if (n > 0) {
-    msg += "Stack trace:\n";
-    char **syms = backtrace_symbols(bt, n);
-    for (int i = 0; i < n; ++i) {
-      msg += "  ";
-      msg += syms[i];
-      msg += '\n';
-    }
-    free(syms);
+  {
+    static const std::string stmsg("Stack trace:\n");
+    msg += stmsg;
+    size_t oldlen = msg.size();
+    msg = stacktrace(2, std::move(msg));
+    if (msg.size() == oldlen)
+      msg.resize(msg.size() - stmsg.size());
   }
-#endif // HAVE_BACKTRACE_SYMBOLS
 #if X23_CORO_TRACE
   uformat_to(&msg, "Coroutine trace:\n");
   msg = trace(pb, 2, std::move(msg));

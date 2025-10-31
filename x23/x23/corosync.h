@@ -88,7 +88,7 @@ public:
   [[nodiscard]] auto lock(this Self &self, LockerState *ls)
   {
     // LockerState can only be used for one lock at a time
-    assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
+    x23assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
 
     if constexpr (requires { self.block_while_inhibited(); })
       // Self is a CoroSharedLock
@@ -172,7 +172,7 @@ private:
   {
     LockerState *lscopy = ls;
     if (last_.compare_exchange_strong(lscopy, nullptr)) {
-      assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
+      x23assert(ls->next_.load(std::memory_order_relaxed) == nullptr);
       return nullptr;
     }
     std::coroutine_handle<> h;
@@ -291,7 +291,7 @@ struct CoroGuard : CoroLock::LockerState {
   // Must be co_awaited and must be called on lvalue CoroGuard
   [[nodiscard]] auto operator()(std::derived_from<CoroLock> auto &lk) &
   {
-    assert(!lkp_);
+    x23assert(!lkp_);
     lkp_ = &lk;
     return lkp_->lock(this);
   }
@@ -313,12 +313,12 @@ struct CoroGuard : CoroLock::LockerState {
   // if the reset_and_return were followed by a "co_return t;".
   [[nodiscard]] auto reset_and_return()
   {
-    assert(lkp_);
+    x23assert(lkp_);
     return std::exchange(lkp_, nullptr)->unlock_and_return(this);
   }
   [[nodiscard]] auto reset_and_return(auto &&t)
   {
-    assert(lkp_);
+    x23assert(lkp_);
     return std::exchange(lkp_, nullptr)
         ->unlock_and_return(this, std::forward<decltype(t)>(t));
   }
@@ -427,7 +427,7 @@ public:
   ~CoroSem()
   {
     // If this fails you destroyed a CoroSem with waiters
-    assert(!next_);
+    x23assert(!next_);
   }
 
   [[nodiscard]] auto acquire() noexcept { return Downer{*this}; }
@@ -468,7 +468,7 @@ private:
     }
     void await_suspend(auto h SLOC_DECL) noexcept
     {
-      assert(ul_);
+      x23assert(ul_);
 #if X23_CORO_TRACE
       if (PromiseBase *base = PromiseBase::get(h))
         base->suspension_ = sloc;
