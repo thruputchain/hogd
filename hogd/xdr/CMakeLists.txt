@@ -7,7 +7,6 @@ add_xdr(
   ../../protocol/catchup.x
   ../../protocol/ci_server.x
   ../../protocol/contract.x
-  ../../protocol/contract_error.x
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x
   ../../protocol/discovery.x
