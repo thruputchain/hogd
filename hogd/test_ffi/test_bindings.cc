@@ -274,6 +274,18 @@ try_commit_transaction(void *syscall_handler) noexcept
   }
 }
 
+TestFFIErrorCode
+abort_transaction(void *syscall_handler) noexcept
+{
+  if (!syscall_handler) {
+    error("abort_transaction error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  context->to_handler().abort_transaction();
+  return kTestFFIErrorCodeNone;
+}
+
 constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
 
 TestFFIErrorCode
@@ -534,6 +546,12 @@ struct ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler)
 {
   return hogd::try_commit_transaction(syscall_handler);
+}
+
+TestFFIErrorCode
+abort_transaction(void *syscall_handler)
+{
+  return hogd::abort_transaction(syscall_handler);
 }
 
 struct ForeignHostFnResult
