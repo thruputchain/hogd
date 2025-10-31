@@ -22,6 +22,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
@@ -65,6 +66,8 @@ log_error(std::format_string<const char *> message, std::exception const &e)
   }
 }
 
+ThreadsafeLogger *global_logger;
+
 void
 lazy_init()
 {
@@ -72,6 +75,9 @@ lazy_init()
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
   if (!initialized) {
+    auto logger = std::make_unique<ThreadsafeLogger>();
+    global_logger = logger.get();
+    hogd::swap_logger(std::move(logger));
     hogd_init(0, nullptr, false);
     initialized = true;
   }
@@ -542,8 +548,7 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 void
 enable_syscall_logging()
 {
-  hogd::swap_logger(
-      std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
+  hogd::global_logger->set_log_level(hogd::LogLevel::kTrace);
 }
 
 TestFFIErrorCode
