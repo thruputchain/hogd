@@ -229,48 +229,104 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 {
   CHECK_GT(chunk_size, 0UL);
 
-  // Create the chunks.
-  size_t num_chunks =
-      (txs.size() / chunk_size) + ((txs.size() % chunk_size) ? 1 : 0);
-  x23::Vec<x23::Vec<SignedTransaction>> chunks;
-  chunks.reserve(num_chunks);
-  for (size_t i = 0; i < num_chunks; i++) {
-    auto end =
-        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * chunk_size) : txs.end();
-    chunks.emplace_back(txs.begin() + (i * chunk_size), end);
-    CHECK_LE(chunks.back().size(), chunk_size);
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  size_t num_threads = 1; // worker_pool.worker_count();
+  std::vector<std::future<void>> futures;
+  futures.reserve(num_threads);
+
+  size_t total_num_chunks = (txs.size() / chunk_size);
+  if (txs.size() % chunk_size) {
+    total_num_chunks++;
+  }
+  size_t chunks_per_thread = total_num_chunks / num_threads;
+  x23::Vec<bool> ret(txs.size(), false);
+  transaction_nominations.resize(txs.size());
+
+  std::atomic<size_t> num_threads_done = 0;
+  for (size_t thread_idx = 0; thread_idx < num_threads; thread_idx++) {
+    futures.push_back(worker_pool.submit(
+        [&num_threads_done, thread_idx, num_threads, total_num_chunks,
+         chunks_per_thread, &ret, &transaction_nominations, chunk_size, &txs,
+         block_id, this] {
+          auto timer = std::make_unique<ElapsedTimer>();
+
+          // Create the chunks.
+          x23::Vec<x23::Vec<SignedTransaction>> chunks;
+          size_t my_num_chunks = chunks_per_thread;
+          if (total_num_chunks % num_threads != 0 &&
+              thread_idx == num_threads - 1) {
+            // Give the extra chunks to the last thread.
+            my_num_chunks += total_num_chunks % num_threads;
+          }
+          chunks.reserve(my_num_chunks);
+          for (size_t i = 0; i < my_num_chunks; i++) {
+            size_t chunk_offset = thread_idx * chunks_per_thread + i;
+            auto end = (chunk_offset < total_num_chunks - 1)
+                           ? txs.begin() + ((chunk_offset + 1) * chunk_size)
+                           : txs.end();
+            chunks.emplace_back(txs.begin() + (chunk_offset * chunk_size), end);
+            CHECK_LE(chunks.back().size(), chunk_size);
+          }
+
+          double create_chunks_duration = timer->elapsed();
+          timer = std::make_unique<ElapsedTimer>();
+
+          // Send the RPCs.
+          x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
+          x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(
+              chunks.size(), {});
+          async_handles.reserve(chunks.size());
+          for (size_t i = 0; i < chunks.size(); i++) {
+            async_handles.push_back(
+                propose_batch(block_id, chunks[i], nomination_chunks[i],
+                              /*executor_idx=*/i % exec_clients_.size()));
+          }
+
+          double send_rpcs_duration = timer->elapsed();
+          timer = std::make_unique<ElapsedTimer>();
+
+          // Wait for the RPC responses.
+          x23::Vec<x23::Vec<bool>> ret_chunks(chunks.size(), {});
+          for (size_t i = 0; i < chunks.size(); i++) {
+            // TODO(jhumphri): Is waiting synchronously on the handle ok?
+            x23::Vec<bool> ret_chunk = async_handles[i]();
+            ret_chunks[i] = ret_chunk;
+          }
+
+          double wait_for_response_duration = timer->elapsed();
+          timer = std::make_unique<ElapsedTimer>();
+
+          // Fold the results.
+          size_t offset = thread_idx * chunks_per_thread * chunk_size;
+          for (size_t i = 0; i < chunks.size(); i++) {
+            CHECK_EQ(ret_chunks[i].size(), nomination_chunks[i].size());
+            for (size_t j = 0; j < ret_chunks[i].size(); j++) {
+              ret[offset] = ret_chunks[i][j];
+              transaction_nominations[offset] = nomination_chunks[i][j];
+              offset++;
+            }
+          }
+
+          double fold_results_duration = timer->elapsed();
+          if (thread_idx == 0) {
+            info("create_chunks_duration {}, send_rpcs_duration {}, "
+                 "wait_for_response_duration {}, fold_results_duration {}",
+                 create_chunks_duration, send_rpcs_duration,
+                 wait_for_response_duration, fold_results_duration);
+          }
+          num_threads_done++;
+        }));
   }
 
-  // Send the RPCs.
-  x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
-  x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
-  async_handles.reserve(num_chunks);
-  for (size_t i = 0; i < num_chunks; i++) {
-    async_handles.push_back(
-        propose_batch(block_id, chunks[i], nomination_chunks[i],
-                      /*executor_idx=*/i % exec_clients_.size()));
+  // TODO(jhumphri): This is a hack.
+  while (num_threads_done < num_threads) {
+    co_await default_coropoll().pool_.bg();
   }
 
-  // Wait for the RPC responses.
-  x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
-  for (size_t i = 0; i < num_chunks; i++) {
-    x23::Vec<bool> ret_chunk = co_await async_handles[i];
-    ret_chunks[i] = ret_chunk;
+  for (std::future<void> &future : futures) {
+    future.get();
   }
-
-  // Fold the results.
-  x23::Vec<bool> ret;
-  ret.reserve(txs.size());
-  transaction_nominations.reserve(txs.size());
-  for (size_t i = 0; i < num_chunks; i++) {
-    for (bool r : ret_chunks[i]) {
-      ret.push_back(r);
-    }
-    for (NominatedTransaction &nominated_tx : nomination_chunks[i]) {
-      transaction_nominations.push_back(nominated_tx);
-    }
-  }
-
+  CHECK_EQ(ret.size(), txs.size());
   co_return ret;
 }
 
@@ -354,13 +410,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       }
     }
 
-    // TODO(jhumphri): Return the txs to the scheduler *and reset the hog ages*
-    // and recover expired txs!
-    // Maybe we actually do not need to reset the hog ages since failure is rare
-    // and one failure will not impact long term fairness. Do we need to recover
-    // the expired txs either? A failure is pretty bad and unexpected, and I do
-    // not think it is worth adding complexity and overhead for recovery here
-    // for a rare event.
+    // TODO(jhumphri): Return the txs to the scheduler *and reset the hog
+    // ages* and recover expired txs! Maybe we actually do not need to reset
+    // the hog ages since failure is rare and one failure will not impact long
+    // term fairness. Do we need to recover the expired txs either? A failure
+    // is pretty bad and unexpected, and I do not think it is worth adding
+    // complexity and overhead for recovery here for a rare event.
     scheduler_->decrement_current_block();
     co_await scheduler_->add_txs(txs);
 
@@ -387,13 +442,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   timer = std::make_unique<ElapsedTimer>();
 
+  // TODO(jhumphri): [propose_batch_in_chunks] should be parallelized.
+
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks_handle =
       propose_batch_in_chunks(block_id, txs, nomination.transaction_nominations,
                               kChunkSize);
 
-  timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
-  double just_wait_for_executor_duration = timer2->elapsed();
   double run_on_executor_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
@@ -450,16 +505,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   info("wait_for_transfer_duration {}, "
        "create_snapshot_and_open_block_and_schedule_duration "
        "{}, wait_for_create_snapshot_and_open_block_handlers_duration {}, "
-       "schedule_duration {}, run_on_executor_duration {}, "
-       "just_wait_for_executor_duration {}, "
+       "schedule_duration {}, "
+       "run_on_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
        "wait_for_lock_duration {}",
        wait_for_transfer_duration,
        create_snapshot_and_open_block_and_schedule_duration,
        wait_for_create_snapshot_and_open_block_handlers_duration,
-       schedule_duration, run_on_executor_duration,
-       just_wait_for_executor_duration, mark_failed_txs_duration,
+       schedule_duration, run_on_executor_duration, mark_failed_txs_duration,
        create_handles_duration, get_block_hash_duration,
        wait_for_handles_duration, wait_for_lock_duration);
 
