@@ -419,7 +419,10 @@ private:
     if ((fdp->ready_ & epflags[write]) || mode != kActive)
       if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
-        wi(mode == kActive ? 0 : EBADF);
+        // Need to run in another thread in case the callback needs a
+        // shared resize_lock_ and someone is trying to lock it
+        // exclusively.
+        pool_.make_callback(wi, mode == kActive ? 0 : EBADF);
       }
   }
   void docbs(const FdPtr &fdp)

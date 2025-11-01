@@ -11,7 +11,7 @@
 #include <x23/threadpool.h>
 #include <x23/utility.h>
 
-#define X23_TRACE_SHLOCK 1
+#define X23_TRACE_SHLOCK 0
 
 namespace x23 {
 
@@ -139,19 +139,19 @@ class SharedLock : public TestLock {
         count.fetch_add(1);
         if (!tl_->busy()) {
 #if X23_TRACE_SHLOCK
-	  auto id = std::this_thread::get_id();
+          auto id = std::this_thread::get_id();
           for (unsigned i = 0; i < slockers_.size(); ++i) {
-	    if (slockers_[i] == std::thread::id{} || slockers_[i] == id) {
+            if (slockers_[i] == std::thread::id{} || slockers_[i] == id) {
               slockers_[i] = id;
-	      return;
-	    }
-	  }
-	  for (unsigned i = 0; i < slockers_.size() - 1; ++i)
-	    slockers_[i] = slockers_[i+1].load();
-	  slockers_.back() = id;
+              return;
+            }
+          }
+          for (unsigned i = 0; i < slockers_.size() - 1; ++i)
+            slockers_[i] = slockers_[i + 1].load();
+          slockers_.back() = id;
 #endif // X23_TRACE_SHLOCK
           return;
-	}
+        }
         decref();
         tl_->block_until_free();
       }
@@ -166,9 +166,9 @@ class SharedLock : public TestLock {
       auto id = std::this_thread::get_id();
       for (unsigned i = 0; i < slockers_.size(); ++i)
         if (slockers_[i] == id) {
-	  slockers_[i] = std::thread::id{};
+          slockers_[i] = std::thread::id{};
           break;
-	}
+        }
 #endif // X23_TRACE_SHLOCK
     }
     void block() noexcept
