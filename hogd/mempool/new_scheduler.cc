@@ -110,7 +110,7 @@ NewScheduler::get_account_key(const ContractAddress &account)
 }
 
 x23::Async<void>
-NewScheduler::add_txs(const SignedTransactionBatch &txs)
+NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 {
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
   // its overhead by removing the [co_await] below, doing other work, and then
@@ -138,37 +138,26 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
     hashes_per_thread++;
   }
 
-  info("txs.size() = {}, tx_hashes.size() = {}, hashes_per_thread = {}",
-       txs.size(), tx_hashes.size(), hashes_per_thread);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20000));
-  info("AGAIN txs.size() = {}, tx_hashes.size() = {}, hashes_per_thread = {}",
-       txs.size(), tx_hashes.size(), hashes_per_thread);
   std::array<x23::Awaitable<void>, kNumThreads> awaitables;
   for (size_t i = 0; i < kNumThreads; i++) {
-    [](size_t coro_idx, auto cb,
-       const x23::Vec<hogd::SignedTransaction, 4294967295> *txs,
+    [](size_t coro_idx, auto cb, const x23::Vec<hogd::SignedTransaction> &txs,
        x23::Vec<SignedTransactionHash> &tx_hashes,
        size_t hashes_per_thread) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
       size_t start = coro_idx * hashes_per_thread;
       size_t possible_end = (coro_idx + 1) * hashes_per_thread;
-      size_t end = std::min(possible_end, txs->size());
-      info("start = {}, end = {}, txs.size() = {}, tx_hashes.size() = {}",
-           start, end, txs->size(), tx_hashes.size());
+      size_t end = std::min(possible_end, txs.size());
       for (size_t hash_idx = start; hash_idx < end; hash_idx++) {
-        info("hash_idx is {}, tx_hashes.size() = {}, txs.size() = {}", hash_idx,
-             tx_hashes.size(), txs->size());
-        tx_hashes[hash_idx] = sha256((*txs)[hash_idx]);
+        tx_hashes[hash_idx] = sha256(txs[hash_idx]);
       }
       cb();
       co_return;
-    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), &txs, tx_hashes,
+    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, tx_hashes,
                                  hashes_per_thread);
   }
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
   }
-  info("AFTER!!! HERE txs.size() is {}", txs.size());
 
   double tx_hashes_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
