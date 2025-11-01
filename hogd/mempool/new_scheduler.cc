@@ -12,6 +12,7 @@
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -109,7 +110,7 @@ NewScheduler::get_account_key(const ContractAddress &account)
 }
 
 x23::Async<void>
-NewScheduler::add_txs(const SignedTransactionBatch &txs)
+NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 {
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
   // its overhead by removing the [co_await] below, doing other work, and then
@@ -118,10 +119,56 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  for (const SignedTransaction &tx : txs) {
+  x23::Vec<SignedTransactionHash> tx_hashes;
+  tx_hashes.resize(txs.size());
+  auto timer = std::make_unique<ElapsedTimer>();
+  constexpr size_t kNumThreads = 10;
+  size_t hashes_per_thread = txs.size() / kNumThreads;
+  if (txs.size() % kNumThreads) {
+    // Have each thread do an extra hash so that there are no hashes leftover.
+    // Note that some of the threads may end up doing more work than other
+    // threads.
+    //
+    // e.g.,
+    // If there are 1,000 hashes and 128 threads:
+    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
+    // [hashes_per_thread] = 8.
+    // Threads 0-124 will do 8 hashes.
+    // Threads 125, 126, and 127 will do *no* hashes.
+    hashes_per_thread++;
+  }
+
+  std::array<x23::Awaitable<void>, kNumThreads> awaitables;
+  for (size_t i = 0; i < kNumThreads; i++) {
+    [](size_t coro_idx, auto cb, const x23::Vec<hogd::SignedTransaction> &txs,
+       x23::Vec<SignedTransactionHash> &tx_hashes,
+       size_t hashes_per_thread) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+      size_t start = coro_idx * hashes_per_thread;
+      size_t possible_end = (coro_idx + 1) * hashes_per_thread;
+      size_t end = std::min(possible_end, txs.size());
+      for (size_t hash_idx = start; hash_idx < end; hash_idx++) {
+        tx_hashes[hash_idx] = sha256(txs[hash_idx]);
+      }
+      cb();
+      co_return;
+    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, tx_hashes,
+                                 hashes_per_thread);
+  }
+  for (x23::Awaitable<void> &awaitable : awaitables) {
+    co_await awaitable;
+  }
+
+  double tx_hashes_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  // for (const SignedTransaction &tx : txs) {
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    const SignedTransactionHash &tx_hash = tx_hashes[i];
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
     // expensive to compute.
-    const SignedTransactionHash tx_hash = sha256(tx);
+    // const SignedTransactionHash tx_hash = sha256(tx);
     auto inserted = txs_.insert({tx_hash, {.tx = tx}});
     // We do not CHECK that [inserted.second] is true because it is okay to add
     // a tx back into the scheduler again. This can happen if the tx was
@@ -158,11 +205,20 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
       size_++;
     }
   }
+
+  double tx_enqueue_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   for (const ContractAddress &account : accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
+
+  double ready_accounts_duration = timer->elapsed();
+  info("NewScheduler::add_txs tx_hashes_duration {}, tx_enqueue_duration {}, "
+       "ready_accounts_duration {}",
+       tx_hashes_duration, tx_enqueue_duration, ready_accounts_duration);
 }
 
 void
@@ -356,6 +412,9 @@ NewScheduler::account_is_ready(const ContractAddress &account,
   // the account has enough gas units to run the tx.
   bool ret = (it != txs.end());
   if (remove_expired_txs) {
+    size_t to_remove = std::distance(txs.begin(), it);
+    CHECK_LE(to_remove, size_);
+    size_ -= to_remove;
     txs.erase(txs.begin(), it);
   }
   return ret;
@@ -415,10 +474,6 @@ NewScheduler::schedule(size_t block_size)
   x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
   x23::Vec<SignedTransaction> txs_to_schedule;
 
-  // TODO(jhumphri): Efficiently erase expired txs with [erase()] and specify a
-  // range of [begin(), lower_bound()]. We can do this in the loop below when an
-  // account is runnable. Do not forget to deduct the erased txs from [size_]!
-
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> removed_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
@@ -449,6 +504,9 @@ NewScheduler::schedule(size_t block_size)
       auto it = txs.lower_bound(lower_bound);
       if (it != txs.begin()) {
         // This removes expired txs.
+        size_t to_remove = std::distance(txs.begin(), it);
+        CHECK_LE(to_remove, size_);
+        size_ -= to_remove;
         it = txs.erase(txs.begin(), it);
       }
       if (it == txs.end()) {
