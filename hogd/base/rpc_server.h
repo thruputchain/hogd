@@ -104,10 +104,7 @@ struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
           RpcSvcHolder<IMPL, VERSMETA>::make(default_coropoll(),
                                              std::forward<Args>(args)...))
   {}
-  uint16_t start_server(uint16_t port)
-  {
-    return (*this)->start_server(port);
-  }
+  uint16_t start_server(uint16_t port) { return (*this)->start_server(port); }
   uint16_t port() const { return (*this)->port(); }
 };
 template<typename I>
