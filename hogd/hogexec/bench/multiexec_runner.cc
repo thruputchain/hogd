@@ -422,7 +422,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   std::string hostname;
   CHECK_EQ(get_hostname(hostname), 0);
 
-  sched_exec_test.impl_.register_event_card(EventCard{
+  sched_exec_test->impl_.register_event_card(EventCard{
       .protocol = version::kHogdProtocol,
       .upid = {},
       .address_for_exec =
@@ -454,10 +454,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         {std::format("{}:{}", hostname, sched_exec_port), "-n", "1024"});
   }
 
-  auto db_cards = sched_db_test.impl_.await_shard_cards(1);
-  sched_exec_test.impl_.register_shard_cards(db_cards);
+  auto db_cards = sched_db_test->impl_.await_shard_cards(1);
+  sched_exec_test->impl_.register_shard_cards(db_cards);
   auto exec_cards =
-      sched_exec_test.impl_.await_executor_cards(server_addrs.size() - 1);
+      sched_exec_test->impl_.await_executor_cards(server_addrs.size() - 1);
 
   auto event_sched_client =
       connect_to_event_sched_server(event_server_sched_port);
