@@ -11,7 +11,7 @@
 #include <x23/threadpool.h>
 #include <x23/utility.h>
 
-#define X23_TRACE_SHLOCK 1
+#define X23_TRACE_SHLOCK 0
 
 namespace x23 {
 
@@ -134,7 +134,7 @@ class SharedLock : public TestLock {
   // exclusive locker.
   struct alignas(hardware_destructive_interference_size) Inhibitor {
     std::atomic_uint count{0};
-    std::atomic_bool want_wake{false};
+    std::atomic_uint want_wake{0};
     TestLock *tl_; // Could get away without, but we have a whole cache line
 #if X23_TRACE_SHLOCK
     std::array<std::atomic<std::thread::id>, 2> slockers_;
@@ -167,10 +167,8 @@ class SharedLock : public TestLock {
     }
     void decref() noexcept
     {
-      if (count.fetch_sub(1) == 1 && want_wake.load()) {
-        want_wake = false;
+      if (count.fetch_sub(1) == 1 && want_wake.load())
         count.notify_all();
-      }
 #if X23_TRACE_SHLOCK
       auto id = std::this_thread::get_id();
       for (unsigned i = 0; i < slockers_.size(); ++i)
@@ -182,9 +180,10 @@ class SharedLock : public TestLock {
     }
     void block() noexcept
     {
-      while (auto n = count.load()) {
-        want_wake = true;
+      if (auto n = count.load()) {
+        ++want_wake;
         count.wait(n);
+        --want_wake;
       }
     }
   };
