@@ -53,7 +53,7 @@ public:
     // Thus, we start the RPC server first, then below we register with the
     // coordinator, and finally we start handling incoming RPCs in
     // [start_rpc_service()].
-    server_.max_message_size_ = kMessageSize;
+    server_->max_message_size_ = kMessageSize;
     uint16_t executor_port = server_.start_server(self_port);
     assert(executor_port == self_port || self_port == 0);
 
@@ -63,13 +63,13 @@ public:
             x23::HostPort(self_hostname, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
-    server_.impl_.init(std::move(exec_result), n_exec_threads_);
+    server_->impl_.init(std::move(exec_result), n_exec_threads_);
 
     return executor_port;
   }
 
-  void shut_down() { server_.shut_down(); }
-  void await_shutdown_request() { server_.impl_.await_shutdown_request(); }
+  //void shut_down() { server_.shut_down(); }
+  void await_shutdown_request() { server_->impl_.await_shutdown_request(); }
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;

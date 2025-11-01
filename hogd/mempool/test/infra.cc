@@ -40,7 +40,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   db_executor_server_->start_server(/*port=*/0);
   // [db_scheduler_server_] handles RPCs from the mempool.
   db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
-  db_scheduler_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  (*db_scheduler_server_)->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   db_scheduler_server_->start_server(/*port=*/0);
 
   // Start the event RPC servers.
@@ -65,7 +65,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   if (!skip_genesis_block) {
     GenesisBlockBuilder builder;
-    CHECK_EQ(mempool_coord_server_.impl_.schedcoord_load_genesis_block(
+    CHECK_EQ(mempool_coord_server_->impl_.schedcoord_load_genesis_block(
                  builder.build())(),
              DbSchedResult::DbSchedResultOK);
   }

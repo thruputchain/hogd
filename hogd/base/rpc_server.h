@@ -86,14 +86,14 @@ private:
 
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
-struct RpcSvc : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
+struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
   template<typename... Args> requires std::constructible_from<IMPL, Args...>
-  RpcSvc(x23::CoroPoll &cp, Args &&...args)
+  RpcServer(x23::CoroPoll &cp, Args &&...args)
     : RpcSvcHolder<IMPL, VERSMETA>::Ptr(
           RpcSvcHolder<IMPL, VERSMETA>::make(cp, std::forward<Args>(args)...))
   {}
   template<typename... Args> requires std::constructible_from<IMPL, Args...>
-  RpcSvc(Args &&...args)
+  RpcServer(Args &&...args)
     : RpcSvcHolder<IMPL, VERSMETA>::Ptr(
           RpcSvcHolder<IMPL, VERSMETA>::make(default_coropoll(),
                                              std::forward<Args>(args)...))
@@ -106,11 +106,12 @@ struct RpcSvc : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
 };
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
-RpcSvc(x23::CoroPoll &, I &&) -> RpcSvc<std::remove_cvref_t<I>>;
+RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
-RpcSvc(I &&) -> RpcSvc<std::remove_cvref_t<I>>;
+RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
 
+#if 0
 template<typename RpcImplementation> class RpcServer {
 public:
   template<typename... Args>
@@ -152,6 +153,7 @@ private:
   x23::BorrowedFd listen_fd_{-1};
   uint16_t port_ = 0;
 };
+#endif
 
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)
