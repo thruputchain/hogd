@@ -65,7 +65,7 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  HogAge &get_cached_hog_age(const ContractAddress &address);
+  HogAge get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
   read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
@@ -160,6 +160,9 @@ private:
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Maps an account to the txs it has submitted.
+  // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
+  // (i.e., are we inserting new accounts into it rarely)? Would it be better to
+  // make it an [std::unordered_map<>] and protect it with a rw lock?
   SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
   std::set<AccountKey> ready_accounts_;
 
@@ -167,9 +170,11 @@ private:
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  std::unordered_map<SignedTransactionHash, TxValue> txs_;
+  SynchronizedMap<SignedTransactionHash, TxValue> txs_;
   // Account cache.
-  std::unordered_map<ContractAddress, HogAge> accounts_;
+  // TODO(jhumphri): Similarly, is this read heavy? Would it be better to make
+  // it an [std::unordered_map] and protect it with a rw lock?
+  SynchronizedMap<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
   size_t size_ = 0;

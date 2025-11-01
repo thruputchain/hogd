@@ -36,7 +36,7 @@ TEST(NewScheduler, ReadAge)
       server.mempool_coord_rpc().scheduler();
 
   scheduler->read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
-  HogAge &ret =
+  const HogAge ret =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
@@ -86,7 +86,7 @@ TEST(NewScheduler, Single)
 
   scheduler->add_txs({txs[0]})();
   // Check that the correct number of hogs was deducted.
-  const HogAge &age =
+  const HogAge age =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
   EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 0);
