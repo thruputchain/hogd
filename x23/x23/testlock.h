@@ -47,11 +47,11 @@ public:
           self.status_.exchange(kLockedWantNotify, std::memory_order_acquire);
     if (prev != kUnlocked)
       return false;
-    if constexpr (requires { self.block_while_inhibited(); })
-      self.block_while_inhibited();
 #if X23_TRACE_SHLOCK
     self.owner_ = std::this_thread::get_id();
 #endif // X23_TRACE_SHLOCK
+    if constexpr (requires { self.block_while_inhibited(); })
+      self.block_while_inhibited();
     return true;
   }
   void lock(this auto &&self) noexcept
