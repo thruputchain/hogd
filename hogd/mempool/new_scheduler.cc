@@ -12,6 +12,7 @@
 #include "db_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -118,10 +119,67 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  for (const SignedTransaction &tx : txs) {
+  x23::Vec<SignedTransactionHash> tx_hashes;
+  tx_hashes.resize(txs.size());
+  auto timer = std::make_unique<ElapsedTimer>();
+  constexpr size_t kNumThreads = 10;
+  size_t hashes_per_thread = txs.size() / kNumThreads;
+  if (txs.size() % kNumThreads) {
+    // Have each thread do an extra hash so that there are no hashes leftover.
+    // Note that some of the threads may end up doing more work than other
+    // threads.
+    //
+    // e.g.,
+    // If there are 1,000 hashes and 128 threads:
+    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
+    // [hashes_per_thread] = 8.
+    // Threads 0-124 will do 8 hashes.
+    // Threads 125, 126, and 127 will do *no* hashes.
+    hashes_per_thread++;
+  }
+
+  info("txs.size() = {}, tx_hashes.size() = {}, hashes_per_thread = {}",
+       txs.size(), tx_hashes.size(), hashes_per_thread);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20000));
+  info("AGAIN txs.size() = {}, tx_hashes.size() = {}, hashes_per_thread = {}",
+       txs.size(), tx_hashes.size(), hashes_per_thread);
+  std::array<x23::Awaitable<void>, kNumThreads> awaitables;
+  for (size_t i = 0; i < kNumThreads; i++) {
+    [](size_t coro_idx, auto cb,
+       const x23::Vec<hogd::SignedTransaction, 4294967295> *txs,
+       x23::Vec<SignedTransactionHash> &tx_hashes,
+       size_t hashes_per_thread) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+      size_t start = coro_idx * hashes_per_thread;
+      size_t possible_end = (coro_idx + 1) * hashes_per_thread;
+      size_t end = std::min(possible_end, txs->size());
+      info("start = {}, end = {}, txs.size() = {}, tx_hashes.size() = {}",
+           start, end, txs->size(), tx_hashes.size());
+      for (size_t hash_idx = start; hash_idx < end; hash_idx++) {
+        info("hash_idx is {}, tx_hashes.size() = {}, txs.size() = {}", hash_idx,
+             tx_hashes.size(), txs->size());
+        tx_hashes[hash_idx] = sha256((*txs)[hash_idx]);
+      }
+      cb();
+      co_return;
+    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), &txs, tx_hashes,
+                                 hashes_per_thread);
+  }
+  for (x23::Awaitable<void> &awaitable : awaitables) {
+    co_await awaitable;
+  }
+  info("AFTER!!! HERE txs.size() is {}", txs.size());
+
+  double tx_hashes_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  // for (const SignedTransaction &tx : txs) {
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    const SignedTransactionHash &tx_hash = tx_hashes[i];
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
     // expensive to compute.
-    const SignedTransactionHash tx_hash = sha256(tx);
+    // const SignedTransactionHash tx_hash = sha256(tx);
     auto inserted = txs_.insert({tx_hash, {.tx = tx}});
     // We do not CHECK that [inserted.second] is true because it is okay to add
     // a tx back into the scheduler again. This can happen if the tx was
@@ -158,11 +216,20 @@ NewScheduler::add_txs(const SignedTransactionBatch &txs)
       size_++;
     }
   }
+
+  double tx_enqueue_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   for (const ContractAddress &account : accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
+
+  double ready_accounts_duration = timer->elapsed();
+  info("NewScheduler::add_txs tx_hashes_duration {}, tx_enqueue_duration {}, "
+       "ready_accounts_duration {}",
+       tx_hashes_duration, tx_enqueue_duration, ready_accounts_duration);
 }
 
 void

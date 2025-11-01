@@ -49,6 +49,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <memory>
+#include <print>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -494,6 +495,10 @@ public:
   }
   constexpr decltype(auto) operator[](this auto &&self, size_type i) noexcept
   {
+    if (i >= self.size()) {
+      std::println("VEC ASSERT HERE, i = {}, self.size() {}", i, self.size());
+      fflush(stdout);
+    }
     x23assert(i < self.size());
     return (self.data()[i]);
   }
