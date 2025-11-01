@@ -85,11 +85,7 @@ public:
   // that are still running.
   x23::Async<void> executorsched_shutdown();
 
-  void shut_down()
-  {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
-  }
+  void shut_down() { shutdown_flag_ = true; }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 

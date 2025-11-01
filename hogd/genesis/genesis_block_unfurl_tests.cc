@@ -8,6 +8,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "built_contracts/fibonacci_call.h"
+#include "built_contracts/manual_revert_test.h"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
@@ -391,6 +392,40 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 
   // contracts should now exist
   EXPECT_TRUE(lookup_contract_from_db(sha256(*fibonacci_contract)));
+}
+
+TEST_P(GenesisBlockUnfurlTest, InitialTokenClaimPropagatesReverts)
+{
+  // Assert that if a contract reverts during the initial token claim's init
+  // call, the entire transaction reverts. In the actual implementation
+  // long-term, we _could_ build some kind of recovery fallback, if we
+  // initialize the chain with bad contracts.  But it would be much better to
+  // catch these errors earlier, during testing.
+  using manual_revert_meta_t =
+      ContractTraitMeta<manual_revert_test::ManualRevertTest>;
+
+  auto manual_revert_contract = manual_revert_meta_t::load_wasm();
+  auto manual_revert_nonce = make_nonce(0);
+
+  GenesisBlockBuilder builder;
+  builder.add_initial_config(
+      manual_revert_contract, manual_revert_nonce,
+      manual_revert_meta_t::entrypoint<"test_basic_manual_revert">(),
+      manual_revert_meta_t::make_calldata<"test_basic_manual_revert">(true),
+      int128_t{1'000'000'000});
+  auto block = builder.build();
+
+  auto unfurl_txns = builder.make_unfurl_genesis_transactions();
+  EXPECT_EQ(unfurl_txns.size(), 1);
+
+  run_genesis_initialization(block);
+
+  // run the unfurl transactions
+
+  auto const &stx = unfurl_txns[0];
+  auto handler = make_new_system_call_handler(stx, wasm_runtime_context_);
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

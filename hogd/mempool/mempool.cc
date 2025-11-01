@@ -55,11 +55,11 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  RpcServer<MempoolCoordinatorRpc> coord(db.impl_);
-  coord.max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
+  RpcServer<MempoolCoordinatorRpc> coord(db->impl_);
+  coord->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   CHECK_EQ(coord.start_server(kMempoolCoordinatorServerPort),
            uint16_t{kMempoolCoordinatorServerPort});
-  while (!coord.impl_.ready()) {
+  while (!coord->impl_.ready()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 

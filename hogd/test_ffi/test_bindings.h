@@ -156,6 +156,7 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
+enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
 void enable_syscall_logging();
 
