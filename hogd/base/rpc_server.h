@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
+#include <tuple>
 #include <type_traits>
 
 #include "hogd/base/coropoll.h"

@@ -39,7 +39,7 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const SignedTransactionBatch &txs);
+  x23::Async<void> add_txs(const x23::Vec<SignedTransaction> &txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
