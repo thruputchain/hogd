@@ -1,6 +1,8 @@
 #include "hogd/mempool/new_scheduler.h"
 
 #include <algorithm>
+#include <array>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -10,7 +12,7 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
