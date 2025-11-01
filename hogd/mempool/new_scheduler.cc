@@ -199,9 +199,10 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     //
     // We then get the address of the [TxValue]: [&inserted.first->second].
     TxValue *value = &inserted.first->second;
+    auto [account_txs, lock] = account_to_tx_[account];
     // Check if the tx is already present in [account_to_tx_[account]]. If it
     // is, we are adding a duplicate tx, so we do not want to increment [size_].
-    if (account_to_tx_[account].insert({key, value}).second) {
+    if (account_txs.insert({key, value}).second) {
       size_++;
     }
   }
@@ -405,7 +406,7 @@ bool
 NewScheduler::account_is_ready(const ContractAddress &account,
                                bool remove_expired_txs)
 {
-  std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+  auto [txs, lock] = account_to_tx_[account];
   const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
   auto it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check if
@@ -455,13 +456,18 @@ NewScheduler::cycle_accounts_during_schedule_helper(
   for (const ContractAddress &account : accounts) {
     // TODO(jhumphri): This is the same code as in [account_is_ready], but
     // we have it here because we need the iterator. Clean this up.
-    const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
-    auto it = txs.lower_bound(lower_bound);
-    if (it == txs.end()) {
-      continue;
+    GasAmount gas_limit;
+    {
+      const auto [txs, lock] = account_to_tx_[account];
+      auto it = txs.lower_bound(lower_bound);
+      if (it == txs.end()) {
+        continue;
+      }
+      const SignedTransaction &tx = it->second->tx;
+      gas_limit = tx.tx.invocation.gas_limit;
     }
-    const SignedTransaction &tx = it->second->tx;
-    cycle_if_needed(account, tx.tx.invocation.gas_limit);
+
+    cycle_if_needed(account, gas_limit);
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
@@ -498,7 +504,7 @@ NewScheduler::schedule(size_t block_size)
     const AccountKey account_key = *ready_accounts_.begin();
     const ContractAddress account = account_key.account;
     HogAge &hog_ages = get_cached_hog_age(account);
-    std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    auto [txs, lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < block_size && size_) {
       auto it = txs.lower_bound(lower_bound);
@@ -603,7 +609,7 @@ NewScheduler::find_and_remove_from_runqueue(
       CHECK_EQ(keys.size(), txs.size());
       CHECK_LT(keys.size(), hashes.size());
       for (size_t i = 0; i < keys.size(); i++) {
-        std::map<TxKey, TxValue *> &per_account_txs =
+        auto [per_account_txs, lock] =
             account_to_tx_[txs[i].tx.invocation.invoked_address];
         CHECK(per_account_txs.insert({keys[i], values[i]}).second);
       }
@@ -620,7 +626,10 @@ NewScheduler::find_and_remove_from_runqueue(
     keys.push_back(key);
     values.push_back(&it->second);
     txs.push_back(tx);
-    CHECK_EQ(account_to_tx_[account].erase(key), 1UL);
+    {
+      auto [txs, lock] = account_to_tx_[account];
+      CHECK_EQ(txs.erase(key), 1UL);
+    }
     size_--;
     accounts.insert(account);
   }

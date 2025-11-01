@@ -11,6 +11,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/mempool/shared.h"
@@ -159,8 +160,7 @@ private:
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::map<TxKey, TxValue *>>
-      account_to_tx_;
+  SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
   std::set<AccountKey> ready_accounts_;
 
   // Tx cache.
