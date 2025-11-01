@@ -168,7 +168,6 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     const SignedTransactionHash &tx_hash = tx_hashes[i];
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
     // expensive to compute.
-    // const SignedTransactionHash tx_hash = sha256(tx);
     auto inserted = txs_.insert({tx_hash, {.tx = tx}});
     // We do not CHECK that [inserted.second] is true because it is okay to add
     // a tx back into the scheduler again. This can happen if the tx was
