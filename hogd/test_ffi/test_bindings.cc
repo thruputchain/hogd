@@ -261,6 +261,7 @@ try_commit_transaction(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->to_handler().try_commit_transaction();
+    context->mark_committed_or_aborted();
     if (!res.has_value()) {
       error("try_commit_transaction encountered system error {}", res.error());
       return ForeignTryCommitResult{.result_code = 0,
@@ -272,6 +273,28 @@ try_commit_transaction(void *syscall_handler) noexcept
     log_error("error during try_commit_transaction: {}", e);
     return kUnrecoverableError;
   }
+}
+
+TestFFIErrorCode
+abort_transaction(void *syscall_handler) noexcept
+{
+  if (!syscall_handler) {
+    error("abort_transaction error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto res = context->to_handler().abort_transaction();
+  context->mark_committed_or_aborted();
+  if (!res.has_value()) {
+    try {
+      error("failed to abort transaction: {}", res.error());
+      return kTestFFIErrorCodeUnrecoverableError;
+    } catch (std::exception const &e) {
+      log_error("error during abort_transaction: {}", e);
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+  }
+  return kTestFFIErrorCodeNone;
 }
 
 constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
@@ -534,6 +557,12 @@ struct ForeignTryCommitResult
 try_commit_transaction(void *syscall_handler)
 {
   return hogd::try_commit_transaction(syscall_handler);
+}
+
+TestFFIErrorCode
+abort_transaction(void *syscall_handler)
+{
+  return hogd::abort_transaction(syscall_handler);
 }
 
 struct ForeignHostFnResult

@@ -17,6 +17,7 @@
 #include "contract.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -296,8 +297,9 @@ public:
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
     trace("Invoke method {} (Name {}) calldata: {}",
-          sdk_method_id(trait_meta_t::template entrypoint<Name>()), Name.get(),
-          x23::show(calldata));
+          encode_hex(std::as_bytes(
+              std::span(trait_meta_t::template entrypoint<Name>().data(), 8))),
+          Name.get(), x23::show(calldata));
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),

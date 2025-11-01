@@ -250,15 +250,12 @@ SystemCallHandler::try_commit_transaction()
   bool result = r.value();
   // check if any of the 2pc database operations failed
   if (!result) {
-    auto res = db_proxy_.abort_transaction();
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
-                                   get_block_execution_mode());
 
-    if (!res.has_value()) {
-      return res.error();
+    auto abort_status = abort_transaction();
+    if (!abort_status.has_value()) {
+      return abort_status.error();
     }
 
-    transaction_committed_or_aborted_ = true;
     return false;
   }
 
@@ -291,6 +288,16 @@ SystemCallHandler::try_commit_transaction()
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   return true;
+}
+
+SystemStatus<void>
+SystemCallHandler::abort_transaction()
+{
+  assert(!transaction_committed_or_aborted_);
+  transaction_committed_or_aborted_ = true;
+  HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
+                                 get_block_execution_mode());
+  return db_proxy_.abort_transaction();
 }
 
 // can only be called when call_frame_stack_ is nonempty
