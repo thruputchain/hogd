@@ -155,8 +155,8 @@ TEST_F(ItemViewTest, RCQRead)
 
   StorageCostModel cost_model(12000, 1, 5, 100, 5);
   server_->impl_.setup_create_item(AddressAndKey{},
-                                  StorageItemWrapper(std::move(queue),
-                                                     &cost_model));
+                                   StorageItemWrapper(std::move(queue),
+                                                      &cost_model));
   ExecutionModeData execution_mode_data = ProposalModeData();
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,
@@ -192,9 +192,9 @@ TEST_F(ItemViewTest, RCQRead)
   // behavior is to read self entries before concurrent entries
 
   server_->impl_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                              make_test_queue_entry(8));
+                                               make_test_queue_entry(8));
   server_->impl_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                              make_test_queue_entry(9));
+                                               make_test_queue_entry(9));
 
   rcq_item.insert_entry(make_test_queue_entry(7));
 
@@ -216,7 +216,7 @@ TEST_F(ItemViewTest, RCQRead)
   check_item(std::nullopt, true);
 
   server_->impl_.setup_add_concurrent_rcq_item(AddressAndKey{},
-                                              make_test_queue_entry(11));
+                                               make_test_queue_entry(11));
 
   check_item(11, false);
   check_item(11, true);

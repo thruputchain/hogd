@@ -9,6 +9,7 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <tuple>
+#include <type_traits>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -107,6 +108,7 @@ struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;
+
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
