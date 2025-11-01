@@ -11,7 +11,7 @@
 #include <x23/threadpool.h>
 #include <x23/utility.h>
 
-#define X23_TRACE_SHLOCK 0
+#define X23_TRACE_SHLOCK 1
 
 namespace x23 {
 
@@ -49,6 +49,9 @@ public:
       return false;
     if constexpr (requires { self.block_while_inhibited(); })
       self.block_while_inhibited();
+#if X23_TRACE_SHLOCK
+    self.owner_ = std::this_thread::get_id();
+#endif // X23_TRACE_SHLOCK
     return true;
   }
   void lock(this auto &&self) noexcept
@@ -58,6 +61,9 @@ public:
   }
   void unlock() noexcept
   {
+#if X23_TRACE_SHLOCK
+    owner_ = {};
+#endif // X23_TRACE_SHLOCK
     if (auto old = status_.exchange(kUnlocked); old == kLockedWantNotify)
       status_.notify_all();
     else
@@ -94,6 +100,9 @@ private:
   static constexpr uint8_t kLockedWantNotify = 0xf5;
 #endif // !NDEBUG
   std::atomic_uint8_t status_{kUnlocked};
+#if X23_TRACE_SHLOCK
+  std::thread::id owner_{};
+#endif // X23_TRACE_SHLOCK
 };
 
 // A shared version of TestLock.  The constructor argument describes
