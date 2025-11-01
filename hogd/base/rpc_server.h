@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -8,13 +9,13 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
-#include <tuple>
 #include <type_traits>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
+#include "x23/refcnt.h"
 #include "x23/x23/event.h"
 #include "x23/x23/rpc.h" // IWYU pragma: keep
 #include "x23/x23/sockio.h"
@@ -44,12 +45,14 @@ public:
   {
     // If this fails you started the same server twice
     assert(listen_fd_ == x23::kInvalidFd);
+    // NOLINTBEGIN(readability-identifier-naming)
     auto [port, lfd] =
         tcp_rpc_server(cp_, portno,
                        [this, _d = x23::Defer([this] { eof(); })](auto c) {
                          c->max_message_size = max_message_size_;
                          c->template server<VersMeta>(&impl_);
                        });
+    // NOLINTEND(readability-identifier-naming)
     listen_fd_ = lfd.get();
     return port_ = port;
   }
@@ -78,6 +81,7 @@ private:
 
   void eof() noexcept
   {
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Ptr _r(*this);
     listen_fd_ = -1;
   }
@@ -99,9 +103,9 @@ struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
           RpcSvcHolder<IMPL, VERSMETA>::make(default_coropoll(),
                                              std::forward<Args>(args)...))
   {}
-  uint16_t start_server(uint16_t portno)
+  uint16_t start_server(uint16_t port)
   {
-    return (*this)->start_server(portno);
+    return (*this)->start_server(port);
   }
   uint16_t port() const { return (*this)->port(); }
 };
@@ -112,50 +116,6 @@ RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
-
-#if 0
-template<typename RpcImplementation> class RpcServer {
-public:
-  template<typename... Args>
-  explicit RpcServer(x23::CoroPoll &cp, Args &&...args)
-    : cp_(cp), impl_(std::forward<Args>(args)...)
-  {}
-
-  template<typename... Args>
-  explicit RpcServer(Args &&...args)
-    : RpcServer(default_coropoll(), std::forward<Args>(args)...)
-  {}
-
-  // Starts the server on the specified port.
-  uint16_t start_server(uint16_t port)
-  {
-    std::tie(port_, listen_fd_) = tcp_rpc_server(cp_, port, [this](auto c) {
-      c->max_message_size = max_message_size_;
-      c->server(&impl_);
-    });
-    return port_;
-  }
-
-  void shut_down()
-  {
-    cp_.poison(listen_fd_);
-    impl_.shut_down();
-  }
-
-  // Returns the port that the server is listening on.
-  uint16_t port() const { return port_; }
-
-  x23::CoroPoll &cp_;
-  RpcImplementation impl_;
-  size_t max_message_size_ = x23::default_max_message_size;
-
-  ~RpcServer() { cp_.reset(listen_fd_); }
-
-private:
-  x23::BorrowedFd listen_fd_{-1};
-  uint16_t port_ = 0;
-};
-#endif
 
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)
