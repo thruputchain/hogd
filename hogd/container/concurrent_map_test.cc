@@ -54,27 +54,28 @@ static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 28) == 0x8);
 TEST(ConcurrentMap, InsertOrGet)
 {
   struct TruncateHasher {
-    uint32_t operator()(std::span<const uint8_t> key) const {
-        uint32_t hash = 0;
-        std::memcpy(&hash, key.data(), std::min(key.size(), sizeof(uint32_t)));
-        return std::byteswap(hash);
+    uint32_t operator()(std::span<const uint8_t> key) const
+    {
+      uint32_t hash = 0;
+      std::memcpy(&hash, key.data(), std::min(key.size(), sizeof(uint32_t)));
+      return std::byteswap(hash);
     }
   };
 
-  EXPECT_EQ(TruncateHasher{}(std::vector<uint8_t>{0,0, 0, 1}), 0x0000'0001);
+  EXPECT_EQ(TruncateHasher{}(std::vector<uint8_t>{0, 0, 0, 1}), 0x0000'0001);
 
   ConcurrentMap<int, TruncateHasher> map;
-  int *value = map.insert_or_get(std::vector<uint8_t>{0,0, 0, 1}, 4);
+  int *value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1}, 4);
   ASSERT_EQ(*value, 4);
-  value = map.insert_or_get(std::vector<uint8_t>{0,0, 0, 1}, 5);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1}, 5);
   ASSERT_EQ(*value, 4);
-  value = map.insert_or_get(std::vector<uint8_t>{0,0, 0, 2}, 6);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 2}, 6);
   ASSERT_EQ(*value, 6);
-  value = map.insert_or_get(std::vector<uint8_t>{0,0, 0, 3}, 7);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 3}, 7);
   ASSERT_EQ(*value, 7);
-  value = map.insert_or_get(std::vector<uint8_t>{0,0, 0, 4}, 8);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 4}, 8);
   ASSERT_EQ(*value, 8);
-  value = map.insert_or_get(std::vector<uint8_t>{0,0, 1, 0}, 9);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 1, 0}, 9);
   ASSERT_EQ(*value, 9);
 }
 

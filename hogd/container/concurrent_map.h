@@ -123,7 +123,7 @@ public:
   {}
   Node(leaf_t /*unused*/, uint32_t shortkey)
     : content_(std::in_place_type<std::atomic<ValueBucket<Value> *>>),
-      key_{shortkey}, key_len_{32}
+      key_{shortkey}, key_len_{32}, owns_children_{true}
   {}
 
   Node(branch_t /*unused*/, uint32_t shortkey, uint8_t key_len, Node *child)
@@ -153,6 +153,9 @@ public:
            std::get<std::array<std::atomic<Node<Value> *>, 16>>(content_)) {
         delete ptr.load();
       }
+    }
+    if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
+      delete std::get<std::atomic<ValueBucket<Value> *>>(content_).load();
     }
   }
 
@@ -220,13 +223,15 @@ private:
 
 } // namespace detail
 
-template<typename Value, typename Hasher = std::hash<std::span<const uint8_t>>> class ConcurrentMap {
+template<typename Value, typename Hasher = std::hash<std::span<const uint8_t>>>
+class ConcurrentMap {
 public:
-  ConcurrentMap(Hasher hasher = Hasher()) : root_(typename detail::Node<Value>::root_t{}), hasher_(hasher) {}
+  ConcurrentMap(Hasher hasher = Hasher())
+    : root_(typename detail::Node<Value>::root_t{}), hasher_(hasher)
+  {}
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  Value *insert_or_get(std::span<const uint8_t> key,
-                       Args &&...args)
+  Value *insert_or_get(std::span<const uint8_t> key, Args &&...args)
   {
     uint32_t shortkey = hasher_(key);
     using node_t = typename detail::Node<Value>;
