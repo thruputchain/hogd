@@ -86,7 +86,7 @@ TEST(NewScheduler, Single)
 
   scheduler->add_txs({txs[0]})();
   // Check that the correct number of hogs was deducted.
-  const HogAge age =
+  HogAge age =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
   EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 0);
@@ -96,6 +96,7 @@ TEST(NewScheduler, Single)
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
 
+  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   // Check the correct number of hogs was deducted from the
   // [kHogAgeGroupToSchedule] group.
   EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
