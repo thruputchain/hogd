@@ -26,7 +26,14 @@ public:
   GccAtomic16B &operator=(GccAtomic16B const &) = delete;
   GccAtomic16B &operator=(GccAtomic16B &&) = delete;
 
-  T load(std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
+  // Normally a load() is const.  We have no load instruction; just a compare
+  // and swap. So we can't make the load() function const without declaring
+  // value_ mutable. This usage of compare and swap is a guaranteed no-op
+  // (either no swap happens, or the value is swapped from 0 to 0). We do this
+  // over e.g. fetch_add(0) because fetch_add(0) does a loop around a CAS and we
+  // don't care about the CAS succeeding here.
+  T
+  load(std::memory_order /*unused*/ = std::memory_order_seq_cst) const noexcept
   {
     return __sync_val_compare_and_swap(&value_, 0, 0);
   }
@@ -110,7 +117,7 @@ public:
   }
 
 private:
-  T value_;
+  mutable T value_;
 };
 
 static_assert(sizeof(GccAtomic16B<int128_t>) == 16);
