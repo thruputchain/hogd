@@ -6,7 +6,6 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -44,12 +43,12 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
-HogAge &
+HogAge
 NewScheduler::get_cached_hog_age(const ContractAddress &address)
 {
-  auto it = accounts_.find(address);
-  CHECK(it != accounts_.end());
-  return it->second;
+  auto [value_ptr, lock] = accounts_.find(address);
+  CHECK_PTR(value_ptr);
+  return *value_ptr;
 }
 
 x23::Async<void>
@@ -58,7 +57,8 @@ NewScheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
   for (const HogAge &age : res.hog_age_batch()) {
-    accounts_[age.address] = age;
+    auto [value_in_map, lock] = accounts_[age.address];
+    value_in_map = age;
   }
 }
 
@@ -72,7 +72,12 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
-    if (!accounts_.contains(account)) {
+    bool contains = false;
+    {
+      auto [value_ptr, lock] = accounts_.find(account);
+      contains = (value_ptr != nullptr);
+    }
+    if (!contains) {
       accounts_vec.push_back(account);
     }
   }
@@ -93,7 +98,12 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
-    if (!accounts_.contains(account)) {
+    bool contains = false;
+    {
+      auto [value_ptr, lock] = accounts_.find(account);
+      contains = (value_ptr != nullptr);
+    }
+    if (!contains) {
       accounts_vec.push_back(account);
     }
   }
@@ -170,40 +180,26 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     const SignedTransactionHash &tx_hash = tx_hashes[i];
     // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
     // expensive to compute.
-    // const SignedTransactionHash tx_hash = sha256(tx);
-    auto inserted = txs_.insert({tx_hash, {.tx = tx}});
+    TxValue *value = nullptr;
+    {
+      // The tx may already exist in [txs_] because it is okay to add a tx back
+      // into the scheduler again. This can happen if the tx was originally
+      // added to the scheduler, then the tx was removed during validation by
+      // [find_and_remove_from_runqueue()], then validation failed, and then the
+      // tx was added back to the scheduler.
+      const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
+      CHECK_PTR(tx_ptr);
+      value = tx_ptr;
+    }
     // We do not CHECK that [inserted.second] is true because it is okay to add
-    // a tx back into the scheduler again. This can happen if the tx was
-    // originally added to the scheduler, the tx was removed during validation
-    // by [find_and_remove_from_runqueue()], validation failed, and the tx was
-    // added back to the scheduler.
 
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
                     .tx_hash = tx_hash};
-    // This is a pretty dense line of code. Basically, I just want to get a
-    // pointer to the [TxValue] struct in the [txs_] map, because the [txs_] map
-    // is the source of truth for txs. Let me break down
-    // [&inserted.first->second].
-    //
-    // [inserted] is returned by [txs_.insert()] above, so it is a pair
-    // containing an iterator to the KV pair in the the [txs_] map along with a
-    // boolean indicating whether the insertion was successful.
-    //
-    // [inserted.first] is the iterator itself. The iterator points to the KV
-    // pair, which is an std::pair<SignedTransactionHash, TxValue>. We
-    // ultimately want to get a pointer to the [TxValue].
-    //
-    // To get the [TxValue], we do [inserted.first->second]. We use the
-    // dereference operator because [inserted.first] is an iterator and thus
-    // requires it, and we access [second] because the [TxValue] is second in
-    // the pair.
-    //
-    // We then get the address of the [TxValue]: [&inserted.first->second].
-    TxValue *value = &inserted.first->second;
+    auto [account_txs, lock] = account_to_tx_[account];
     // Check if the tx is already present in [account_to_tx_[account]]. If it
     // is, we are adding a duplicate tx, so we do not want to increment [size_].
-    if (account_to_tx_[account].insert({key, value}).second) {
+    if (account_txs.insert({key, value}).second) {
       size_++;
     }
   }
@@ -328,7 +324,8 @@ NewScheduler::cycle_groups(const ContractAddress &account)
       to_xdr(static_cast<uint128_t>(0));
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
-  accounts_[account] = new_averages;
+  auto [value_ref, lock] = accounts_[account];
+  value_ref = new_averages;
 }
 
 void
@@ -349,7 +346,13 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     CHECK_NE(num_received, static_cast<int128_t>(0));
 
     const ContractAddress &account = delta.address;
-    const HogAge &averages = accounts_[account];
+    // I just wanted to make [averages] a const type and fill it in with a copy
+    // of the [HogAge] struct so that I can drop the lock quickly... I could not
+    // figure out a better way to do this than with a lambda.
+    const HogAge averages = [&] -> HogAge {
+      const auto [tmp_averages, lock] = accounts_[account];
+      return tmp_averages;
+    }();
     HogAge new_averages = averages;
 
     uint128_t received_hogs = from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
@@ -399,7 +402,10 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
       new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
     }
 
-    accounts_[account] = new_averages;
+    {
+      auto [value_ref, lock] = accounts_[account];
+      value_ref = new_averages;
+    }
   }
 }
 
@@ -407,7 +413,7 @@ bool
 NewScheduler::account_is_ready(const ContractAddress &account,
                                bool remove_expired_txs)
 {
-  std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+  auto [txs, lock] = account_to_tx_[account];
   const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
   auto it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check if
@@ -427,7 +433,7 @@ NewScheduler::move_hogs_to_already_scheduled_group(
     const ContractAddress &account, uint128_t num_hogs,
     BlockHeight block_height)
 {
-  HogAge &age = get_cached_hog_age(account);
+  HogAge age = get_cached_hog_age(account);
   const uint128_xdr already_scheduled_hogs =
       age.num_hogs[kHogAgeGroupAlreadyScheduled];
   const BlockHeight already_scheduled_age =
@@ -447,6 +453,11 @@ NewScheduler::move_hogs_to_already_scheduled_group(
                             from_xdr(already_scheduled_hogs),
                             already_scheduled_age);
   }
+
+  {
+    auto [value_ref, lock] = accounts_[account];
+    value_ref = age;
+  }
 }
 
 void
@@ -457,13 +468,18 @@ NewScheduler::cycle_accounts_during_schedule_helper(
   for (const ContractAddress &account : accounts) {
     // TODO(jhumphri): This is the same code as in [account_is_ready], but
     // we have it here because we need the iterator. Clean this up.
-    const std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
-    auto it = txs.lower_bound(lower_bound);
-    if (it == txs.end()) {
-      continue;
+    GasAmount gas_limit;
+    {
+      const auto [txs, lock] = account_to_tx_[account];
+      auto it = txs.lower_bound(lower_bound);
+      if (it == txs.end()) {
+        continue;
+      }
+      const SignedTransaction &tx = it->second->tx;
+      gas_limit = tx.tx.invocation.gas_limit;
     }
-    const SignedTransaction &tx = it->second->tx;
-    cycle_if_needed(account, tx.tx.invocation.gas_limit);
+
+    cycle_if_needed(account, gas_limit);
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
@@ -499,8 +515,8 @@ NewScheduler::schedule(size_t block_size)
     // handle its own chunk of accounts from [ready_accounts_].
     const AccountKey account_key = *ready_accounts_.begin();
     const ContractAddress account = account_key.account;
-    HogAge &hog_ages = get_cached_hog_age(account);
-    std::map<TxKey, TxValue *> &txs = account_to_tx_[account];
+    HogAge hog_ages = get_cached_hog_age(account);
+    auto [txs, lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < block_size && size_) {
       auto it = txs.lower_bound(lower_bound);
@@ -522,6 +538,10 @@ NewScheduler::schedule(size_t block_size)
       if (tx.tx.invocation.gas_limit <= hogs_available) {
         hog_ages.num_hogs[kHogAgeGroupToSchedule] =
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
+        {
+          auto [value_ref, lock] = accounts_[account];
+          value_ref = hog_ages;
+        }
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes_to_schedule.push_back(tx_hash);
@@ -597,15 +617,15 @@ NewScheduler::find_and_remove_from_runqueue(
 
   std::unordered_set<ContractAddress> accounts;
   for (const SignedTransactionHash &tx_hash : hashes) {
-    auto it = txs_.find(tx_hash);
-    if (it == txs_.end()) {
+    auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    if (!tx_value_ptr) {
       // We could not find all of the txs, so we put the txs we did find back
       // and return false.
       CHECK_EQ(keys.size(), values.size());
       CHECK_EQ(keys.size(), txs.size());
       CHECK_LT(keys.size(), hashes.size());
       for (size_t i = 0; i < keys.size(); i++) {
-        std::map<TxKey, TxValue *> &per_account_txs =
+        auto [per_account_txs, lock] =
             account_to_tx_[txs[i].tx.invocation.invoked_address];
         CHECK(per_account_txs.insert({keys[i], values[i]}).second);
       }
@@ -614,15 +634,18 @@ NewScheduler::find_and_remove_from_runqueue(
       return false;
     }
 
-    const SignedTransaction &tx = it->second.tx;
+    const SignedTransaction &tx = tx_value_ptr->tx;
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key = {.expiry_block_height =
                            tx.tx.uniquifier.block_expiry_height,
                        .tx_hash = tx_hash};
     keys.push_back(key);
-    values.push_back(&it->second);
+    values.push_back(tx_value_ptr);
     txs.push_back(tx);
-    CHECK_EQ(account_to_tx_[account].erase(key), 1UL);
+    {
+      auto [txs, lock] = account_to_tx_[account];
+      CHECK_EQ(txs.erase(key), 1UL);
+    }
     size_--;
     accounts.insert(account);
   }

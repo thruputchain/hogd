@@ -139,7 +139,15 @@ public:
     return &it->second;
   }
 
-  std::pair<T &, std::unique_lock<std::mutex>> insert_or_assign(const Key &k,
+  std::pair<T *, std::unique_lock<std::mutex>> find_or_insert(const Key &k,
+                                                              const T &obj)
+  {
+    auto [map, ul] = get_bucket(k);
+    auto [it, _] = map.insert({k, obj});
+    return {&it->second, std::move(ul)};
+  }
+
+  std::pair<T *, std::unique_lock<std::mutex>> insert_or_assign(const Key &k,
                                                                 T &&obj)
   {
     auto [map, ul] = get_bucket(k);
