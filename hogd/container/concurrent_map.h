@@ -150,15 +150,20 @@ public:
       return;
     }
 
+    // get_if is noexcept
     if (std::holds_alternative<std::array<std::atomic<Node<Value> *>, 16>>(
             content_)) {
-      for (auto &ptr :
-           std::get<std::array<std::atomic<Node<Value> *>, 16>>(content_)) {
+      auto &content =
+          *std::get_if<std::array<std::atomic<Node<Value> *>, 16>>(&content_);
+      for (auto &ptr : content) {
         delete ptr.load();
       }
     }
+
     if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
-      delete std::get<std::atomic<ValueBucket<Value> *>>(content_).load();
+      auto &content =
+          *std::get_if<std::atomic<ValueBucket<Value> *>>(&content_);
+      delete content.load();
     }
   }
 
