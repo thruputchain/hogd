@@ -65,7 +65,8 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  HogAge get_cached_hog_age(const ContractAddress &address);
+  std::pair<HogAge *, std::unique_lock<std::mutex>>
+  get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
   read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);

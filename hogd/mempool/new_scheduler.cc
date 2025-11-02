@@ -43,12 +43,12 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
-HogAge
+std::pair<HogAge *, std::unique_lock<std::mutex>>
 NewScheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto [value_ptr, lock] = accounts_.find(address);
   CHECK_PTR(value_ptr);
-  return *value_ptr;
+  return {value_ptr, std::move(lock)};
 }
 
 x23::Async<void>
@@ -116,8 +116,8 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
 NewScheduler::AccountKey
 NewScheduler::get_account_key(const ContractAddress &account)
 {
-  const HogAge &hog_ages = get_cached_hog_age(account);
-  BlockHeight average_hog_age = hog_ages.average_ages[kHogAgeGroupToSchedule];
+  const auto [hog_age, lock] = get_cached_hog_age(account);
+  BlockHeight average_hog_age = hog_age->average_ages[kHogAgeGroupToSchedule];
   return {.average_hog_age = average_hog_age, .account = account};
 }
 
@@ -215,20 +215,22 @@ NewScheduler::cycle_if_needed(const ContractAddress &account,
                               GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
-    const HogAge &hog_age = get_cached_hog_age(account);
+    const auto [hog_age, lock] = get_cached_hog_age(account);
 
     const uint128_t to_schedule =
-        from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+        from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]);
     const BlockHeight to_schedule_age =
-        hog_age.average_ages[kHogAgeGroupToSchedule];
+        hog_age->average_ages[kHogAgeGroupToSchedule];
 
     const uint128_t already_scheduled =
-        from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+        from_xdr(hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]);
     const BlockHeight already_scheduled_age =
-        hog_age.average_ages[kHogAgeGroupAlreadyScheduled];
+        hog_age->average_ages[kHogAgeGroupAlreadyScheduled];
 
-    const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
-    const BlockHeight received_age = hog_age.average_ages[kHogAgeGroupReceived];
+    const uint128_t received =
+        from_xdr(hog_age->num_hogs[kHogAgeGroupReceived]);
+    const BlockHeight received_age =
+        hog_age->average_ages[kHogAgeGroupReceived];
 
     bool already_scheduled_average_older = false;
     bool combined_averages_older = false;
@@ -267,24 +269,24 @@ NewScheduler::cycle_if_needed(const ContractAddress &account,
 void
 NewScheduler::cycle_groups(const ContractAddress &account)
 {
-  const HogAge &averages = get_cached_hog_age(account);
+  const auto [averages, lock] = get_cached_hog_age(account);
 
   HogAge new_averages{};
-  new_averages.address = averages.address;
+  new_averages.address = averages->address;
 
   const uint128_t to_schedule_hogs =
-      from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+      from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
   const BlockHeight to_schedule_age =
-      averages.average_ages[kHogAgeGroupToSchedule];
+      averages->average_ages[kHogAgeGroupToSchedule];
 
   const uint128_t already_scheduled_hogs =
-      from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+      from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
   const BlockHeight already_scheduled_age =
-      averages.average_ages[kHogAgeGroupAlreadyScheduled];
+      averages->average_ages[kHogAgeGroupAlreadyScheduled];
 
   const uint128_t received_hogs =
-      from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
-  const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
+      from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
 
   // Update [kGroupToSchedule].
   new_averages.num_hogs[kHogAgeGroupToSchedule] =
@@ -315,8 +317,10 @@ NewScheduler::cycle_groups(const ContractAddress &account)
       to_xdr(static_cast<uint128_t>(0));
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
-  auto [value_ref, lock] = accounts_[account];
-  value_ref = new_averages;
+  // I really want [averages] to be a const so that I do not accidentally mutate
+  // it above. Thus, I keep it const and I do a const cast below since I am sure
+  // I want to write it here.
+  *const_cast<HogAge *>(averages) = new_averages;
 }
 
 void
@@ -337,18 +341,13 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     CHECK_NE(num_received, static_cast<int128_t>(0));
 
     const ContractAddress &account = delta.address;
-    // I just wanted to make [averages] a const type and fill it in with a copy
-    // of the [HogAge] struct so that I can drop the lock quickly... I could not
-    // figure out a better way to do this than with a lambda.
-    const HogAge averages = [&] -> HogAge {
-      const auto [tmp_averages, lock] = accounts_[account];
-      return tmp_averages;
-    }();
-    HogAge new_averages = averages;
+    auto [averages, lock] = get_cached_hog_age(account);
+    HogAge new_averages = *averages;
 
-    uint128_t received_hogs = from_xdr(averages.num_hogs[kHogAgeGroupReceived]);
+    uint128_t received_hogs =
+        from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
     const BlockHeight received_age =
-        averages.average_ages[kHogAgeGroupReceived];
+        averages->average_ages[kHogAgeGroupReceived];
     if (num_received > 0) {
       new_averages.num_hogs[kHogAgeGroupReceived] =
           to_xdr(received_hogs + num_received);
@@ -365,9 +364,9 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
       auto num_received_abs = static_cast<uint128_t>(num_received * -1);
 
       uint128_t already_scheduled_hogs =
-          from_xdr(averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+          from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
       uint128_t to_schedule_hogs =
-          from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]);
+          from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
       CHECK_LE(num_received_abs,
                to_schedule_hogs + already_scheduled_hogs + received_hogs);
 
@@ -393,10 +392,10 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
       new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
     }
 
-    {
-      auto [value_ref, lock] = accounts_[account];
-      value_ref = new_averages;
-    }
+    // I really want [averages] to be a const so that I do not accidentally
+    // mutate it above. Thus, I keep it const and I do a const cast below since
+    // I am sure I want to write it here.
+    *const_cast<HogAge *>(averages) = new_averages;
   }
 }
 
@@ -424,30 +423,26 @@ NewScheduler::move_hogs_to_already_scheduled_group(
     const ContractAddress &account, uint128_t num_hogs,
     BlockHeight block_height)
 {
-  HogAge age = get_cached_hog_age(account);
+  auto [age, lock] = get_cached_hog_age(account);
+
   const uint128_xdr already_scheduled_hogs =
-      age.num_hogs[kHogAgeGroupAlreadyScheduled];
+      age->num_hogs[kHogAgeGroupAlreadyScheduled];
   const BlockHeight already_scheduled_age =
-      age.average_ages[kHogAgeGroupAlreadyScheduled];
+      age->average_ages[kHogAgeGroupAlreadyScheduled];
 
   // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
-  bool empty = from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
-  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+  bool empty = from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  age->num_hogs[kHogAgeGroupAlreadyScheduled] =
       to_xdr(num_hogs + from_xdr(already_scheduled_hogs));
   if (empty) {
-    age.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
+    age->average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
   }
   else {
     // See comment above for [compute_average_age()].
-    age.average_ages[kHogAgeGroupAlreadyScheduled] =
+    age->average_ages[kHogAgeGroupAlreadyScheduled] =
         compute_average_age(num_hogs, block_height,
                             from_xdr(already_scheduled_hogs),
                             already_scheduled_age);
-  }
-
-  {
-    auto [value_ref, lock] = accounts_[account];
-    value_ref = age;
   }
 }
 
@@ -506,8 +501,8 @@ NewScheduler::schedule(size_t block_size)
     // handle its own chunk of accounts from [ready_accounts_].
     const AccountKey account_key = *ready_accounts_.begin();
     const ContractAddress account = account_key.account;
-    HogAge hog_ages = get_cached_hog_age(account);
-    auto [txs, lock] = account_to_tx_[account];
+    auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
+    auto [txs, txs_lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
     while (num_scheduled < block_size && size_) {
       auto it = txs.lower_bound(lower_bound);
@@ -525,14 +520,10 @@ NewScheduler::schedule(size_t block_size)
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
       const uint128_t hogs_available =
-          from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]);
+          from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= hogs_available) {
-        hog_ages.num_hogs[kHogAgeGroupToSchedule] =
+        hog_ages->num_hogs[kHogAgeGroupToSchedule] =
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
-        {
-          auto [value_ref, lock] = accounts_[account];
-          value_ref = hog_ages;
-        }
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes_to_schedule.push_back(tx_hash);
@@ -547,9 +538,9 @@ NewScheduler::schedule(size_t block_size)
       else {
         const uint128_t all_hogs_available =
             hogs_spent_by_account +
-            from_xdr(hog_ages.num_hogs[kHogAgeGroupToSchedule]) +
-            from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) +
-            from_xdr(hog_ages.num_hogs[kHogAgeGroupReceived]);
+            from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]) +
+            from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
+            from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
         if (tx.tx.invocation.gas_limit > all_hogs_available) {
           // This account does not have enough hogs across all three of its
           // groups to schedule the tx, so we discard the tx.
