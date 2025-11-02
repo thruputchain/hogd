@@ -29,7 +29,7 @@ public:
   T
   load(std::memory_order /*unused*/ = std::memory_order_seq_cst) const noexcept
   {
-    return __sync_compare_and_swap(&value_, 0, 0);
+    return __sync_val_compare_and_swap(&value_, 0, 0);
   }
 
   void store(T value,
