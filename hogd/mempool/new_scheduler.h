@@ -142,6 +142,8 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  void add_txs_helper(const SignedTransaction &tx);
+
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress> &accounts,
