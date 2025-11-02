@@ -173,7 +173,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   if (old_mode == kActive) {
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
       if (errno != ENOENT && errno != EBADF)
-	debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
+        debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
   }
   unlock.reset();
   docbs(fdp);

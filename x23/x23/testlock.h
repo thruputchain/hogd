@@ -182,7 +182,8 @@ class SharedLock : public TestLock {
     {
       if (auto n = count.load()) {
         ++want_wake;
-        count.wait(n);
+        while ((n = count.load()))
+          count.wait(n);
         --want_wake;
       }
     }
