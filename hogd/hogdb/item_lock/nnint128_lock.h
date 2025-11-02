@@ -1,6 +1,5 @@
 #pragma once
 
-#include "hogd/base/atomic.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
@@ -54,13 +53,13 @@ public:
 
 private:
   const int128_t base_;
-  Atomic16B<int128_t> delta_ = 0;
+  std::atomic<int128_t> delta_ = 0;
   // nonnegative ints that represent
   // the amount that can be added to or subtracted from the base, without
   // overflowing. We subtract the (positive) add amount from add_, and add the
   // (negative) sub amount to sub_.
-  Atomic16B<int128_t> add_;
-  Atomic16B<int128_t> sub_;
+  std::atomic<int128_t> add_;
+  std::atomic<int128_t> sub_;
 
   bool try_reserve_add_capacity(int128_t amount)
   {
