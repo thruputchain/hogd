@@ -3,6 +3,7 @@
 add_library(hogdb_objects OBJECT
   block_tx.cc
   block_id_manager.cc
+  item_lock/nnint128_lock.cc
   invariant_hog_conservation.cc
   invoke_tx.cc
   item_change.cc
@@ -59,6 +60,7 @@ add_executable(
   item_change_auth_test.cc
   item_change_exclusive_test.cc
   item_change_replay_cache_test.cc
+  item_lock/nnint128_lock_test.cc
   recovery_tests.cc
 )
 target_link_libraries(

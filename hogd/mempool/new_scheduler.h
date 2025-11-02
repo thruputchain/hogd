@@ -11,6 +11,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/mempool/shared.h"
@@ -64,7 +65,7 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  HogAge &get_cached_hog_age(const ContractAddress &address);
+  HogAge get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
   read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
@@ -141,6 +142,8 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  void add_txs_helper(const SignedTransaction &tx);
+
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress> &accounts,
@@ -159,17 +162,21 @@ private:
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
   // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::map<TxKey, TxValue *>>
-      account_to_tx_;
+  // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
+  // (i.e., are we inserting new accounts into it rarely)? Would it be better to
+  // make it an [std::unordered_map<>] and protect it with a rw lock?
+  SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
   std::set<AccountKey> ready_accounts_;
 
   // Tx cache.
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  std::unordered_map<SignedTransactionHash, TxValue> txs_;
+  SynchronizedMap<SignedTransactionHash, TxValue> txs_;
   // Account cache.
-  std::unordered_map<ContractAddress, HogAge> accounts_;
+  // TODO(jhumphri): Similarly, is this read heavy? Would it be better to make
+  // it an [std::unordered_map] and protect it with a rw lock?
+  SynchronizedMap<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
   size_t size_ = 0;
