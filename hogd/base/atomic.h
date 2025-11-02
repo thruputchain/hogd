@@ -27,7 +27,7 @@ public:
   GccAtomic16B &operator=(GccAtomic16B &&) = delete;
 
   T
-  load(std::memory_order /*unused*/ = std::memory_order_seq_cst) const noexcept
+  load(std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
   {
     return __sync_val_compare_and_swap(&value_, 0, 0);
   }
