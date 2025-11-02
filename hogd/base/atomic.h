@@ -13,6 +13,8 @@ namespace detail {
 
 template<typename T> struct GccAtomic16B : public std::atomic<T> {
 
+  using std::atomic<T>::atomic;
+
   static_assert(
       !std::integral<T> || requires(std::atomic<T> arg) { arg.fetch_add(T{}); },
       "We should not be overriding an existing fetch_add method");
