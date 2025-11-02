@@ -76,8 +76,11 @@ public:
       if (next_value_bucket == nullptr) {
 
         if (!new_value_bucket) {
+          // This call to construct new_value_bucket only happens at most once.
+          // NOLINTBEGIN(bugprone-use-after-move)
           new_value_bucket =
               new ValueBucket<Value>{key, Value(std::forward<Args>(args)...)};
+          // NOLINTEND(bugprone-use-after-move)
         }
         assert(key_matches(std::span(new_value_bucket->key_), key));
 
