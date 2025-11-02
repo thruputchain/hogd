@@ -142,8 +142,9 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
     fdp->mode_.wait(kLocked);
 
+  int fd = fdp.get() - state_;
   FdState::Mode unlock_mode = old_mode;
-  Defer unlock([&unlock_mode, &fdp] {
+  Defer unlock([&] {
     fdp->mode_ = unlock_mode;
     fdp->mode_.notify_all();
   });
@@ -153,7 +154,6 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     return;
 
   unlock_mode = mode;
-  int fd = fdp.get() - state_;
 
   if (mode == kActive) {
 #if X23_FD_TRACE
@@ -172,7 +172,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   fdp->ready_ = 0; // because EPOLLERR is sticky
   if (old_mode == kActive) {
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
-      debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{});
+      if (errno != ENOENT && errno != EBADF)
+	debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
   }
   unlock.reset();
   docbs(fdp);

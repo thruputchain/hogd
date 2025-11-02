@@ -18,6 +18,14 @@ namespace x23 {
 // Do not do any logging regardless of environment variables
 extern bool ignore_debug_env;
 
+// Prepend prefix and append a newline to a formatted string.
+std::string vformat_line(std::string_view prefix, std::string_view fmt,
+                         std::format_args args);
+
+// Like vformat_log_msg but add the program name at the beginning.
+std::string vformat_logline(std::string_view prefix, std::string_view fmt,
+                            std::format_args args);
+
 // Replace instances of "%n" for various characters 'n' with a
 // substitution string.  "%%" is replaced with "%".
 std::string replace_percent(std::string_view target,
@@ -85,8 +93,7 @@ template<FixedStr EnvVar> struct DebugFd {
 
   static void verr(std::string_view fmt, std::format_args args)
   {
-    std::string msg = std::vformat(fmt, args);
-    msg += '\n';
+    std::string msg = vformat_logline("", fmt, args);
     if (int f = fd(); f != -1 && f != 2)
       write(fd(), msg.data(), msg.size());
     write(2, msg.data(), msg.size());
@@ -100,8 +107,7 @@ template<FixedStr EnvVar> struct DebugFd {
 private:
   static void do_vfmt(std::string_view fmt, std::format_args args)
   {
-    std::string msg = std::vformat(fmt, args);
-    msg += '\n';
+    std::string msg = vformat_logline("", fmt, args);
     write(fd(), msg.data(), msg.size());
   }
 };
@@ -116,8 +122,7 @@ struct NullDebugFd {
   static void operator()(auto &&...) {}
   static void verr(std::string_view fmt, std::format_args args)
   {
-    std::string msg = std::vformat(fmt, args);
-    msg += '\n';
+    std::string msg = vformat_logline("", fmt, args);
     write(2, msg.data(), msg.size());
   }
   template<typename... Args>

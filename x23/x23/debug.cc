@@ -52,6 +52,29 @@ stacktrace(unsigned indent, std::string ret)
 }
 
 std::string
+vformat_line(std::string_view prefix, std::string_view fmt,
+             std::format_args args)
+{
+  std::string msg(prefix);
+  uvformat_to(&msg, fmt, args);
+  msg += '\n';
+  return msg;
+}
+
+std::string
+vformat_logline(std::string_view prefix, std::string_view fmt,
+                std::format_args args)
+{
+  std::string msg(getprogname());
+  if (!msg.empty())
+    msg += ": ";
+  msg += prefix;
+  uvformat_to(&msg, fmt, args);
+  msg += '\n';
+  return msg;
+}
+
+std::string
 replace_percent(std::string_view target,
                 const std::map<char, std::string> &subst)
 {
