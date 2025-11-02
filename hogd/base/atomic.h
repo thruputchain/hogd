@@ -26,8 +26,8 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
     for (;;) {
       T current = std::atomic<T>::load(std::memory_order_relaxed);
       T desired = current + arg;
-      if (compare_exchange_weak(current, desired, order,
-                                std::memory_order_relaxed)) {
+      if (std::atomic<T>::compare_exchange_weak(current, desired, order,
+                                                std::memory_order_relaxed)) {
         return current;
       }
     }
@@ -39,8 +39,8 @@ template<typename T> struct GccAtomic16B : public std::atomic<T> {
     for (;;) {
       T current = std::atomic<T>::load(std::memory_order_relaxed);
       T desired = current - arg;
-      if (compare_exchange_weak(current, desired, order,
-                                std::memory_order_relaxed)) {
+      if (std::atomic<T>::compare_exchange_weak(current, desired, order,
+                                                std::memory_order_relaxed)) {
         return current;
       }
     }
