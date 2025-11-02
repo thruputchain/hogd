@@ -213,8 +213,11 @@ public:
 
   static size_t storage_size() { return sizeof(int128_t); }
   int128_t value() const { return base_ + delta_; }
+
   int128_t base() const { return base_; }
   int128_t delta() const { return delta_; }
+  int128_t plus() const { return plus_; }
+  int128_t minus() const { return minus_; }
 
   static int128_t committed_storage_cost(const StorageCostModel *cost_model)
   {
@@ -257,8 +260,9 @@ template<> struct std::formatter<hogd::NNInt128> {
 
   static auto format(const hogd::NNInt128 &nnint, auto &ctx)
   {
-    return format_to(ctx.out(), "NNInt128{{base={}, delta={}}}", nnint.base(),
-                     nnint.delta());
+    return format_to(ctx.out(),
+                     "NNInt128{{base={}, delta={}, plus={}, minus={}}}",
+                     nnint.base(), nnint.delta(), nnint.plus(), nnint.minus());
   }
 };
 static_assert(hogd::is_item<hogd::NNInt128>);

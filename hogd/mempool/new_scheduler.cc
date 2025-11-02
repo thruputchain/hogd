@@ -1,6 +1,8 @@
 #include "hogd/mempool/new_scheduler.h"
 
 #include <algorithm>
+#include <array>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -10,7 +12,7 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
@@ -181,15 +183,16 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     // expensive to compute.
     TxValue *value = nullptr;
     {
+      // The tx may already exist in [txs_] because it is okay to add a tx back
+      // into the scheduler again. This can happen if the tx was originally
+      // added to the scheduler, then the tx was removed during validation by
+      // [find_and_remove_from_runqueue()], then validation failed, and then the
+      // tx was added back to the scheduler.
       const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
       CHECK_PTR(tx_ptr);
       value = tx_ptr;
     }
     // We do not CHECK that [inserted.second] is true because it is okay to add
-    // a tx back into the scheduler again. This can happen if the tx was
-    // originally added to the scheduler, the tx was removed during validation
-    // by [find_and_remove_from_runqueue()], validation failed, and the tx was
-    // added back to the scheduler.
 
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,

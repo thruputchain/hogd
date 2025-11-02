@@ -32,7 +32,7 @@
 
 namespace hogd {
 
-inline HogDBStatus<void>
+HogDBStatus<void>
 NNInt128::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
   int128_t v = value();
@@ -50,7 +50,7 @@ NNInt128::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
   return ret;
 }
 
-inline bool
+bool
 NNInt128::narrow(const NNInt128 &nnint)
 {
   assert_is_valid();
@@ -81,7 +81,7 @@ NNInt128::narrow(const NNInt128 &nnint)
   return true;
 }
 
-inline HogDBStatus<int128_t>
+HogDBStatus<int128_t>
 NNInt128::merge(const NNInt128 &nnint, const StorageCostModel *cost_model)
 {
   assert_is_valid();
@@ -115,7 +115,7 @@ NNInt128::merge(const NNInt128 &nnint, const StorageCostModel *cost_model)
   return marginal_storage_cost(cost_model);
 }
 
-inline void
+void
 NNInt128::undo_merge(const NNInt128 &nnint)
 {
   assert_is_valid();
@@ -128,7 +128,7 @@ NNInt128::undo_merge(const NNInt128 &nnint)
   assert_is_valid();
 }
 
-inline HogDBStatus<void>
+HogDBStatus<void>
 Bytes::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
   std::span<const std::byte> v = std::as_bytes(std::span(buf_));
@@ -143,7 +143,7 @@ Bytes::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
   return ret;
 }
 
-inline HogDBStatus<void>
+HogDBStatus<void>
 Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
   HogDBStatus<int8_t> type_ret = db.get_item_type(key);
@@ -167,7 +167,7 @@ Deletion::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key)
   return {};
 }
 
-inline HogDBStatus<void>
+HogDBStatus<void>
 DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
                              const ItemKey &key) const
 {
@@ -196,7 +196,7 @@ DeployedContractData::commit(HogDBDAO &db, MerkleTriePrefix &trie,
   return ret;
 }
 
-inline HogDBStatus<void>
+HogDBStatus<void>
 NewContractData::commit(HogDBDAO &db, MerkleTriePrefix & /*unused*/,
                         const ItemKey &key) const
 {

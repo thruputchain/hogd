@@ -11,6 +11,8 @@
 #include <x23/threadpool.h>
 #include <x23/utility.h>
 
+#define X23_TRACE_SHLOCK 0
+
 namespace x23 {
 
 // A simple futex-based mutex with some features missing from
@@ -125,6 +127,9 @@ class SharedLock : public TestLock {
     std::atomic_uint count{0};
     std::atomic_bool want_wake{false};
     TestLock *tl_; // Could get away without, but we have a whole cache line
+#if X23_TRACE_SHLOCK
+    std::array<std::atomic<std::thread::id>, 2> slockers_;
+#endif // X23_TRACE_SHLOCK
 
     Inhibitor(TestLock *tl) noexcept : tl_(tl) {}
 
@@ -132,8 +137,21 @@ class SharedLock : public TestLock {
     {
       for (;;) {
         count.fetch_add(1);
-        if (!tl_->busy())
+        if (!tl_->busy()) {
+#if X23_TRACE_SHLOCK
+          auto id = std::this_thread::get_id();
+          for (unsigned i = 0; i < slockers_.size(); ++i) {
+            if (slockers_[i] == std::thread::id{} || slockers_[i] == id) {
+              slockers_[i] = id;
+              return;
+            }
+          }
+          for (unsigned i = 0; i < slockers_.size() - 1; ++i)
+            slockers_[i] = slockers_[i + 1].load();
+          slockers_.back() = id;
+#endif // X23_TRACE_SHLOCK
           return;
+        }
         decref();
         tl_->block_until_free();
       }
@@ -144,6 +162,14 @@ class SharedLock : public TestLock {
         want_wake = false;
         count.notify_all();
       }
+#if X23_TRACE_SHLOCK
+      auto id = std::this_thread::get_id();
+      for (unsigned i = 0; i < slockers_.size(); ++i)
+        if (slockers_[i] == id) {
+          slockers_[i] = std::thread::id{};
+          break;
+        }
+#endif // X23_TRACE_SHLOCK
     }
     void block() noexcept
     {
