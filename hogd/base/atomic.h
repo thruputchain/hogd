@@ -1,129 +1,68 @@
 #pragma once
 
 #include <atomic>
+#include <concepts>
 #include <type_traits>
-
-#include "hogd/base/types.h"
 
 namespace hogd {
 
-// gcc after version 7.1 refuses to emit cmpxchg16b instructions,
-// instead defaulting to a lock table.
-// See gcc bug https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80878
+// GCC's stdlib does not provide integral specializations for
+// std::atomic<int128_t>.
 
 namespace detail {
 
-// Due to the limitations of gcc, this winds up being a full seq_cst fence
-// on each op.
-template<typename T> requires (sizeof(T) == 16 && alignof(T) == 16 &&
-                               std::is_trivially_copyable_v<T>)
-class GccAtomic16B {
-public:
-  GccAtomic16B(T value) : value_(value) {}
+template<typename T> struct GccAtomic16B : public std::atomic<T> {
 
-  GccAtomic16B(GccAtomic16B const &) = delete;
-  GccAtomic16B(GccAtomic16B &&) = delete;
-  GccAtomic16B &operator=(GccAtomic16B const &) = delete;
-  GccAtomic16B &operator=(GccAtomic16B &&) = delete;
+  using std::atomic<T>::atomic;
 
-  // Normally a load() is const.  We have no load instruction; just a compare
-  // and swap. So we can't make the load() function const without declaring
-  // value_ mutable. This usage of compare and swap is a guaranteed no-op
-  // (either no swap happens, or the value is swapped from 0 to 0). We do this
-  // over e.g. fetch_add(0) because fetch_add(0) does a loop around a CAS and we
-  // don't care about the CAS succeeding here.
-  T
-  load(std::memory_order /*unused*/ = std::memory_order_seq_cst) const noexcept
+  static_assert(
+      !requires(std::atomic<T> arg) { arg.fetch_add(T{}); },
+      "We should not be overriding an existing fetch_add method");
+
+  T fetch_add(T arg,
+              std::memory_order order = std::memory_order_seq_cst) noexcept
+      requires std::integral<T>
   {
-    return __sync_val_compare_and_swap(&value_, 0, 0);
-  }
-
-  void store(T value,
-             std::memory_order order = std::memory_order_seq_cst) noexcept
-  {
-    exchange(value, order);
-  }
-
-  T exchange(T value,
-             std::memory_order order = std::memory_order_seq_cst) noexcept
-  {
-    // Per the GCC documentation, this function is an acquire barrier, not a
-    // seq_cst barrier.
-    // This is an exchange operation, despite the name.
-    T old_value = __sync_lock_test_and_set(&value_, value);
-
-    if (order == std::memory_order_seq_cst ||
-        order == std::memory_order_release ||
-        order == std::memory_order_acq_rel) {
-      // This is a release barrier
-      __sync_synchronize();
+    for (;;) {
+      T current = std::atomic<T>::load(std::memory_order_relaxed);
+      T desired = current + arg;
+      if (std::atomic<T>::compare_exchange_weak(current, desired, order,
+                                                std::memory_order_relaxed)) {
+        return current;
+      }
     }
-
-    return old_value;
   }
-
-  bool compare_exchange_strong(
-      T &expected, T desired,
-      std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
+  T fetch_sub(T arg,
+              std::memory_order order = std::memory_order_seq_cst) noexcept
+      requires std::integral<T>
   {
-
-    T previous_value = __sync_val_compare_and_swap(&value_, expected, desired);
-    bool success = previous_value == expected;
-    expected = previous_value;
-    return success;
+    for (;;) {
+      T current = std::atomic<T>::load(std::memory_order_relaxed);
+      T desired = current - arg;
+      if (std::atomic<T>::compare_exchange_weak(current, desired, order,
+                                                std::memory_order_relaxed)) {
+        return current;
+      }
+    }
   }
 
-  bool compare_exchange_weak(
-      T &expected, T desired,
-      std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
+  T operator+=(T arg) noexcept requires std::integral<T>
   {
-    return compare_exchange_strong(expected, desired);
+    return fetch_add(arg) + 1;
   }
-
-  // specializations for integral types
-  T fetch_add(T value,
-              std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
-      requires std::is_integral_v<T>
+  T operator-=(T arg) noexcept requires std::integral<T>
   {
-    return __sync_fetch_and_add(&value_, value);
+    return fetch_sub(arg) - 1;
   }
 
-  T fetch_sub(T value,
-              std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
-      requires std::is_integral_v<T>
-  {
-    return __sync_fetch_and_sub(&value_, value);
-  }
-
-  T fetch_and(T value,
-              std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
-      requires std::is_integral_v<T>
-  {
-    return __sync_fetch_and_and(&value_, value);
-  }
-
-  T fetch_or(T value,
-             std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
-      requires std::is_integral_v<T>
-  {
-    return __sync_fetch_and_or(&value_, value);
-  }
-
-  T fetch_xor(T value,
-              std::memory_order /*unused*/ = std::memory_order_seq_cst) noexcept
-      requires std::is_integral_v<T>
-  {
-    return __sync_fetch_and_xor(&value_, value);
-  }
-
-private:
-  mutable T value_;
+  T operator++(int) noexcept requires std::integral<T> { return fetch_add(1); }
+  T operator--(int) noexcept requires std::integral<T> { return fetch_sub(1); }
 };
-
-static_assert(sizeof(GccAtomic16B<int128_t>) == 16);
 
 } // namespace detail
 
+// Clang's stdlib provices integral specializations for std::atomic<int128_t>.
+// Clang also sets is_always_lock_free to true for int128_t.
 template<typename T>
 using Atomic16B = std::conditional_t<std::atomic<T>::is_always_lock_free,
                                      std::atomic<T>, detail::GccAtomic16B<T>>;
