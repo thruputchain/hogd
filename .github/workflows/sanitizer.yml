@@ -35,10 +35,29 @@ jobs:
       with:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
+    
     - name: build gcc asan
       run: ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON"
     - name: run gcc tests
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
         ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
-
+   
+    - name: build clang asan
+      run: ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON"
+    - name: run llvm tests
+      run: |
+        export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+        ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
+    
+    - name: build gcc ubsan
+      run: ./scripts/build.sh -d build/gcc_ubsan -c gcc -f "-fsanitize=undefined" -t Debug -x "-DENABLE_TEST_FFI=ON"
+    - name: run gcc ubsan tests
+      run: |
+        ctest --test-dir build/gcc_ubsan --parallel --timeout 100 --output-on-failure
+    
+    - name: build clang ubsan
+      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined" -t Debug -x "-DENABLE_TEST_FFI=ON"
+    - name: run llvm ubsan tests
+      run: |
+        ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
