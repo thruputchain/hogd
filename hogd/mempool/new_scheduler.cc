@@ -181,8 +181,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     // expensive to compute.
     TxValue *value = nullptr;
     {
-      const auto [tx_ptr, lock] = txs_.insert(tx_hash, {.tx = tx});
-      // [txs_.insert] returns a nullptr if the insertion failed.
+      const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
       CHECK_PTR(tx_ptr);
       value = tx_ptr;
     }
@@ -345,7 +344,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     CHECK_NE(num_received, static_cast<int128_t>(0));
 
     const ContractAddress &account = delta.address;
-    // I just wanted to make [averages] a const type fill it in with a copy from
+    // I just wanted to make [averages] a const type and fill it in with a copy
     // of the [HogAge] struct so that I can drop the lock quickly... I could not
     // figure out a better way to do this than with a lambda.
     const HogAge averages = [&] -> HogAge {
