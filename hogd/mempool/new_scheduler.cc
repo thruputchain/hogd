@@ -327,6 +327,69 @@ void
 NewScheduler::dump_runqueue() const
 {}
 
+void
+NewScheduler::process_transfers_helper(const Delta &delta,
+                                       BlockHeight block_height)
+{
+  int128_t num_received = from_xdr(delta.hog_delta);
+  CHECK_NE(num_received, static_cast<int128_t>(0));
+
+  const ContractAddress &account = delta.address;
+  auto [averages, lock] = get_cached_hog_age(account);
+  HogAge new_averages = *averages;
+
+  uint128_t received_hogs = from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
+  if (num_received > 0) {
+    new_averages.num_hogs[kHogAgeGroupReceived] =
+        to_xdr(received_hogs + num_received);
+    // See comment above for [compute_average_age()].
+    //
+    // Note that [compute_average_age()] will never divide by 0 because we check
+    // that [num_received] is not 0.
+    new_averages.average_ages[kHogAgeGroupReceived] =
+        compute_average_age(received_hogs, received_age, num_received,
+                            block_height);
+  }
+  else {
+    CHECK_LT(num_received, 0);
+    auto num_received_abs = static_cast<uint128_t>(num_received * -1);
+
+    uint128_t already_scheduled_hogs =
+        from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
+    uint128_t to_schedule_hogs =
+        from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
+    CHECK_LE(num_received_abs,
+             to_schedule_hogs + already_scheduled_hogs + received_hogs);
+
+    uint128_t to_deduct = std::min(num_received_abs, received_hogs);
+    num_received_abs -= to_deduct;
+    received_hogs -= to_deduct;
+
+    if (num_received_abs > 0) {
+      to_deduct = std::min(num_received_abs, already_scheduled_hogs);
+      num_received_abs -= to_deduct;
+      already_scheduled_hogs -= to_deduct;
+    }
+    if (num_received_abs > 0) {
+      to_deduct = std::min(num_received_abs, to_schedule_hogs);
+      num_received_abs -= to_deduct;
+      to_schedule_hogs -= to_deduct;
+    }
+    CHECK_EQ(num_received_abs, 0UL);
+
+    new_averages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule_hogs);
+    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+        to_xdr(already_scheduled_hogs);
+    new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
+  }
+
+  // I really want [averages] to be a const so that I do not accidentally mutate
+  // it above. Thus, I keep it const and I do a const cast below since I am sure
+  // I want to write it here.
+  *const_cast<HogAge *>(averages) = new_averages;
+}
+
 x23::Async<void>
 NewScheduler::process_transfers(const HogsTransferred &transfers)
 {
@@ -336,66 +399,41 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   // [read_average_hog_ages] on a separate thread.
   co_await read_average_hog_ages(transfers);
 
-  for (const Delta &delta : transfers.deltas) {
-    int128_t num_received = from_xdr(delta.hog_delta);
-    CHECK_NE(num_received, static_cast<int128_t>(0));
+  constexpr size_t kNumThreads = 100;
+  size_t deltas_per_thread = transfers.deltas.size() / kNumThreads;
+  if (transfers.deltas.size() % kNumThreads) {
+    // Have each thread handle an extra delta so that there are no deltas
+    // leftover. Note that some of the threads may end up doing more work than
+    // other threads.
+    //
+    // e.g.,
+    // If there are 1,000 deltas and 128 threads:
+    // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
+    // [deltas_per_thread] = 8.
+    // Threads 0-124 will handle 8 detlas.
+    // Threads 125, 126, and 127 will handle *no* deltas.
+    deltas_per_thread++;
+  }
 
-    const ContractAddress &account = delta.address;
-    auto [averages, lock] = get_cached_hog_age(account);
-    HogAge new_averages = *averages;
-
-    uint128_t received_hogs =
-        from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
-    const BlockHeight received_age =
-        averages->average_ages[kHogAgeGroupReceived];
-    if (num_received > 0) {
-      new_averages.num_hogs[kHogAgeGroupReceived] =
-          to_xdr(received_hogs + num_received);
-      // See comment above for [compute_average_age()].
-      //
-      // Note that [compute_average_age()] will never divide by 0 because we
-      // check that [num_received] is not 0.
-      new_averages.average_ages[kHogAgeGroupReceived] =
-          compute_average_age(received_hogs, received_age, num_received,
-                              transfers.block);
-    }
-    else {
-      CHECK_LT(num_received, 0);
-      auto num_received_abs = static_cast<uint128_t>(num_received * -1);
-
-      uint128_t already_scheduled_hogs =
-          from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
-      uint128_t to_schedule_hogs =
-          from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
-      CHECK_LE(num_received_abs,
-               to_schedule_hogs + already_scheduled_hogs + received_hogs);
-
-      uint128_t to_deduct = std::min(num_received_abs, received_hogs);
-      num_received_abs -= to_deduct;
-      received_hogs -= to_deduct;
-
-      if (num_received_abs > 0) {
-        to_deduct = std::min(num_received_abs, already_scheduled_hogs);
-        num_received_abs -= to_deduct;
-        already_scheduled_hogs -= to_deduct;
+  std::array<x23::Awaitable<void>, kNumThreads> awaitables;
+  for (size_t i = 0; i < kNumThreads; i++) {
+    [](size_t coro_idx, auto cb, const HogsTransferred &transfers,
+       size_t deltas_per_thread, NewScheduler &scheduler) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+      size_t start = coro_idx * deltas_per_thread;
+      size_t possible_end = (coro_idx + 1) * deltas_per_thread;
+      size_t end = std::min(possible_end, transfers.deltas.size());
+      for (size_t delta_idx = start; delta_idx < end; delta_idx++) {
+        scheduler.process_transfers_helper(transfers.deltas[delta_idx],
+                                           transfers.block);
       }
-      if (num_received_abs > 0) {
-        to_deduct = std::min(num_received_abs, to_schedule_hogs);
-        num_received_abs -= to_deduct;
-        to_schedule_hogs -= to_deduct;
-      }
-      CHECK_EQ(num_received_abs, 0UL);
-
-      new_averages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule_hogs);
-      new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
-          to_xdr(already_scheduled_hogs);
-      new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
-    }
-
-    // I really want [averages] to be a const so that I do not accidentally
-    // mutate it above. Thus, I keep it const and I do a const cast below since
-    // I am sure I want to write it here.
-    *const_cast<HogAge *>(averages) = new_averages;
+      cb();
+    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), transfers,
+                                                          deltas_per_thread,
+                                                          *this);
+  }
+  for (x23::Awaitable<void> &awaitable : awaitables) {
+    co_await awaitable;
   }
 }
 
