@@ -121,6 +121,33 @@ NewScheduler::get_account_key(const ContractAddress &account)
   return {.average_hog_age = average_hog_age, .account = account};
 }
 
+void
+NewScheduler::add_txs_helper(const SignedTransaction &tx)
+{
+  const SignedTransactionHash &tx_hash = sha256(tx);
+  TxValue *value = nullptr;
+  {
+    // The tx may already exist in [txs_] because it is okay to add a tx back
+    // into the scheduler again. This can happen if the tx was originally
+    // added to the scheduler, then the tx was removed during validation by
+    // [find_and_remove_from_runqueue()], then validation failed, and then the
+    // tx was added back to the scheduler.
+    const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
+    CHECK_PTR(tx_ptr);
+    value = tx_ptr;
+  }
+
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_txs, lock] = account_to_tx_[account];
+  // Check if the tx is already present in [account_to_tx_[account]]. If it
+  // is, we are adding a duplicate tx, so we do not want to increment [size_].
+  if (account_txs.insert({key, value}).second) {
+    size_++;
+  }
+}
+
 x23::Async<void>
 NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 {
@@ -131,80 +158,44 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
-  x23::Vec<SignedTransactionHash> tx_hashes;
-  tx_hashes.resize(txs.size());
   auto timer = std::make_unique<ElapsedTimer>();
-  constexpr size_t kNumThreads = 10;
-  size_t hashes_per_thread = txs.size() / kNumThreads;
+  constexpr size_t kNumThreads = 100;
+  size_t txs_per_thread = txs.size() / kNumThreads;
   if (txs.size() % kNumThreads) {
-    // Have each thread do an extra hash so that there are no hashes leftover.
+    // Have each thread handle an extra tx so that there are no txs leftover.
     // Note that some of the threads may end up doing more work than other
     // threads.
     //
     // e.g.,
-    // If there are 1,000 hashes and 128 threads:
+    // If there are 1,000 txs and 128 threads:
     // 1000 / 128 = 7. 1000 % 128 != 0, so we add one to 7. Thus,
-    // [hashes_per_thread] = 8.
-    // Threads 0-124 will do 8 hashes.
-    // Threads 125, 126, and 127 will do *no* hashes.
-    hashes_per_thread++;
+    // [txs_per_thread] = 8.
+    // Threads 0-124 will handle 8 txs.
+    // Threads 125, 126, and 127 will handle *no* txs.
+    txs_per_thread++;
   }
 
   std::array<x23::Awaitable<void>, kNumThreads> awaitables;
   for (size_t i = 0; i < kNumThreads; i++) {
     [](size_t coro_idx, auto cb, const x23::Vec<hogd::SignedTransaction> &txs,
-       x23::Vec<SignedTransactionHash> &tx_hashes,
-       size_t hashes_per_thread) -> x23::Detached {
+       size_t txs_per_thread, NewScheduler &scheduler) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
-      size_t start = coro_idx * hashes_per_thread;
-      size_t possible_end = (coro_idx + 1) * hashes_per_thread;
+      size_t start = coro_idx * txs_per_thread;
+      size_t possible_end = (coro_idx + 1) * txs_per_thread;
       size_t end = std::min(possible_end, txs.size());
-      for (size_t hash_idx = start; hash_idx < end; hash_idx++) {
-        tx_hashes[hash_idx] = sha256(txs[hash_idx]);
+      for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
+        scheduler.add_txs_helper(txs[tx_idx]);
       }
       cb();
       co_return;
-    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, tx_hashes,
-                                 hashes_per_thread);
+    }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
+                                                       *this);
   }
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
   }
 
-  double tx_hashes_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  // for (const SignedTransaction &tx : txs) {
-  for (size_t i = 0; i < txs.size(); i++) {
-    const SignedTransaction &tx = txs[i];
-    const SignedTransactionHash &tx_hash = tx_hashes[i];
-    // TODO(jhumphri): This is a good parallelization opportunity! Hashes are
-    // expensive to compute.
-    TxValue *value = nullptr;
-    {
-      // The tx may already exist in [txs_] because it is okay to add a tx back
-      // into the scheduler again. This can happen if the tx was originally
-      // added to the scheduler, then the tx was removed during validation by
-      // [find_and_remove_from_runqueue()], then validation failed, and then the
-      // tx was added back to the scheduler.
-      const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
-      CHECK_PTR(tx_ptr);
-      value = tx_ptr;
-    }
-    // We do not CHECK that [inserted.second] is true because it is okay to add
-
-    const ContractAddress &account = tx.tx.invocation.invoked_address;
-    const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-                    .tx_hash = tx_hash};
-    auto [account_txs, lock] = account_to_tx_[account];
-    // Check if the tx is already present in [account_to_tx_[account]]. If it
-    // is, we are adding a duplicate tx, so we do not want to increment [size_].
-    if (account_txs.insert({key, value}).second) {
-      size_++;
-    }
-  }
-
-  double tx_enqueue_duration = timer->elapsed();
+  double tx_hash_and_enqueue_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
   for (const ContractAddress &account : accounts) {
@@ -214,9 +205,9 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   }
 
   double ready_accounts_duration = timer->elapsed();
-  info("NewScheduler::add_txs tx_hashes_duration {}, tx_enqueue_duration {}, "
+  info("NewScheduler::add_txs tx_hash_and_enqueue_duration {}, "
        "ready_accounts_duration {}",
-       tx_hashes_duration, tx_enqueue_duration, ready_accounts_duration);
+       tx_hash_and_enqueue_duration, ready_accounts_duration);
 }
 
 void
