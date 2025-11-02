@@ -134,30 +134,26 @@ void
 CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 {
   using enum FdState::Mode;
+
   FdState::Mode old_mode = fdp->mode_;
-  do {
-    if (old_mode == mode || (mode == kActive && old_mode == kPoisoned))
-      return;
-    if (old_mode == kLocked) {
-      fdp->mode_.wait(kLocked);
-      continue;
-    }
-  } while (!fdp->mode_.compare_exchange_strong(old_mode, kLocked));
-
-  if (mode == kActive && stop_requested()) {
-    fdp->mode_ = old_mode;
-    fdp->mode_.notify_all();
+  if (mode == old_mode || (mode == kActive && old_mode == kPoisoned))
     return;
-  }
 
-  Defer unlock([&fdp, mode] {
-    fdp->mode_ = mode;
+  while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
+    fdp->mode_.wait(kLocked);
+
+  int fd = fdp.get() - state_;
+  FdState::Mode unlock_mode = old_mode;
+  Defer unlock([&] {
+    fdp->mode_ = unlock_mode;
     fdp->mode_.notify_all();
   });
 
-  int fd = fdp.get() - state_;
+  if (mode == old_mode ||
+      (mode == kActive && (old_mode == kPoisoned || stop_requested())))
+    return;
 
-  // debug("setmode fd {}: {} -> {}", fd, int(old_mode), int(mode));
+  unlock_mode = mode;
 
   if (mode == kActive) {
 #if X23_FD_TRACE
@@ -167,20 +163,20 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
-    [[maybe_unused]] int err =
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
-    x23assert(err != -1);
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
+      return;
+    debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
+    unlock_mode = mode = kPoisoned;
   }
-  else {
-    fdp->ready_ = 0; // because EPOLLERR is sticky
-    if (old_mode == kActive) {
-      [[maybe_unused]] int err =
-          epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
-      x23assert(err != -1 || errno == EBADF || errno == ENOENT);
-    }
-    unlock.reset();
-    docbs(fdp);
+
+  fdp->ready_ = 0; // because EPOLLERR is sticky
+  if (old_mode == kActive) {
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
+      if (errno != ENOENT && errno != EBADF)
+        debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
   }
+  unlock.reset();
+  docbs(fdp);
 }
 
 bool
@@ -204,9 +200,8 @@ void
 CoroPollImpl::wake()
 {
   uint64_t one{1};
-  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]] {
-    x23assert(!"write(eventfd)");
-  }
+  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
+    panic("write(eventfd): {}", Errno{});
 }
 
 CoroPollImpl::FdPtr

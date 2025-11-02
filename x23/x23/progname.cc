@@ -94,6 +94,8 @@ getprogpath()
   if (progpath.empty()) {
 #ifdef __APPLE__
     progpath = get_executable_path();
+#elifdef HAVE_GETPROGNAME
+    progpath = find_exe(::getprogname());
 #else  // !HAVE_GETPROGNAME
     std::string buf(1024UZ, '\0');
     for (;;) {

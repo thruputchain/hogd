@@ -47,6 +47,9 @@ public:
           self.status_.exchange(kLockedWantNotify, std::memory_order_acquire);
     if (prev != kUnlocked)
       return false;
+#if X23_TRACE_SHLOCK
+    self.owner_ = std::this_thread::get_id();
+#endif // X23_TRACE_SHLOCK
     if constexpr (requires { self.block_while_inhibited(); })
       self.block_while_inhibited();
     return true;
@@ -58,6 +61,9 @@ public:
   }
   void unlock() noexcept
   {
+#if X23_TRACE_SHLOCK
+    owner_ = {};
+#endif // X23_TRACE_SHLOCK
     if (auto old = status_.exchange(kUnlocked); old == kLockedWantNotify)
       status_.notify_all();
     else
@@ -94,6 +100,9 @@ private:
   static constexpr uint8_t kLockedWantNotify = 0xf5;
 #endif // !NDEBUG
   std::atomic_uint8_t status_{kUnlocked};
+#if X23_TRACE_SHLOCK
+  std::thread::id owner_{};
+#endif // X23_TRACE_SHLOCK
 };
 
 // A shared version of TestLock.  The constructor argument describes
@@ -125,7 +134,7 @@ class SharedLock : public TestLock {
   // exclusive locker.
   struct alignas(hardware_destructive_interference_size) Inhibitor {
     std::atomic_uint count{0};
-    std::atomic_bool want_wake{false};
+    std::atomic_uint want_wake{0};
     TestLock *tl_; // Could get away without, but we have a whole cache line
 #if X23_TRACE_SHLOCK
     std::array<std::atomic<std::thread::id>, 2> slockers_;
@@ -158,10 +167,8 @@ class SharedLock : public TestLock {
     }
     void decref() noexcept
     {
-      if (count.fetch_sub(1) == 1 && want_wake.load()) {
-        want_wake = false;
+      if (count.fetch_sub(1) == 1 && want_wake.load())
         count.notify_all();
-      }
 #if X23_TRACE_SHLOCK
       auto id = std::this_thread::get_id();
       for (unsigned i = 0; i < slockers_.size(); ++i)
@@ -173,9 +180,11 @@ class SharedLock : public TestLock {
     }
     void block() noexcept
     {
-      while (auto n = count.load()) {
-        want_wake = true;
-        count.wait(n);
+      if (auto n = count.load()) {
+        ++want_wake;
+        while ((n = count.load()))
+          count.wait(n);
+        --want_wake;
       }
     }
   };
