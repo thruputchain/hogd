@@ -1,8 +1,8 @@
 name: Sanitizer
 
 on:
-  pull_request:
-    branches: [ "main" ]
+  schedule:
+    - cron: '0 14 * * *' # Daily at 7am PDT/6am PST
   workflow_dispatch:
 
 jobs:
