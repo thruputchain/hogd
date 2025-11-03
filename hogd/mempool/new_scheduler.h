@@ -88,7 +88,7 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  void cycle_groups(const ContractAddress &account);
+  void cycle_groups(HogAge &current_averages);
 
   void increment_current_block() { current_block_++; }
   void decrement_current_block() { current_block_--; }
@@ -150,7 +150,7 @@ private:
       const std::unordered_set<ContractAddress> &accounts,
       const TxKey &lower_bound);
 
-  void move_hogs_to_already_scheduled_group(const ContractAddress &account,
+  void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
                                             uint128_t num_hogs,
                                             BlockHeight block_height);
 

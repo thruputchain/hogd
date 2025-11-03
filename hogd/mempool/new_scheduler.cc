@@ -215,7 +215,7 @@ NewScheduler::cycle_if_needed(const ContractAddress &account,
                               GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
-    const auto [hog_age, lock] = get_cached_hog_age(account);
+    auto [hog_age, lock] = get_cached_hog_age(account);
 
     const uint128_t to_schedule =
         from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]);
@@ -258,7 +258,7 @@ NewScheduler::cycle_if_needed(const ContractAddress &account,
     //    the boolean OR statement.
     if (already_scheduled_average_older || combined_averages_older ||
         gas_limit > to_schedule) {
-      cycle_groups(account);
+      cycle_groups(*hog_age);
     }
     else {
       break;
@@ -267,26 +267,25 @@ NewScheduler::cycle_if_needed(const ContractAddress &account,
 }
 
 void
-NewScheduler::cycle_groups(const ContractAddress &account)
+NewScheduler::cycle_groups(HogAge &current_averages)
 {
-  const auto [averages, lock] = get_cached_hog_age(account);
-
   HogAge new_averages{};
-  new_averages.address = averages->address;
+  new_averages.address = current_averages.address;
 
   const uint128_t to_schedule_hogs =
-      from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
+      from_xdr(current_averages.num_hogs[kHogAgeGroupToSchedule]);
   const BlockHeight to_schedule_age =
-      averages->average_ages[kHogAgeGroupToSchedule];
+      current_averages.average_ages[kHogAgeGroupToSchedule];
 
   const uint128_t already_scheduled_hogs =
-      from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
+      from_xdr(current_averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
   const BlockHeight already_scheduled_age =
-      averages->average_ages[kHogAgeGroupAlreadyScheduled];
+      current_averages.average_ages[kHogAgeGroupAlreadyScheduled];
 
   const uint128_t received_hogs =
-      from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
-  const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
+      from_xdr(current_averages.num_hogs[kHogAgeGroupReceived]);
+  const BlockHeight received_age =
+      current_averages.average_ages[kHogAgeGroupReceived];
 
   // Update [kGroupToSchedule].
   new_averages.num_hogs[kHogAgeGroupToSchedule] =
@@ -317,10 +316,7 @@ NewScheduler::cycle_groups(const ContractAddress &account)
       to_xdr(static_cast<uint128_t>(0));
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
-  // I really want [averages] to be a const so that I do not accidentally mutate
-  // it above. Thus, I keep it const and I do a const cast below since I am sure
-  // I want to write it here.
-  *const_cast<HogAge *>(averages) = new_averages;
+  current_averages = new_averages;
 }
 
 void
@@ -419,27 +415,25 @@ NewScheduler::account_is_ready(const ContractAddress &account,
 }
 
 void
-NewScheduler::move_hogs_to_already_scheduled_group(
-    const ContractAddress &account, uint128_t num_hogs,
-    BlockHeight block_height)
+NewScheduler::move_hogs_to_already_scheduled_group(HogAge &hog_ages,
+                                                   uint128_t num_hogs,
+                                                   BlockHeight block_height)
 {
-  auto [age, lock] = get_cached_hog_age(account);
-
   const uint128_xdr already_scheduled_hogs =
-      age->num_hogs[kHogAgeGroupAlreadyScheduled];
+      hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled];
   const BlockHeight already_scheduled_age =
-      age->average_ages[kHogAgeGroupAlreadyScheduled];
+      hog_ages.average_ages[kHogAgeGroupAlreadyScheduled];
 
   // We now move the hogs to the [kHogAgeGroupAlreadyScheduled] group.
-  bool empty = from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
-  age->num_hogs[kHogAgeGroupAlreadyScheduled] =
+  bool empty = from_xdr(hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled]) == 0UL;
+  hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled] =
       to_xdr(num_hogs + from_xdr(already_scheduled_hogs));
   if (empty) {
-    age->average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
+    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
   }
   else {
     // See comment above for [compute_average_age()].
-    age->average_ages[kHogAgeGroupAlreadyScheduled] =
+    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] =
         compute_average_age(num_hogs, block_height,
                             from_xdr(already_scheduled_hogs),
                             already_scheduled_age);
@@ -568,7 +562,7 @@ NewScheduler::schedule(size_t block_size)
     if (hogs_spent_by_account) {
       // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
       // this account.
-      move_hogs_to_already_scheduled_group(account, hogs_spent_by_account,
+      move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
                                            current_block_);
     }
   }
