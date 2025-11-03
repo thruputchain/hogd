@@ -295,6 +295,11 @@ public:
     return OwningSpan(span, [ref = std::move(buf)] {});
   }
 
+  std::span<const std::byte> value_view() const
+  {
+    return std::span<const std::byte>(buf_);
+  }
+
   int128_t committed_storage_cost(const StorageCostModel *cost_model) const
   {
     return marginal_storage_cost(cost_model);
