@@ -979,7 +979,7 @@ template<typename T, uint32_t Size = kMaxXdrSize>
 using XdrStr = BoundedStr<Size>;
 
 constexpr Str
-operator""_ustr(const char *s, size_t len)
+operator""_str(const char *s, size_t len)
 {
   return Str{s, len};
 }
