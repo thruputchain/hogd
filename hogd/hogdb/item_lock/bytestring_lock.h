@@ -17,6 +17,8 @@ public:
     : bytestring_(std::move(bytestring))
   {}
 
+  using change_type = Bytes;
+
   // On success, returns a (deterministic) upper bound on the storage cost
   // required to commit the after value. Is a no-op on failure.
   // If after is nullptr, the storage cost output should be ignored.

@@ -672,6 +672,7 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
   std::optional<ReplayCacheIt> to_replay_cache() const;
+  bool is_bytes() const { return std::holds_alternative<Bytes>(type_); }
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
@@ -694,6 +695,11 @@ public:
   bool is_replay_cache() const
   {
     return std::holds_alternative<ReplayCacheIt>(type_);
+  }
+
+  template<typename T> auto const *get_inner() const
+  {
+    return std::get_if<T>(&type_);
   }
 
   // commit applies the item's changes to the ramdb.

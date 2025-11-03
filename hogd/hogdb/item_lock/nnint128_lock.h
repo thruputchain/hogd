@@ -20,6 +20,8 @@ public:
       sub_(sub_capacity(base_value))
   {}
 
+  using change_type = NNInt128;
+
   // On success, returns a (deterministic) upper bound on the storage cost
   // required to commit the after value. Is a no-op on failure.
   // If after is nullptr, the storage cost output should be ignored.
