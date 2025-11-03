@@ -88,6 +88,8 @@ TEST(NewScheduler, Single)
   // Check that the correct number of hogs was deducted.
   auto [age, lock] =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
+  lock.unlock();
+
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
             5'000'000'000 * 10);
   EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
