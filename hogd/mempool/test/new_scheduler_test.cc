@@ -36,12 +36,12 @@ TEST(NewScheduler, ReadAge)
       server.mempool_coord_rpc().scheduler();
 
   scheduler->read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
-  const HogAge ret =
+  const auto [ret, lock] =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
+  EXPECT_EQ(ret->num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
-  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 0);
+  EXPECT_EQ(ret->average_ages[kHogAgeGroupToSchedule], 0);
 }
 
 TEST(NewScheduler, AddVettedTx)
@@ -86,28 +86,30 @@ TEST(NewScheduler, Single)
 
   scheduler->add_txs({txs[0]})();
   // Check that the correct number of hogs was deducted.
-  HogAge age =
+  auto [age, lock] =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 0);
+  lock.unlock();
+
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+            5'000'000'000 * 10);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
 
   const auto &[_, scheduled] = scheduler->schedule(kBlockSize);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
 
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
   // Check the correct number of hogs was deducted from the
   // [kHogAgeGroupToSchedule] group.
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 0);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
 
   // Check that the correct number of hogs was added to the
   // [kHogAgeGroupAlreadyScheduled] group.
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled],
-            age.average_ages[kHogAgeGroupToSchedule]);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
+            age->average_ages[kHogAgeGroupToSchedule]);
 }
 
 TEST(Scheduler, Fairness)

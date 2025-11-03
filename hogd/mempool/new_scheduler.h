@@ -65,7 +65,8 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  HogAge get_cached_hog_age(const ContractAddress &address);
+  std::pair<HogAge *, std::unique_lock<std::mutex>>
+  get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
   read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
@@ -87,7 +88,7 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  void cycle_groups(const ContractAddress &account);
+  static void cycle_groups(HogAge &current_averages);
 
   void increment_current_block() { current_block_++; }
   void decrement_current_block() { current_block_--; }
@@ -149,9 +150,11 @@ private:
       const std::unordered_set<ContractAddress> &accounts,
       const TxKey &lower_bound);
 
-  void move_hogs_to_already_scheduled_group(const ContractAddress &account,
-                                            uint128_t num_hogs,
-                                            BlockHeight block_height);
+  void process_transfers_helper(const Delta &delta, BlockHeight block_height);
+
+  static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
+                                                   uint128_t num_hogs,
+                                                   BlockHeight block_height);
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
