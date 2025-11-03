@@ -15,13 +15,14 @@ namespace hogd {
 
 class NNInt128Lock {
 public:
-  NNInt128Lock(int128_t snapshot_value)
-    : base_(snapshot_value), add_(add_capacity(snapshot_value)),
-      sub_(sub_capacity(snapshot_value))
+  NNInt128Lock(int128_t base_value)
+    : base_(base_value), add_(add_capacity(base_value)),
+      sub_(sub_capacity(base_value))
   {}
 
   // On success, returns a (deterministic) upper bound on the storage cost
   // required to commit the after value. Is a no-op on failure.
+  // If after is nullptr, the storage cost output should be ignored.
   HogDBStatus<int128_t>
   try_atomic_change_lock(const NNInt128 *before, const NNInt128 *after,
                          const StorageCostModel *cost_model);
