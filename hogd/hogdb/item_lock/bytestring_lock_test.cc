@@ -27,7 +27,6 @@ make_owning_span(std::vector<uint8_t> bytes)
 
 TEST(BytestringLockTest, BasicUsage)
 {
-
   BytestringLock lock(make_owning_span({0, 1, 2, 3}));
 
   Bytes match(make_owning_span({0, 1, 2, 3}));
@@ -41,6 +40,8 @@ TEST(BytestringLockTest, BasicUsage)
                   .has_value());
 
   EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &nomatch, &kTestCostModel)
+                   .has_value());
+  EXPECT_FALSE(lock.try_atomic_change_lock(&match, &nomatch, &kTestCostModel)
                    .has_value());
 }
 
