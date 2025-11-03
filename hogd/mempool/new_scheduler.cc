@@ -5,6 +5,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_set>
 #include <utility>
