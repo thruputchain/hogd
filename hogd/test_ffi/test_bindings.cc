@@ -78,13 +78,23 @@ lazy_init()
   static std::mutex init_mutex;
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
+  ffi_trace("lazy_init: initialized={}", initialized);
   if (!initialized) {
+    hogd_init(0, nullptr, false);
     auto logger = std::make_unique<ThreadsafeLogger>();
     global_logger = logger.get();
     hogd::swap_logger(std::move(logger));
-    hogd_init(0, nullptr, false);
     initialized = true;
   }
+}
+
+void
+enable_syscall_logging() noexcept
+{
+  ffi_trace("FFI: enable_syscall_logging() -> ()");
+  lazy_init();
+  assert(global_logger != nullptr);
+  global_logger->set_log_level(LogLevel::kTrace);
 }
 
 CreateDBResult
@@ -642,9 +652,7 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 void
 enable_syscall_logging()
 {
-  hogd::lazy_init();
-  assert(hogd::global_logger != nullptr);
-  hogd::global_logger->set_log_level(hogd::LogLevel::kTrace);
+  hogd::enable_syscall_logging();
 }
 
 TestFFIErrorCode
