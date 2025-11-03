@@ -25,12 +25,11 @@ public:
                          const StorageCostModel *cost_model);
 
   // Commits the change to the item lock.
-  void commit_change(const ItemChange *before,
-                     const StorageCostModel *cost_model);
-
-  // Returns the storage cost of the item, after any committed changes.
-  // returns the snapshot cost if no changes have been committed.
-  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
+  // Returns the storage cost used to commit the change.
+  // Must be less than or equal to the storage cost returned by
+  // try_atomic_change_lock for that change.
+  int128_t commit_change(const ItemChange *change,
+                         const StorageCostModel *cost_model);
 
 private:
   HogDBStatus<int128_t>
@@ -55,9 +54,12 @@ private:
 
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
+  // Does NOT set the type as ExclusiveLock.
   void prepare_lock_contents(const ItemChange *after,
                              std::unique_lock<std::mutex> const &ul);
   void reset_lock_contents(std::unique_lock<std::mutex> const &ul);
+
+  void set_exclusive_lock(std::unique_lock<std::mutex> const &ul);
 
   // No change has committed on this item.
   // As such, its type is not yet known,

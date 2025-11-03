@@ -32,6 +32,17 @@ public:
     return cost_model->get_bytestring_cost(bytestring_.size());
   }
 
+  int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
+                         const Bytes * /*unused*/,
+                         const StorageCostModel *cost_model) const
+  {
+    if (did_finalize) {
+      return cost_model->get_bytestring_cost(bytestring_.size()) -
+             snapshot_cost;
+    }
+    return 0;
+  }
+
 private:
   const OwningSpan<const std::byte> bytestring_;
 };

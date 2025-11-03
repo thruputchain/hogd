@@ -8,6 +8,7 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(readability-convert-member-functions-to-static)
 HogDBStatus<int128_t>
 ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
                                       const ItemChange *after,
@@ -30,5 +31,6 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   }
   panic("unimplemented");
 }
+// NOLINTEND(readability-convert-member-functions-to-static)
 
 } // namespace hogd

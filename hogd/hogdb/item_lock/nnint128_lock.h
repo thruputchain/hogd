@@ -29,6 +29,23 @@ public:
   try_atomic_change_lock(const NNInt128 *before, const NNInt128 *after,
                          const StorageCostModel *cost_model);
 
+  // Returns the amount of tokens that this commit is responsible for locking,
+  // relative to the previously committed set of changes. Positive values
+  // indicate tokens locked relative to prior to the transaction. The returned
+  // value must be LTE the value returned by try_atomic_change_lock. The gap
+  // (nonnegative) between the value returned by try_atomic_change_lock and the
+  // value returned by this function is the amount of tokens that can be
+  // released after the transaction commits.
+  static int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
+                                const NNInt128 * /*unused*/,
+                                const StorageCostModel *cost_model)
+  {
+    if (did_finalize) {
+      return get_storage_cost_of_committed_value(cost_model) - snapshot_cost;
+    }
+    return 0;
+  }
+
   static int128_t
   get_storage_cost_of_committed_value(const StorageCostModel *cost_model)
   {

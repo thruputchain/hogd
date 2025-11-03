@@ -18,7 +18,7 @@ public:
   // if after is nullptr. This method is infallible, and the before parameter is
   // ignored. We leave it as is to keep the same method signature as the other
   // lock types.
-  static HogDBStatus<int128_t>
+  HogDBStatus<int128_t>
   try_atomic_change_lock(const ItemChange * /*unused*/, const ItemChange *after,
                          const StorageCostModel *cost_model);
 

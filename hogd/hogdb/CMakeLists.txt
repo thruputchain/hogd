@@ -63,6 +63,7 @@ add_executable(
   item_change_auth_test.cc
   item_change_exclusive_test.cc
   item_change_replay_cache_test.cc
+  item_lock_test.cc
   item_lock/bytestring_lock_test.cc
   item_lock/nnint128_lock_test.cc
   recovery_tests.cc
