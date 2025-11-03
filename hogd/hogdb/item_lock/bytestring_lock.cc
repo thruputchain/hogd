@@ -12,7 +12,8 @@
 namespace hogd {
 
 HogDBStatus<int128_t>
-BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after, const StorageCostModel *cost_model)
+BytestringLock::try_atomic_change_lock(const Bytes *before, const Bytes *after,
+                                       const StorageCostModel *cost_model)
 {
   assert(before == nullptr || before->value_view() == bytestring_);
   if (after != nullptr && after->value_view() != bytestring_) {
