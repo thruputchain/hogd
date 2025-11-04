@@ -45,7 +45,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
+  MempoolCoordinatorRpc(std::shared_ptr<MempoolDbRpc> db_rpc)
+    : db_rpc_(std::move(db_rpc))
+  {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -171,7 +173,7 @@ private:
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
     scheduler_ = std::make_shared<NewScheduler>(db_sched_client_);
-    db_rpc_.register_scheduler(scheduler_);
+    db_rpc_->register_scheduler(scheduler_);
 
     ready_.store(true, std::memory_order_release);
   }
@@ -206,7 +208,7 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  MempoolDbRpc &db_rpc_;
+  std::shared_ptr<MempoolDbRpc> db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

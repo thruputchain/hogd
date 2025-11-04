@@ -63,14 +63,14 @@ public:
             x23::HostPort(self_hostname, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     // Then begins serving RPCs to the coordinator.
-    server_->impl_.init(std::move(exec_result), n_exec_threads_);
+    server_->impl()->init(std::move(exec_result), n_exec_threads_);
 
     return executor_port;
   }
 
-  void await_shutdown_request() { server_->impl_.await_shutdown_request(); }
+  void await_shutdown_request() { server_->impl()->await_shutdown_request(); }
 
-  void shut_down() { server_->impl_.shut_down(); }
+  void shut_down() { server_->impl()->shut_down(); }
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;
