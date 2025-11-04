@@ -1,5 +1,6 @@
 #include "hogd/test_ffi/test_bindings.h"
 
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <cstdlib>
@@ -8,6 +9,7 @@
 #include <format>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <utility>
 
 #include "account.hh"
@@ -22,11 +24,13 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/debug.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -65,16 +69,32 @@ log_error(std::format_string<const char *> message, std::exception const &e)
   }
 }
 
+ThreadsafeLogger *global_logger = nullptr;
+x23::DebugFd<"TEST_FFI_TRACE"> ffi_trace;
+
 void
 lazy_init()
 {
   static std::mutex init_mutex;
   std::lock_guard lock(init_mutex);
   static bool initialized = false;
+  ffi_trace("lazy_init: initialized={}", initialized);
   if (!initialized) {
     hogd_init(0, nullptr, false);
+    auto logger = std::make_unique<ThreadsafeLogger>();
+    global_logger = logger.get();
+    hogd::swap_logger(std::move(logger));
     initialized = true;
   }
+}
+
+void
+enable_syscall_logging() noexcept
+{
+  ffi_trace("FFI: enable_syscall_logging() -> ()");
+  lazy_init();
+  assert(global_logger != nullptr);
+  global_logger->set_log_level(LogLevel::kTrace);
 }
 
 CreateDBResult
@@ -82,7 +102,9 @@ make_new_db() noexcept
 {
   lazy_init();
   try {
-    return {.db = new DBContext(), .ffi_error_code = kTestFFIErrorCodeNone};
+    auto *db = new DBContext();
+    ffi_trace("FFI: make_new_db() -> (db={})", static_cast<void *>(db));
+    return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
     return {.db = nullptr,
@@ -94,6 +116,7 @@ TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
   try {
+    ffi_trace("FFI: free_db(db={}) -> ()", static_cast<void *>(ptr));
     delete ptr;
   } catch (std::exception const &e) {
     log_error("error freeing db context: {}", e);
@@ -105,6 +128,7 @@ free_db(DBContext *ptr) noexcept
 TestFFIErrorCode
 advance_new_block(void *db) noexcept
 {
+  ffi_trace("FFI: advance_new_block(db={}) -> ()", db);
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
     return kTestFFIErrorCodeInvalidPointer;
@@ -132,6 +156,8 @@ open_runtime_context() noexcept
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
   CHECK(*out != nullptr);
+  ffi_trace("FFI: open_runtime_context() -> (context={})",
+            static_cast<void *>(out));
   return {.context = out, .ffi_error_code = kTestFFIErrorCodeNone};
 }
 
@@ -139,6 +165,7 @@ TestFFIErrorCode
 close_runtime_context(void *context) noexcept
 {
   try {
+    ffi_trace("FFI: close_runtime_context(context={}) -> ()", context);
     delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
@@ -152,6 +179,10 @@ register_new_contract(void *context, int32_t mock_contract_id,
                       ForeignEntryPoint entry_point,
                       void *foreign_context) noexcept
 {
+  ffi_trace("FFI: register_new_contract(context={}, mock_contract_id={}, "
+            "entry_point={}, foreign_context={})",
+            context, mock_contract_id, reinterpret_cast<void *>(entry_point),
+            foreign_context);
   if (context == nullptr || entry_point == nullptr)
     return kTestFFIErrorCodeInvalidPointer;
 
@@ -170,6 +201,9 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
 {
   constexpr auto kNullptrError = make_ffi_result_type<OpenSyscallHandlerResult>(
       kTestFFIErrorCodeInvalidPointer);
+  ffi_trace(
+      "FFI: open_syscall_handler(db={}, rc={}, signed_tx={}, signed_tx_len={})",
+      db, rc, static_cast<const void *>(signed_tx), signed_tx_len);
 
   if (!db) {
     return kNullptrError;
@@ -207,6 +241,8 @@ TestFFIErrorCode
 close_syscall_handler(void *syscall_handler) noexcept
 {
   try {
+    ffi_trace("FFI: close_syscall_handler(syscall_handler={}) -> ()",
+              syscall_handler);
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
     return kTestFFIErrorCodeNone;
   } catch (std::exception const &e) {
@@ -220,6 +256,14 @@ constexpr ForeignRootInvokeResult kUnrecoverableError = {
                    std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)},
     .gas_consumed = 0};
 
+std::string
+format_foreign_root_invoke_result(const ForeignRootInvokeResult &result)
+{
+  return std::format("result={{.panic={}}}, gas_consumed={}, ffi_error_code={}",
+                     result.result.panic, result.gas_consumed,
+                     std::to_underlying(result.ffi_error_code));
+}
+
 ForeignRootInvokeResult
 root_invoke(void *syscall_handler) noexcept
 {
@@ -232,11 +276,21 @@ root_invoke(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->root_invoke();
+    ffi_trace("FFI: root_invoke(syscall_handler={}) -> (result={})",
+              syscall_handler, format_foreign_root_invoke_result(res));
     return res;
   } catch (std::exception const &e) {
     log_error("unhandled error during root_invoke: {}", e);
     return kUnrecoverableError;
   }
+}
+
+std::string
+format_foreign_try_commit_result(const ForeignTryCommitResult &result)
+{
+  return std::format("result_code={}, panic={}, ffi_error_code={}",
+                     result.result_code, result.panic,
+                     std::to_underlying(result.ffi_error_code));
 }
 
 ForeignTryCommitResult
@@ -255,17 +309,45 @@ try_commit_transaction(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->to_handler().try_commit_transaction();
+    context->mark_committed_or_aborted();
     if (!res.has_value()) {
       error("try_commit_transaction encountered system error {}", res.error());
       return ForeignTryCommitResult{.result_code = 0,
                                     .panic =
                                         std::to_underlying(res.error().code())};
     }
-    return ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
+    auto out = ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
+    ffi_trace("FFI: try_commit_transaction(syscall_handler={}) -> (result={})",
+              syscall_handler, format_foreign_try_commit_result(out));
+    return out;
   } catch (std::exception const &e) {
     log_error("error during try_commit_transaction: {}", e);
     return kUnrecoverableError;
   }
+}
+
+TestFFIErrorCode
+abort_transaction(void *syscall_handler) noexcept
+{
+  if (!syscall_handler) {
+    error("abort_transaction error: no syscall handler!");
+    return kTestFFIErrorCodeInvalidPointer;
+  }
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto res = context->to_handler().abort_transaction();
+  context->mark_committed_or_aborted();
+  ffi_trace("FFI: abort_transaction(syscall_handler={}) -> ()",
+            syscall_handler);
+  if (!res.has_value()) {
+    try {
+      error("failed to abort transaction: {}", res.error());
+      return kTestFFIErrorCodeUnrecoverableError;
+    } catch (std::exception const &e) {
+      log_error("error during abort_transaction: {}", e);
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+  }
+  return kTestFFIErrorCodeNone;
 }
 
 constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
@@ -274,6 +356,9 @@ TestFFIErrorCode
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens) noexcept
 {
+  ffi_trace("FFI: setup_grant_contract_storage_tokens(db={}, contract_addr={}, "
+            "tokens={})",
+            db, static_cast<const void *>(contract_addr), tokens);
   if (db == nullptr || contract_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -300,6 +385,8 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
 TestFFIErrorCode
 get_event_log(void *syscall_handler, unsigned char *buffer, uint32_t buffer_len)
 {
+  ffi_trace("FFI: get_event_log(syscall_handler={}, buffer={}, buffer_len={})",
+            syscall_handler, static_cast<const void *>(buffer), buffer_len);
   if (!syscall_handler) {
     error("get_event_log error: no syscall handler!");
     return kTestFFIErrorCodeInvalidPointer;
@@ -342,12 +429,18 @@ get_event_log_len(void *syscall_handler)
 {
   if (!syscall_handler) {
     error("get_event_log_len error: no syscall handler!");
+    ffi_trace(
+        "FFI: get_event_log_len(syscall_handler={}) -> (ffi_error_code={})",
+        syscall_handler, std::to_underlying(kTestFFIErrorCodeInvalidPointer));
     return make_ffi_result_type<GetEventLogLenResult>(
         kTestFFIErrorCodeInvalidPointer);
   }
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
   auto event_log = context->get_tx_event_log();
   if (!event_log) {
+    ffi_trace(
+        "FFI: get_event_log_len(syscall_handler={}) -> (ffi_error_code={})",
+        syscall_handler, std::to_underlying(kTestFFIErrorCodeEventLogNotFound));
     return make_ffi_result_type<GetEventLogLenResult>(
         kTestFFIErrorCodeEventLogNotFound);
   }
@@ -355,6 +448,8 @@ get_event_log_len(void *syscall_handler)
   try {
     auto serialized_event_log = x23::serialize(event_log.value());
     uint32_t len = serialized_event_log.size();
+    ffi_trace("FFI: get_event_log_len(syscall_handler={}) -> (len={})",
+              syscall_handler, len);
     return {.len = len, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrException &e) {
     log_error("error serializing event log: {}", e);
@@ -371,6 +466,10 @@ TestFFIErrorCode
 setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
                       uint32_t contract_len) noexcept
 {
+  ffi_trace("FFI: setup_create_contract(context={}, db={}, contract_bytes={}, "
+            "contract_len={}) -> ()",
+            context, db, static_cast<const void *>(contract_bytes),
+            contract_len);
   if (context == nullptr || db == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -407,6 +506,11 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
                       const uint8_t *contract_hash,
                       uint32_t contract_size) noexcept
 {
+  ffi_trace("FFI: setup_deploy_contract(db={}, deployment_addr={}, "
+            "contract_hash={}, contract_size={}) -> ()",
+            db, static_cast<const void *>(deployment_addr),
+            static_cast<const void *>(contract_hash), contract_size);
+
   if (db == nullptr || contract_hash == nullptr || deployment_addr == nullptr) {
     return kTestFFIErrorCodeInvalidPointer;
   }
@@ -530,6 +634,12 @@ try_commit_transaction(void *syscall_handler)
   return hogd::try_commit_transaction(syscall_handler);
 }
 
+TestFFIErrorCode
+abort_transaction(void *syscall_handler)
+{
+  return hogd::abort_transaction(syscall_handler);
+}
+
 struct ForeignHostFnResult
 mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg3, uint64_t arg4, uint64_t arg5,
@@ -542,8 +652,7 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 void
 enable_syscall_logging()
 {
-  hogd::swap_logger(
-      std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
+  hogd::enable_syscall_logging();
 }
 
 TestFFIErrorCode

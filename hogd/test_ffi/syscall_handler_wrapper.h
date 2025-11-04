@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <tuple>
@@ -13,6 +14,7 @@
 
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -35,6 +37,22 @@ class SyscallHandlerContext {
 public:
   SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
                         SignedTransaction const &stx, DBContext &db);
+
+  ~SyscallHandlerContext()
+  {
+    if (!transaction_committed_or_aborted_) {
+      warn("SyscallHandlerContext closed without committing: aborting "
+           "transaction");
+      auto res = handler_.abort_transaction();
+      if (!res.has_value()) {
+        try {
+          warn("Failed to abort transaction: {}", res.error());
+        } catch (std::exception const &e) {
+          panic("failed to print error message: {}", e.what());
+        }
+      }
+    }
+  }
 
   SyscallHandlerContext(SyscallHandlerContext const &) = delete;
   SyscallHandlerContext &operator=(SystemCallHandler const &) = delete;
@@ -92,6 +110,8 @@ public:
     return db_.get_tx_event_log(identifier_);
   }
 
+  void mark_committed_or_aborted() { transaction_committed_or_aborted_ = true; }
+
 private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 
@@ -100,6 +120,7 @@ private:
 
   SystemCallHandler handler_;
   std::vector<MockRuntime *> mock_runtime_stack_;
+  bool transaction_committed_or_aborted_ = false;
 };
 
 constexpr ForeignHostFnResult

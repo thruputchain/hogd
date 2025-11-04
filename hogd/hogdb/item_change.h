@@ -213,8 +213,11 @@ public:
 
   static size_t storage_size() { return sizeof(int128_t); }
   int128_t value() const { return base_ + delta_; }
+
   int128_t base() const { return base_; }
   int128_t delta() const { return delta_; }
+  int128_t plus() const { return plus_; }
+  int128_t minus() const { return minus_; }
 
   static int128_t committed_storage_cost(const StorageCostModel *cost_model)
   {
@@ -257,8 +260,9 @@ template<> struct std::formatter<hogd::NNInt128> {
 
   static auto format(const hogd::NNInt128 &nnint, auto &ctx)
   {
-    return format_to(ctx.out(), "NNInt128{{base={}, delta={}}}", nnint.base(),
-                     nnint.delta());
+    return format_to(ctx.out(),
+                     "NNInt128{{base={}, delta={}, plus={}, minus={}}}",
+                     nnint.base(), nnint.delta(), nnint.plus(), nnint.minus());
   }
 };
 static_assert(hogd::is_item<hogd::NNInt128>);
@@ -289,6 +293,11 @@ public:
     std::vector<std::byte> buf(buf_);
     auto span = std::span<const std::byte>(buf);
     return OwningSpan(span, [ref = std::move(buf)] {});
+  }
+
+  std::span<const std::byte> value_view() const
+  {
+    return std::span<const std::byte>(buf_);
   }
 
   int128_t committed_storage_cost(const StorageCostModel *cost_model) const
@@ -663,6 +672,7 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
   std::optional<ReplayCacheIt> to_replay_cache() const;
+  bool is_bytes() const { return std::holds_alternative<Bytes>(type_); }
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
   bool is_exclusive() const { return exclusive_; }
@@ -685,6 +695,11 @@ public:
   bool is_replay_cache() const
   {
     return std::holds_alternative<ReplayCacheIt>(type_);
+  }
+
+  template<typename T> auto const *get_inner() const
+  {
+    return std::get_if<T>(&type_);
   }
 
   // commit applies the item's changes to the ramdb.

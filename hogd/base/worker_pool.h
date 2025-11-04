@@ -128,17 +128,22 @@ public:
   {
     std::vector<std::future<void>> completions;
     completions.reserve(divide_up(r.size(), width));
+    // The prior usage of std::views::chunk resulting in stack use-after-scope
+    // bugs. Moving the range into the completion took references to elements
+    // constructed in the temporary (the first argument into the
+    // ranges::for_each).  Moving the range construction outside the for_each
+    // fixes this.
 #if defined(__cpp_lib_ranges_chunk)
-    std::ranges::for_each(r | std::views::chunk(width),
-                          [this, &f, proj,
-                           &completions](std::ranges::viewable_range auto &&r) {
-                            completions.emplace_back(submit(
-                                [proj, &f, r = std::forward<decltype(r)>(r)] {
-                                  for (auto &v : r) {
-                                    f(std::invoke(proj, v));
-                                  }
-                                }));
-                          });
+    auto range = r | std::views::chunk(width);
+    std::ranges::for_each(range, [this, &f, proj, &completions](
+                                     std::ranges::viewable_range auto &&r) {
+      completions.emplace_back(
+          submit([proj, &f, r = std::forward<decltype(r)>(r)] {
+            for (auto& v : r) {
+              f(std::invoke(proj, v));
+            }
+          }));
+    });
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
     for (size_t i = 0; i < r.size(); i += width) {

@@ -58,7 +58,7 @@ public:
     return client_->get_transactions(num_txs);
   }
 
-  ~LoadgenHelper() { server_.shut_down(); }
+  // ~LoadgenHelper() { server_.shut_down(); }
 
 private:
   RpcServer<LoadgenRpc> server_;

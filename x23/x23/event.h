@@ -4,12 +4,10 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <mutex>
 #include <stop_token>
 #include <string>
 #include <sys/socket.h>
@@ -40,6 +38,18 @@
 #include <poll.h>
 #include <unordered_map>
 #endif // !USE_EPOLL
+
+#ifndef X23_FD_TRACE
+#ifdef DEBUG
+#define X23_FD_TRACE 1
+#else // !DEBUG
+#define X23_FD_TRACE 0
+#endif // !DEBUG
+#endif // !X23_FD_TRACE
+#ifdef NDEBUG
+#undef X23_FD_TRACE
+#define X23_FD_TRACE 0
+#endif // NDEBUG
 
 namespace x23 {
 
@@ -111,7 +121,7 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
   {
     if (len == 0)
       return 0;
-    assert(len <= PTRDIFF_MAX);
+    x23assert(len <= PTRDIFF_MAX);
 
     if (size_t buflen = nbuffered()) {
       size_t n = std::min(len, buflen);
@@ -169,7 +179,7 @@ struct WriteBuffer : RefCount {
 
 private:
   std::atomic_bool want_write_{false};
-  std::mutex service_lock_;
+  TestLock service_lock_;
   MVar<BufVec> writer_;
 
   class Service;
@@ -307,7 +317,15 @@ public:
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop() { ss_.request_stop(); }
+  void request_stop()
+  {
+#if USE_EPOLL
+    std::lock_guard _lk(resize_lock_);
+#else  // !USE_EPOLL
+    auto _s = state_.take();
+#endif // !USE_EPOLL
+    ss_.request_stop();
+  }
   bool time_to_stop();
   int get_max_fd();
   void wake();
@@ -333,9 +351,17 @@ private:
     std::atomic<std::uint32_t> ready_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
+#if X23_FD_TRACE
+    MVar<std::string> info_;
+#endif // X23_FD_TRACE
 
     FdState() noexcept = default;
-    FdState(FdState &&other) noexcept : BufHolder(std::move(other))
+    FdState(FdState &&other) noexcept
+      : BufHolder(std::move(other))
+#if X23_FD_TRACE
+        ,
+        info_(std::move(*other.info_.take()))
+#endif // X23_FD_TRACE
     {
       copy_fields(other);
     }
@@ -356,7 +382,7 @@ private:
 
     void copy_fields(const FdState &other)
     {
-      mode_ = other.mode_.load();
+      mode_ = other.mode();
       ready_ = other.ready_.load();
       for (size_t i = 0; i < callbacks_.size(); ++i) {
         callbacks_[i].value = other.callbacks_[i].value.load();
@@ -393,7 +419,10 @@ private:
     if ((fdp->ready_ & epflags[write]) || mode != kActive)
       if (WorkItem wi = fdp->callbacks_[write].exchange({})) {
         --numcoro_;
-        wi(mode == kActive ? 0 : EBADF);
+        // Need to run in another thread in case the callback needs a
+        // shared resize_lock_ and someone is trying to lock it
+        // exclusively.
+        pool_.make_callback(wi, mode == kActive ? 0 : EBADF);
       }
   }
   void docbs(const FdPtr &fdp)
@@ -556,7 +585,7 @@ private:
   WriteBuffer *wb_;
   CoroPoll *cp_;
   BorrowedFd fd_;
-  std::unique_lock<std::mutex> lk_;
+  std::unique_lock<TestLock> lk_;
   CoroPoll::WriteToken tok_;
 
   Service(Service &&) noexcept = default;

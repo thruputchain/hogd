@@ -102,7 +102,6 @@
 #pragma once
 
 #include <atomic>
-#include <cassert>
 #include <concepts>
 #include <condition_variable>
 #include <coroutine>
@@ -308,7 +307,7 @@ public:
     ThreadPool *tp = my_thread_pool;
     // If this crashes, you called get_suspend_count in a thread that
     // wasn't part of a thread pool:
-    assert(tp);
+    x23assert(tp);
     return SuspendCount{std::this_thread::get_id(),
                         tp->tstate_[my_thread_no].count_.load(
                             std::memory_order_relaxed)};
@@ -330,7 +329,7 @@ public:
     void reset() noexcept { start_ = SuspendCount{}; }
     void check() const
     {
-      assert(start_ == get_suspend_count() || !start_.valid());
+      x23assert(start_ == get_suspend_count() || !start_.valid());
     }
 
 #else  // NDEBUG
@@ -391,7 +390,7 @@ private:
     if (!ptr)
       return -1;
     auto ret = static_cast<RunQueue *>(ptr.get_mvar()) - runqueues_.get();
-    assert(size_t(ret) < nqueues_);
+    x23assert(size_t(ret) < nqueues_);
     return ret;
   }
 
@@ -399,7 +398,7 @@ private:
   // the previously locked queue (if any) to avoid deadlock.
   void relock(QPtr &ptr, int n)
   {
-    assert(size_t(n) < nqueues_);
+    x23assert(size_t(n) < nqueues_);
     if (qno(ptr) != n) {
       ptr.reset();
       ptr = runqueues_[n].take();
@@ -460,5 +459,9 @@ private:
   void qselect(QPtr *lq, unsigned cpuhint);
   void debug_dump();
 };
+
+// If this returns true, we are in a coroutine thread pool and so
+// should not do anything that blocks.
+extern bool in_thread_pool();
 
 } // namespace x23

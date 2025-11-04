@@ -9,7 +9,7 @@ loadgen_server="hog3"
 chuckd_server="hog3"
 fake_coordinator_server="hog3"
 mempool_server="hog3"
-hogexec_servers=("hog4" "hog5")
+hogexec_servers=("hog1" "hog4" "hog5")
 event_server="hog4"
 hogdb_servers=("hog4")
 logdir=/tmp/$(whoami)
@@ -255,14 +255,14 @@ echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   ${#hogdb_servers[@]} ${#hogexec_servers[@]}
 
-# Wait for hogexec (port 8070).
+# Wait for hogexec (port 8090).
 for s in "${hogexec_servers[@]}"; do
-  wait_port "$s" 8070
+  wait_port "$s" 8090
 done
 
-# Wait for event (ports 8090-8091).
-wait_port "$event_server" 8090
+# Wait for event (ports 8091-8092).
 wait_port "$event_server" 8091
+wait_port "$event_server" 8092
 
 # Wait for hogdb (ports 8080-8081).
 for s in "${hogdb_servers[@]}"; do

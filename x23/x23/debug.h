@@ -2,8 +2,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <format>
 #include <map>
+#include <source_location>
 #include <string>
 
 #include <unistd.h>
@@ -15,6 +17,14 @@ namespace x23 {
 
 // Do not do any logging regardless of environment variables
 extern bool ignore_debug_env;
+
+// Prepend prefix and append a newline to a formatted string.
+std::string vformat_line(std::string_view prefix, std::string_view fmt,
+                         std::format_args args);
+
+// Like vformat_log_msg but add the program name at the beginning.
+std::string vformat_logline(std::string_view prefix, std::string_view fmt,
+                            std::format_args args);
 
 // Replace instances of "%n" for various characters 'n' with a
 // substitution string.  "%%" is replaced with "%".
@@ -81,11 +91,23 @@ template<FixedStr EnvVar> struct DebugFd {
       do_vfmt(fmt.get(), std::make_format_args(args...));
   }
 
+  static void verr(std::string_view fmt, std::format_args args)
+  {
+    std::string msg = vformat_logline("", fmt, args);
+    if (int f = fd(); f != -1 && f != 2)
+      write(fd(), msg.data(), msg.size());
+    write(2, msg.data(), msg.size());
+  }
+  template<typename... Args>
+  static void err(std::format_string<Args...> fmt, Args &&...args)
+  {
+    verr(fmt.get(), std::make_format_args(args...));
+  }
+
 private:
   static void do_vfmt(std::string_view fmt, std::format_args args)
   {
-    std::string msg = std::vformat(fmt, args);
-    msg += '\n';
+    std::string msg = vformat_logline("", fmt, args);
     write(fd(), msg.data(), msg.size());
   }
 };
@@ -98,6 +120,16 @@ struct NullDebugFd {
   static void vfmt(std::string_view fmt, std::format_args args) {}
   static void fmt(auto &&...) {}
   static void operator()(auto &&...) {}
+  static void verr(std::string_view fmt, std::format_args args)
+  {
+    std::string msg = vformat_logline("", fmt, args);
+    write(2, msg.data(), msg.size());
+  }
+  template<typename... Args>
+  static void err(std::format_string<Args...> fmt, Args &&...args)
+  {
+    verr(fmt.get(), std::make_format_args(args...));
+  }
 };
 
 #ifdef NDEBUG
@@ -116,5 +148,56 @@ inline DebugFd<"X23SERVER_TRACE"> debug;
 //       // ...
 //    }
 Defer<> dump_rusage(int fd = debug.fd());
+
+std::string stacktrace(unsigned indent = 2, std::string ret = {});
+
+#ifdef NDEBUG
+
+template<typename... Args>
+[[noreturn]] inline void
+panic(std::format_string<Args...>, const Args &...args)
+{
+  std::unreachable();
+}
+
+consteval bool
+panicking()
+{
+  return false;
+}
+
+#define x23assert(cond)
+
+#else // !NDEBUG
+
+namespace detail {
+[[noreturn]] void do_panic(std::string_view fmt, std::format_args args,
+                           std::source_location sloc) noexcept;
+} // namespace detail
+
+template<typename... Args> struct panic {
+  panic(std::format_string<Args...> fmt, const Args &...args,
+        std::source_location sloc = std::source_location::current()) noexcept
+  {
+    detail::do_panic(fmt.get(), std::make_format_args(args...), sloc);
+  }
+};
+template<typename... Args>
+panic(std::format_string<Args...>, const Args &...args) -> panic<Args...>;
+
+#define x23assert(cond)                                                        \
+  do {                                                                         \
+    if (!(cond)) [[unlikely]]                                                  \
+      ::x23::panic("x23assert failure: {}", #cond);                            \
+  } while (0)
+
+extern std::atomic_bool panicking_flag;
+inline bool
+panicking() noexcept
+{
+  return panicking_flag.load(std::memory_order_relaxed);
+}
+
+#endif // !NDEBUG
 
 } // namespace x23

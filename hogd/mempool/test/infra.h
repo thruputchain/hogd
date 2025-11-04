@@ -77,31 +77,30 @@ public:
     // I print the exception description followed by a [CHECK(false)]. This will
     // bring more attention to an exception when it is thrown.
     try {
-      mempool_coord_server_.impl_.scheduler()->shut_down()();
-      mempool_coord_server_.shut_down();
+      NewScheduler::shut_down()();
+      // mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
       // We need to call [executor_.shut_down()] so that the [Exector]
       // destructor does not block.
       executor_.shut_down();
 
-      coordinator_sched_server_.shut_down();
+      // coordinator_sched_server_.shut_down();
 
-      event_exec_server_.shut_down();
-      event_sched_server_.shut_down();
+      // event_exec_server_.shut_down();
+      //  event_sched_server_.shut_down();
 
-      db_scheduler_server_->shut_down();
       db_scheduler_server_.reset();
-      db_executor_server_->shut_down();
+
       db_executor_server_.reset();
       // [ctx_] holds an instance of [sched_db_client], so we need to destroy it
       // so that the [sched_db_client] is in turned destroyed and therefore does
       // not continue using the default coropoll.
       ctx_.reset();
 
-      sched_exec_server_.shut_down();
-      sched_event_server_.shut_down();
-      sched_db_server_.shut_down();
+      // sched_exec_server_.shut_down();
+      // sched_event_server_.shut_down();
+      // sched_db_server_.shut_down();
     } catch (const std::exception &e) {
       error("~MempoolTestInfra received exception: {}", e.what());
       CHECK(false);
@@ -147,7 +146,7 @@ public:
   // This getter is used by [auth_test.cc].
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
-    return mempool_coord_server_.impl_;
+    return mempool_coord_server_->impl_;
   }
 
 private:
@@ -230,7 +229,7 @@ private:
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
     // account unlimited hogs with UINT128_MAX.
     set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
-             /*age=*/1, /*num_hogs=*/5'000'000'000 * 10);
+             /*age=*/0, /*num_hogs=*/5'000'000'000 * 10);
   }
 
   void register_db_with_mempool()
@@ -309,7 +308,7 @@ private:
   // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_.impl_);
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl_);
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };

@@ -74,6 +74,7 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
+  link_libraries(atomic) # needed for std::atomic<int128_t>
 endif()
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")

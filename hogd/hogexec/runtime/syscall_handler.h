@@ -89,6 +89,7 @@ public:
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
   SystemStatus<bool> try_commit_transaction();
+  SystemStatus<void> abort_transaction();
 
   // Get the proposal data.
   // Can only be called after root_invoke()

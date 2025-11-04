@@ -39,6 +39,10 @@
 // to use !defined(NDEBUG) && X23_CORO_SLOC_OK
 #cmakedefine X23_CORO_TRACE @X23_CORO_TRACE@
 
+// Define to 1 to enable tracing of how file descriptors are handled.
+// 0 to disable.  Leave undefined to set it based on DEBUG.
+#cmakedefine X23_FD_TRACE @X23_FD_TRACE@
+
 // Define to 1 if you have the abi::__cxa_demangle function
 #cmakedefine01 HAVE_CXA_DEMANGLE
 

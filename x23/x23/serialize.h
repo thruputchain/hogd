@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +20,7 @@
 #include <utility>
 #include <variant>
 
+#include <x23/debug.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
@@ -225,9 +225,30 @@ xdr_size(const X &x)
   }
 }
 
+inline size_t
+xdr_size(std::monostate)
+{
+  return 0;
+}
+
+inline void
+xdr_serialize(auto &&, const std::monostate &)
+{}
+
 namespace detail {
+struct Serializer;
+
+template<typename T>
+concept has_custom_serializer = requires(Serializer s, const T t) {
+  { xdr_size(t) } -> std::same_as<size_t>;
+  xdr_serialize(s, t);
+};
+
 struct Serializer {
   uint8_t *p;
+
+  Serializer(uint8_t *p0) noexcept : p(p0) {}
+  Serializer(const Serializer &) = delete;
 
   void put32(uint32_t v)
   {
@@ -311,19 +332,79 @@ struct Serializer {
     put32(uint32_t(get<0>(u)));
     union_visit_arm(*this, u);
   }
+  template<has_custom_serializer T> requires (!is_xdr_type<T>)
+  void operator()(const T &t)
+  {
+    xdr_serialize(*this, t);
+  }
 };
 } // namespace detail
 
+template<typename X>
+concept is_xdr_serializable =
+    is_xdr_type<X> || detail::has_custom_serializer<X>;
+
+static_assert(is_xdr_serializable<std::monostate>);
+
+template<x23::is_xdr_serializable X>
+size_t
+xdr_size(span<X> s)
+{
+  if constexpr (requires {
+                  {
+                    x23::detail::size_of_fixed<X>()
+                  } -> std::convertible_to<size_t>;
+                })
+    return 4UZ + (s.size() * x23::detail::size_of_fixed<X>());
+  size_t ret = 4;
+  for (const auto &e : s)
+    ret += xdr_size(e);
+  return ret;
+}
+
+template<is_xdr_serializable X>
 void
-serialize_to(Buf *bufp, const is_xdr_type auto &x)
+xdr_serialize(auto &serializer, span<X> s)
+{
+  serializer.put32(s.size());
+  for (const auto &e : s)
+    serializer(e);
+}
+
+static_assert(is_xdr_serializable<span<int32_t>>);
+
+inline size_t
+xdr_size(BufView v)
+{
+  return (v.size() + 7UZ) & ~3UZ;
+}
+
+inline void
+xdr_serialize(auto &serializer, BufView v)
+{
+  size_t len = v.size();
+  serializer.put32(len);
+  serializer.putbytes(v.data(), len);
+}
+
+static_assert(is_xdr_serializable<BufView>);
+
+template<typename X, size_t NX, typename T, size_t NT>
+requires serialize_equiv<X, T>::value && (NT == std::dynamic_extent || NT <= NX)
+struct serialize_equiv<Vec<X, NX>, span<T, NT>> : std::true_type {};
+
+static_assert(serializes_like<span<int32_t>, Vec<int32_t>>);
+
+void
+serialize_to(Buf *bufp, const is_xdr_serializable auto &x)
 {
   size_t old_size = bufp->size(), xsize = xdr_size(x);
   bufp->resize_uninitialized(old_size + xsize);
-  detail::Serializer{.p = bufp->data() + old_size}(x);
+  detail::Serializer{bufp->data() + old_size}(x);
 }
 
 Buf
-serialize(const is_xdr_type auto &...x)
+serialize(const is_xdr_serializable auto &...x)
 {
   Buf ret;
   (serialize_to(&ret, x), ...);
@@ -344,8 +425,8 @@ public:
   {
 #ifndef NDEBUG
     if (!empty()) {
-      assert(data() >= container.data());
-      assert(data() + size() <= container.data() + container.size());
+      x23assert(data() >= container.data());
+      x23assert(data() + size() <= container.data() + container.size());
     }
 #endif // !NDEBUG
   }

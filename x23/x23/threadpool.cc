@@ -90,7 +90,7 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
-  assert(!ss_.stop_requested());
+  x23assert(!ss_.stop_requested());
 
   std::ranges::stable_sort(jobs, [](const Job &a, const Job &b) {
     return llc_map->bucket(a.cpuhint) < llc_map->bucket(b.cpuhint);
@@ -113,7 +113,7 @@ ThreadPool::go(std::vector<Job> &&jobs)
 void
 ThreadPool::quiesce() noexcept
 {
-  assert(ThreadPool::my_thread_pool != this);
+  x23assert(ThreadPool::my_thread_pool != this);
 
   std::vector<size_t> counts(nthreads_);
   for (size_t i = 0; i < nthreads_; ++i)
@@ -129,7 +129,7 @@ ThreadPool::quiesce() noexcept
 void
 ThreadPool::drain() noexcept
 {
-  assert(ThreadPool::my_thread_pool != this);
+  x23assert(ThreadPool::my_thread_pool != this);
 
   // Get the timestamp of the newest (back) job in each runqueue
   std::vector<size_t> backtimes(nqueues_);
@@ -277,7 +277,7 @@ ThreadPool::Worker::getq() noexcept
 std::coroutine_handle<>
 ThreadPool::Worker::qpop(QPtr &ptr)
 {
-  assert(!ptr->q.empty());
+  x23assert(!ptr->q.empty());
 
   const auto mycore = core_map->bucket(cpu_);
   const auto qi = ptr->q.front();

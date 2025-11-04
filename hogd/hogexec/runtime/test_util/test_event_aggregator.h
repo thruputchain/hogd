@@ -65,17 +65,7 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
-  void shut_down()
-  {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
-  }
-
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
 private:
-  std::atomic<bool> shutdown_flag_ = false;
-
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventExecutor1<TestEventAggregatorExecRpc *, x23::MaybeAsync>);
@@ -112,17 +102,7 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.close_block(block_id).error();
   }
 
-  void shut_down()
-  {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
-  }
-
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
 private:
-  std::atomic<bool> shutdown_flag_ = false;
-
   TestEventAggregator &event_aggregator_;
 };
 static_assert(is_EventSched1<TestEventAggregatorSchedRpc *, x23::MaybeAsync>);

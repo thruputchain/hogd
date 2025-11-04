@@ -34,7 +34,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   // debug("{}_clear(fd {})", write ? "write" : "read", fd.get());
 
   auto fdp = getfd(fd);
-  assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
+  x23assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
   fdp->ready_ &= ~epflags[write] | epflags[!write];
 }
@@ -54,7 +54,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 
   // If this fails, you forgot to call {read,write}_clear before
   // calling {read,write}_wait.
-  assert(mode != kFree);
+#if X23_FD_TRACE
+  if (mode == kFree)
+    panic("Mode was kFree when setting {} callback on fd {}\n{}", int(mode),
+          write ? "write" : "read", fd.get(), *fdp->info_.take());
+#else  // !X23_FD_TRACE
+  x23assert(mode != kFree);
+#endif // !X23_FD_TRACE
 
   if ((fdp->ready_ & epflags[write]) && mode == kActive) {
     wi(0);
@@ -65,7 +71,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   [[maybe_unused]] auto oldwi = fdp->callbacks_[write].exchange(wi);
   // If this assertion fails, you attempted to register two read or
   // two write callbacks on the same file descriptor.
-  assert(!*oldwi);
+  x23assert(!*oldwi);
 
   setmode(fdp, kActive);
   // have to re-check in case write edge occured before we published wi
@@ -96,7 +102,21 @@ CoroPollImpl::debug_dump()
   uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
              (void *)static_cast<CoroPoll *>(this), eventfd_.get());
   {
-    auto _lk = std::unique_lock(resize_lock_);
+    std::unique_lock<SharedLock> lk;
+    std::jthread lkthread;
+    if (panicking()) {
+      // By attempting to acquire the lock we will at least prevent
+      // new read locks in the likely case that we can't acquire the
+      // write lock because we already hold a read lock.  This could
+      // lead to tracing deallocated coroutines, but we are panicking
+      // anyway.
+      lkthread =
+          std::jthread([this, &lk] { lk = std::unique_lock(resize_lock_); });
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    else
+      lk = std::unique_lock(resize_lock_);
+
     for (unsigned i = 0; i < state_size_; ++i) {
       FdState *p = state_ + i;
       if (p->mode_ == kFree)
@@ -114,49 +134,49 @@ void
 CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 {
   using enum FdState::Mode;
+
   FdState::Mode old_mode = fdp->mode_;
-  do {
-    if (old_mode == mode || (mode == kActive && old_mode == kPoisoned))
-      return;
-    if (old_mode == kLocked) {
-      fdp->mode_.wait(kLocked);
-      continue;
-    }
-  } while (!fdp->mode_.compare_exchange_strong(old_mode, kLocked));
-
-  if (mode == kActive && stop_requested()) {
-    fdp->mode_ = old_mode;
-    fdp->mode_.notify_all();
+  if (mode == old_mode || (mode == kActive && old_mode == kPoisoned))
     return;
-  }
 
-  Defer unlock([&fdp, mode] {
-    fdp->mode_ = mode;
+  while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
+    fdp->mode_.wait(kLocked);
+
+  int fd = fdp.get() - state_;
+  FdState::Mode unlock_mode = old_mode;
+  Defer unlock([&] {
+    fdp->mode_ = unlock_mode;
     fdp->mode_.notify_all();
   });
 
-  int fd = fdp.get() - state_;
+  if (mode == old_mode ||
+      (mode == kActive && (old_mode == kPoisoned || stop_requested())))
+    return;
 
-  // debug("setmode fd {}: {} -> {}", fd, int(old_mode), int(mode));
+  unlock_mode = mode;
 
   if (mode == kActive) {
+#if X23_FD_TRACE
+    *fdp->info_.take() =
+        std::format("fd {} activation stack trace\n{}", fd, stacktrace());
+#endif // X23_FD_TRACE
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
-    [[maybe_unused]] int err =
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
-    assert(err != -1);
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
+      return;
+    debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
+    unlock_mode = mode = kPoisoned;
   }
-  else {
-    fdp->ready_ = 0; // because EPOLLERR is sticky
-    if (old_mode == kActive) {
-      [[maybe_unused]] int err =
-          epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
-      assert(err != -1 || errno == EBADF || errno == ENOENT);
-    }
-    unlock.reset();
-    docbs(fdp);
+
+  fdp->ready_ = 0; // because EPOLLERR is sticky
+  if (old_mode == kActive) {
+    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
+      if (errno != ENOENT && errno != EBADF)
+        debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
   }
+  unlock.reset();
+  docbs(fdp);
 }
 
 bool
@@ -180,15 +200,14 @@ void
 CoroPollImpl::wake()
 {
   uint64_t one{1};
-  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]] {
-    assert(!"write(eventfd)");
-  }
+  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
+    panic("write(eventfd): {}", Errno{});
 }
 
 CoroPollImpl::FdPtr
 CoroPollImpl::getfd(BorrowedFd fd)
 {
-  assert(fd.get() >= 0);
+  x23assert(fd.get() >= 0);
 
   if (size_t(fd.get()) >= state_size_) {
     std::lock_guard _lg(resize_lock_);
@@ -278,13 +297,22 @@ CoroPollImpl::reset(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
   fdp->buf_clear();
+#if X23_FD_TRACE
+  *fdp->info_.take() =
+      std::format("fd {} reset stack trace\n{}", fd.get(), stacktrace());
+#endif // X23_FD_TRACE
   setmode(fdp, FdState::Mode::kFree);
 }
 
 void
 CoroPollImpl::poison(BorrowedFd fd)
 {
-  setmode(getfd(fd), FdState::Mode::kPoisoned);
+  auto fdp = getfd(fd);
+#if X23_FD_TRACE
+  *fdp->info_.take() =
+      std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
+#endif // X23_FD_TRACE
+  setmode(fdp, FdState::Mode::kPoisoned);
 }
 
 void

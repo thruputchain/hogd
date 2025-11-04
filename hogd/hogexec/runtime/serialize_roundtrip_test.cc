@@ -11,8 +11,8 @@
 #include "built_contracts/cxs_roundtrip.h"
 #include "built_contracts/roundtrip.hh"
 #include "built_contracts/txs_roundtrip.h"
+#include "built_contracts/txs_roundtrip.hh"
 #include "contract.hh"
-#include "contract_error.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
@@ -224,8 +224,11 @@ protected:
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
 
+           using Error = txs_roundtrip::Error;
+
            // Test ErrorXDR - Caller branch
-           hogd::ErrorXDR error_caller(hogd::ErrorType::kErrorTypeCaller);
+           // cxs_roundtrip and txs_roundtrip use the same error types
+           Error error_caller = Error(txs_roundtrip::ErrorType::Caller);
            roundtrip_test<"roundtrip_error_xdr">(error_caller, handler,
                                                  success);
            if (!success) {
@@ -233,10 +236,10 @@ protected:
            }
 
            // Test ErrorXDR - Contract branch with Custom
-           hogd::ErrorXDR error_contract_custom(
-               hogd::ErrorType::kErrorTypeContract);
-           error_contract_custom.contract_err().error_type(
-               hogd::ContractErrorType::kContractErrorTypeCustom);
+           Error error_contract_custom =
+               Error(txs_roundtrip::ErrorType::Contract);
+           error_contract_custom.contract_error().which(
+               txs_roundtrip::ContractErrorType::Custom);
            roundtrip_test<"roundtrip_error_xdr">(error_contract_custom, handler,
                                                  success);
            if (!success) {
@@ -244,11 +247,11 @@ protected:
            }
 
            // Test ErrorXDR - Contract branch with Syscall
-           hogd::ErrorXDR error_contract_syscall(
-               hogd::ErrorType::kErrorTypeContract);
-           error_contract_syscall.contract_err().error_type(
-               hogd::ContractErrorType::kContractErrorTypeSyscall);
-           error_contract_syscall.contract_err().syscall_err() = 42;
+           Error error_contract_syscall =
+               Error(txs_roundtrip::ErrorType::Contract);
+           error_contract_syscall.contract_error().which(
+               txs_roundtrip::ContractErrorType::Syscall);
+           error_contract_syscall.contract_error().syscall_error() = 42;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_syscall,
                                                  handler, success);
            if (!success) {
@@ -256,14 +259,15 @@ protected:
            }
 
            // Test ErrorXDR - Contract branch with Storage
-           hogd::ErrorXDR error_contract_storage(
-               hogd::ErrorType::kErrorTypeContract);
-           error_contract_storage.contract_err().error_type(
-               hogd::ContractErrorType::kContractErrorTypeStorage);
-           error_contract_storage.contract_err().storage_err().error_type(
-               hogd::StorageErrorType::kStorageErrorTypeSyscall);
-           error_contract_storage.contract_err().storage_err().syscall_err() =
-               123;
+           Error error_contract_storage =
+               Error(txs_roundtrip::ErrorType::Contract);
+           error_contract_storage.contract_error().which(
+               txs_roundtrip::ContractErrorType::Storage);
+           error_contract_storage.contract_error().storage_error().which(
+               txs_roundtrip::StorageErrorType::Syscall);
+           error_contract_storage.contract_error()
+               .storage_error()
+               .syscall_error() = 123;
            roundtrip_test<"roundtrip_error_xdr">(error_contract_storage,
                                                  handler, success);
            if (!success) {
@@ -277,9 +281,11 @@ protected:
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
 
+           using ContractError = txs_roundtrip::ContractError;
+
            // Test ContractErrorXDR - Custom branch
-           hogd::ContractErrorXDR contract_error_custom(
-               hogd::ContractErrorType::kContractErrorTypeCustom);
+           ContractError contract_error_custom =
+               ContractError(txs_roundtrip::ContractErrorType::Custom);
            roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_custom,
                                                           handler, success);
            if (!success) {
@@ -287,9 +293,9 @@ protected:
            }
 
            // Test ContractErrorXDR - Syscall branch
-           hogd::ContractErrorXDR contract_error_syscall(
-               hogd::ContractErrorType::kContractErrorTypeSyscall);
-           contract_error_syscall.syscall_err() = 99;
+           ContractError contract_error_syscall =
+               ContractError(txs_roundtrip::ContractErrorType::Syscall);
+           contract_error_syscall.syscall_error() = 99;
            roundtrip_test<"roundtrip_contract_error_xdr">(
                contract_error_syscall, handler, success);
            if (!success) {
@@ -297,11 +303,11 @@ protected:
            }
 
            // Test ContractErrorXDR - Storage branch with Syscall
-           hogd::ContractErrorXDR contract_error_storage_syscall(
-               hogd::ContractErrorType::kContractErrorTypeStorage);
-           contract_error_storage_syscall.storage_err().error_type(
-               hogd::StorageErrorType::kStorageErrorTypeSyscall);
-           contract_error_storage_syscall.storage_err().syscall_err() = 456;
+           ContractError contract_error_storage_syscall =
+               ContractError(txs_roundtrip::ContractErrorType::Storage);
+           contract_error_storage_syscall.storage_error().which(
+               txs_roundtrip::StorageErrorType::Syscall);
+           contract_error_storage_syscall.storage_error().syscall_error() = 456;
            roundtrip_test<"roundtrip_contract_error_xdr">(
                contract_error_storage_syscall, handler, success);
            if (!success) {
@@ -309,10 +315,10 @@ protected:
            }
 
            // Test ContractErrorXDR - Storage branch with Serialization
-           hogd::ContractErrorXDR contract_error_storage_serialization(
-               hogd::ContractErrorType::kContractErrorTypeStorage);
-           contract_error_storage_serialization.storage_err().error_type(
-               hogd::StorageErrorType::kStorageErrorTypeSerialization);
+           ContractError contract_error_storage_serialization =
+               ContractError(txs_roundtrip::ContractErrorType::Storage);
+           contract_error_storage_serialization.storage_error().which(
+               txs_roundtrip::StorageErrorType::Serialization);
            roundtrip_test<"roundtrip_contract_error_xdr">(
                contract_error_storage_serialization, handler, success);
            if (!success) {
@@ -320,15 +326,14 @@ protected:
            }
 
            // Test ContractErrorXDR - Storage branch with IndexOutOfBounds
-           hogd::ContractErrorXDR contract_error_storage_index(
-               hogd::ContractErrorType::kContractErrorTypeStorage);
-           contract_error_storage_index.storage_err().error_type(
-               hogd::StorageErrorType::kStorageErrorTypeIndexOutOfBounds);
-           contract_error_storage_index.storage_err()
-               .index_out_of_bounds_err()
-               .len = 1000;
-           contract_error_storage_index.storage_err()
-               .index_out_of_bounds_err()
+           ContractError contract_error_storage_index =
+               ContractError(txs_roundtrip::ContractErrorType::Storage);
+           contract_error_storage_index.storage_error().which(
+               txs_roundtrip::StorageErrorType::IndexOutOfBounds);
+           contract_error_storage_index.storage_error().indexoutofbounds().len =
+               1000;
+           contract_error_storage_index.storage_error()
+               .indexoutofbounds()
                .access = 1500;
            roundtrip_test<"roundtrip_contract_error_xdr">(
                contract_error_storage_index, handler, success);
@@ -343,10 +348,12 @@ protected:
              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
            bool success = false;
 
+           using StorageError = txs_roundtrip::StorageError;
+
            // Test StorageErrXDR - Syscall branch
-           hogd::StorageErrXDR storage_err_syscall(
-               hogd::StorageErrorType::kStorageErrorTypeSyscall);
-           storage_err_syscall.syscall_err() = 789;
+           StorageError storage_err_syscall =
+               StorageError(txs_roundtrip::StorageErrorType::Syscall);
+           storage_err_syscall.syscall_error() = 789;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_syscall,
                                                        handler, success);
            if (!success) {
@@ -354,8 +361,8 @@ protected:
            }
 
            // Test StorageErrXDR - Serialization branch
-           hogd::StorageErrXDR storage_err_serialization(
-               hogd::StorageErrorType::kStorageErrorTypeSerialization);
+           StorageError storage_err_serialization =
+               StorageError(txs_roundtrip::StorageErrorType::Serialization);
            roundtrip_test<"roundtrip_storage_err_xdr">(
                storage_err_serialization, handler, success);
            if (!success) {
@@ -363,10 +370,10 @@ protected:
            }
 
            // Test StorageErrXDR - IndexOutOfBounds branch
-           hogd::StorageErrXDR storage_err_index(
-               hogd::StorageErrorType::kStorageErrorTypeIndexOutOfBounds);
-           storage_err_index.index_out_of_bounds_err().len = 2000;
-           storage_err_index.index_out_of_bounds_err().access = 2500;
+           StorageError storage_err_index =
+               StorageError(txs_roundtrip::StorageErrorType::IndexOutOfBounds);
+           storage_err_index.indexoutofbounds().len = 2000;
+           storage_err_index.indexoutofbounds().access = 2500;
            roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_index,
                                                        handler, success);
            if (!success) {

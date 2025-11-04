@@ -1,16 +1,15 @@
 #pragma once
 
 #include <concepts>
+#include <cstdint>
 #include <tuple>
 #include <type_traits>
 #include <variant>
 
-#include "contract_error.hh"
-
 namespace hogd {
 
 // Parse and work with result types returned by contract methods.
-template<typename T, typename E = ErrorXDR> class Result {
+template<typename T, typename E> class Result {
 public:
   constexpr static bool kIsContractResultType = true;
 
@@ -52,6 +51,9 @@ concept is_contract_result_type = requires {
   { T::kIsContractResultType } -> std::convertible_to<bool>;
 };
 
-static_assert(is_contract_result_type<Result<void>>);
+static_assert(is_contract_result_type<Result<void, void>>);
+static_assert(is_contract_result_type<Result<void, int32_t>>);
+static_assert(is_contract_result_type<Result<int32_t, void>>);
+static_assert(is_contract_result_type<Result<int32_t, int32_t>>);
 
 } // namespace hogd

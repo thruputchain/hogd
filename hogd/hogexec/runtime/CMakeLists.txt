@@ -73,6 +73,7 @@ add_library(runtime_test_objects OBJECT
   direct_nnint_test.cc
   direct_nonce_tests.cc
   direct_storage_ordering_tests.cc
+  empty_test.cc
   error_handling_test.cc
   event_test.cc
   execution_mode_test.cc

@@ -9,7 +9,9 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/hogdb/block_id_manager.h"
+#include "hogd/hogdb/block_tx.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -62,14 +64,6 @@ public:
   dbsched_load_genesis_block(GenesisBlock genesis_block);
 
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
-
-  void shut_down()
-  {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
-  }
-
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
   std::atomic<bool> shutdown_flag_ = false;

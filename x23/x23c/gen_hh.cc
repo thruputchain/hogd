@@ -213,6 +213,10 @@ concept is_{0} =)",
         "      {}\n"
         "  }};\n",
         vers.procs.size(), procnos);
+    top_ += "  enum class procs : std::uint32_t {\n";
+    for (const auto &proc : vers.procs)
+      top_ += std::format("    {} = {},\n", proc.id, proc.val);
+    top_ += "  };\n";
     if (!namespaces_.empty())
       bottom_ += format("\nnamespace {} {{", ns());
 
@@ -262,26 +266,37 @@ concept is_{0} =)",
 )";
 
     for (const auto &proc : vers.procs) {
-      top_ += std::format("\n    decltype(auto) // {0}\n"
-                          "    {1}(",
-                          map_type(proc.return_type), proc.id);
-      comma.reset();
-      for (int i = 0, n = proc.arg_types.size(); i < n; ++i)
-        top_ += std::format("{}const {} &__a{}", comma.get(),
-                            map_type(proc.arg_types[i]), i);
-      if (!proc.arg_types.empty())
-        top_ += std::format(",\n{0:{1}}", "", proc.id.size() + 5);
-      top_ += std::format("__ExtraArgs...__ea)\n", comma.get(),
-                          map_type(proc.return_type));
-      top_ += "    {\n";
-      top_ += std::format(
-          "      return __send_call->template send_call<proc_meta<{0}>>(\n"
-          "          __ea...",
-          proc.val);
-      for (int i = 0, n = proc.arg_types.size(); i < n; ++i)
-        top_ += std::format(", __a{}", i);
-      top_ += ");\n";
-      top_ += "    }\n";
+      top_ += '\n';
+      for (int round = 0; round < 1 + !proc.arg_types.empty(); round++) {
+        top_ += std::format("    decltype(auto) // {0}\n"
+                            "    {1}(",
+                            map_type(proc.return_type), proc.id);
+
+        Join commanl(std::format(",\n{:>{}}", "", 5 + proc.id.size()));
+
+        for (int i = 0, n = proc.arg_types.size(); i < n; ++i)
+          if (round == 0)
+            top_ += std::format("{}const {} &__a{}", commanl.get(),
+                                map_type(proc.arg_types[i]), i);
+          else
+            top_ += std::format("{}x23::satisfies_rpc_arg<{}> auto &&__a{}",
+                                commanl.get(), map_type(proc.arg_types[i]), i);
+
+        top_ += std::format("{}__ExtraArgs...__ea)\n", commanl.get());
+        top_ += "    {\n";
+        top_ += std::format(
+            "      return __send_call->template send_call<proc_meta<{0}>>(\n"
+            "          __ea...",
+            proc.val);
+        for (int i = 0, n = proc.arg_types.size(); i < n; ++i)
+          if (round == 0)
+            top_ += std::format(", __a{}", i);
+          else
+            top_ += std::format(",\n          x23::convert_rpc_arg<{}>(__a{})",
+                                map_type(proc.arg_types[i]), i);
+        top_ += ");\n";
+        top_ += "    }\n";
+      }
     }
 
     top_ += R"(  };
@@ -295,6 +310,9 @@ concept is_{0} =)",
       bottom_ += std::format("}} // namespace {}\n", ns());
     bottom_ +=
         std::format(R"(
+template<> struct x23::version_for_proc_enum<{0}::procs> {{
+  using type = {0};
+}};
 template<typename Server, template<typename> typename RetTrans,
          typename... ExtraArgs>
 struct x23::rpc_compatible<Server, {0}, RetTrans, ExtraArgs...>
@@ -445,7 +463,7 @@ Gen::show_type(const UnionBody &b, string t)
 
   if (non_enum_switch_types.find(b.switch_type) ==
       non_enum_switch_types.end()) {
-    prtop("using enum {};\n", switch_type);
+    prtop("using enum x23::AlwaysEnum<{}>::type;\n", switch_type);
   }
   prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
   prtop("inline explicit {0}({1}) noexcept;\n", t, switch_type);
@@ -591,7 +609,6 @@ struct x23::xdr_meta<struct {0}> {{
   bottom_ += std::format(R"(constexpr int
 {1}::__xdr_union_arm_number({0} discriminant)
 {{
-  using enum x23::AlwaysEnum<{0}>::type;
   switch (x23::unbool(discriminant)) {{
 )",
                          switch_type, scope(false));
