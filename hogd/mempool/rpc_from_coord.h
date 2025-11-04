@@ -42,7 +42,7 @@ public:
 
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 1'000'000;
-  static constexpr size_t kChunkSize = 20;
+  static constexpr size_t kChunkSize = 50;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
