@@ -225,6 +225,16 @@ xdr_size(const X &x)
   }
 }
 
+inline size_t
+xdr_size(std::monostate)
+{
+  return 0;
+}
+
+inline void
+xdr_serialize(auto &&, const std::monostate &)
+{}
+
 namespace detail {
 struct Serializer;
 
@@ -334,6 +344,8 @@ template<typename X>
 concept is_xdr_serializable =
     is_xdr_type<X> || detail::has_custom_serializer<X>;
 
+static_assert(is_xdr_serializable<std::monostate>);
+
 template<x23::is_xdr_serializable X>
 size_t
 xdr_size(span<X> s)
@@ -376,6 +388,12 @@ xdr_serialize(auto &serializer, BufView v)
 }
 
 static_assert(is_xdr_serializable<BufView>);
+
+template<typename X, size_t NX, typename T, size_t NT>
+requires serialize_equiv<X, T>::value && (NT == std::dynamic_extent || NT <= NX)
+struct serialize_equiv<Vec<X, NX>, span<T, NT>> : std::true_type {};
+
+static_assert(serializes_like<span<int32_t>, Vec<int32_t>>);
 
 void
 serialize_to(Buf *bufp, const is_xdr_serializable auto &x)

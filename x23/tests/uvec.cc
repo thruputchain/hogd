@@ -12,7 +12,7 @@ using namespace x23;
 #if !BROKEN_P2564R3
 
 constexpr size_t test_constexpr = [] {
-  auto v = "123"_ustr;
+  auto v = "123"_str;
   v.resize(5, '0');
   v.resize(7);
   v.resize(4);
@@ -87,7 +87,7 @@ uvec_vs_vector(const T &init = {})
 void
 reinterpret()
 {
-  Str x = "Hello world\n"_ustr;
+  Str x = "Hello world\n"_str;
   auto y = auto(x).reinterpret<Vec<unsigned char>>();
   assert(!y.empty());
   auto z = std::move(y).reinterpret<Str>();
@@ -106,10 +106,10 @@ add()
 void
 str_methods()
 {
-  auto x = "Hello world!\n"_ustr;
+  auto x = "Hello world!\n"_str;
   assert(x.contains("world"));
-  assert(x.contains("world"_ustr));
-  assert(!x.contains("goodbye"_ustr));
+  assert(x.contains("world"_str));
+  assert(!x.contains("goodbye"_str));
   assert(x.find("world") == 6);
   assert(x.find("goodbye") == x.npos);
 }
@@ -128,7 +128,7 @@ format_test()
 
   std::println("{}", x);
 
-  assert(x == "789abcdefg"_ustr);
+  assert(x == "789abcdefg"_str);
 }
 
 int

@@ -604,4 +604,46 @@ struct version_for_proc_enum;
 template<typename E>
 concept is_proc_enum = requires { typename version_for_proc_enum<E>::type; };
 
+// Specialize this template to declare that some XDR type serializes
+// equivalently to some other type.
+template<typename XdrType, typename OtherType>
+struct serialize_equiv : std::false_type {};
+
+template<is_xdr_type X> struct serialize_equiv<X, X> : std::true_type {};
+template<> struct serialize_equiv<void, std::monostate> : std::true_type {};
+template<> struct serialize_equiv<void, std::tuple<>> : std::true_type {};
+
+// Concept for types T you can use where you want to serialize an X.
+template<typename T, typename X>
+concept serializes_like = serialize_equiv<X, std::remove_cvref_t<T>>::value;
+
+// Concept for types you can pass to an RPC function expecting type X.
+template<typename T, typename X>
+concept satisfies_rpc_arg = serializes_like<T, X> || std::convertible_to<T, X>;
+
+// Convert arguments that need to be converted to RPC type X.  Note
+// the result will have reference semantics, so should not be used
+// after the arguments are destroyed.  Specifically:
+//
+//    f(convert_rpc_arg<XdrStr>("hello"_str));  // OK
+//
+//    decltype(auto) tmp = convert_rpc_arg<XdrStr>("hello"_str);
+//    // argument destroyed at end of full expression above
+//    f(tmp);   // Use after free error
+//
+//    auto tmp2 = convert_rpc_arg<XdrStr>("hello"_str);
+//    f(tmp2);  // OK but incured extra move into tmp2
+template<typename X, satisfies_rpc_arg<X> T>
+inline decltype(auto)
+convert_rpc_arg(T &&t)
+{
+  if constexpr (serializes_like<std::remove_cvref_t<T>, X>)
+    return static_cast<T &&>(t);
+  else
+    return X(t);
+}
+
+static_assert(std::same_as<decltype(convert_rpc_arg<Str>("hi")), Str>);
+static_assert(std::same_as<decltype(convert_rpc_arg<Str>("hi"_str)), Str &&>);
+
 } // namespace x23

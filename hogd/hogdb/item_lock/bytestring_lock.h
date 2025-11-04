@@ -17,6 +17,8 @@ public:
     : bytestring_(std::move(bytestring))
   {}
 
+  using change_type = Bytes;
+
   // On success, returns a (deterministic) upper bound on the storage cost
   // required to commit the after value. Is a no-op on failure.
   // If after is nullptr, the storage cost output should be ignored.
@@ -28,6 +30,17 @@ public:
       const StorageCostModel *cost_model) const noexcept
   {
     return cost_model->get_bytestring_cost(bytestring_.size());
+  }
+
+  int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
+                         const Bytes * /*unused*/,
+                         const StorageCostModel *cost_model) const
+  {
+    if (did_finalize) {
+      return cost_model->get_bytestring_cost(bytestring_.size()) -
+             snapshot_cost;
+    }
+    return 0;
   }
 
 private:
