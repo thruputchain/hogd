@@ -28,7 +28,8 @@ public:
   // Returns the storage cost used to commit the change.
   // Must be less than or equal to the storage cost returned by
   // try_atomic_change_lock for that change.
-  int128_t commit_change(const ItemChange *change,
+  // change must be non-null.
+  int128_t commit_change(const ItemChange &change,
                          const StorageCostModel *cost_model);
 
 private:

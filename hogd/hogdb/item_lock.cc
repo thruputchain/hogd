@@ -58,11 +58,9 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 }
 
 int128_t
-ItemLock::commit_change(const ItemChange *change,
+ItemLock::commit_change(const ItemChange &change,
                         const StorageCostModel *cost_model)
 {
-  assert(change != nullptr);
-
   bool did_finalize = false;
 
   auto lock_state = lock_state_.load(std::memory_order_acquire);
@@ -74,10 +72,10 @@ ItemLock::commit_change(const ItemChange *change,
     // We only need to acquire the lock here if change_ is an exclusive change.
     // In that case, we wind up changing the variant of lock_contents_.
 
-    if (change->is_exclusive()) {
+    if (change.is_exclusive()) {
       std::unique_lock lock(mtx_);
       assert(pending_refcount_ == 1);
-      prepare_lock_contents(change, lock);
+      prepare_lock_contents(&change, lock);
     }
 
     // If change_ is not exclusive, then there may be
@@ -88,7 +86,7 @@ ItemLock::commit_change(const ItemChange *change,
     // calls to try_atomic_change_lock will not change the variant/reset the
     // variant of lock_contents_.
 
-    if (change->is_permanent_exclusive()) {
+    if (change.is_permanent_exclusive()) {
       lock_state_.store(kFinalizedPermamentExclusiveLock,
                         std::memory_order_release);
     }
@@ -107,7 +105,7 @@ ItemLock::commit_change(const ItemChange *change,
           panic("bad finalized state");
         }
         else {
-          auto const *inner = change->get_inner<typename lock_t::change_type>();
+          auto const *inner = change.get_inner<typename lock_t::change_type>();
           assert(inner != nullptr);
           return lock.commit_change(did_finalize, snapshot_cost_, inner,
                                     cost_model);
@@ -121,8 +119,16 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
                                            const ItemChange *after,
                                            const StorageCostModel *cost_model)
 {
+  info("handle_try_atomic_from_finalized: before = {}, after = {}",
+       before != nullptr ? std::format("{}", *before) : "[null]",
+       after != nullptr ? std::format("{}", *after) : "[null]");
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
   assert(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+  assert(before == nullptr || (!before->is_exclusive()));
+
+  if (after != nullptr && after->is_exclusive()) {
+    return HogDBError{HogDBCode::kConflict};
+  }
 
   auto local_cost = std::visit(
       [&](auto &lock) -> HogDBStatus<int128_t> {
@@ -133,14 +139,21 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           panic("finalized bad state");
         }
         else {
-
           using change_type = typename lock_t::change_type;
 
-          auto const *before_inner =
-              (before != nullptr) ? before->get_inner<change_type>() : nullptr;
-          auto const *after_inner =
-              (after != nullptr) ? after->get_inner<change_type>() : nullptr;
+          change_type const *before_inner = nullptr;
+          if (before != nullptr) {
+            before_inner = before->get_inner<change_type>();
+            assert(before_inner != nullptr);
+          }
 
+          change_type const *after_inner = nullptr;
+          if (after != nullptr) {
+            after_inner = after->get_inner<change_type>();
+            if (after_inner == nullptr) {
+              return HogDBError{HogDBCode::kConflict};
+            }
+          }
           return lock.try_atomic_change_lock(before_inner, after_inner,
                                              cost_model);
         }
@@ -189,22 +202,53 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
     }
     // downgrade from exclusive to non-exclusive
     prepare_lock_contents(after, ul);
+
+    // before might be a different type of change, which is incompatible with
+    // the type-specific lock API.  So when downgrading from exclusive to
+    // non-exclusive, we perform the type-specific locking as though no lock
+    // were held.
+    auto res = std::visit(
+        [&](auto &lock) -> HogDBStatus<int128_t> {
+          using lock_t = std::decay_t<decltype(lock)>;
+          if constexpr (std::is_same_v<lock_t, std::monostate> ||
+                        std::is_same_v<lock_t, ExclusiveLock>) {
+            panic("bad pending state");
+          }
+          else {
+            using change_type = typename lock_t::change_type;
+            auto const *after_inner = after->get_inner<change_type>();
+            assert(after_inner != nullptr);
+            auto res =
+                lock.try_atomic_change_lock(nullptr, after_inner, cost_model);
+            assert(res.has_value());
+            return res.value();
+          }
+        },
+        lock_contents_);
+    assert(res.has_value());
+    return res;
   }
 
   if (after != nullptr && after->is_exclusive()) {
-    if (pending_refcount_ > 0 && before == nullptr) {
-      // Some other transaction already has a ref on this lock; cannot acquire
-      // in exclusive mode
+    assert(!before_holds_exclusive_lock);
+    // upgrading from non-exclusive to exclusive
+
+    if (before == nullptr && pending_refcount_ > 0) {
+      // we do not have a lock, and some other transaction already has a ref on
+      // this lock. Cannot acquire in exclusive mode
       return HogDBError{HogDBCode::kConflict};
     }
 
-    if (pending_refcount_ > 1) {
-      assert(before != nullptr);
+    if (before != nullptr && pending_refcount_ > 1) {
       assert(!before->is_exclusive());
+      // we have a lock, but some other transaction already has a ref on this
+      // lock. Cannot acquire in exclusive mode
       return HogDBError{HogDBCode::kConflict};
     }
 
-    assert(pending_refcount_ == 1);
+    assert((before == nullptr && pending_refcount_ == 0) ||
+           (before != nullptr && pending_refcount_ == 1));
+
     set_exclusive_lock(ul);
 
     return std::get<ExclusiveLock>(lock_contents_)
@@ -222,13 +266,21 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
           return HogDBError{HogDBCode::kConflict};
         }
         else {
-
           using change_type = typename lock_t::change_type;
 
-          auto const *before_inner =
-              (before != nullptr) ? before->get_inner<change_type>() : nullptr;
-          auto const *after_inner =
-              (after != nullptr) ? after->get_inner<change_type>() : nullptr;
+          change_type const *before_inner = nullptr;
+          if (before != nullptr) {
+            before_inner = before->get_inner<change_type>();
+            assert(before_inner != nullptr);
+          }
+
+          change_type const *after_inner = nullptr;
+          if (after != nullptr) {
+            after_inner = after->get_inner<change_type>();
+            if (after_inner == nullptr) {
+              return HogDBError{HogDBCode::kConflict};
+            }
+          }
 
           return lock.try_atomic_change_lock(before_inner, after_inner,
                                              cost_model);
@@ -295,7 +347,7 @@ void
 ItemLock::set_exclusive_lock(std::unique_lock<std::mutex> const &ul)
 {
   assert(ul.owns_lock());
-  assert(pending_refcount_ == 1);
+  assert(pending_refcount_ <= 1);
   lock_contents_.emplace<ExclusiveLock>();
 }
 
