@@ -43,6 +43,7 @@ public:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 100'000;
   static constexpr size_t kChunkSize = 10;
+  static constexpr size_t kNumClientsPerExecutor = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
 
@@ -156,7 +157,11 @@ private:
     // distributed across shards?
     db_sched_client_ = std::make_shared<db_sched_client_t>(
         std::move(MempoolDbRpc::get_clients()[0]));
-    exec_clients_ = MempoolExecutorRpc::get_clients();
+    for (size_t i = 0; i < kNumClientsPerExecutor; i++) {
+      for (auto &client : MempoolExecutorRpc::get_clients()) {
+        exec_clients_.push_back(client);
+      }
+    }
     info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
@@ -178,10 +183,10 @@ private:
   x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
 
-  x23::Async<x23::Vec<bool>>
+  x23::Detached
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                size_t executor_idx);
+                size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb);
 
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
       BlockID block_id, const x23::Vec<SignedTransaction> &txs,

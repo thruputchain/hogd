@@ -193,12 +193,15 @@ MempoolCoordinatorRpc::get_block_hash(
   return sha256(preimage);
 }
 
-x23::Async<x23::Vec<bool>>
+// x23::Async<x23::Vec<bool>>
+x23::Detached
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
-    size_t executor_idx)
+    size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb)
 {
+  co_await default_coropoll().pool_.bg();
+
   x23::Vec<bool> ret;
   ret.reserve(txs.size());
 
@@ -218,7 +221,7 @@ MempoolCoordinatorRpc::propose_batch(
       break;
     }
   }
-  co_return ret;
+  cb(ret);
 }
 
 x23::Async<x23::Vec<bool>>
@@ -228,6 +231,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     size_t chunk_size)
 {
   CHECK_GT(chunk_size, 0UL);
+
+  auto timer = std::make_unique<ElapsedTimer>();
 
   // Create the chunks.
   size_t num_chunks =
@@ -241,22 +246,40 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     CHECK_LE(chunks.back().size(), chunk_size);
   }
 
+  double create_chunk_dur = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   // Send the RPCs.
-  x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
+  // x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
+
+  std::vector<std::unique_ptr<x23::Awaitable<x23::Vec<bool>>>> awaitables;
+  awaitables.reserve(num_chunks);
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
-  async_handles.reserve(num_chunks);
   for (size_t i = 0; i < num_chunks; i++) {
-    async_handles.push_back(
-        propose_batch(block_id, chunks[i], nomination_chunks[i],
-                      /*executor_idx=*/i % exec_clients_.size()));
+    awaitables.push_back(std::make_unique<x23::Awaitable<x23::Vec<bool>>>());
+    propose_batch(block_id, chunks[i], nomination_chunks[i],
+                  /*executor_idx=*/i % exec_clients_.size(),
+                  x23::CoroCB<x23::Vec<bool>>(*awaitables[i]));
   }
+
+  double send_rpc_dur = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   // Wait for the RPC responses.
   x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
-  for (size_t i = 0; i < num_chunks; i++) {
-    x23::Vec<bool> ret_chunk = co_await async_handles[i];
-    ret_chunks[i] = ret_chunk;
+  for (std::unique_ptr<x23::Awaitable<x23::Vec<bool>>> &awaitable :
+       awaitables) {
+    x23::Vec<bool> ret_chunk = co_await *awaitable;
+    ret_chunks.push_back(ret_chunk);
   }
+  info("num chunks {}, awaitables.size() {}", num_chunks, awaitables.size());
+  // for (size_t i = 0; i < num_chunks; i++) {
+  //   x23::Vec<bool> ret_chunk = co_await async_handles[i];
+  //   ret_chunks[i] = ret_chunk;
+  // }
+
+  double wait_dur = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   // Fold the results.
   x23::Vec<bool> ret;
@@ -270,6 +293,11 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
       transaction_nominations.push_back(nominated_tx);
     }
   }
+
+  double fold_dur = timer->elapsed();
+
+  info("create_chunk_dur {}, send_rpc_dur {}, wait_dur {}, fold_dur {}",
+       create_chunk_dur, send_rpc_dur, wait_dur, fold_dur);
 
   co_return ret;
 }
