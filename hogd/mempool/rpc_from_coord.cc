@@ -195,7 +195,7 @@ MempoolCoordinatorRpc::get_block_hash(
 
 x23::Detached
 MempoolCoordinatorRpc::propose_batch(
-    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+    BlockID block_id, x23::span<SignedTransaction> txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb)
 {
@@ -204,9 +204,10 @@ MempoolCoordinatorRpc::propose_batch(
   x23::Vec<bool> ret;
   ret.reserve(txs.size());
 
+  x23::Vec<SignedTransaction> txs_to_send(txs.begin(), txs.end());
   ExecProposeBatchResult res =
-      co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
-                                                                       txs);
+      co_await exec_clients_[executor_idx].executorsched_propose_batch(
+          block_id, txs_to_send);
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -225,7 +226,7 @@ MempoolCoordinatorRpc::propose_batch(
 
 x23::Async<x23::Vec<bool>>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
-    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+    BlockID block_id, x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     size_t chunk_size)
 {
@@ -233,28 +234,20 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 
   auto timer = std::make_unique<ElapsedTimer>();
 
-  // Create the chunks.
+  // Send the RPCs.
   size_t num_chunks =
       (txs.size() / chunk_size) + ((txs.size() % chunk_size) ? 1 : 0);
-  x23::Vec<x23::Vec<SignedTransaction>> chunks;
-  chunks.reserve(num_chunks);
-  for (size_t i = 0; i < num_chunks; i++) {
-    auto end =
-        (i < num_chunks - 1) ? txs.begin() + ((i + 1) * chunk_size) : txs.end();
-    chunks.emplace_back(txs.begin() + (i * chunk_size), end);
-    CHECK_LE(chunks.back().size(), chunk_size);
-  }
-
-  double create_chunk_dur = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  // Send the RPCs.
   x23::Vec<std::unique_ptr<x23::Awaitable<x23::Vec<bool>>>> awaitables;
   awaitables.reserve(num_chunks);
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
   for (size_t i = 0; i < num_chunks; i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<x23::Vec<bool>>>());
-    propose_batch(block_id, chunks[i], nomination_chunks[i],
+
+    auto start = txs.begin() + (i * chunk_size);
+    auto end = (i < num_chunks - 1) ? start + chunk_size : txs.end();
+    x23::span<SignedTransaction> chunk(start, end);
+
+    propose_batch(block_id, chunk, nomination_chunks[i],
                   /*executor_idx=*/i % exec_clients_.size(),
                   x23::CoroCB<x23::Vec<bool>>(*awaitables[i]));
   }
@@ -287,8 +280,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 
   double fold_dur = timer->elapsed();
 
-  info("create_chunk_dur {}, send_rpc_dur {}, wait_dur {}, fold_dur {}",
-       create_chunk_dur, send_rpc_dur, wait_dur, fold_dur);
+  info("send_rpc_dur {}, wait_dur {}, fold_dur {}", send_rpc_dur, wait_dur,
+       fold_dur);
 
   co_return ret;
 }
