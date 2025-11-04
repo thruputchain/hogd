@@ -185,7 +185,10 @@ public:
     }
   }
 
-  template<typename Func> requires std::invocable<Func, Value &>
+  // this is a limited, bounded depth recursion; the I parameter bypasses
+  // clang-tidy's recursion limit
+  template<size_t I, typename Func>
+  requires std::invocable<Func, Value &> && (I <= sizeof(Shortkey) * 2)
   void for_each(Func &f)
   {
     if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
@@ -204,7 +207,7 @@ public:
       auto *node = ptr.load();
       if (node == nullptr)
         continue;
-      node->for_each(f);
+      node->template for_each<I + 1>(f);
     }
   }
 
@@ -358,7 +361,9 @@ public:
   {
     pool.for_each_parallel(
         roots_,
-        [&f](detail::Node<Value, shortkey_t> &root) { root.for_each(f); },
+        [&f](detail::Node<Value, shortkey_t> &root) {
+          root.template for_each<0>(f);
+        },
         width);
   }
 
