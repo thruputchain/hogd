@@ -113,6 +113,7 @@ public:
       break;
     case Type::kBump:
       CHECK(bump_allocator_.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return bump_allocator_->alloc();
       break;
     default:
