@@ -95,7 +95,7 @@ public:
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
-  size_t size() const { return size_; }
+  size_t size() const { return size_.load(std::memory_order_relaxed); }
 
   // Debug.
   void dump_runqueue() const;
@@ -143,7 +143,7 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
-  void add_txs_helper(const SignedTransaction &tx);
+  bool add_txs_helper(const SignedTransaction &tx);
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
@@ -182,7 +182,7 @@ private:
   SynchronizedMap<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
-  size_t size_ = 0;
+  std::atomic<size_t> size_ = 0;
   BlockHeight current_block_ = 0;
 
   // The RPC client that the scheduler uses to talk to the database. The
