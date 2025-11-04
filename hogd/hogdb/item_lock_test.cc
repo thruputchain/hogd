@@ -302,4 +302,26 @@ TEST(ItemLockTest, PermamentExclusiveUpgradeDowngrade)
   EXPECT_EQ(lock.commit_change(third, &kTestCostModel), -1000);
 }
 
+TEST(ItemLockTest, PermamentExclusiveKeepsLock)
+{
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto first = make_nnint_change(100, 10);
+  first.set_permanent_exclusive();
+  auto second = make_nnint_change(100, 20);
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), -1000);
+
+  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel)
+                   .has_value());
+
+  EXPECT_EQ(lock.commit_change(first, &kTestCostModel), -1000);
+
+  // second should not conflict with first, except that first is permanent
+  // exclusive
+  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel)
+                   .has_value());
+}
+
 } // namespace hogd
