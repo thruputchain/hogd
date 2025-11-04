@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <future>
 #include <optional>
 #include <print>
 #include <span>
@@ -13,6 +14,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
@@ -1413,7 +1415,6 @@ MerkleTrie::free_all_nodes(Node *root)
         if (&node != &root_) {
           CHECK(!node.rw_lock.is_locked_relaxed());
           CHECK(!node.hash_lock.is_locked_relaxed());
-          node.clear();
           delete &node;
         }
       };
