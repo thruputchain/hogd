@@ -259,4 +259,47 @@ TEST(ItemLockTest, PermamentExclusiveInitial)
   EXPECT_EQ(lock.commit_change(first, &kTestCostModel), -1000);
 }
 
+TEST(ItemLockTest, PermamentExclusiveDowngrade)
+{
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto first = make_nnint_change(100, 10);
+  first.set_permanent_exclusive();
+  auto second = make_nnint_change(200, 20);
+  second.narrow(first);
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), -1000);
+
+  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), 0);
+
+  EXPECT_EQ(lock.commit_change(second, &kTestCostModel), -1000);
+}
+
+TEST(ItemLockTest, PermamentExclusiveUpgradeDowngrade)
+{
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto first = make_nnint_change(100, 10);
+  auto second = make_nnint_change(200, 20);
+  second.narrow(first);
+  auto third = second;
+  second.set_permanent_exclusive();
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), 0);
+
+  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), -1000);
+
+  auto r3 = lock.try_atomic_change_lock(&second, &third, &kTestCostModel);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(r3.value(), 0);
+
+  EXPECT_EQ(lock.commit_change(third, &kTestCostModel), -1000);
+}
+
 } // namespace hogd

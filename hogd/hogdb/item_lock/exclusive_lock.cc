@@ -2,14 +2,13 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
-#include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include <cassert>
 
 namespace hogd {
 
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
-HogDBStatus<int128_t>
+int128_t
 ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
                                       const ItemChange *after,
                                       const StorageCostModel *cost_model)

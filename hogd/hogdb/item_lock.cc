@@ -134,9 +134,6 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
                                            const ItemChange *after,
                                            const StorageCostModel *cost_model)
 {
-  info("handle_try_atomic_from_finalized: before = {}, after = {}",
-       before != nullptr ? std::format("{}", *before) : "[null]",
-       after != nullptr ? std::format("{}", *after) : "[null]");
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
   assert(!std::holds_alternative<ExclusiveLock>(lock_contents_));
   assert(before == nullptr || (!before->is_exclusive()));
@@ -192,12 +189,6 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
                                          const StorageCostModel *cost_model,
                                          std::unique_lock<std::mutex> const &ul)
 {
-  info("handle_try_atomic_from_pending: before = {}, after = {}, "
-       "pending_refcount_ = {}",
-       before != nullptr ? std::format("{}", *before) : "[null]",
-       after != nullptr ? std::format("{}", *after) : "[null]",
-       pending_refcount_);
-
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
   assert(ul.owns_lock());
   assert(before == nullptr || pending_refcount_ > 0);
@@ -212,9 +203,12 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
     assert(after != nullptr);
 
     if (after->is_exclusive()) {
-      return std::get<ExclusiveLock>(lock_contents_)
-          .try_atomic_change_lock(before, after, cost_model);
+      auto res = std::get<ExclusiveLock>(lock_contents_)
+                     .try_atomic_change_lock(before, after, cost_model);
+      return snapshot_cost_transform(res, snapshot_cost_,
+                                     after->is_permanent_exclusive());
     }
+
     // downgrade from exclusive to non-exclusive
     prepare_lock_contents(after, ul);
 
@@ -269,8 +263,7 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
 
     auto res = std::get<ExclusiveLock>(lock_contents_)
                    .try_atomic_change_lock(before, after, cost_model);
-    assert(res.has_value());
-    return snapshot_cost_transform(res.value(), snapshot_cost_,
+    return snapshot_cost_transform(res, snapshot_cost_,
                                    after->is_permanent_exclusive());
   }
 
