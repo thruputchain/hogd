@@ -19,8 +19,10 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/authentication.h"
 #include "nomination.hh"
@@ -150,7 +152,8 @@ MempoolCoordinatorRpc::get_block_hash(
 {
   CHECK(!hashes.empty());
 
-  MerkleTriePrefix trie;
+  MerkleTriePrefix trie(/*no_hash_depth=*/3,
+                        /*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   // The optimal number of threads to use varies with the number of hashes we
   // are adding to the trie. For example, if we are adding 128 hashes to the
