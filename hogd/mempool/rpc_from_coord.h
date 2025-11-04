@@ -186,7 +186,8 @@ private:
   x23::Detached
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb);
+                x23::span<bool> ret_chunk, size_t executor_idx,
+                x23::CoroCB<void> cb);
 
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
       BlockID block_id, const x23::Vec<SignedTransaction> &txs,
