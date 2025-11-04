@@ -41,7 +41,7 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 100'000;
+  static constexpr size_t kMaxBlockSize = 1'000'000;
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
