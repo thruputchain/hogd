@@ -1,9 +1,11 @@
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <atomic>
 #include <bit>
 #include <cstring>
-#include <gtest/gtest.h>
-
+#include <mutex>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -12,6 +14,15 @@
 #include "hogd/init.h"
 
 namespace hogd {
+
+struct TruncateHasher {
+  uint64_t operator()(std::span<const uint8_t> key) const
+  {
+    uint64_t hash = 0;
+    std::memcpy(&hash, key.data(), std::min(key.size(), sizeof(hash)));
+    return std::byteswap(hash);
+  }
+};
 
 TEST(ConcurrentMap, ValueBucketUsage)
 {
@@ -43,41 +54,76 @@ TEST(ConcurrentMap, ValueBucketUsage)
             nullptr);
 }
 
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 0) == 0x1);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 4) == 0x2);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 8) == 0x3);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 12) == 0x4);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 16) == 0x5);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 20) == 0x6);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 24) == 0x7);
-static_assert(hogd::detail::Node<int>::get_branch_bits(0x1234'5678, 28) == 0x8);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 0) == 0x1);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 4) == 0x2);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 8) == 0x3);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 12) == 0x4);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 16) == 0x5);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 20) == 0x6);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 24) == 0x7);
+static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
+                                                                 28) == 0x8);
+
+static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 0) ==
+              0x1);
+static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 4) ==
+              0x2);
+static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 8) ==
+              0x3);
+static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 12) ==
+              0x4);
 
 TEST(ConcurrentMap, InsertOrGet)
 {
-  struct TruncateHasher {
-    uint32_t operator()(std::span<const uint8_t> key) const
-    {
-      uint32_t hash = 0;
-      std::memcpy(&hash, key.data(), std::min(key.size(), sizeof(uint32_t)));
-      return std::byteswap(hash);
-    }
-  };
-
-  EXPECT_EQ(TruncateHasher{}(std::vector<uint8_t>{0, 0, 0, 1}), 0x0000'0001);
+  EXPECT_EQ(TruncateHasher{}(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}),
+            0x0000'0000'0000'0001);
 
   ConcurrentMap<int, TruncateHasher> map;
-  int *value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1}, 4);
+  int *value =
+      map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 4);
   ASSERT_EQ(*value, 4);
-  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1}, 5);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 5);
   ASSERT_EQ(*value, 4);
-  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 2}, 6);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 2}, 6);
   ASSERT_EQ(*value, 6);
-  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 3}, 7);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 3}, 7);
   ASSERT_EQ(*value, 7);
-  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 4}, 8);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 4}, 8);
   ASSERT_EQ(*value, 8);
-  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 1, 0}, 9);
+  value = map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 1, 0}, 9);
   ASSERT_EQ(*value, 9);
+}
+
+TEST(ConcurrentMap, ForEachParallel)
+{
+  ConcurrentMap<int, TruncateHasher> map;
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 4);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 2}, 5);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 3}, 6);
+  // separate bucket
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1, 0, 0, 0, 4}, 7);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1, 0, 0, 0, 5}, 8);
+
+  std::mutex mtx;
+  std::set<int> values;
+  map.for_each_parallel([&values, &mtx](int &value) {
+    std::scoped_lock lock(mtx);
+    values.insert(value);
+  });
+
+  ASSERT_EQ(values.size(), 5);
+  ASSERT_TRUE(values.contains(4));
+  ASSERT_TRUE(values.contains(5));
+  ASSERT_TRUE(values.contains(6));
+  ASSERT_TRUE(values.contains(7));
+  ASSERT_TRUE(values.contains(8));
 }
 
 } // namespace hogd

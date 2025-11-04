@@ -10,11 +10,14 @@
 #include <cstring>
 #include <functional>
 #include <span>
+#include <utility>
 #include <variant>
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 
 namespace hogd {
 
@@ -58,6 +61,16 @@ public:
   {
     return key1.size() == key2.size() &&
            std::memcmp(key1.data(), key2.data(), key1.size()) == 0;
+  }
+
+  template<typename Func> requires std::invocable<Func, Value &>
+  static void for_each(std::atomic<ValueBucket<Value> *> *scan_ptr, Func f)
+  {
+    while (auto *next_value_bucket =
+               scan_ptr->load(std::memory_order_relaxed)) {
+      f(next_value_bucket->value_);
+      scan_ptr = &next_value_bucket->next_ptr_;
+    }
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
@@ -112,25 +125,29 @@ public:
   }
 };
 
-template<typename Value> class Node {
+template<typename Value, std::unsigned_integral Shortkey = uint16_t>
+class Node {
 public:
+  constexpr static size_t kShortkeyBits = sizeof(Shortkey) * 8;
+
   // NOLINTBEGIN(readability-identifier-naming)
-  struct root_t {};
   struct leaf_t {};
   struct branch_t {};
   // NOLINTEND(readability-identifier-naming)
 
-  Node(root_t /*unused*/)
-    : content_(std::in_place_type<std::array<std::atomic<Node<Value> *>, 16>>),
+  Node()
+    : content_(std::in_place_type<
+               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>),
       key_{0}, key_len_{0}, owns_children_{true}
   {}
-  Node(leaf_t /*unused*/, uint32_t shortkey)
+  Node(leaf_t /*unused*/, Shortkey shortkey)
     : content_(std::in_place_type<std::atomic<ValueBucket<Value> *>>),
-      key_{shortkey}, key_len_{32}, owns_children_{true}
+      key_{shortkey}, key_len_{kShortkeyBits}, owns_children_{true}
   {}
 
-  Node(branch_t /*unused*/, uint32_t shortkey, uint8_t key_len, Node *child)
-    : content_(std::in_place_type<std::array<std::atomic<Node<Value> *>, 16>>),
+  Node(branch_t /*unused*/, Shortkey shortkey, uint8_t key_len, Node *child)
+    : content_(std::in_place_type<
+               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>),
       key_{shortkey}, key_len_{key_len}
   {
     assert(child != nullptr);
@@ -138,7 +155,8 @@ public:
     assert(key_len_ < child->key_len_);
 
     uint8_t branch_bits = get_branch_bits(child->key_, key_len_);
-    std::get<std::array<std::atomic<Node<Value> *>, 16>>(content_)[branch_bits]
+    std::get<std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(
+        content_)[branch_bits]
         .store(child, std::memory_order_release);
   }
 
@@ -167,23 +185,48 @@ public:
     }
   }
 
-  uint8_t get_shortkey_match_len(uint32_t shortkey) const
+  template<typename Func> requires std::invocable<Func, Value &>
+  void for_each(Func f)
+  {
+    if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
+      auto &content = std::get<std::atomic<ValueBucket<Value> *>>(content_);
+      ValueBucket<Value>::for_each(&content, f);
+      return;
+    }
+
+    assert((std::holds_alternative<
+            std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(content_)));
+
+    auto &content =
+        std::get<std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(
+            content_);
+    for (auto &ptr : content) {
+      auto *node = ptr.load();
+      if (node == nullptr)
+        continue;
+      node->for_each(f);
+    }
+  }
+
+  uint8_t get_shortkey_match_len(Shortkey shortkey) const
   {
     return get_shortkey_match_len(key_, key_len_, shortkey);
   }
 
   // key2 is presumed to be a full length shortkey, i.e. 32 bits
   constexpr static uint8_t
-  get_shortkey_match_len(uint32_t key1, uint8_t key1_len, uint32_t key2)
+  get_shortkey_match_len(Shortkey key1, uint8_t key1_len, Shortkey key2)
   {
-    return std::min<uint8_t>(std::countl_zero(key1 ^ key2), key1_len) & 0xFC;
+    Shortkey diff = key1 ^ key2;
+    return std::min<uint8_t>(std::countl_zero(diff), key1_len) & 0xFC;
   }
 
-  constexpr static uint8_t get_branch_bits(uint32_t key, uint8_t branch_point)
+  constexpr static uint8_t get_branch_bits(Shortkey key, uint8_t branch_point)
   {
-    assert(branch_point < 32);
+    constexpr size_t kShortkeyBits = sizeof(Shortkey) * 8;
+    assert(branch_point < kShortkeyBits);
     assert(branch_point % 4 == 0);
-    return (key >> (28 - branch_point)) & 0xF;
+    return (key >> (kShortkeyBits - 4 - branch_point)) & 0xF;
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
@@ -216,15 +259,15 @@ public:
                                  std::memory_order_relaxed);
   }
 
-  uint32_t get_key() const { return key_; }
+  Shortkey get_key() const { return key_; }
   uint8_t get_key_len() const { return key_len_; }
 
 private:
   std::variant<std::atomic<ValueBucket<Value> *>,
-               std::array<std::atomic<Node<Value> *>, 16>>
+               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>
       content_;
 
-  const uint32_t key_;
+  const Shortkey key_;
   const uint8_t key_len_;
   bool owns_children_ = false;
 };
@@ -234,16 +277,31 @@ private:
 template<typename Value, typename Hasher = std::hash<std::span<const uint8_t>>>
 class ConcurrentMap {
 public:
-  ConcurrentMap(Hasher hasher = Hasher())
-    : root_(typename detail::Node<Value>::root_t{}), hasher_(hasher)
+  using shortkey_t = uint16_t;
+
+  ConcurrentMap(size_t n_roots = available_parallelism(),
+                Hasher hasher = Hasher())
+    : roots_(n_roots), hasher_(hasher)
   {}
+
+  static_assert(std::unsigned_integral<
+                decltype(Hasher()(std::declval<std::span<const uint8_t>>()))>);
+  static_assert(
+      sizeof(decltype(Hasher()(std::declval<std::span<const uint8_t>>()))) >=
+          sizeof(uint64_t),
+      "insufficient entropy otherwise");
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
   Value *insert_or_get(std::span<const uint8_t> key, Args &&...args)
   {
-    uint32_t shortkey = hasher_(key);
+    uint64_t overall_shortkey = hasher_(key);
+    uint32_t root_selector = (overall_shortkey >> 32) % roots_.size();
+    uint16_t shortkey = overall_shortkey & 0xFFFF;
+
+    assert(roots_.size() > root_selector);
+
     using node_t = typename detail::Node<Value>;
-    node_t *current_node = &root_;
+    node_t *current_node = &roots_[root_selector];
 
     while (true) {
 
@@ -251,7 +309,7 @@ public:
       assert(match_len == current_node->get_key_len());
 
       // We've found the node for the shortkey.
-      if (current_node->get_key_len() == 32) {
+      if (current_node->get_key_len() == kShortkeyBits) {
         assert(current_node->get_key() == shortkey);
         return current_node->insert_value(key, std::forward<Args>(args)...);
       }
@@ -294,8 +352,20 @@ public:
     }
   }
 
+  template<typename Func> requires std::invocable<Func, Value &>
+  void for_each_parallel(Func f, size_t width = kDefaultParallelRangeWidth,
+                         WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    pool.for_each_parallel(
+        roots_,
+        [f](detail::Node<Value, shortkey_t> &root) { root.for_each(f); },
+        width);
+  }
+
 private:
-  detail::Node<Value> root_;
+  constexpr static size_t kShortkeyBits = sizeof(shortkey_t) * 8;
+
+  std::vector<detail::Node<Value, shortkey_t>> roots_;
   Hasher hasher_;
 };
 
