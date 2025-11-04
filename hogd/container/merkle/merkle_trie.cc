@@ -1397,18 +1397,39 @@ MerkleTrie::generate_top_level_hashes()
 void
 MerkleTrie::free_all_nodes(Node *root)
 {
-  HexArray prefix;
-  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
-    // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
-    // pointer to a [Node] value on the heap, so we cannot free the root node.
-    if (&node != &root_) {
-      CHECK(!node.rw_lock.is_locked_relaxed());
-      CHECK(!node.hash_lock.is_locked_relaxed());
-      node.clear();
-      delete &node;
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  std::vector<std::future<void>> futures;
+  futures.reserve(Node::kMaxNumBranches - 1);
+
+  for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
+    Node *child = root->child[i];
+    HexArray prefix;
+    prefix.append(std::byte(i));
+    auto lambda = [this, child, prefix] {
+      auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+        // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
+        // pointer to a [Node] value on the heap, so we cannot free the root
+        // node.
+        if (&node != &root_) {
+          CHECK(!node.rw_lock.is_locked_relaxed());
+          CHECK(!node.hash_lock.is_locked_relaxed());
+          node.clear();
+          delete &node;
+        }
+      };
+      walk<Node>(child, prefix, f);
+    };
+    if (i < Node::kMaxNumBranches - 1) {
+      futures.push_back(worker_pool.submit(lambda));
     }
-  };
-  walk<Node>(root, prefix, f);
+    else {
+      lambda();
+    }
+  }
+
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
 }
 
 } // namespace hogd
