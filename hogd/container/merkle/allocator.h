@@ -50,6 +50,8 @@ public:
       *num_private_elements_ = kPerThreadNumElementsPerChunk;
     }
 
+    // The [--] operator (when placed after a variable) has higher precendence
+    // than the [*] operator.
     (*num_private_elements_)--;
     T *ret = reinterpret_cast<T *>(*private_region_);
     *private_region_ += sizeof(T);
