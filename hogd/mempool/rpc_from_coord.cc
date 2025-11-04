@@ -197,31 +197,29 @@ x23::Detached
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
-    size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb)
+    x23::span<bool> ret_chunk, size_t executor_idx, x23::CoroCB<void> cb)
 {
   co_await default_coropoll().pool_.bg();
-
-  x23::Vec<bool> ret;
-  ret.reserve(txs.size());
 
   x23::Vec<SignedTransaction> txs_to_send(txs.begin(), txs.end());
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(
           block_id, txs_to_send);
-  for (const ExecProposeResult &result : res) {
+  for (size_t i = 0; i < res.size(); i++) {
+    const ExecProposeResult &result = res[i];
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
     case ExecResult::ExecResultOK:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
-      ret.push_back(true);
+      ret_chunk[i] = true;
       break;
     default:
-      ret.push_back(false);
+      ret_chunk[i] = false;
       break;
     }
   }
-  cb(ret);
+  cb();
 }
 
 x23::Async<x23::Vec<bool>>
@@ -232,56 +230,48 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 {
   CHECK_GT(chunk_size, 0UL);
 
+  ElapsedTimer total_timer;
   auto timer = std::make_unique<ElapsedTimer>();
 
   // Send the RPCs.
   size_t num_chunks =
       (txs.size() / chunk_size) + ((txs.size() % chunk_size) ? 1 : 0);
-  x23::Vec<std::unique_ptr<x23::Awaitable<x23::Vec<bool>>>> awaitables;
+  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(num_chunks);
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
+  x23::Vec<bool> ret;
+  ret.reserve(txs.size());
   for (size_t i = 0; i < num_chunks; i++) {
-    awaitables.push_back(std::make_unique<x23::Awaitable<x23::Vec<bool>>>());
+    awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
-    auto start = txs.begin() + (i * chunk_size);
-    auto end = (i < num_chunks - 1) ? start + chunk_size : txs.end();
-    x23::span<const SignedTransaction> chunk(start, end);
+    size_t start_idx = i * chunk_size;
+    size_t end_idx = (i < num_chunks - 1) ? start_idx + chunk_size : txs.size();
+    x23::span<const SignedTransaction> chunk(txs.begin() + start_idx,
+                                             txs.begin() + end_idx);
+    x23::span<bool> ret_chunk(ret.begin() + start_idx, ret.begin() + end_idx);
 
-    propose_batch(block_id, chunk, nomination_chunks[i],
+    propose_batch(block_id, chunk, nomination_chunks[i], ret_chunk,
                   /*executor_idx=*/i % exec_clients_.size(),
-                  x23::CoroCB<x23::Vec<bool>>(*awaitables[i]));
+                  x23::CoroCB<void>(*awaitables[i]));
   }
 
   double send_rpc_dur = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
   // Wait for the RPC responses.
-  x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
-  for (size_t i = 0; i < num_chunks; i++) {
-    std::unique_ptr<x23::Awaitable<x23::Vec<bool>>> &awaitable = awaitables[i];
-    ret_chunks[i] = co_await *awaitable;
-  }
-
-  double wait_dur = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  // Fold the results.
-  x23::Vec<bool> ret;
-  ret.reserve(txs.size());
   transaction_nominations.reserve(txs.size());
   for (size_t i = 0; i < num_chunks; i++) {
-    for (bool r : ret_chunks[i]) {
-      ret.push_back(r);
-    }
+    std::unique_ptr<x23::Awaitable<void>> &awaitable = awaitables[i];
+    co_await *awaitable;
     for (NominatedTransaction &nominated_tx : nomination_chunks[i]) {
       transaction_nominations.push_back(nominated_tx);
     }
   }
 
-  double fold_dur = timer->elapsed();
+  double wait_dur = timer->elapsed();
+  double total = total_timer.elapsed();
 
-  info("send_rpc_dur {}, wait_dur {}, fold_dur {}", send_rpc_dur, wait_dur,
-       fold_dur);
+  info("send_rpc_dur {}, wait_dur {}, total {}", send_rpc_dur, wait_dur, total);
 
   co_return ret;
 }
