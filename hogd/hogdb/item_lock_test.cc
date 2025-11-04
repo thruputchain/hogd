@@ -202,4 +202,48 @@ TEST(ItemLockTest, ChangeItemType)
             kTestCostModel.get_bytestring_cost(3));
 }
 
+TEST(ItemLockTest, SeveralBytestringAcquires)
+{
+  ItemLock lock(0); // creating item from empty storage slot
+  auto first = make_bytestring_change({1, 2, 3});                 // 3 bytes
+  auto second = make_bytestring_change({4, 5, 6, 7, 8});          // 5 bytes
+  auto third = make_bytestring_change({7, 8, 9, 10, 11, 12, 13}); // 7 bytes
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_bytestring_cost(3));
+
+  second.narrow(first);
+  ASSERT_TRUE(second.is_exclusive());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), kTestCostModel.get_bytestring_cost(5));
+
+  third.narrow(second);
+  auto r3 = lock.try_atomic_change_lock(&second, &third, &kTestCostModel);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(r3.value(), kTestCostModel.get_bytestring_cost(7));
+
+  EXPECT_EQ(lock.commit_change(third, &kTestCostModel),
+            kTestCostModel.get_bytestring_cost(7));
+
+  // same as third
+  auto post_commit = make_bytestring_change({7, 8, 9, 10, 11, 12, 13});
+  auto r4 = lock.try_atomic_change_lock(nullptr, &post_commit, &kTestCostModel);
+  ASSERT_TRUE(r4.has_value());
+  EXPECT_EQ(r4.value(), kTestCostModel.get_bytestring_cost(7));
+  EXPECT_EQ(lock.commit_change(post_commit, &kTestCostModel), 0);
+
+  // can't acaquire exclusive lock now
+  auto post_commit_exclusive = post_commit;
+  post_commit_exclusive.narrow(first);
+  ASSERT_TRUE(post_commit_exclusive.is_exclusive());
+  ASSERT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &post_commit, &kTestCostModel)
+          .has_value());
+  ASSERT_FALSE(lock.try_atomic_change_lock(&post_commit, &post_commit_exclusive,
+                                           &kTestCostModel)
+                   .has_value());
+}
+
 } // namespace hogd

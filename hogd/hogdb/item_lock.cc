@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <format>
 #include <limits>
 #include <mutex>
 #include <type_traits>
