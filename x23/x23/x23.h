@@ -61,14 +61,7 @@ constexpr auto num_string_array = []<size_t... I>(std::index_sequence<I...>) {
 }(std::make_index_sequence<N>{});
 } // namespace detail
 
-// Treat tuples like structures to make it easy to bundle multiple
-// arguments into a tuple.  Also, makes std::tuple<> serialize to 0
-// bytes.
-template<typename... T> struct xdr_meta<std::tuple<T...>> {
-  static constexpr XdrCategory category = XdrCategory::kStruct;
-  static constexpr const char *type_name = "tuple";
-  static constexpr auto &field_names = detail::num_string_array<sizeof...(T)>;
-};
+template<typename... T> struct xdr_meta<std::tuple<T...>>;
 
 template<typename T, size_t N> requires (!std::same_as<T, std::uint8_t>)
 struct xdr_meta<std::array<T, N>> {
@@ -102,10 +95,10 @@ constexpr XdrCategory category = [] {
                 })
     return xdr_meta<reffed_type>::category;
   else if constexpr (same_as<reffed_type, bool> ||
-                     same_as<reffed_type, std::int32_t> ||
-                     same_as<reffed_type, std::uint32_t> ||
-                     same_as<reffed_type, std::int64_t> ||
-                     same_as<reffed_type, std::uint64_t> ||
+                     same_as<reffed_type, int32_t> ||
+                     same_as<reffed_type, uint32_t> ||
+                     same_as<reffed_type, int64_t> ||
+                     same_as<reffed_type, uint64_t> ||
                      same_as<reffed_type, float> ||
                      same_as<reffed_type, double>)
     return kPrimitive;
@@ -114,6 +107,17 @@ constexpr XdrCategory category = [] {
 }();
 
 template<typename T> concept is_xdr_type = category<T> != XdrCategory::kInvalid;
+
+// Treat tuples like structures to make it easy to bundle multiple
+// arguments into a tuple.  Also, makes std::tuple<> serialize to 0
+// bytes.
+template<typename... T> struct xdr_meta<std::tuple<T...>> {
+  // is_xdr_serializable but not is_xdr_type for serializable non-xdr-types T
+  static constexpr XdrCategory category =
+      (is_xdr_type<T> && ...) ? XdrCategory::kStruct : XdrCategory::kInvalid;
+  static constexpr const char *type_name = "tuple";
+  static constexpr auto &field_names = detail::num_string_array<sizeof...(T)>;
+};
 
 // Matches XDR types that match one of the categories
 template<typename T, XdrCategory... C>

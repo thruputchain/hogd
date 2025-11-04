@@ -430,7 +430,7 @@ struct RpcStream : public detail::RpcStreamImpl {
 
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
-  send_call(const is_xdr_type auto &...args)
+  send_call(const is_xdr_serializable auto &...args)
   {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
