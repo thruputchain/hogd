@@ -226,7 +226,7 @@ MempoolCoordinatorRpc::propose_batch(
 
 x23::Async<x23::Vec<bool>>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
-    BlockID block_id, x23::Vec<const SignedTransaction> &txs,
+    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     size_t chunk_size)
 {
