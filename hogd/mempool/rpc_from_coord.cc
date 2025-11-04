@@ -193,7 +193,6 @@ MempoolCoordinatorRpc::get_block_hash(
   return sha256(preimage);
 }
 
-// x23::Async<x23::Vec<bool>>
 x23::Detached
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
@@ -250,9 +249,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   timer = std::make_unique<ElapsedTimer>();
 
   // Send the RPCs.
-  // x23::Vec<x23::Async<x23::Vec<bool>>> async_handles;
-
-  std::vector<std::unique_ptr<x23::Awaitable<x23::Vec<bool>>>> awaitables;
+  x23::Vec<std::unique_ptr<x23::Awaitable<x23::Vec<bool>>>> awaitables;
   awaitables.reserve(num_chunks);
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
   for (size_t i = 0; i < num_chunks; i++) {
@@ -266,17 +263,12 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   timer = std::make_unique<ElapsedTimer>();
 
   // Wait for the RPC responses.
-  x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
+  x23::Vec<x23::Vec<bool>> ret_chunks;
   for (std::unique_ptr<x23::Awaitable<x23::Vec<bool>>> &awaitable :
        awaitables) {
     x23::Vec<bool> ret_chunk = co_await *awaitable;
     ret_chunks.push_back(ret_chunk);
   }
-  info("num chunks {}, awaitables.size() {}", num_chunks, awaitables.size());
-  // for (size_t i = 0; i < num_chunks; i++) {
-  //   x23::Vec<bool> ret_chunk = co_await async_handles[i];
-  //   ret_chunks[i] = ret_chunk;
-  // }
 
   double wait_dur = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
@@ -348,14 +340,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
+  x23::Vec<SignedTransactionHash> tx_hashes;
 
   x23::CoroGuard cg;
   auto timer3 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
   double wait_for_lock_duration = timer3->elapsed();
 
-  std::tie(nomination.transaction_hashes, txs) =
-      scheduler_->schedule(kMaxBlockSize);
+  std::tie(tx_hashes, txs) = scheduler_->schedule(kMaxBlockSize);
   size_t num_on_runqueue = scheduler_->size();
   cg.reset();
 
@@ -403,7 +395,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
        txs.size(), num_on_runqueue);
-  if (nomination.transaction_hashes.empty()) {
+  if (tx_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       co_await finish_block(block_id, /*executor_idx=*/i);
@@ -427,7 +419,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   x23::Vec<SignedTransaction> failed_txs;
   for (size_t i = 0; i < txs.size(); i++) {
-    if (!statuses[i]) {
+    if (statuses[i]) {
+      nomination.transaction_hashes.push_back(tx_hashes[i]);
+    }
+    else {
       failed_txs.push_back(txs[i]);
     }
   }

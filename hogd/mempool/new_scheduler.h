@@ -98,7 +98,7 @@ public:
   size_t size() const { return size_.load(std::memory_order_relaxed); }
 
   // Debug.
-  void dump_runqueue() const;
+  void dump_runqueue();
 
   // TODO(jhumphri): Replace with [CoroSem].
   std::atomic<bool> transfer_finished_;
