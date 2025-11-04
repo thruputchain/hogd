@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/container/merkle/rw_lock.h"
 
 namespace hogd {
 
@@ -18,21 +19,48 @@ public:
 
   T *alloc()
   {
-    if (!current_region_offset_ ||
-        current_region_offset_ + sizeof(T) >
-            allocated_regions_.back() + kMmapLength) {
-      alloc_new_region();
-    }
-    CHECK_PTR(current_region_offset_);
+    while (true) {
+      char *current_region_offset =
+          current_region_offset_.load(std::memory_order_relaxed);
 
-    char *ret = current_region_offset_;
-    current_region_offset_ += sizeof(T);
-    return reinterpret_cast<T *>(ret);
+      if (!current_region_offset ||
+          current_region_offset + sizeof(T) >
+              allocated_regions_.back() + kMmapLength) {
+        // We need to allocate a new region. Only one thread should should do
+        // this while the others wait.
+        rw_lock_.lock_reader();
+        if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
+          // This thread won the race and will allocate the new region.
+          alloc_new_region();
+          rw_lock_.unlock();
+        }
+        else {
+          rw_lock_.unlock();
+          // Another thread won the race and is allocating the region. Wait
+          // until that thread is done.
+          while (current_region_offset_.load(std::memory_order_relaxed) ==
+                 current_region_offset) {
+            cpu_relax();
+          }
+        }
+        continue;
+      }
+      CHECK_PTR(current_region_offset);
+
+      if (current_region_offset_.compare_exchange_weak(
+              /*expected=*/current_region_offset,
+              /*desired=*/current_region_offset + sizeof(T),
+              /*order=*/std::memory_order_relaxed)) {
+        return reinterpret_cast<T *>(current_region_offset);
+      }
+    }
   }
 
 private:
   void alloc_new_region()
   {
+    CHECK(rw_lock_.is_writer_locked_relaxed());
+
     void *addr =
         mmap(/*addr=*/nullptr, kMmapLength, /*prot=*/PROT_READ | PROT_WRITE,
              /*flags=*/MAP_PRIVATE | MAP_ANONYMOUS, /*fildes=*/-1, /*off=*/0);
@@ -50,7 +78,8 @@ private:
     }
   }
 
-  char *current_region_offset_ = nullptr;
+  RwLock rw_lock_;
+  std::atomic<char *> current_region_offset_ = nullptr;
   std::vector<char *> allocated_regions_;
 };
 
@@ -65,7 +94,7 @@ public:
   {
     switch (type_) {
     case Type::kBump:
-      bump_allocator_ = BumpAllocator<T>();
+      bump_allocator_.emplace();
       break;
     default:
       CHECK(false);
