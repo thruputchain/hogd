@@ -195,7 +195,7 @@ MempoolCoordinatorRpc::get_block_hash(
 
 x23::Detached
 MempoolCoordinatorRpc::propose_batch(
-    BlockID block_id, x23::span<SignedTransaction> txs,
+    BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb)
 {
@@ -226,7 +226,7 @@ MempoolCoordinatorRpc::propose_batch(
 
 x23::Async<x23::Vec<bool>>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
-    BlockID block_id, x23::Vec<SignedTransaction> &txs,
+    BlockID block_id, x23::Vec<const SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     size_t chunk_size)
 {
@@ -245,7 +245,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 
     auto start = txs.begin() + (i * chunk_size);
     auto end = (i < num_chunks - 1) ? start + chunk_size : txs.end();
-    x23::span<SignedTransaction> chunk(start, end);
+    x23::span<const SignedTransaction> chunk(start, end);
 
     propose_batch(block_id, chunk, nomination_chunks[i],
                   /*executor_idx=*/i % exec_clients_.size(),
