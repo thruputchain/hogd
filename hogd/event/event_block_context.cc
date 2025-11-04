@@ -186,7 +186,7 @@ EventBlockContext::~EventBlockContext()
 {
   std::unique_lock ul(file_mutex_);
   file_cv_.wait(ul, [this] { return pending_writes_ == 0; });
-  trie.reset();
+  trie_.reset();
   // async_free_trie(std::move(trie_));
 }
 
