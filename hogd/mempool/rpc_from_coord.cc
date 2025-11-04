@@ -239,8 +239,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(num_chunks);
   x23::Vec<x23::XdrVec<NominatedTransaction>> nomination_chunks(num_chunks, {});
-  x23::Vec<bool> ret;
-  ret.reserve(txs.size());
+  x23::Vec<bool> ret(txs.size(), false);
   for (size_t i = 0; i < num_chunks; i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
