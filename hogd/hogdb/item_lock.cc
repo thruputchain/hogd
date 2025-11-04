@@ -370,8 +370,10 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_nnint128()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     lock_contents_.emplace<NNInt128Lock>(
         after->get_raw_nnint128().value().base());
+    // NOLINTEND(bugprone-unchecked-optional-access)
     return;
   }
 
