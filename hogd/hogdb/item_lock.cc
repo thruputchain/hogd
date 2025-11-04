@@ -20,6 +20,20 @@
 
 namespace hogd {
 
+namespace {
+
+int128_t
+snapshot_cost_transform(int128_t local_cost, int128_t snapshot_cost,
+                        bool is_permanent_exclusive)
+{
+  if (is_permanent_exclusive) {
+    return local_cost - snapshot_cost;
+  }
+  return std::max<int128_t>(local_cost - snapshot_cost, 0);
+}
+
+} // namespace
+
 HogDBStatus<int128_t>
 ItemLock::try_atomic_change_lock(const ItemChange *before,
                                  const ItemChange *after,
@@ -166,7 +180,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
   assert((before == nullptr || !before->is_permanent_exclusive()) &&
          (after == nullptr || !after->is_permanent_exclusive()));
 
-  return std::max<int128_t>(local_cost.value() - snapshot_cost_, 0);
+  return snapshot_cost_transform(local_cost.value(), snapshot_cost_, false);
 }
 
 // pending_refcount_ is the number of transactions that have successfully
@@ -227,7 +241,8 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
         },
         lock_contents_);
     assert(res.has_value());
-    return res;
+    return snapshot_cost_transform(res.value(), snapshot_cost_,
+                                   after->is_permanent_exclusive());
   }
 
   if (after != nullptr && after->is_exclusive()) {
@@ -252,8 +267,11 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
 
     set_exclusive_lock(ul);
 
-    return std::get<ExclusiveLock>(lock_contents_)
-        .try_atomic_change_lock(before, after, cost_model);
+    auto res = std::get<ExclusiveLock>(lock_contents_)
+                   .try_atomic_change_lock(before, after, cost_model);
+    assert(res.has_value());
+    return snapshot_cost_transform(res.value(), snapshot_cost_,
+                                   after->is_permanent_exclusive());
   }
 
   auto local_cost = std::visit(
@@ -293,10 +311,10 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
     return local_cost;
   }
 
-  if (after != nullptr && after->is_permanent_exclusive()) {
-    return local_cost.value();
-  }
-  return std::max<int128_t>(local_cost.value() - snapshot_cost_, 0);
+  bool is_permanent_exclusive =
+      after != nullptr && after->is_permanent_exclusive();
+  return snapshot_cost_transform(local_cost.value(), snapshot_cost_,
+                                 is_permanent_exclusive);
 }
 
 HogDBStatus<int128_t>

@@ -246,4 +246,17 @@ TEST(ItemLockTest, SeveralBytestringAcquires)
                    .has_value());
 }
 
+TEST(ItemLockTest, PermamentExclusiveInitial)
+{
+  ItemLock lock(kTestCostModel.kBaseItemCost + 1000);
+  auto first = make_nnint_change(100, 10);
+  first.set_permanent_exclusive();
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), -1000);
+
+  EXPECT_EQ(lock.commit_change(first, &kTestCostModel), -1000);
+}
+
 } // namespace hogd
