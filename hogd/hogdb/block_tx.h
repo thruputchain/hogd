@@ -6,10 +6,13 @@
 #include <mutex>
 #include <utility>
 
+#include "hogd/base/mutex_cache.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/concurrent_map.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -75,25 +78,17 @@ private:
   HogDBDAO &db_;
   MerkleTriePrefix &trie_;
   StorageCostModel cost_model_;
-  SynchronizedMap<Address, ItemLock> addr_balance_locks_;
-  SynchronizedMap<ItemKey, ItemLock> item_locks_;
+  // key type: Address
+  ConcurrentMap<ItemLock> addr_balance_locks_;
+  // key type: ItemKey
+  ConcurrentMap<ItemLock> item_locks_;
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  // raw locking operations.
-  static inline HogDBStatus<int128_t>
-  do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-          const ItemChange &change, const StorageCostModel *cost_model);
-  static inline HogDBStatus<int128_t>
-  do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-                 const ItemChange &old_change, const ItemChange &new_change,
-                 const StorageCostModel *cost_model);
-  void inline do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                             const ItemKey &key, ItemLock &lock,
-                             const ItemChange &change);
-  void inline do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                                     const Address &addr, ItemLock &lock,
-                                     const ItemChange &change);
+  static std::mutex& get_mutex(const ItemKey &key) {
+    static MutexCache<SipHash24> mutex_cache;
+    return mutex_cache.get_mutex(key.as_bytes());
+  }
 };
 
 } // namespace hogd
