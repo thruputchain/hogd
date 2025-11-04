@@ -34,17 +34,17 @@ constexpr static size_t kBufferThreshold = 500_KiB;
 
 namespace {
 // TODO(geoff): Is there any benefit to recycling the MerkleTriePrefix struct?
-x23::Detached
-async_free_trie(std::unique_ptr<MerkleTriePrefix> trie)
-{
-  auto *pool = x23::ThreadPool::get_thread_pool();
-  if (!pool) {
-    pool = &default_threadpool();
-  }
-  co_await pool->bg();
-  trie.reset();
-  co_return;
-}
+// x23::Detached
+// async_free_trie(std::unique_ptr<MerkleTriePrefix> trie)
+// {
+//   auto *pool = x23::ThreadPool::get_thread_pool();
+//   if (!pool) {
+//     pool = &default_threadpool();
+//   }
+//   co_await pool->bg();
+//   trie.reset();
+//   co_return;
+// }
 } // namespace
 
 void
@@ -186,7 +186,8 @@ EventBlockContext::~EventBlockContext()
 {
   std::unique_lock ul(file_mutex_);
   file_cv_.wait(ul, [this] { return pending_writes_ == 0; });
-  async_free_trie(std::move(trie_));
+  trie_.reset();
+  // async_free_trie(std::move(trie_));
 }
 
 } // namespace hogd

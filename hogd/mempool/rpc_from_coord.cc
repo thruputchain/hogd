@@ -160,6 +160,7 @@ MempoolCoordinatorRpc::get_block_hash(
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
+  ElapsedTimer insert_timer;
   size_t base = 0;
   size_t chunk_size = hashes.size() / num_threads;
   size_t remainder = hashes.size() % num_threads;
@@ -181,16 +182,28 @@ MempoolCoordinatorRpc::get_block_hash(
   for (std::future<void> &future : futures) {
     future.get();
   }
+  double insert_duration = insert_timer.elapsed();
+
   ElapsedTimer timer;
   trie.generate_top_level_hashes();
   double generate_top_level_hashes_duration = timer.elapsed();
-  info("generate_top_level_hashes_duration {}",
-       generate_top_level_hashes_duration);
-  SHA256Hash root_hash = trie.get_root_hash();
 
+  ElapsedTimer root_hash_timer;
+  SHA256Hash root_hash = trie.get_root_hash();
+  double root_hash_duration = root_hash_timer.elapsed();
+
+  ElapsedTimer preimage_timer;
   BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
                              .prev_block_hash = prev_block_hash};
-  return sha256(preimage);
+  auto ret = sha256(preimage);
+  double preimage_duration = preimage_timer.elapsed();
+
+  info("insert_duration {}, generate_top_level_hashes_duration {}, "
+       "root_hash_duration {}, preimage_duration {}",
+       insert_duration, generate_top_level_hashes_duration, root_hash_duration,
+       preimage_duration);
+
+  return ret;
 }
 
 x23::Detached
