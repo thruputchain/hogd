@@ -66,9 +66,10 @@ public:
   // [generate_top_level_hashes()] when we are done with all operations, but the
   // overhead of this is much smaller than hashing these nodes on all
   // operations.
-  MerkleTrie(size_t no_hash_depth = 3, Allocator<Node>::Type allocator_type =
-                                           Allocator<Node>::Type::kDefault)
-    : no_hash_depth_(no_hash_depth), allocator_(allocator_type)
+  MerkleTrie(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
+    : allocator_(allocator_type), no_hash_depth_(no_hash_depth)
   {
     init_root_node();
   }
@@ -458,10 +459,10 @@ private:
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
-  // See the note above the constructor about [no_hash_depth].
-  const size_t no_hash_depth_ = 3;
   // The memory allocator for nodes.
   Allocator<Node> allocator_;
+  // See the note above the constructor about [no_hash_depth].
+  const size_t no_hash_depth_ = 3;
   // The number of KV pairs in the trie.
   std::atomic<size_t> size_ = 0;
   // If this is true, nodes are hashed on every [insert()/remove()] operation.
@@ -505,11 +506,11 @@ private:
 class MerkleTriePrefix {
 public:
   MerkleTriePrefix(
-      size_t no_hash_depth = 3,
-      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
   {
     for (std::optional<MerkleTrie> &trie : tries_) {
-      trie.emplace(no_hash_depth, allocator_type);
+      trie.emplace(allocator_type, no_hash_depth);
     }
   }
 
