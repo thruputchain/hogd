@@ -263,11 +263,10 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   timer = std::make_unique<ElapsedTimer>();
 
   // Wait for the RPC responses.
-  x23::Vec<x23::Vec<bool>> ret_chunks;
-  for (std::unique_ptr<x23::Awaitable<x23::Vec<bool>>> &awaitable :
-       awaitables) {
-    x23::Vec<bool> ret_chunk = co_await *awaitable;
-    ret_chunks.push_back(ret_chunk);
+  x23::Vec<x23::Vec<bool>> ret_chunks(num_chunks, {});
+  for (size_t i = 0; i < num_chunks; i++) {
+    std::unique_ptr<x23::Awaitable<x23::Vec<bool>>> &awaitable = awaitables[i];
+    ret_chunks[i] = co_await *awaitable;
   }
 
   double wait_dur = timer->elapsed();
