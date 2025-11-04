@@ -493,6 +493,8 @@ private:
 // trie.prove(proof.first, proof.second, different_key, value);
 //
 // trie.remove(key);
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 class MerkleTriePrefix {
 public:
   MerkleTriePrefix(size_t no_hash_depth = 3)
@@ -506,8 +508,8 @@ public:
   {
     WorkerPool &worker_pool = WorkerPool::get_default_pool();
     std::vector<std::future<void>> futures;
-    for (size_t i = 0; i < tries_.size(); i++) {
-      futures.push_back(worker_pool.submit([this, i] { tries_[i].reset(); }));
+    for (std::unique_ptr<MerkleTrie> &trie : tries_) {
+      futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
     }
     for (std::future<void> &future : futures) {
       future.get();
@@ -704,6 +706,7 @@ private:
 
   std::array<std::optional<MerkleTrie>, kNumTries> tries_;
 };
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
 
