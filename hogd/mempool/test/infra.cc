@@ -65,7 +65,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
 
   if (!skip_genesis_block) {
     GenesisBlockBuilder builder;
-    CHECK_EQ(mempool_coord_server_->impl_.schedcoord_load_genesis_block(
+    CHECK_EQ(mempool_coord_server_->impl()->schedcoord_load_genesis_block(
                  builder.build())(),
              DbSchedResult::DbSchedResultOK);
   }
