@@ -11,7 +11,7 @@ namespace hogd {
 
 template<typename T> class BumpAllocator {
 public:
-  static constexpr size_t kNumMmapPages = 16;
+  static constexpr size_t kNumMmapPages = 128;
   static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
   static_assert(sizeof(T) < kMmapLength);
 
@@ -36,7 +36,7 @@ public:
         }
         else {
           rw_lock_.unlock();
-          // Another thread won the race and is allocating the region. Wait
+          // Another thread won the race and is allocating the new region. Wait
           // until that thread is done.
           while (current_region_offset_.load(std::memory_order_relaxed) ==
                  current_region_offset) {
@@ -67,7 +67,8 @@ private:
     CHECK_NE(addr, MAP_FAILED);
     CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
-    current_region_offset_ = static_cast<char *>(addr);
+    current_region_offset_.store(static_cast<char *>(addr),
+                                 std::memory_order_relaxed);
     allocated_regions_.push_back(static_cast<char *>(addr));
   }
 
@@ -93,6 +94,8 @@ public:
   Allocator(Type type) : type_(type)
   {
     switch (type_) {
+    case Type::kDefault:
+      break;
     case Type::kBump:
       bump_allocator_.emplace();
       break;
