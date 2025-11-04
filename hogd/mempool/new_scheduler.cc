@@ -325,8 +325,15 @@ NewScheduler::cycle_groups(HogAge &current_averages)
 }
 
 void
-NewScheduler::dump_runqueue() const
-{}
+NewScheduler::dump_runqueue()
+{
+  size_t actual_size = 0;
+  account_to_tx_.for_each(
+      [&actual_size](
+          const std::pair<ContractAddress, const std::map<TxKey, TxValue *>>
+              &kv) { actual_size += kv.second.size(); });
+  info("dump_runqueue(), size() = {}, actual size = {}", size(), actual_size);
+}
 
 void
 NewScheduler::process_transfers_helper(const Delta &delta,
