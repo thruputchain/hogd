@@ -235,6 +235,14 @@ inline void
 xdr_serialize(auto &&, const std::monostate &)
 {}
 
+template<typename... T>
+inline void
+xdr_serialize(auto &&s, const std::tuple<T...> &t)
+    requires requires { (s(std::declval<T>()), ...); }
+{
+  apply(t, [&s](const auto &...args) { (s(args), ...); });
+}
+
 namespace detail {
 struct Serializer;
 
@@ -390,10 +398,10 @@ xdr_serialize(auto &serializer, BufView v)
 static_assert(is_xdr_serializable<BufView>);
 
 template<typename X, size_t NX, typename T, size_t NT>
-requires serialize_equiv<X, T>::value && (NT == std::dynamic_extent || NT <= NX)
+requires serializes_like<T, X> && (NT == std::dynamic_extent || NT <= NX)
 struct serialize_equiv<Vec<X, NX>, span<T, NT>> : std::true_type {};
 
-static_assert(serializes_like<span<int32_t>, Vec<int32_t>>);
+static_assert(serializes_like<span<const int32_t>, Vec<int32_t>>);
 
 void
 serialize_to(Buf *bufp, const is_xdr_serializable auto &x)

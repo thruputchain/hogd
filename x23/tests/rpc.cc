@@ -44,6 +44,8 @@ struct Impl {
     ret.r() = "This is the string in the result";
     co_return ret;
   }
+
+  Async<intvec> takes_vec(intvec v, Context &c) { co_return v; }
 };
 static_assert(is_myvers<Impl *, Async, Context>);
 
@@ -67,6 +69,11 @@ client(auto &c)
   test_recursive tr{.elem = "outer element"};
   tr.nextvec.push_back({.elem = "vec element"});
   coloru cu = co_await c.takes_recursive(tr, fix_12{.i = 99, .d = 95.3});
+
+  intvec iv{1, 2, 3};
+  co_await c.takes_vec(iv);
+  x23::span<const int32_t> is(iv);
+  co_await c.takes_vec(is);
 
   co_return;
 }

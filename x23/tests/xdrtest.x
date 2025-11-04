@@ -1,34 +1,34 @@
 
-enum senum {
-  SE_NEGATIVE = -1,
-  SE_POSITIVE = 1
+enum senum { SE_NEGATIVE = -1, SE_POSITIVE = 1 };
+
+union sunion switch (senum d)
+{
+case SE_NEGATIVE:
+  bool neg;
+case SE_POSITIVE:
+  int pos;
+default:
+  void;
 };
 
-union sunion switch (senum d) {
-  case SE_NEGATIVE:
-    bool neg;
-  case SE_POSITIVE:
-    int pos;
-  default:
-    void;
+union sunion_no_void switch (senum d)
+{
+case SE_NEGATIVE:
+  bool neg;
+case SE_POSITIVE:
+  int pos;
 };
 
-union sunion_no_void switch (senum d) {
-  case SE_NEGATIVE:
-    bool neg;
-  case SE_POSITIVE:
-    int pos;
-};
-
-union uunion switch (unsigned int d) {
-  case 1:
-    bool one;
-  case 2:
-    int two;
-  case 3:
-    double three;
-  case 4:
-    string four<>;
+union uunion switch (unsigned int d)
+{
+case 1:
+  bool one;
+case 2:
+  int two;
+case 3:
+  double three;
+case 4:
+  string four<>;
 };
 
 struct test_recursive {
@@ -57,46 +57,48 @@ struct fix_16 {
   } x;
 };
 
-union u_4_12 switch (int which) {
- case 4:
-   fix_4 f4;
- case 12:
-   fix_12 f12;
+union u_4_12 switch (int which)
+{
+case 4:
+  fix_4 f4;
+case 12:
+  fix_12 f12;
 };
 
 typedef fix_12 v12<>;
 
-union uptr switch (bool b) {
-  case FALSE:
-    void;
-  case TRUE:
-    int *val;
+union uptr switch (bool b)
+{
+case FALSE:
+  void;
+case TRUE:
+  int *val;
 };
 
-enum color {
-  RED = 1,
-  REDDER = 2,
-  REDDEST = 3
-};
+enum color { RED = 1, REDDER = 2, REDDEST = 3 };
 
-union coloru switch (color c) {
+union coloru switch (color c)
+{
 case RED:
-     string r<>;
+  string r<>;
 case REDDER:
-     hyper rr;
+  hyper rr;
 case REDDEST:
-     double rrr;
+  double rrr;
 };
+
+typedef int intvec<>;
 
 program myprog {
-  version myvers {
+  version myvers
+  {
     void null(void) = 0;
     int takes_int(int) = 1;
     int takes_two_ints(int, int) = 2;
     coloru takes_recursive(test_recursive, fix_12) = 5;
+    intvec takes_vec(intvec) = 6;
   } = 1;
 } = 3123123;
-
 
 enum StorageDeltaType {
   kDeleteLast = 0,
@@ -145,17 +147,20 @@ struct VoidCheckStrange {
 typedef opaque Data<>;
 typedef opaque GenericArraySize<15>;
 
-program blank_rpc {
-  version blank_rpc_v1 {
+program blank_rpc
+{
+  version blank_rpc_v1
+  {
     void null(void) = 0;
     Data echo(Data) = 1;
-  } = 1;
-} = 3123124;
+  }
+  = 1;
+}
+= 3123124;
 
 struct MultilineComment {
   hyper value;
 };
-
 
 /************ Stellar's XDR parse problem ************/
 
@@ -163,10 +168,7 @@ struct StellarValue {
   hyper value;
 };
 
-enum StellarValueEnum {
-  kStellarValue = 0,
-  kStellarValueVec = 1
-};
+enum StellarValueEnum { kStellarValue = 0, kStellarValueVec = 1 };
 
 /************ End Stellar's XDR parse problem ************/
 
@@ -193,7 +195,7 @@ typedef opaque SHA256Hash[32];
 
 struct TxEmittedEvent {
   ContractAddress contract_address;
-  opaque serialized_event<>;  // serialized EventData
+  opaque serialized_event<>; // serialized EventData
 };
 
 struct TxEventLog {
