@@ -152,8 +152,7 @@ MempoolCoordinatorRpc::get_block_hash(
 {
   CHECK(!hashes.empty());
 
-  MerkleTriePrefix trie(/*no_hash_depth=*/3,
-                        /*allocator_type=*/Allocator<Node>::Type::kBump);
+  MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   // The optimal number of threads to use varies with the number of hashes we
   // are adding to the trie. For example, if we are adding 128 hashes to the
