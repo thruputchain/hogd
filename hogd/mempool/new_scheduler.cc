@@ -122,7 +122,7 @@ NewScheduler::get_account_key(const ContractAddress &account)
   return {.average_hog_age = average_hog_age, .account = account};
 }
 
-void
+bool
 NewScheduler::add_txs_helper(const SignedTransaction &tx)
 {
   const SignedTransactionHash &tx_hash = sha256(tx);
@@ -144,9 +144,7 @@ NewScheduler::add_txs_helper(const SignedTransaction &tx)
   auto [account_txs, lock] = account_to_tx_[account];
   // Check if the tx is already present in [account_to_tx_[account]]. If it
   // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  if (account_txs.insert({key, value}).second) {
-    size_++;
-  }
+  return account_txs.insert({key, value}).second;
 }
 
 x23::Async<void>
@@ -184,9 +182,14 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
       size_t start = coro_idx * txs_per_thread;
       size_t possible_end = (coro_idx + 1) * txs_per_thread;
       size_t end = std::min(possible_end, txs.size());
+
+      size_t num_added = 0;
       for (size_t tx_idx = start; tx_idx < end; tx_idx++) {
-        scheduler.add_txs_helper(txs[tx_idx]);
+        if (scheduler.add_txs_helper(txs[tx_idx])) {
+          num_added++;
+        }
       }
+      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
       cb();
       co_return;
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
@@ -446,7 +449,7 @@ NewScheduler::account_is_ready(const ContractAddress &account,
   bool ret = (it != txs.end());
   if (remove_expired_txs) {
     size_t to_remove = std::distance(txs.begin(), it);
-    CHECK_LE(to_remove, size_);
+    CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
     size_ -= to_remove;
     txs.erase(txs.begin(), it);
   }
@@ -520,9 +523,14 @@ NewScheduler::schedule(size_t block_size)
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
-  while (num_scheduled < block_size && size_) {
+  auto while_timer = std::make_unique<ElapsedTimer>();
+  while (num_scheduled < block_size && size_.load(std::memory_order_relaxed)) {
     if (ready_accounts_.empty()) {
+      info("block of work took {}", while_timer->elapsed());
+      while_timer = std::make_unique<ElapsedTimer>();
+      ElapsedTimer cycle_timer;
       cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+      info("cycle took {}", cycle_timer.elapsed());
       removed_accounts.clear();
       if (ready_accounts_.empty()) {
         // If there are still no ready accounts, then break.
@@ -537,12 +545,13 @@ NewScheduler::schedule(size_t block_size)
     auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
     auto [txs, txs_lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
-    while (num_scheduled < block_size && size_) {
+    while (num_scheduled < block_size &&
+           size_.load(std::memory_order_relaxed)) {
       auto it = txs.lower_bound(lower_bound);
       if (it != txs.begin()) {
         // This removes expired txs.
         size_t to_remove = std::distance(txs.begin(), it);
-        CHECK_LE(to_remove, size_);
+        CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
         size_ -= to_remove;
         it = txs.erase(txs.begin(), it);
       }
@@ -566,7 +575,7 @@ NewScheduler::schedule(size_t block_size)
         // beyond this point!
         it = txs.erase(it);
         num_scheduled++;
-        size_--;
+        size_.fetch_sub(1, std::memory_order_relaxed);
       }
       else {
         const uint128_t all_hogs_available =
@@ -584,7 +593,7 @@ NewScheduler::schedule(size_t block_size)
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
           it = txs.erase(it);
-          size_--;
+          size_.fetch_sub(1, std::memory_order_relaxed);
           CHECK(accounts_excluded_from_block.insert(account_key).second);
         }
         else {
@@ -605,6 +614,7 @@ NewScheduler::schedule(size_t block_size)
                                            current_block_);
     }
   }
+  info("block of work took {}", while_timer->elapsed());
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
@@ -661,7 +671,7 @@ NewScheduler::find_and_remove_from_runqueue(
       auto [txs, lock] = account_to_tx_[account];
       CHECK_EQ(txs.erase(key), 1UL);
     }
-    size_--;
+    size_.fetch_sub(1, std::memory_order_relaxed);
     accounts.insert(account);
   }
   for (const ContractAddress &account : accounts) {
