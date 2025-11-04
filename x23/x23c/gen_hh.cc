@@ -276,7 +276,7 @@ concept is_{0} =)",
 
         for (int i = 0, n = proc.arg_types.size(); i < n; ++i)
           if (round == 0)
-            top_ += std::format("{}const {} &&__a{}", commanl.get(),
+            top_ += std::format("{}const {} &__a{}", commanl.get(),
                                 map_type(proc.arg_types[i]), i);
           else
             top_ += std::format("{}x23::satisfies_rpc_arg<{}> auto &&__a{}",
