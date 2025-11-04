@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <sys/mman.h>
 #include <vector>
 
@@ -10,7 +11,7 @@ namespace hogd {
 template<typename T> class BumpAllocator {
 public:
   static constexpr size_t kNumMmapPages = 16;
-  static constexpr size_t kMmapLength = kNumMmapPages * kNumMmapPages;
+  static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
   static_assert(sizeof(T) < kMmapLength);
 
   ~BumpAllocator() { free_all_regions(); }
@@ -26,7 +27,7 @@ public:
 
     char *ret = current_region_offset_;
     current_region_offset_ += sizeof(T);
-    return ret;
+    return reinterpret_cast<T *>(ret);
   }
 
 private:
@@ -36,8 +37,9 @@ private:
         mmap(/*addr=*/nullptr, kMmapLength, /*prot=*/PROT_READ | PROT_WRITE,
              /*flags=*/MAP_PRIVATE | MAP_ANONYMOUS, /*fildes=*/-1, /*off=*/0);
     CHECK_NE(addr, MAP_FAILED);
+    CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
-    current_region_offset_ = addr;
+    current_region_offset_ = static_cast<char *>(addr);
     allocated_regions_.push_back(static_cast<char *>(addr));
   }
 
@@ -97,8 +99,9 @@ public:
       delete t;
       break;
     case Type::kBump:
-      CHECK(bump_allocator_->has_value());
-      return bump_allocator_->free(t);
+      CHECK(bump_allocator_.has_value());
+      // We only free bump allocator objects when the bump allocator is
+      // destructed.
       break;
     default:
       CHECK(false);
