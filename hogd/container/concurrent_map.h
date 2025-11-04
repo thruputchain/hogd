@@ -64,7 +64,7 @@ public:
   }
 
   template<typename Func> requires std::invocable<Func, Value &>
-  static void for_each(std::atomic<ValueBucket<Value> *> *scan_ptr, Func f)
+  static void for_each(std::atomic<ValueBucket<Value> *> *scan_ptr, Func &f)
   {
     while (auto *next_value_bucket =
                scan_ptr->load(std::memory_order_relaxed)) {
@@ -186,7 +186,7 @@ public:
   }
 
   template<typename Func> requires std::invocable<Func, Value &>
-  void for_each(Func f)
+  void for_each(Func &f)
   {
     if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
       auto &content = std::get<std::atomic<ValueBucket<Value> *>>(content_);
@@ -358,7 +358,7 @@ public:
   {
     pool.for_each_parallel(
         roots_,
-        [f](detail::Node<Value, shortkey_t> &root) { root.for_each(f); },
+        [&f](detail::Node<Value, shortkey_t> &root) { root.for_each(f); },
         width);
   }
 

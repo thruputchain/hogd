@@ -134,7 +134,7 @@ public:
                            &completions](std::ranges::viewable_range auto &&r) {
                             completions.emplace_back(submit(
                                 [proj, &f, r = std::forward<decltype(r)>(r)] {
-                                  for (auto v : r) {
+                                  for (auto &v : r) {
                                     f(std::invoke(proj, v));
                                   }
                                 }));
