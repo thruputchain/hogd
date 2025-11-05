@@ -7,7 +7,6 @@
 #include <future>
 #include <memory>
 #include <span>
-#include <tuple>
 #include <vector>
 
 #include "block.hh"

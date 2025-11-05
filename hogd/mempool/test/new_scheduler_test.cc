@@ -227,7 +227,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::Vec<SignedTransactionHash> scheduled_hashes;
     x23::Vec<SignedTransaction> scheduled;
-    scheduler->schedule(/*block_size=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
   }
