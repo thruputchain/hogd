@@ -43,7 +43,8 @@ public:
   }
 
   EventBlockContext(std::string_view work_directory, BlockID block_id)
-    : trie_(std::make_unique<MerkleTriePrefix>()),
+    : trie_(std::make_unique<MerkleTriePrefix>(
+          /*alocator_type=*/Allocator<Node>::Type::kBump)),
       work_directory_(work_directory), block_id_(block_id)
   {
     // Ensure the work_directory_ exists before creating the events file.

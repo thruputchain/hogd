@@ -13,3 +13,16 @@ target_link_libraries(
   GTest::gtest
 )
 gtest_discover_tests(container_test)
+
+
+add_executable(
+  container_bench
+  container_bench.cc
+)
+target_link_libraries(
+  container_bench
+  hogd
+  benchmark::benchmark
+)
+
+set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

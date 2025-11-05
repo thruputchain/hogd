@@ -97,7 +97,7 @@ msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
 
 std::string msg_show_stat(const rpc_msg &msg);
 
-template<is_xdr_type... X>
+template<is_xdr_serializable... X>
 Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
@@ -211,9 +211,9 @@ struct RpcLogger {
   }
 
   template<typename Meta = void>
-  static std::string
-  make_log_message(bool am_server, const std::string &peername,
-                   const rpc_msg &msg, const is_xdr_type auto &...pl)
+  static std::string make_log_message(bool am_server,
+                                      const std::string &peername,
+                                      const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     using enum msg_type;
@@ -229,7 +229,10 @@ struct RpcLogger {
       uformat_to(&ret, " FAIL {}", msg_show_stat(msg));
     if constexpr (sizeof...(pl) > 0) {
       ret += ' ';
-      ret = show(pl..., 0, std::move(ret));
+      if constexpr (requires { show(pl..., 0, std::move(ret)); })
+        ret = show(pl..., 0, std::move(ret));
+      else
+        [&]<typename Arg>(const Arg &) { ret += type_name<Arg>(); }(pl...);
     }
     if (ret.back() != '\n')
       ret += '\n';
@@ -237,7 +240,7 @@ struct RpcLogger {
   }
 
   template<typename Meta = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_client(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     if (logfd_ < 0)
@@ -303,7 +306,7 @@ struct RpcCsvLogger {
   }
 
   template<typename Meta = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_client(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     do_log<Meta>(false, msg, pl...);
@@ -334,7 +337,7 @@ struct RpcNoLogger {
   RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
   static constexpr bool active() { return false; }
   template<typename = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_client(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
   void log_client_fail(std::uint32_t xid, std::string_view text) {}

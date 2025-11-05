@@ -41,11 +41,13 @@ public:
   using rpc_service = SchedulerCoord1;
 
   // The maximum number of txs in a block.
-  static constexpr size_t kMaxBlockSize = 100'000;
+  static constexpr size_t kMaxBlockSize = 1'000'000;
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc &db_rpc) : db_rpc_(db_rpc) {}
+  MempoolCoordinatorRpc(std::shared_ptr<MempoolDbRpc> db_rpc)
+    : db_rpc_(std::move(db_rpc))
+  {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -171,7 +173,7 @@ private:
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
     scheduler_ = std::make_shared<NewScheduler>(db_sched_client_);
-    db_rpc_.register_scheduler(scheduler_);
+    db_rpc_->register_scheduler(scheduler_);
 
     ready_.store(true, std::memory_order_release);
   }
@@ -186,12 +188,17 @@ private:
   x23::Detached
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                size_t executor_idx, x23::CoroCB<x23::Vec<bool>> cb);
+                x23::span<bool> ret_chunk, size_t executor_idx,
+                x23::CoroCB<void> cb);
+
+  x23::Detached propose_small_chunks_from_large_chunk(
+      BlockID block_id, x23::span<const SignedTransaction> txs,
+      x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
+      x23::span<bool> ret, x23::CoroCB<void> cb);
 
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
       BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-      x23::XdrVec<NominatedTransaction> &transaction_nominations,
-      size_t chunk_size);
+      x23::XdrVec<NominatedTransaction> &transaction_nominations);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
@@ -205,7 +212,7 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  MempoolDbRpc &db_rpc_;
+  std::shared_ptr<MempoolDbRpc> db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

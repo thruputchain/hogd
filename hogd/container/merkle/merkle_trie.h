@@ -19,8 +19,10 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -64,14 +66,21 @@ public:
   // [generate_top_level_hashes()] when we are done with all operations, but the
   // overhead of this is much smaller than hashing these nodes on all
   // operations.
-  MerkleTrie(size_t no_hash_depth = 3) : no_hash_depth_(no_hash_depth)
+  MerkleTrie(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
+    : allocator_(allocator_type), no_hash_depth_(no_hash_depth)
   {
     init_root_node();
   }
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
-    free_all_nodes(&root_);
+    ElapsedTimer timer;
+    if (allocator_.type() != Allocator<Node>::Type::kBump) {
+      free_all_nodes(&root_);
+    }
+    info("MerkleTrie destructor took {}", timer.elapsed());
   }
 
   // Disable copy and move.
@@ -260,8 +269,8 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  static Node *remove_branch(Node *branch, size_t num_children,
-                             std::byte remaining_child_hex);
+  Node *remove_branch(Node *branch, size_t num_children,
+                      std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node. Does not traverse nodes with a depth
@@ -450,6 +459,8 @@ private:
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
+  // The memory allocator for nodes.
+  Allocator<Node> allocator_;
   // See the note above the constructor about [no_hash_depth].
   const size_t no_hash_depth_ = 3;
   // The number of KV pairs in the trie.
@@ -490,18 +501,45 @@ private:
 // trie.prove(proof.first, proof.second, different_key, value);
 //
 // trie.remove(key);
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 class MerkleTriePrefix {
 public:
-  MerkleTriePrefix(size_t no_hash_depth = 3)
-    : tries_(make_tries(std::make_index_sequence<kNumTries>{}, no_hash_depth))
-  {}
+  MerkleTriePrefix(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
+  {
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie.emplace(allocator_type, no_hash_depth);
+    }
+  }
+
+  ~MerkleTriePrefix()
+  {
+    if (tries_[0]->allocator_.type() != Allocator<Node>::Type::kBump) {
+      try {
+        WorkerPool &worker_pool = WorkerPool::get_default_pool();
+        std::vector<std::future<void>> futures;
+        futures.reserve(tries_.size());
+        for (std::optional<MerkleTrie> &trie : tries_) {
+          futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
+        }
+        for (std::future<void> &future : futures) {
+          future.get();
+        }
+      } catch (...) {
+        // Unexpected exception thrown.
+        CHECK(false);
+      }
+    }
+  }
 
   SHA256Hash get_root_hash()
   {
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.child[i] = &tries_[i].root_;
+      root.child[i] = &tries_[i]->root_;
     }
     return root.compute_node_hash();
   }
@@ -533,14 +571,14 @@ public:
     Node root;
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
-      root.child[i] = &tries_[i].root_;
+      root.child[i] = &tries_[i]->root_;
       if (i == index) {
-        tries_[i].root_.parent = &root;
+        tries_[i]->root_.parent = &root;
       }
     }
     std::vector<std::vector<std::byte>> proof =
-        tries_[index].get_proof_by_node(k_no_prefix).second;
-    tries_[index].root_.parent = nullptr;
+        tries_[index]->get_proof_by_node(k_no_prefix).second;
+    tries_[index]->root_.parent = nullptr;
     return {root.compute_node_hash(), proof};
   }
 
@@ -561,7 +599,7 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].find_begin(k_no_prefix, value_hash, cookie);
+    return tries_[index]->find_begin(k_no_prefix, value_hash, cookie);
   }
 
   // You must call this when you are done accessing a value returned by
@@ -576,7 +614,7 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].insert(k_no_prefix, obj);
+    return tries_[index]->insert(k_no_prefix, obj);
   }
 
   bool insert_or_update(const MerkleTrie::Key &k,
@@ -588,7 +626,7 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].insert_or_update(k_no_prefix, obj);
+    return tries_[index]->insert_or_update(k_no_prefix, obj);
   }
 
   bool remove(const MerkleTrie::Key &k)
@@ -599,13 +637,13 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].remove(k_no_prefix);
+    return tries_[index]->remove(k_no_prefix);
   }
 
   void clear()
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.clear();
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie->clear();
     }
   }
 
@@ -614,14 +652,14 @@ public:
     for (size_t i = 0; i < tries_.size(); i++) {
       HexArray prefix;
       prefix.append(std::byte(i));
-      tries_[i].for_each(func, prefix);
+      tries_[i]->for_each(func, prefix);
     }
   }
 
   void set_should_hash_nodes_on_each_op(bool to_set)
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.set_should_hash_nodes_on_each_op(to_set);
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie->set_should_hash_nodes_on_each_op(to_set);
     }
   }
 
@@ -634,7 +672,7 @@ public:
     // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < tries_.size(); i++) {
       futures.push_back(
-          pool.submit([this, i] { tries_[i].generate_top_level_hashes(); }));
+          pool.submit([this, i] { tries_[i]->generate_top_level_hashes(); }));
     }
     for (std::future<void> &future : futures) {
       future.get();
@@ -643,16 +681,16 @@ public:
 
   void generate_all_hashes()
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.generate_all_hashes();
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie->generate_all_hashes();
     }
   }
 
   bool check()
   {
     bool ret = true;
-    for (MerkleTrie &trie : tries_) {
-      ret = trie.check() && ret;
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      ret = trie->check() && ret;
     }
     return ret;
   }
@@ -660,8 +698,8 @@ public:
   size_t size()
   {
     size_t count = 0;
-    for (MerkleTrie &trie : tries_) {
-      count += trie.size();
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      count += trie->size();
     }
     return count;
   }
@@ -675,14 +713,6 @@ private:
   static constexpr size_t kNumTries = 16;
   static_assert(kNumTries == 1 << (4 * kPrefixSize));
 
-  template<std::size_t... Is>
-  static std::array<MerkleTrie, kNumTries>
-  make_tries(std::index_sequence<Is...> /*unused*/, size_t no_hash_depth)
-  {
-    return std::array<MerkleTrie, kNumTries>{
-        ((void)Is, MerkleTrie(no_hash_depth))...};
-  }
-
   static std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
   {
     CHECK_GT(k.size(), 0UL);
@@ -692,8 +722,9 @@ private:
     return {index, k_no_prefix};
   }
 
-  std::array<MerkleTrie, kNumTries> tries_;
+  std::array<std::optional<MerkleTrie>, kNumTries> tries_;
 };
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
 

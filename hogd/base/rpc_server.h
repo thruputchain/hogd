@@ -34,7 +34,6 @@ public:
   static constexpr bool kAllowRefPtrConversion = true;
 
   x23::CoroPoll &cp_;
-  Impl impl_;
 
   template<typename... Args> requires std::constructible_from<Impl, Args...>
   static RpcSvcHolder &make(x23::CoroPoll &cp, Args &&...args)
@@ -51,23 +50,25 @@ public:
         tcp_rpc_server(cp_, portno,
                        [this, _d = x23::Defer([this] { eof(); })](auto c) {
                          c->max_message_size = max_message_size_;
-                         c->template server<VersMeta>(&impl_);
+                         c->template server<VersMeta>(impl_);
                        });
     // NOLINTEND(readability-identifier-naming)
     listen_fd_ = lfd.get();
     return port_ = port;
   }
 
+  const std::shared_ptr<Impl> &impl() const noexcept { return impl_; }
   uint16_t port() const { return port_; }
   size_t max_message_size_ = x23::default_max_message_size;
 
 private:
+  std::shared_ptr<Impl> impl_;
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
   template<typename... Args>
   RpcSvcHolder(x23::CoroPoll &cp, Args &&...args)
-    : cp_(cp), impl_(std::forward<Args>(args)...)
+    : cp_(cp), impl_(std::make_shared<Impl>(std::forward<Args>(args)...))
   {}
 
   ~RpcSvcHolder() = default;

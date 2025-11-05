@@ -146,7 +146,8 @@ public:
   // This getter is used by [auth_test.cc].
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
-    return mempool_coord_server_->impl_;
+    // XXX should we return a shared_ptr?
+    return *mempool_coord_server_->impl();
   }
 
 private:
@@ -308,7 +309,7 @@ private:
   // can flush its cache.
   RpcServer<MempoolDbRpc> sched_db_server_;
   RpcServer<MempoolCoordinatorRpc> mempool_coord_server_ =
-      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl_);
+      RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl());
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 };
