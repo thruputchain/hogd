@@ -307,7 +307,8 @@ public:
 
     while (true) {
 
-      assert(current_node->get_shortkey_match_len(shortkey) == current_node->get_key_len());
+      assert(current_node->get_shortkey_match_len(shortkey) ==
+             current_node->get_key_len());
 
       // We've found the node for the shortkey.
       if (current_node->get_key_len() == kShortkeyBits) {
