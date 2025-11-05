@@ -18,7 +18,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -85,7 +84,7 @@ BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
   assert(lock.ref > 0);
 
   if (--lock.ref == 0) {
-    item_locks_.remove(key, ul);
+    //item_locks_.remove(key, ul);
     return;
   }
   lock.change.undo_merge(change);
@@ -100,7 +99,7 @@ BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
   assert(lock.ref > 0);
 
   if (--lock.ref == 0) {
-    addr_balance_locks_.remove(addr, ul);
+    //addr_balance_locks_.remove(addr, ul);
     return;
   }
   lock.change.undo_merge(change);
@@ -214,6 +213,9 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel(
       [this, &lock, &ret](std::pair<const ItemKey, const ItemLock &> v) {
+        if (v.second.ref == 0) {
+          return;
+        }
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
@@ -228,6 +230,9 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address, const ItemLock &> v) {
+        if (v.second.ref == 0) {
+          return;
+        }
         assert(v.second.change.get_raw_nnint128().has_value());
         auto raw_nnint128 = v.second.change.get_raw_nnint128().value();
         int128_t prev_val = raw_nnint128.base();
