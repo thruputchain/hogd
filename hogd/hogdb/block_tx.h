@@ -73,10 +73,13 @@ private:
     ItemChange change;
     size_t ref{0};
 
-    ItemLock(int128_t snapshot_cost)  {
+    ItemLock(int128_t snapshot_cost)
+    {
       change.set_snapshot_cost(snapshot_cost);
     }
   };
+
+  HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
 
   HogDBDAO &db_;
   MerkleTriePrefix &trie_;
@@ -86,18 +89,25 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  static std::mutex& get_mutex(const ItemKey &key) {
+  static std::mutex &get_mutex(const ItemKey &key)
+  {
     static MutexCache<SipHash24> mutex_cache;
     return mutex_cache.get_mutex(key.as_bytes());
   }
 
-  static HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock, const ItemChange &change, const StorageCostModel *cost_model);
-  static HogDBStatus<int128_t> do_modify_lock(const std::unique_lock<std::mutex> &ul,
-                                       ItemLock &lock, const ItemChange &old_change,
-                                       const ItemChange &new_change, const StorageCostModel *cost_model);
-  static void do_unlock_item(const std::unique_lock<std::mutex> &ul, const ItemKey &key, ItemLock &lock, const ItemChange &change);
-  static void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul, const Address &addr, ItemLock &lock, const ItemChange &change);
-
+  static HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul,
+                                       ItemLock &lock, const ItemChange &change,
+                                       const StorageCostModel *cost_model);
+  static HogDBStatus<int128_t>
+  do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+                 const ItemChange &old_change, const ItemChange &new_change,
+                 const StorageCostModel *cost_model);
+  static void do_unlock_item(const std::unique_lock<std::mutex> &ul,
+                             const ItemKey &key, ItemLock &lock,
+                             const ItemChange &change);
+  static void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+                                     const Address &addr, ItemLock &lock,
+                                     const ItemChange &change);
 };
 
 } // namespace hogd

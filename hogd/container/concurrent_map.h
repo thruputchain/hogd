@@ -60,12 +60,15 @@ public:
   Value value_;
   std::atomic<value_bucket_t *> next_ptr_;
 
-  template<typename Func> requires std::invocable<Func, std::pair<const KeyType&, Value &>>
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   static void for_each(std::atomic<value_bucket_t *> *scan_ptr, Func &f)
   {
     while (auto *next_value_bucket =
                scan_ptr->load(std::memory_order_relaxed)) {
-      f(std::pair<const KeyType&, Value &>(std::cref(next_value_bucket->key_), std::ref(next_value_bucket->value_)));
+      f(std::pair<const KeyType &, Value &>(std::cref(next_value_bucket->key_),
+                                            std::ref(
+                                                next_value_bucket->value_)));
       scan_ptr = &next_value_bucket->next_ptr_;
     }
   }
@@ -186,7 +189,8 @@ public:
   // this is a limited, bounded depth recursion; the I parameter bypasses
   // clang-tidy's recursion limit
   template<size_t I, typename Func>
-  requires std::invocable<Func, std::pair<const KeyType&, Value &>> && (I <= sizeof(Shortkey) * 2)
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>> &&
+           (I <= sizeof(Shortkey) * 2)
   void for_each(Func &f)
   {
     if (std::holds_alternative<std::atomic<value_bucket_t *>>(content_)) {
@@ -357,7 +361,8 @@ public:
     }
   }
 
-  template<typename Func> requires std::invocable<Func, std::pair<const KeyType&, Value &>>
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   void for_each_parallel(Func f, size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {

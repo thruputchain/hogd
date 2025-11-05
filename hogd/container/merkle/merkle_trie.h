@@ -80,7 +80,7 @@ public:
     if (allocator_.type() != Allocator<Node>::Type::kBump) {
       free_all_nodes(&root_);
     }
-    info("MerkleTrie destructor took {}", timer.elapsed());
+    // info("MerkleTrie destructor took {}", timer.elapsed());
   }
 
   // Disable copy and move.

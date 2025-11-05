@@ -1422,12 +1422,12 @@ MerkleTrie::free_all_nodes(Node *root)
       };
       walk<Node>(child, prefix, f);
     };
-    if (i < Node::kMaxNumBranches - 1) {
-      futures.push_back(worker_pool.submit(lambda));
-    }
-    else {
-      lambda();
-    }
+    // if (i < Node::kMaxNumBranches - 1) {
+    //   futures.push_back(worker_pool.submit(lambda));
+    // }
+    // else {
+    lambda();
+    //}
   }
 
   for (std::future<void> &future : futures) {
