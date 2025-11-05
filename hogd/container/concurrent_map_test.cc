@@ -52,6 +52,7 @@ TEST(ConcurrentMap, ValueBucketUsage)
                 ->next_ptr_.load()
                 ->next_ptr_.load(),
             nullptr);
+  delete value_bucket_ptr.load();
 }
 
 static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
