@@ -419,6 +419,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       propose_batch_in_chunks_handles;
   propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
   x23::Vec<bool> statuses(kMaxBlockSize, false);
+  x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks(
+      kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
@@ -445,7 +447,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
          ret_span.size(), txs_span.size(), tx_hashes.size(), num_scheduled);
     num_scheduled = tx_hashes.size();
     propose_batch_in_chunks(block_id, txs_span,
-                            nomination.transaction_nominations, ret_span,
+                            transaction_nomination_chunks[i], ret_span,
                             x23::CoroCB<void>(
                                 *propose_batch_in_chunks_handles.back()));
   }
@@ -467,9 +469,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   timer2 = std::make_unique<ElapsedTimer>();
 
-  for (std::unique_ptr<x23::Awaitable<void>> &handle :
-       propose_batch_in_chunks_handles) {
-    co_await *handle;
+  for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
+    co_await *propose_batch_in_chunks_handles[i];
+    nomination.transaction_nominations += transaction_nomination_chunks[i];
   }
 
   double just_wait_for_executor_duration = timer2->elapsed();
