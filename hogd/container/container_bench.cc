@@ -41,12 +41,14 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
   pool.adjust_workers(nworkers);
 
   for (auto _ : state) {
-    pool.for_each_parallel(std::ranges::iota_view{0UL, nvals},
-                           [&map](size_t i) {
-                             uint64_t key = i;
-                             uint64_t val = i;
-                             CHECK(map.insert_or_get(key, val) != nullptr);
-                           });
+    pool.for_each_parallel(
+        std::ranges::iota_view{0UL, nvals},
+        [&map](size_t i) {
+          uint64_t key = i;
+          uint64_t val = i;
+          CHECK(map.insert_or_get(key, val) != nullptr);
+        },
+        4000);
   }
 }
 
@@ -65,12 +67,14 @@ bench_synchronized_map_insert_lowcontention(benchmark::State &state)
   pool.adjust_workers(nworkers);
 
   for (auto _ : state) {
-    pool.for_each_parallel(std::ranges::iota_view{0UL, nvals},
-                           [&map](size_t i) {
-                             uint64_t key = i;
-                             uint64_t val = i;
-                             map.insert(key, val);
-                           });
+    pool.for_each_parallel(
+        std::ranges::iota_view{0UL, nvals},
+        [&map](size_t i) {
+          uint64_t key = i;
+          uint64_t val = i;
+          map.insert(key, val);
+        },
+        4000);
   }
 }
 
