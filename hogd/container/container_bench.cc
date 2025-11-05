@@ -31,7 +31,6 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
 {
   std::vector<std::byte> in(state.range(0));
 
-  ConcurrentMap<uint64_t, uint64_t, HashWrapper> map;
 
   WorkerPool &pool = WorkerPool::get_default_pool();
 
@@ -41,6 +40,7 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
   pool.adjust_workers(nworkers);
 
   for (auto _ : state) {
+    ConcurrentMap<uint64_t, uint64_t, HashWrapper> map;
     pool.for_each_parallel(
         std::ranges::iota_view{0UL, nvals},
         [&map](size_t i) {
@@ -57,7 +57,6 @@ bench_synchronized_map_insert_lowcontention(benchmark::State &state)
 {
   std::vector<std::byte> in(state.range(0));
 
-  SynchronizedMap<uint64_t, uint64_t, HashWrapper> map;
 
   WorkerPool &pool = WorkerPool::get_default_pool();
 
@@ -67,6 +66,7 @@ bench_synchronized_map_insert_lowcontention(benchmark::State &state)
   pool.adjust_workers(nworkers);
 
   for (auto _ : state) {
+    SynchronizedMap<uint64_t, uint64_t, HashWrapper> map;
     pool.for_each_parallel(
         std::ranges::iota_view{0UL, nvals},
         [&map](size_t i) {

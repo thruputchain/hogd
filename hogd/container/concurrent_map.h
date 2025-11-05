@@ -43,8 +43,8 @@ template<typename KeyType, typename Value,
 class ValueBucket {
 public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  ValueBucket(KeyType const &key, Args &&...args)
-    : key_(key), value_(std::forward<Args>(args)...)
+  ValueBucket(KeyType key, Args &&...args)
+    : key_(std::move(key)), value_(std::forward<Args>(args)...)
   {}
 
   using value_bucket_t = ValueBucket<KeyType, Value, KeyEqual>;
