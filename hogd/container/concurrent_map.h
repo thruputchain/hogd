@@ -54,15 +54,7 @@ public:
   ValueBucket(ValueBucket &&) noexcept = delete;
   ValueBucket &operator=(ValueBucket &&) noexcept = delete;
 
-  ~ValueBucket()
-  {
-    auto *next_ptr = next_ptr_.load(std::memory_order_relaxed);
-    while(next_ptr != nullptr) {
-      auto* cur = next_ptr;
-      next_ptr = cur->next_ptr_.load(std::memory_order_relaxed);
-      delete cur;
-    }
-  }
+  ~ValueBucket() { delete next_ptr_.load(std::memory_order_relaxed); }
 
   const KeyType key_;
   Value value_;
