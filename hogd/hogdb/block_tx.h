@@ -71,7 +71,11 @@ public:
 private:
   struct ItemLock {
     ItemChange change;
-    size_t ref;
+    size_t ref{0};
+
+    ItemLock(int128_t snapshot_cost)  {
+      change.set_snapshot_cost(snapshot_cost);
+    }
   };
 
   HogDBDAO &db_;
@@ -88,11 +92,11 @@ private:
   }
 
   static HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock, const ItemChange &change, const StorageCostModel *cost_model);
-  HogDBStatus<int128_t> do_modify_lock(const std::unique_lock<std::mutex> &ul, const ItemKey &key,
+  static HogDBStatus<int128_t> do_modify_lock(const std::unique_lock<std::mutex> &ul,
                                        ItemLock &lock, const ItemChange &old_change,
-                                       const ItemChange &new_change);
-  void do_unlock_item(const std::unique_lock<std::mutex> &ul, const ItemKey &key, ItemLock &lock, const ItemChange &change);
-  void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul, const Address &addr, ItemLock &lock, const ItemChange &change);
+                                       const ItemChange &new_change, const StorageCostModel *cost_model);
+  static void do_unlock_item(const std::unique_lock<std::mutex> &ul, const ItemKey &key, ItemLock &lock, const ItemChange &change);
+  static void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul, const Address &addr, ItemLock &lock, const ItemChange &change);
 
 };
 

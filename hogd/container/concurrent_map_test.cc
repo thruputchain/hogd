@@ -7,6 +7,7 @@
 #include <mutex>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -118,9 +119,9 @@ TEST(ConcurrentMap, ForEachParallel)
 
   std::mutex mtx;
   std::set<int> values;
-  map.for_each_parallel([&values, &mtx](int &value) {
+  map.for_each_parallel([&values, &mtx](std::pair<const std::vector<uint8_t>&, int&> value) {
     std::scoped_lock lock(mtx);
-    values.insert(value);
+    values.insert(value.second);
   });
 
   ASSERT_EQ(values.size(), 5);

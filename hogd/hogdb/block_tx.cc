@@ -116,8 +116,10 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   }
   change->set_snapshot_cost(0);
 
-  auto [lock, ul] = addr_balance_locks_[addr];
-  if (auto r = do_lock(ul, lock, *change, &cost_model_); !r) [[unlikely]] {
+  auto* lock = addr_balance_locks_.insert_or_get(addr, 0);
+  std::unique_lock<std::mutex> ul(get_mutex(make_address_balance_item_key(addr)));
+
+  if (auto r = do_lock(ul, *lock, *change, &cost_model_); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
 }
@@ -127,16 +129,26 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    change.set_snapshot_cost(0);
-    return do_lock(ul, lock, change, &cost_model_)
+
+    auto* lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+
+    std::unique_lock<std::mutex> ul(get_mutex(key));
+    
+    return do_lock(ul, *lock, change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto [lock, ul] = item_locks_[key];
-  if (auto r = lock.change.load_snapshot_cost(db_, key, &cost_model_); !r)
-    return r.error();
-  return do_lock(ul, lock, change, &cost_model_);
+  auto snapshot_cost = db_.get_charged_storage_cost(key, &cost_model_);
+  if (!snapshot_cost) [[unlikely]] {
+    return snapshot_cost.error();
+  }
+
+  auto* item = item_locks_.insert_or_get(key, *snapshot_cost);
+  assert(item != nullptr);
+
+  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+
+  return do_lock(ul, *item, change, &cost_model_);
 }
 
 HogDBStatus<int128_t>
@@ -145,13 +157,20 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    return do_modify_lock(ul, lock, old_change, new_change, &cost_model_)
+    auto* lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    std::unique_lock<std::mutex> ul(get_mutex(key));
+    return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto [lock, ul] = item_locks_[key];
-  return do_modify_lock(ul, lock, old_change, new_change, &cost_model_);
+  auto snapshot_cost = db_.get_charged_storage_cost(key, &cost_model_);
+  if (!snapshot_cost) [[unlikely]] {
+    return snapshot_cost.error();
+  }
+
+  auto* lock = item_locks_.insert_or_get(key, *snapshot_cost);
+  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_);
 }
 
 void
@@ -159,13 +178,15 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    do_unlock_addr_balance(ul, key.get_address(), lock, change);
+    auto* lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    std::unique_lock<std::mutex> ul(get_mutex(key));
+    do_unlock_addr_balance(ul, key.get_address(), *lock, change);
     return;
   }
 
-  auto [lock, ul] = item_locks_[key];
-  do_unlock_item(ul, key, lock, change);
+  auto* lock = item_locks_.insert_or_get(key, 0);
+  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  do_unlock_item(ul, key, *lock, change);
 }
 
 int128_t
@@ -175,14 +196,17 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
   // lock.
   if (key.is_address_balance()) {
-    auto [lock, ul] = addr_balance_locks_[key.get_address()];
-    lock.change.commit_change(change);
+    auto* lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    std::unique_lock<std::mutex> ul(get_mutex(key));
+    lock->change.commit_change(change);
     return 0;
   }
-  auto [lock, ul] = item_locks_[key];
-  int128_t cost_before = lock.change.committed_storage_cost(&cost_model_);
-  lock.change.commit_change(change);
-  int128_t cost_after = lock.change.committed_storage_cost(&cost_model_);
+  auto* lock = item_locks_.insert_or_get(key, 0);
+  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  
+  int128_t cost_before = lock->change.committed_storage_cost(&cost_model_);
+  lock->change.commit_change(change);
+  int128_t cost_after = lock->change.committed_storage_cost(&cost_model_);
   return cost_after - cost_before;
 }
 
@@ -212,7 +236,7 @@ BlockTX::commit(WorkerPool &pool)
 
   // write item changes.
   item_locks_.for_each_parallel(
-      [this, &lock, &ret](std::pair<const ItemKey, const ItemLock &> v) {
+      [this, &lock, &ret](std::pair<const ItemKey&, const ItemLock &> v) {
         if (v.second.ref == 0) {
           return;
         }
@@ -229,7 +253,7 @@ BlockTX::commit(WorkerPool &pool)
   // write address balances.
   addr_balance_locks_.for_each_parallel(
       [this, &lock, &ret,
-       &balance_deltas](std::pair<const Address, const ItemLock &> v) {
+       &balance_deltas](std::pair<const Address&, const ItemLock &> v) {
         if (v.second.ref == 0) {
           return;
         }
