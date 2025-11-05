@@ -155,14 +155,15 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto snapshot_cost = get_snapshot_cost(key);
-  if (!snapshot_cost) [[unlikely]] {
-    return snapshot_cost.error();
-  }
-  auto *item = item_locks_.insert_or_get(key, *snapshot_cost);
+  auto *item =
+      item_locks_.insert_or_get(key, [&] { return get_snapshot_cost(key); });
+
   assert(item != nullptr);
 
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  if (!item->change.has_snapshot_cost()) {
+    return HogDBError{HogDBCode::kInternal};
+  }
 
   return do_lock(ul, *item, change, &cost_model_);
 }
@@ -179,13 +180,12 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto snapshot_cost = get_snapshot_cost(key);
-  if (!snapshot_cost) [[unlikely]] {
-    return snapshot_cost.error();
-  }
-
-  auto *lock = item_locks_.insert_or_get(key, *snapshot_cost);
+  auto *lock =
+      item_locks_.insert_or_get(key, [&] { return get_snapshot_cost(key); });
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  if (!lock->change.has_snapshot_cost()) [[unlikely]] {
+    return HogDBError{HogDBCode::kInternal};
+  }
   return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_);
 }
 
@@ -200,7 +200,10 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
     return;
   }
 
-  auto *lock = item_locks_.insert_or_get(key, 0);
+  auto *lock = item_locks_.insert_or_get(key, [] -> HogDBStatus<int128_t> {
+    CHECK(false);
+    return HogDBError{HogDBCode::kInternal};
+  });
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
   do_unlock_item(ul, key, *lock, change);
 }
@@ -217,7 +220,10 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
     lock->change.commit_change(change);
     return 0;
   }
-  auto *lock = item_locks_.insert_or_get(key, 0);
+  auto *lock = item_locks_.insert_or_get(key, [] -> HogDBStatus<int128_t> {
+    CHECK(false);
+    return HogDBError{HogDBCode::kInternal};
+  });
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
 
   int128_t cost_before = lock->change.committed_storage_cost(&cost_model_);

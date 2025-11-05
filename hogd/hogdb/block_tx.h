@@ -77,6 +77,20 @@ private:
     {
       change.set_snapshot_cost(snapshot_cost);
     }
+
+    // Lazily load the snapshot cost, if the item is constructed
+    ItemLock(auto const &lambda)
+        requires std::invocable<decltype(lambda)> &&
+                 std::same_as<std::invoke_result_t<decltype(lambda)>,
+                              HogDBStatus<int128_t>>
+    {
+      auto status = lambda();
+      if (!status) [[unlikely]] {
+        error("failed to get snapshot cost: {}", status.error());
+        return;
+      }
+      change.set_snapshot_cost(*status);
+    }
   };
 
   HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
@@ -95,19 +109,20 @@ private:
     return mutex_cache.get_mutex(key.as_bytes());
   }
 
-  static inline HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul,
-                                       ItemLock &lock, const ItemChange &change,
-                                       const StorageCostModel *cost_model);
+  static inline HogDBStatus<int128_t>
+  do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+          const ItemChange &change, const StorageCostModel *cost_model);
   static inline HogDBStatus<int128_t>
   do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
                  const ItemChange &old_change, const ItemChange &new_change,
                  const StorageCostModel *cost_model);
   static inline void do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                             const ItemKey &key, ItemLock &lock,
-                             const ItemChange &change);
-  static inline void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                                     const Address &addr, ItemLock &lock,
-                                     const ItemChange &change);
+                                    const ItemKey &key, ItemLock &lock,
+                                    const ItemChange &change);
+  static inline void
+  do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+                         const Address &addr, ItemLock &lock,
+                         const ItemChange &change);
 };
 
 } // namespace hogd
