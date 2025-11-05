@@ -39,12 +39,16 @@ namespace detail {
 // Linked list of values, to resolve hash collisions.
 // These are kept in an unsorted (arbitrary) order.  Items are appended to the
 // end.
-template<typename Value> class ValueBucket {
+template<typename KeyType, typename Value,
+         typename KeyEqual = std::equal_to<KeyType>>
+class ValueBucket {
 public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
   ValueBucket(std::span<const uint8_t> key, Args &&...args)
     : key_(key.begin(), key.end()), value_(std::forward<Args>(args)...)
   {}
+
+  using value_bucket_t = ValueBucket<KeyType, Value, KeyEqual>;
 
   ValueBucket(const ValueBucket &) = delete;
   ValueBucket &operator=(const ValueBucket &) = delete;
@@ -53,19 +57,12 @@ public:
 
   ~ValueBucket() { delete next_ptr_.load(); }
 
-  const std::vector<uint8_t> key_;
+  const KeyType key_;
   Value value_;
-  std::atomic<ValueBucket<Value> *> next_ptr_;
-
-  static bool key_matches(std::span<const uint8_t> key1,
-                          std::span<const uint8_t> key2)
-  {
-    return key1.size() == key2.size() &&
-           std::memcmp(key1.data(), key2.data(), key1.size()) == 0;
-  }
+  std::atomic<value_bucket_t *> next_ptr_;
 
   template<typename Func> requires std::invocable<Func, Value &>
-  static void for_each(std::atomic<ValueBucket<Value> *> *scan_ptr, Func &f)
+  static void for_each(std::atomic<value_bucket_t *> *scan_ptr, Func &f)
   {
     while (auto *next_value_bucket =
                scan_ptr->load(std::memory_order_relaxed)) {
@@ -75,14 +72,14 @@ public:
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  static Value *insert(std::atomic<ValueBucket<Value> *> *scan_ptr,
-                       std::span<const uint8_t> key, Args &&...args)
+  static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
+                       const KeyType &key, Args &&...args)
   {
     // The value bucket that we might create in this iteration of insert.
     // Starts as nullptr, instantiated if we try to insert.
-    ValueBucket<Value> *new_value_bucket = nullptr;
+    value_bucket_t *new_value_bucket = nullptr;
 
-    ValueBucket<Value> *next_value_bucket =
+    value_bucket_t *next_value_bucket =
         scan_ptr->load(std::memory_order_relaxed);
 
     while (true) {
@@ -93,10 +90,10 @@ public:
           // This call to construct new_value_bucket only happens at most once.
           // NOLINTBEGIN(bugprone-use-after-move)
           new_value_bucket =
-              new ValueBucket<Value>{key, Value(std::forward<Args>(args)...)};
+              new value_bucket_t{key, Value(std::forward<Args>(args)...)};
           // NOLINTEND(bugprone-use-after-move)
         }
-        assert(key_matches(std::span(new_value_bucket->key_), key));
+        assert(KeyEqual{}(new_value_bucket->key_, key));
 
         if (scan_ptr->compare_exchange_strong(next_value_bucket,
                                               new_value_bucket,
@@ -114,7 +111,7 @@ public:
       assert(next_value_bucket != nullptr);
 
       // Not at a nullptr, so try scanning the current object for a match
-      if (key_matches(std::span(next_value_bucket->key_), key)) {
+      if (KeyEqual{}(next_value_bucket->key_, key)) {
         delete new_value_bucket;
         return &next_value_bucket->value_;
       }
@@ -126,10 +123,15 @@ public:
   }
 };
 
-template<typename Value, std::unsigned_integral Shortkey = uint16_t>
+template<typename KeyType, typename Value,
+         std::unsigned_integral Shortkey = uint16_t,
+         typename KeyEqual = std::equal_to<KeyType>>
 class Node {
 public:
   constexpr static size_t kShortkeyBits = sizeof(Shortkey) * 8;
+
+  using node_t = Node<KeyType, Value, Shortkey, KeyEqual>;
+  using value_bucket_t = ValueBucket<KeyType, Value, KeyEqual>;
 
   // NOLINTBEGIN(readability-identifier-naming)
   struct leaf_t {};
@@ -137,18 +139,16 @@ public:
   // NOLINTEND(readability-identifier-naming)
 
   Node()
-    : content_(std::in_place_type<
-               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>),
+    : content_(std::in_place_type<std::array<std::atomic<node_t *>, 16>>),
       key_{0}, key_len_{0}, owns_children_{true}
   {}
   Node(leaf_t /*unused*/, Shortkey shortkey)
-    : content_(std::in_place_type<std::atomic<ValueBucket<Value> *>>),
+    : content_(std::in_place_type<std::atomic<value_bucket_t *>>),
       key_{shortkey}, key_len_{kShortkeyBits}, owns_children_{true}
   {}
 
   Node(branch_t /*unused*/, Shortkey shortkey, uint8_t key_len, Node *child)
-    : content_(std::in_place_type<
-               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>),
+    : content_(std::in_place_type<std::array<std::atomic<node_t *>, 16>>),
       key_{shortkey}, key_len_{key_len}
   {
     assert(child != nullptr);
@@ -156,8 +156,7 @@ public:
     assert(key_len_ < child->key_len_);
 
     uint8_t branch_bits = get_branch_bits(child->key_, key_len_);
-    std::get<std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(
-        content_)[branch_bits]
+    std::get<std::array<std::atomic<node_t *>, 16>>(content_)[branch_bits]
         .store(child, std::memory_order_release);
   }
 
@@ -170,18 +169,17 @@ public:
     }
 
     // get_if is noexcept
-    if (std::holds_alternative<std::array<std::atomic<Node<Value> *>, 16>>(
+    if (std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
             content_)) {
       auto &content =
-          *std::get_if<std::array<std::atomic<Node<Value> *>, 16>>(&content_);
+          *std::get_if<std::array<std::atomic<node_t *>, 16>>(&content_);
       for (auto &ptr : content) {
         delete ptr.load();
       }
     }
 
-    if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
-      auto &content =
-          *std::get_if<std::atomic<ValueBucket<Value> *>>(&content_);
+    if (std::holds_alternative<std::atomic<value_bucket_t *>>(content_)) {
+      auto &content = *std::get_if<std::atomic<value_bucket_t *>>(&content_);
       delete content.load();
     }
   }
@@ -192,18 +190,16 @@ public:
   requires std::invocable<Func, Value &> && (I <= sizeof(Shortkey) * 2)
   void for_each(Func &f)
   {
-    if (std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_)) {
-      auto &content = std::get<std::atomic<ValueBucket<Value> *>>(content_);
-      ValueBucket<Value>::for_each(&content, f);
+    if (std::holds_alternative<std::atomic<value_bucket_t *>>(content_)) {
+      auto &content = std::get<std::atomic<value_bucket_t *>>(content_);
+      value_bucket_t::for_each(&content, f);
       return;
     }
 
-    assert((std::holds_alternative<
-            std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(content_)));
+    assert((std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
+        content_)));
 
-    auto &content =
-        std::get<std::array<std::atomic<Node<Value, Shortkey> *>, 16>>(
-            content_);
+    auto &content = std::get<std::array<std::atomic<node_t *>, 16>>(content_);
     for (auto &ptr : content) {
       auto *node = ptr.load();
       if (node == nullptr)
@@ -239,30 +235,29 @@ public:
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  Value *insert_value(std::span<const uint8_t> key, Args &&...args)
+  Value *insert_value(const KeyType &key, Args &&...args)
   {
-    assert(std::holds_alternative<std::atomic<ValueBucket<Value> *>>(content_));
-    auto &value_bucket = std::get<std::atomic<ValueBucket<Value> *>>(content_);
+    assert(std::holds_alternative<std::atomic<value_bucket_t *>>(content_));
+    auto &value_bucket = std::get<std::atomic<value_bucket_t *>>(content_);
 
-    return ValueBucket<Value>::insert(&value_bucket, key,
-                                      std::forward<Args>(args)...);
+    return value_bucket_t::insert(&value_bucket, key,
+                                  std::forward<Args>(args)...);
   }
 
-  Node<Value> *get_child(uint8_t branch_bits) const
+  node_t *get_child(uint8_t branch_bits) const
   {
-    assert((std::holds_alternative<std::array<std::atomic<Node<Value> *>, 16>>(
+    assert((std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
         content_)));
-    return std::get<std::array<std::atomic<Node<Value> *>, 16>>(
+    return std::get<std::array<std::atomic<node_t *>, 16>>(
                content_)[branch_bits]
         .load(std::memory_order_acquire);
   }
 
-  bool try_insert_child(uint8_t branch_bits, Node<Value> *&expect,
-                        Node<Value> *desired)
+  bool try_insert_child(uint8_t branch_bits, node_t *&expect, node_t *desired)
   {
-    assert((std::holds_alternative<std::array<std::atomic<Node<Value> *>, 16>>(
+    assert((std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
         content_)));
-    return std::get<std::array<std::atomic<Node<Value> *>, 16>>(
+    return std::get<std::array<std::atomic<node_t *>, 16>>(
                content_)[branch_bits]
         .compare_exchange_strong(expect, desired, std::memory_order_release,
                                  std::memory_order_relaxed);
@@ -272,8 +267,8 @@ public:
   uint8_t get_key_len() const { return key_len_; }
 
 private:
-  std::variant<std::atomic<ValueBucket<Value> *>,
-               std::array<std::atomic<Node<Value, Shortkey> *>, 16>>
+  std::variant<std::atomic<value_bucket_t *>,
+               std::array<std::atomic<node_t *>, 16>>
       content_;
 
   const Shortkey key_;
@@ -283,7 +278,7 @@ private:
 
 } // namespace detail
 
-template<typename Value, typename Hasher = std::hash<std::span<const uint8_t>>>
+template<typename KeyType, typename Value, typename Hasher = std::hash<KeyType>>
 class ConcurrentMap {
 public:
   using shortkey_t = uint16_t;
@@ -293,15 +288,14 @@ public:
     : roots_(n_roots), hasher_(hasher)
   {}
 
-  static_assert(std::unsigned_integral<
-                decltype(Hasher()(std::declval<std::span<const uint8_t>>()))>);
   static_assert(
-      sizeof(decltype(Hasher()(std::declval<std::span<const uint8_t>>()))) >=
-          sizeof(uint64_t),
-      "insufficient entropy otherwise");
+      std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
+  static_assert(sizeof(decltype(Hasher()(std::declval<KeyType>()))) >=
+                    sizeof(uint64_t),
+                "insufficient entropy otherwise");
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  Value *insert_or_get(std::span<const uint8_t> key, Args &&...args)
+  Value *insert_or_get(const KeyType &key, Args &&...args)
   {
     uint64_t overall_shortkey = hasher_(key);
     uint32_t root_selector = (overall_shortkey >> 32) % roots_.size();
@@ -309,7 +303,7 @@ public:
 
     assert(roots_.size() > root_selector);
 
-    using node_t = typename detail::Node<Value>;
+    using node_t = typename detail::Node<KeyType, Value, shortkey_t>;
     node_t *current_node = &roots_[root_selector];
 
     while (true) {
@@ -367,7 +361,7 @@ public:
   {
     pool.for_each_parallel(
         roots_,
-        [&f](detail::Node<Value, shortkey_t> &root) {
+        [&f](detail::Node<KeyType, Value, shortkey_t> &root) {
           root.template for_each<0>(f);
         },
         width);
@@ -376,7 +370,7 @@ public:
 private:
   constexpr static size_t kShortkeyBits = sizeof(shortkey_t) * 8;
 
-  std::vector<detail::Node<Value, shortkey_t>> roots_;
+  std::vector<detail::Node<KeyType, Value, shortkey_t>> roots_;
   Hasher hasher_;
 };
 

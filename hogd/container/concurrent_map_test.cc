@@ -26,7 +26,7 @@ struct TruncateHasher {
 
 TEST(ConcurrentMap, ValueBucketUsage)
 {
-  using bucket_t = detail::ValueBucket<int>;
+  using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
 
   std::atomic<bucket_t *> value_bucket_ptr = nullptr;
 
@@ -54,30 +54,34 @@ TEST(ConcurrentMap, ValueBucketUsage)
             nullptr);
 }
 
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 0) == 0x1);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 4) == 0x2);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 8) == 0x3);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 12) == 0x4);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 16) == 0x5);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 20) == 0x6);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 24) == 0x7);
-static_assert(hogd::detail::Node<int, uint32_t>::get_branch_bits(0x1234'5678,
-                                                                 28) == 0x8);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 0) == 0x1);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 4) == 0x2);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 8) == 0x3);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 12) == 0x4);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 16) == 0x5);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 20) == 0x6);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 24) == 0x7);
+static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
+                  0x1234'5678, 28) == 0x8);
 
-static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 0) ==
+static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
+                                                                      0) ==
               0x1);
-static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 4) ==
+static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
+                                                                      4) ==
               0x2);
-static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 8) ==
+static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
+                                                                      8) ==
               0x3);
-static_assert(hogd::detail::Node<int, uint16_t>::get_branch_bits(0x1234, 12) ==
+static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
+                                                                      12) ==
               0x4);
 
 TEST(ConcurrentMap, InsertOrGet)
@@ -85,7 +89,7 @@ TEST(ConcurrentMap, InsertOrGet)
   EXPECT_EQ(TruncateHasher{}(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}),
             0x0000'0000'0000'0001);
 
-  ConcurrentMap<int, TruncateHasher> map;
+  ConcurrentMap<std::vector<uint8_t>, int, TruncateHasher> map;
   int *value =
       map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 4);
   ASSERT_EQ(*value, 4);
@@ -103,7 +107,7 @@ TEST(ConcurrentMap, InsertOrGet)
 
 TEST(ConcurrentMap, ForEachParallel)
 {
-  ConcurrentMap<int, TruncateHasher> map;
+  ConcurrentMap<std::vector<uint8_t>, int, TruncateHasher> map;
   map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 4);
   map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 2}, 5);
   map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 3}, 6);
