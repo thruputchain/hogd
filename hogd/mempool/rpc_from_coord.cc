@@ -7,7 +7,6 @@
 #include <future>
 #include <memory>
 #include <span>
-#include <tuple>
 #include <vector>
 
 #include "block.hh"
@@ -270,22 +269,23 @@ MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
   cb();
 }
 
-x23::Async<x23::Vec<bool>>
+x23::Detached
 MempoolCoordinatorRpc::propose_batch_in_chunks(
-    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-    x23::XdrVec<NominatedTransaction> &transaction_nominations)
+    BlockID block_id, x23::span<SignedTransaction> txs,
+    x23::XdrVec<NominatedTransaction> &transaction_nominations,
+    x23::span<bool> ret, x23::CoroCB<void> cb)
 {
   ElapsedTimer total_timer;
   auto timer = std::make_unique<ElapsedTimer>();
 
   // Send the RPCs.
-  constexpr size_t kNumBigChunks = 128;
+  constexpr size_t kNumBigChunks = 120;
   size_t large_chunk_size = txs.size() / kNumBigChunks;
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(kNumBigChunks);
   x23::Vec<x23::Vec<x23::XdrVec<NominatedTransaction>>> nomination_chunks(
       kNumBigChunks, {});
-  x23::Vec<bool> ret(txs.size());
+  CHECK_EQ(ret.size(), txs.size());
   for (size_t i = 0; i < kNumBigChunks; i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
@@ -319,8 +319,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   double total = total_timer.elapsed();
 
   info("send_rpc_dur {}, wait_dur {}, total {}", send_rpc_dur, wait_dur, total);
-
-  co_return ret;
+  cb();
 }
 
 x23::Async<ExecResult>
@@ -356,36 +355,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         open_proposal_block(block_id, /*executor_idx=*/i));
   }
 
-  // Scheduler ---
-  auto timer2 = std::make_unique<ElapsedTimer>();
-
-  SchedulerNominationResult result(
-      SchedulerNominationOutcome::SchedulerNominationOK);
-  result.scheduler_nomination().block_id = block_id;
-  Nomination &nomination = result.scheduler_nomination().nomination;
-  nomination.block_height = db_tip.height + 1;
-  nomination.prev_block_hash = db_tip.hash;
-  // [nomination.block_hash], [nomination.transaction_hashes], and
-  // [nomination.transaction_nominations] are filled in below.
-  nomination.transaction_hashes.reserve(kMaxBlockSize);
-  nomination.transaction_nominations.reserve(kMaxBlockSize);
-
-  x23::Vec<SignedTransaction> txs;
-  x23::Vec<SignedTransactionHash> tx_hashes;
-
-  x23::CoroGuard cg;
-  auto timer3 = std::make_unique<ElapsedTimer>();
-  co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_duration = timer3->elapsed();
-
-  std::tie(tx_hashes, txs) = scheduler_->schedule(kMaxBlockSize);
-  size_t num_on_runqueue = scheduler_->size();
-  cg.reset();
-
-  double schedule_duration = timer2->elapsed();
-  // Scheduler ---
-
-  timer2 = std::make_unique<ElapsedTimer>();
   bool create_snapshot_handler_ret = co_await create_snapshot_handler;
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
@@ -412,20 +381,79 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // the expired txs either? A failure is pretty bad and unexpected, and I do
     // not think it is worth adding complexity and overhead for recovery here
     // for a rare event.
-    scheduler_->decrement_current_block();
-    co_await scheduler_->add_txs(txs);
+    // scheduler_->decrement_current_block();
+    // co_await scheduler_->add_txs(txs);
 
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   double wait_for_create_snapshot_and_open_block_handlers_duration =
-      timer2->elapsed();
-  double create_snapshot_and_open_block_and_schedule_duration =
       timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
-  info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
-       txs.size(), num_on_runqueue);
+  // Scheduler ---
+
+  SchedulerNominationResult result(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  result.scheduler_nomination().block_id = block_id;
+  Nomination &nomination = result.scheduler_nomination().nomination;
+  nomination.block_height = db_tip.height + 1;
+  nomination.prev_block_hash = db_tip.hash;
+  // [nomination.block_hash], [nomination.transaction_hashes], and
+  // [nomination.transaction_nominations] are filled in below.
+  nomination.transaction_hashes.reserve(kMaxBlockSize);
+  nomination.transaction_nominations.reserve(kMaxBlockSize);
+
+  x23::Vec<SignedTransaction> txs;
+  x23::Vec<SignedTransactionHash> tx_hashes;
+  txs.reserve(kMaxBlockSize);
+  tx_hashes.reserve(kMaxBlockSize);
+
+  x23::CoroGuard cg;
+  auto timer2 = std::make_unique<ElapsedTimer>();
+  co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_duration = timer2->elapsed();
+
+  x23::Vec<std::unique_ptr<x23::Awaitable<void>>>
+      propose_batch_in_chunks_handles;
+  propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
+  x23::Vec<bool> statuses(kMaxBlockSize, false);
+  size_t num_scheduled = 0;
+  for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
+                         txs);
+    size_t num_on_runqueue = scheduler_->size();
+
+    size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
+    info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
+         num_scheduled_this_iteration, num_on_runqueue);
+    if (!num_scheduled_this_iteration) {
+      break;
+    }
+
+    // TODO(jhumphri): Might want to do this in another thread.
+    propose_batch_in_chunks_handles.push_back(
+        std::make_unique<x23::Awaitable<void>>());
+
+    x23::span<bool> ret_span(statuses.begin() + num_scheduled,
+                             statuses.begin() + tx_hashes.size());
+    x23::span<SignedTransaction> txs_span(txs.begin() + num_scheduled,
+                                          txs.end());
+    info("ret_span.size() = {}, txs_span.size() = {}, tx_hashes.size() = {}, "
+         "num_scheduled = {}",
+         ret_span.size(), txs_span.size(), tx_hashes.size(), num_scheduled);
+    num_scheduled = tx_hashes.size();
+    propose_batch_in_chunks(block_id, txs_span,
+                            nomination.transaction_nominations, ret_span,
+                            x23::CoroCB<void>(
+                                *propose_batch_in_chunks_handles.back()));
+  }
+
+  cg.reset();
+
+  double schedule_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
   if (tx_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -435,15 +463,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-
-  timer = std::make_unique<ElapsedTimer>();
-
-  x23::Async<x23::Vec<bool>> propose_batch_in_chunks_handle =
-      propose_batch_in_chunks(block_id, txs,
-                              nomination.transaction_nominations);
+  // Scheduler ---
 
   timer2 = std::make_unique<ElapsedTimer>();
-  x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
+
+  for (std::unique_ptr<x23::Awaitable<void>> &handle :
+       propose_batch_in_chunks_handles) {
+    co_await *handle;
+  }
+
   double just_wait_for_executor_duration = timer2->elapsed();
   double run_on_executor_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
@@ -502,15 +530,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double wait_for_handles_duration = timer->elapsed();
 
   info("wait_for_transfer_duration {}, "
-       "create_snapshot_and_open_block_and_schedule_duration "
-       "{}, wait_for_create_snapshot_and_open_block_handlers_duration {}, "
+       "wait_for_create_snapshot_and_open_block_handlers_duration {}, "
        "schedule_duration {}, run_on_executor_duration {}, "
        "just_wait_for_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
        "wait_for_lock_duration {}",
        wait_for_transfer_duration,
-       create_snapshot_and_open_block_and_schedule_duration,
        wait_for_create_snapshot_and_open_block_handlers_duration,
        schedule_duration, run_on_executor_duration,
        just_wait_for_executor_duration, mark_failed_txs_duration,

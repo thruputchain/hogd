@@ -516,12 +516,11 @@ NewScheduler::cycle_accounts_during_schedule_helper(
   }
 }
 
-std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-NewScheduler::schedule(size_t block_size)
+void
+NewScheduler::schedule(size_t num_txs,
+                       x23::Vec<SignedTransactionHash> &tx_hashes,
+                       x23::Vec<SignedTransaction> &txs)
 {
-  x23::Vec<SignedTransactionHash> tx_hashes_to_schedule;
-  x23::Vec<SignedTransaction> txs_to_schedule;
-
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> removed_accounts;
   // I would prefer to make [accounts_excluded_from_block] an
@@ -532,7 +531,7 @@ NewScheduler::schedule(size_t block_size)
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
   auto while_timer = std::make_unique<ElapsedTimer>();
-  while (num_scheduled < block_size && size_.load(std::memory_order_relaxed)) {
+  while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
     if (ready_accounts_.empty()) {
       info("block of work took {}", while_timer->elapsed());
       while_timer = std::make_unique<ElapsedTimer>();
@@ -551,19 +550,18 @@ NewScheduler::schedule(size_t block_size)
     const AccountKey account_key = *ready_accounts_.begin();
     const ContractAddress account = account_key.account;
     auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
-    auto [txs, txs_lock] = account_to_tx_[account];
+    auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
     uint128_t hogs_spent_by_account = 0;
-    while (num_scheduled < block_size &&
-           size_.load(std::memory_order_relaxed)) {
-      auto it = txs.lower_bound(lower_bound);
-      if (it != txs.begin()) {
+    while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
+      auto it = txs_to_schedule.lower_bound(lower_bound);
+      if (it != txs_to_schedule.begin()) {
         // This removes expired txs.
-        size_t to_remove = std::distance(txs.begin(), it);
+        size_t to_remove = std::distance(txs_to_schedule.begin(), it);
         CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
         size_ -= to_remove;
-        it = txs.erase(txs.begin(), it);
+        it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
       }
-      if (it == txs.end()) {
+      if (it == txs_to_schedule.end()) {
         CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         break;
       }
@@ -576,12 +574,12 @@ NewScheduler::schedule(size_t block_size)
             to_xdr(hogs_available - tx.tx.invocation.gas_limit);
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
-        tx_hashes_to_schedule.push_back(tx_hash);
-        txs_to_schedule.push_back(tx);
+        tx_hashes.push_back(tx_hash);
+        txs.push_back(tx);
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
         // beyond this point!
-        it = txs.erase(it);
+        it = txs_to_schedule.erase(it);
         num_scheduled++;
         size_.fetch_sub(1, std::memory_order_relaxed);
       }
@@ -600,7 +598,7 @@ NewScheduler::schedule(size_t block_size)
           // already included in the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
-          it = txs.erase(it);
+          it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
           CHECK(accounts_excluded_from_block.insert(account_key).second);
         }
@@ -632,7 +630,6 @@ NewScheduler::schedule(size_t block_size)
   }
 
   increment_current_block();
-  return {tx_hashes_to_schedule, txs_to_schedule};
 }
 
 bool
