@@ -127,7 +127,7 @@ public:
                          Proj proj = {})
   {
     std::vector<std::future<void>> completions;
-    completions.reserve(divide_up(r.size(), width));
+    completions.reserve(divide_up<size_t>(r.size(), width));
     // The prior usage of std::views::chunk resulting in stack use-after-scope
     // bugs. Moving the range into the completion took references to elements
     // constructed in the temporary (the first argument into the
@@ -147,7 +147,7 @@ public:
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
     for (size_t i = 0; i < r.size(); i += width) {
-      size_t end = std::min(i + width, r.size());
+      size_t end = std::min<size_t>(i + width, r.size());
 
       completions.emplace_back(submit([proj, &f, i, end, &r]() {
         for (size_t j = i; j < end; ++j) {

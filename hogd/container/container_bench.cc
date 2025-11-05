@@ -1,0 +1,75 @@
+#include <benchmark/benchmark.h>
+
+#include <cstddef>
+#include <cstdlib>
+#include <ranges>
+#include <span>
+#include <vector>
+
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
+#include "hogd/container/concurrent_map.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/init.h"
+
+namespace hogd {
+
+namespace {
+
+struct HashWrapper {
+  constexpr uint64_t operator()(uint64_t val)
+  {
+    static SipHash24 hasher;
+    return hasher(std::as_bytes(std::span(&val, 1)));
+  }
+};
+
+void
+bench_concurrent_map_insert(benchmark::State &state)
+{
+  std::vector<std::byte> in(state.range(0));
+
+  ConcurrentMap<uint64_t, uint64_t, HashWrapper> map;
+
+  WorkerPool &pool = WorkerPool::get_default_pool();
+
+  auto nworkers = state.range(0);
+  uint64_t nvals = state.range(1);
+
+  pool.adjust_workers(nworkers);
+
+  for (auto _ : state) {
+    pool.for_each_parallel(std::ranges::iota_view{0UL, nvals},
+                           [&map](size_t i) {
+                             uint64_t key = i;
+                             uint64_t val = i;
+                             CHECK(map.insert_or_get(key, val) != nullptr);
+                           });
+  }
+}
+
+BENCHMARK(bench_concurrent_map_insert)
+    ->Args({1, 1000000})
+    ->Args({4, 1000000})
+    ->Args({8, 1000000})
+    ->Args({16, 1000000})
+    ->Args({32, 1000000})
+    ->Args({64, 1000000})
+    ->Args({128, 1000000})
+    ->Args({256, 1000000})
+    ->UseRealTime();
+
+} // namespace
+
+} // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  auto ret = hogd::hogd_init(argc, argv);
+  if (ret != 0)
+    return EXIT_FAILURE;
+  benchmark::Initialize(&argc, argv);
+  benchmark::RunSpecifiedBenchmarks();
+}

@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
-#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -44,8 +43,8 @@ template<typename KeyType, typename Value,
 class ValueBucket {
 public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  ValueBucket(std::span<const uint8_t> key, Args &&...args)
-    : key_(key.begin(), key.end()), value_(std::forward<Args>(args)...)
+  ValueBucket(KeyType const &key, Args &&...args)
+    : key_(key), value_(std::forward<Args>(args)...)
   {}
 
   using value_bucket_t = ValueBucket<KeyType, Value, KeyEqual>;
