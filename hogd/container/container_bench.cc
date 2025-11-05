@@ -19,7 +19,7 @@ namespace hogd {
 namespace {
 
 struct HashWrapper {
-  constexpr uint64_t operator()(uint64_t val)
+  constexpr uint64_t operator()(uint64_t val) const
   {
     static SipHash24 hasher;
     return hasher(std::as_bytes(std::span(&val, 1)));
