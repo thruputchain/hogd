@@ -35,7 +35,7 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
 
   WorkerPool &pool = WorkerPool::get_default_pool();
 
-  auto nworkers = state.range(0);
+  size_t nworkers = state.range(0);
   uint64_t nvals = state.range(1);
 
   pool.adjust_workers(nworkers);
@@ -61,7 +61,7 @@ bench_synchronized_map_insert_lowcontention(benchmark::State &state)
 
   WorkerPool &pool = WorkerPool::get_default_pool();
 
-  auto nworkers = state.range(0);
+  size_t nworkers = state.range(0);
   uint64_t nvals = state.range(1);
 
   pool.adjust_workers(nworkers);
