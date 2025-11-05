@@ -54,7 +54,7 @@ public:
   ValueBucket(ValueBucket &&) noexcept = delete;
   ValueBucket &operator=(ValueBucket &&) noexcept = delete;
 
-  ~ValueBucket() { delete next_ptr_.load(); }
+  ~ValueBucket() { delete next_ptr_.load(std::memory_order_relaxed); }
 
   const KeyType key_;
   Value value_;
@@ -256,6 +256,8 @@ public:
   {
     assert((std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
         content_)));
+    assert(desired != nullptr);
+    assert(expect == nullptr || expect->key_len_ > desired->key_len_);
     return std::get<std::array<std::atomic<node_t *>, 16>>(
                content_)[branch_bits]
         .compare_exchange_strong(expect, desired, std::memory_order_release,
@@ -346,6 +348,7 @@ public:
       auto *new_branch = new node_t(typename node_t::branch_t{}, shortkey,
                                     child_match_len, child);
       if (current_node->try_insert_child(branch_bits, child, new_branch)) {
+        new_branch->set_owns_children();
         current_node = new_branch;
         continue;
       }
