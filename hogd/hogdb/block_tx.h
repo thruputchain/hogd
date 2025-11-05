@@ -95,17 +95,17 @@ private:
     return mutex_cache.get_mutex(key.as_bytes());
   }
 
-  static HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul,
+  static inline HogDBStatus<int128_t> do_lock(const std::unique_lock<std::mutex> &ul,
                                        ItemLock &lock, const ItemChange &change,
                                        const StorageCostModel *cost_model);
-  static HogDBStatus<int128_t>
+  static inline HogDBStatus<int128_t>
   do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
                  const ItemChange &old_change, const ItemChange &new_change,
                  const StorageCostModel *cost_model);
-  static void do_unlock_item(const std::unique_lock<std::mutex> &ul,
+  static inline void do_unlock_item(const std::unique_lock<std::mutex> &ul,
                              const ItemKey &key, ItemLock &lock,
                              const ItemChange &change);
-  static void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+  static inline void do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
                                      const Address &addr, ItemLock &lock,
                                      const ItemChange &change);
 };
