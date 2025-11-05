@@ -31,7 +31,6 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
 {
   std::vector<std::byte> in(state.range(0));
 
-
   WorkerPool &pool = WorkerPool::get_default_pool();
 
   size_t nworkers = state.range(0);
@@ -56,7 +55,6 @@ void
 bench_synchronized_map_insert_lowcontention(benchmark::State &state)
 {
   std::vector<std::byte> in(state.range(0));
-
 
   WorkerPool &pool = WorkerPool::get_default_pool();
 
