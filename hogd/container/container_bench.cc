@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 
@@ -26,7 +27,7 @@ struct HashWrapper {
 };
 
 void
-bench_concurrent_map_insert(benchmark::State &state)
+bench_concurrent_map_insert_lowcontention(benchmark::State &state)
 {
   std::vector<std::byte> in(state.range(0));
 
@@ -49,7 +50,42 @@ bench_concurrent_map_insert(benchmark::State &state)
   }
 }
 
-BENCHMARK(bench_concurrent_map_insert)
+void
+bench_synchronized_map_insert_lowcontention(benchmark::State &state)
+{
+  std::vector<std::byte> in(state.range(0));
+
+  SynchronizedMap<uint64_t, uint64_t, HashWrapper> map;
+
+  WorkerPool &pool = WorkerPool::get_default_pool();
+
+  auto nworkers = state.range(0);
+  uint64_t nvals = state.range(1);
+
+  pool.adjust_workers(nworkers);
+
+  for (auto _ : state) {
+    pool.for_each_parallel(std::ranges::iota_view{0UL, nvals},
+                           [&map](size_t i) {
+                             uint64_t key = i;
+                             uint64_t val = i;
+                             map.insert(key, val);
+                           });
+  }
+}
+
+BENCHMARK(bench_concurrent_map_insert_lowcontention)
+    ->Args({1, 1000000})
+    ->Args({4, 1000000})
+    ->Args({8, 1000000})
+    ->Args({16, 1000000})
+    ->Args({32, 1000000})
+    ->Args({64, 1000000})
+    ->Args({128, 1000000})
+    ->Args({256, 1000000})
+    ->UseRealTime();
+
+BENCHMARK(bench_synchronized_map_insert_lowcontention)
     ->Args({1, 1000000})
     ->Args({4, 1000000})
     ->Args({8, 1000000})
