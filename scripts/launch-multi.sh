@@ -229,7 +229,7 @@ wait_port "$loadgen_server" 11222
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
-  remote_launch "$s" "$HOGEXEC_BINARY" "$mempool_server":8071
+  remote_launch "$s" "$HOGEXEC_BINARY" "$mempool_server":8071 -n 1024
 done
 
 # Start event.
