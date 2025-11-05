@@ -296,9 +296,9 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
                                              txs.begin() + end_idx);
     x23::span<bool> ret_chunk(ret.begin() + start_idx, ret.begin() + end_idx);
 
-    propose_batch_in_chunks_helper(block_id, chunk, nomination_chunks[i],
-                                   ret_chunk,
-                                   x23::CoroCB<void>(*awaitables[i]));
+    propose_small_chunks_from_large_chunk(block_id, chunk, nomination_chunks[i],
+                                          ret_chunk,
+                                          x23::CoroCB<void>(*awaitables[i]));
   }
 
   double send_rpc_dur = timer->elapsed();
@@ -439,8 +439,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   timer = std::make_unique<ElapsedTimer>();
 
   x23::Async<x23::Vec<bool>> propose_batch_in_chunks_handle =
-      propose_batch_in_chunks(block_id, txs, nomination.transaction_nominations,
-                              kChunkSize);
+      propose_batch_in_chunks(block_id, txs,
+                              nomination.transaction_nominations);
 
   timer2 = std::make_unique<ElapsedTimer>();
   x23::Vec<bool> statuses = co_await propose_batch_in_chunks_handle;
