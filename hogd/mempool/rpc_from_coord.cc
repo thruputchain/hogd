@@ -216,10 +216,9 @@ MempoolCoordinatorRpc::propose_batch(
 {
   co_await default_coropoll().pool_.bg();
 
-  x23::Vec<SignedTransaction> txs_to_send(txs.begin(), txs.end());
   ExecProposeBatchResult res =
-      co_await exec_clients_[executor_idx].executorsched_propose_batch(
-          block_id, txs_to_send);
+      co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
+                                                                       txs);
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
     switch (result.result()) {
