@@ -288,7 +288,7 @@ class ConcurrentMap {
 public:
   using shortkey_t = uint16_t;
 
-  ConcurrentMap(size_t n_roots = available_parallelism(),
+  ConcurrentMap(size_t n_roots = scalable_shard_size(),
                 Hasher hasher = Hasher())
     : roots_(n_roots), hasher_(hasher)
   {}

@@ -12,7 +12,7 @@ namespace hogd {
 
 template<typename Hash> class MutexCache {
 public:
-  MutexCache(size_t n = available_parallelism()) : mutexes_(n) {}
+  MutexCache(size_t n = scalable_shard_size()) : mutexes_(n) {}
 
   std::mutex &get_mutex(std::span<const std::byte> key)
   {
