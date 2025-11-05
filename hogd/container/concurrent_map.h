@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -207,7 +208,12 @@ public:
       auto *node = ptr.load();
       if (node == nullptr)
         continue;
-      node->template for_each<I + 1>(f);
+      if constexpr (I < sizeof(Shortkey) * 2) {
+        node->template for_each<I + 1>(f);
+      }
+      else {
+        panic("Unreachable");
+      }
     }
   }
 
