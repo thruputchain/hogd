@@ -56,17 +56,11 @@ public:
 
   ~ValueBucket()
   {
-    auto *next_ptr = &next_ptr_;
-    for (;;) {
-      assert(next_ptr != nullptr);
-      auto *next = next_ptr->load(std::memory_order_relaxed);
-      if (next) {
-        next_ptr = &next->next_ptr_;
-        delete next;
-      }
-      else {
-        break;
-      }
+    auto *next_ptr = next_ptr_.load(std::memory_order_relaxed);
+    while(next_ptr != nullptr) {
+      auto* cur = next_ptr;
+      next_ptr = cur->next_ptr_.load(std::memory_order_relaxed);
+      delete cur;
     }
   }
 
