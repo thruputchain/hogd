@@ -63,8 +63,8 @@ using std::declval;
       __FORWARD_APPLY_IGNORE(__FORWARD_PARENTHESIZED_TO_COMMA arg)
 
 // When creating global objects that should not be destroyed at
-// shutdown, wrap them in make_permanent_ref to avoid address
-// sanitizer warnings about leaks.  For example:
+// shutdown, wrap them in make_nodestroy to avoid address sanitizer
+// warnings about leaks.  For example:
 //
 // auto &my_global_map = make_nodestroy(new std::map<int, std::string>);
 inline decltype(auto)
@@ -79,7 +79,7 @@ make_nodestroy(auto *p)
 template<typename T, typename U>
 concept decays_to = std::same_as<std::decay_t<T>, std::decay_t<U>>;
 
-// Match an lvalue- or rvalue-, const or non-const reference to T.
+// Match an lvalue or rvalue, const or non-const U.
 template<typename T, typename U>
 concept references = std::convertible_to<T, const U &>;
 
@@ -87,21 +87,12 @@ concept references = std::convertible_to<T, const U &>;
 template<typename T>
 concept is_mutable = !std::is_const_v<std::remove_reference_t<T>>;
 
-// Type Derived is a posibly cv- or reference-qualified Base or
-// subtype of Base.
-template<typename Derived, typename Base>
-concept derived_ref = std::derived_from<std::remove_cvref_t<Derived>, Base>;
-
 template<typename T, typename... Ts>
 concept is_one_of = (std::same_as<T, Ts> || ...);
 
 template<typename RG, typename T>
 concept is_range_of =
     std::ranges::range<RG> && std::same_as<std::ranges::range_value_t<RG>, T>;
-
-template<typename RG, typename T>
-concept is_forward_range_of =
-    is_range_of<RG, T> && std::ranges::forward_range<RG>;
 
 // Lambda with ad-hoc polymorphism.  For example:
 //
@@ -208,9 +199,9 @@ concept void_invocable =
 template<typename F, typename... Args>
 concept noexcept_invocable = void_invocable<F, Args...> && [] {
   if constexpr (sizeof...(Args) == 1 && (std::same_as<void, Args> && ...))
-    return noexcept(std::invoke(std::declval<F>()));
+    return noexcept(std::invoke(declval<F>()));
   else
-    return noexcept(std::invoke(std::declval<F>(), std::declval<Args>()...));
+    return noexcept(std::invoke(declval<F>(), declval<Args>()...));
 }();
 
 // Return the result of f2(f1(args...)) unless f1 returns void, in
