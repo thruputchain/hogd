@@ -199,9 +199,10 @@ private:
       x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
       x23::span<bool> ret, x23::CoroCB<void> cb);
 
-  x23::Async<x23::Vec<bool>> propose_batch_in_chunks(
+  x23::Detached propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
-      x23::XdrVec<NominatedTransaction> &transaction_nominations);
+      x23::XdrVec<NominatedTransaction> &transaction_nominations,
+      x23::span<bool> ret, x23::CoroCB<void> cb);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
