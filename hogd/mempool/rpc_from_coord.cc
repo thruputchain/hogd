@@ -330,11 +330,11 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-std::unique_ptr<ElapsedTimer> nominate_timer = std::make_unique<ElapsedTimer>();
-
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  static std::unique_ptr<ElapsedTimer> nominate_timer =
+      std::make_unique<ElapsedTimer>();
   info("nominate: {} seconds between calls", nominate_timer->elapsed());
   // std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
 
