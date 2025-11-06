@@ -90,6 +90,7 @@ public:
           // This call to construct new_value_bucket only happens at most once.
           // NOLINTBEGIN(bugprone-use-after-move)
           new_value_bucket = allocator.alloc();
+          CHECK_PTR(new_value_bucket);
           new (new_value_bucket)
               value_bucket_t{key, Value(std::forward<Args>(args)...)};
           // NOLINTEND(bugprone-use-after-move)
