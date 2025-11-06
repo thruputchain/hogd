@@ -635,7 +635,7 @@ NewScheduler::schedule(size_t num_txs,
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   for (const ContractAddress &account : accounts_excluded_from_block) {
-    if (account_is_ready(account, /*removed_expired_txs=*/false)) {
+    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
