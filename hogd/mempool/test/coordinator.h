@@ -53,8 +53,10 @@ public:
     CHECK(!nominations_.empty());
     CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
 
-    SchedulerNomination ret = nominations_[0].chunk;
-    for (size_t i = 1; i < nominations_[0].total_chunks; i++) {
+    // The block hash is in the last chunk.
+    size_t last_chunk = nominations_[0].total_chunks - 1;
+    SchedulerNomination ret = nominations_[last_chunk].chunk;
+    for (size_t i = 0; i < nominations_[0].total_chunks; i++) {
       ret.nomination.transaction_hashes +=
           nominations_[i].chunk.nomination.transaction_hashes;
       ret.nomination.transaction_nominations +=
