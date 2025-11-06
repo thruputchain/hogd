@@ -94,7 +94,9 @@ TEST(NewScheduler, Single)
             5'000'000'000 * 10);
   EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
 
-  const auto &[_, scheduled] = scheduler->schedule(kBlockSize);
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
@@ -153,7 +155,9 @@ TEST(Scheduler, Fairness)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] = scheduler->schedule(kBlockSize);
+    x23::Vec<SignedTransactionHash> scheduled_hashes;
+    x23::Vec<SignedTransaction> scheduled;
+    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
@@ -221,8 +225,9 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] =
-        scheduler->schedule(/*block_size=*/1);
+    x23::Vec<SignedTransactionHash> scheduled_hashes;
+    x23::Vec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
   }

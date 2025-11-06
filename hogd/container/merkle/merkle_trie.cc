@@ -538,7 +538,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
       else {
         // There is no child node, so we create a leaf for [key] and place the
         // leaf as a child of the branch.
-        Node *leaf = Node::create_leaf(/*parent=*/branch);
+        Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
         CHECK(leaf->rw_lock.try_lock_writer());
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
@@ -655,7 +655,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first = Node::create_extension(/*parent=*/extension_cache_parent);
+    Node *first =
+        Node::create_extension(/*parent=*/extension_cache_parent, allocator_);
     CHECK(first->rw_lock.try_lock_writer());
     first->path = key_window.get_subarray(0, diverge_idx);
 
@@ -711,7 +712,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   auto second_branch =
       std::to_integer<size_t>(extension_cache_path.get(diverge_idx));
   if (diverge_idx < extension_cache_path.size() - 1) {
-    extension = Node::create_extension(/*parent=*/branch);
+    extension = Node::create_extension(/*parent=*/branch, allocator_);
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
@@ -754,7 +755,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   }
   // Create new leaf node for [key_window] and add the leaf node as a child of
   // the new branch.
-  Node *leaf = Node::create_leaf(/*parent=*/branch);
+  Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
   CHECK(leaf->rw_lock.try_lock_writer());
   // Add 1 to account for the branch node. Since we are placing the leaf node
   // for [key_window] as a child of the branch, the branch accounts for 1 hex
@@ -791,7 +792,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
   Key key_window = k.get_subarray(idx + 1, k.size());
 
   // We create a branch that we will put both keys under.
-  Node *branch = Node::create_branch(/*parent=*/leaf->parent);
+  Node *branch = Node::create_branch(/*parent=*/leaf->parent, allocator_);
   CHECK(branch->rw_lock.try_lock_writer());
   leaf->parent->child[parent_branch_digit] = branch;
 
@@ -802,7 +803,8 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
       get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
-    Node *extension = Node::create_extension(/*parent=*/leaf->parent);
+    Node *extension =
+        Node::create_extension(/*parent=*/leaf->parent, allocator_);
     CHECK(extension->rw_lock.try_lock_writer());
     extension->path = key_window.get_subarray(0, diverge_idx);
 
@@ -853,7 +855,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
     // [leaf]. The [shorter_*] and [longer_*] variables above are references to
     // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
     // those references.
-    Node *shorter_leaf = Node::create_leaf(/*parent=*/branch);
+    Node *shorter_leaf = Node::create_leaf(/*parent=*/branch, allocator_);
     // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
     // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
@@ -1012,7 +1014,7 @@ MerkleTrie::remove(const Key &k)
     num_children--;
 
     existing_key->rw_lock.unlock();
-    delete existing_key;
+    allocator_.free(existing_key);
   }
 
   Node *to_hash = nullptr;
@@ -1087,7 +1089,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
     branch->parent = extension->parent;
 
     extension->rw_lock.unlock();
-    delete extension;
+    allocator_.free(extension);
   }
   else {
     CHECK_EQ(branch->parent->type, Node::Type::kBranch);
@@ -1160,7 +1162,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
       new_child = remaining_child;
 
       branch->rw_lock.unlock();
-      delete branch;
+      allocator_.free(branch);
     }
   }
 

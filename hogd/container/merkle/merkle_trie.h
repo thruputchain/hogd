@@ -22,6 +22,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -65,16 +66,19 @@ public:
   // [generate_top_level_hashes()] when we are done with all operations, but the
   // overhead of this is much smaller than hashing these nodes on all
   // operations.
-  MerkleTrie(size_t no_hash_depth = 3) : no_hash_depth_(no_hash_depth)
+  MerkleTrie(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
+    : allocator_(allocator_type), no_hash_depth_(no_hash_depth)
   {
     init_root_node();
   }
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
-    ElapsedTimer timer;
-    free_all_nodes(&root_);
-    info("MerkleTrie destructor took {}", timer.elapsed());
+    if (allocator_.type() != Allocator<Node>::Type::kBump) {
+      free_all_nodes(&root_);
+    }
   }
 
   // Disable copy and move.
@@ -263,8 +267,8 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  static Node *remove_branch(Node *branch, size_t num_children,
-                             std::byte remaining_child_hex);
+  Node *remove_branch(Node *branch, size_t num_children,
+                      std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node. Does not traverse nodes with a depth
@@ -453,6 +457,8 @@ private:
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
+  // The memory allocator for nodes.
+  Allocator<Node> allocator_;
   // See the note above the constructor about [no_hash_depth].
   const size_t no_hash_depth_ = 3;
   // The number of KV pairs in the trie.
@@ -497,28 +503,32 @@ private:
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 class MerkleTriePrefix {
 public:
-  MerkleTriePrefix(size_t no_hash_depth = 3)
+  MerkleTriePrefix(
+      Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault,
+      size_t no_hash_depth = 3)
   {
     for (std::optional<MerkleTrie> &trie : tries_) {
-      trie.emplace(no_hash_depth);
+      trie.emplace(allocator_type, no_hash_depth);
     }
   }
 
   ~MerkleTriePrefix()
   {
-    try {
-      WorkerPool &worker_pool = WorkerPool::get_default_pool();
-      std::vector<std::future<void>> futures;
-      futures.reserve(tries_.size());
-      for (std::optional<MerkleTrie> &trie : tries_) {
-        futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
+    if (tries_[0]->allocator_.type() != Allocator<Node>::Type::kBump) {
+      try {
+        WorkerPool &worker_pool = WorkerPool::get_default_pool();
+        std::vector<std::future<void>> futures;
+        futures.reserve(tries_.size());
+        for (std::optional<MerkleTrie> &trie : tries_) {
+          futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
+        }
+        for (std::future<void> &future : futures) {
+          future.get();
+        }
+      } catch (...) {
+        // Unexpected exception thrown.
+        CHECK(false);
       }
-      for (std::future<void> &future : futures) {
-        future.get();
-      }
-    } catch (...) {
-      // Unexpected exception thrown.
-      CHECK(false);
     }
   }
 

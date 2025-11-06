@@ -11,7 +11,6 @@
 #include <memory>
 #include <mutex>
 #include <ranges>
-#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>

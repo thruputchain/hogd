@@ -9,6 +9,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -85,7 +86,8 @@ TEST(Node, Clear)
 TEST(Node, CreateBranch)
 {
   Node parent;
-  Node *branch = Node::create_branch(&parent);
+  Allocator<Node> allocator(Allocator<Node>::Type::kDefault);
+  Node *branch = Node::create_branch(&parent, allocator);
 
   EXPECT_EQ(branch->type, Node::Type::kBranch);
   EXPECT_EQ(branch->parent, &parent);
@@ -113,7 +115,8 @@ TEST(Node, InitBranch)
 TEST(Node, CreateExtension)
 {
   Node parent;
-  Node *extension = Node::create_extension(&parent);
+  Allocator<Node> allocator(Allocator<Node>::Type::kDefault);
+  Node *extension = Node::create_extension(&parent, allocator);
 
   EXPECT_EQ(extension->type, Node::Type::kExtension);
   EXPECT_EQ(extension->parent, &parent);
@@ -141,7 +144,8 @@ TEST(Node, InitExtension)
 TEST(Node, CreateLeaf)
 {
   Node parent;
-  Node *leaf = Node::create_leaf(&parent);
+  Allocator<Node> allocator(Allocator<Node>::Type::kDefault);
+  Node *leaf = Node::create_leaf(&parent, allocator);
 
   EXPECT_EQ(leaf->type, Node::Type::kLeaf);
   EXPECT_EQ(leaf->parent, &parent);

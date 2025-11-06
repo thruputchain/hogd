@@ -2,12 +2,29 @@ add_subdirectory(merkle)
 
 # create container module test binary
 add_executable(
-  synchronized_map_test
+  container_test
   synchronized_map_test.cc
+  concurrent_map_test.cc
 )
 target_link_libraries(
-  synchronized_map_test
+  container_test
   base
-  GTest::gtest_main
+  hogd
+  GTest::gtest
 )
-gtest_discover_tests(synchronized_map_test)
+gtest_discover_tests(container_test)
+
+
+add_executable(
+  container_bench
+  container_bench.cc
+)
+target_link_libraries(
+  container_bench
+  hogd
+  benchmark::benchmark
+)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

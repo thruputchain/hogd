@@ -49,7 +49,7 @@ dependencies = [
 [[package]]
 name = "bottle-test-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "sdk",
  "xdrs",
@@ -200,7 +200,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 [[package]]
 name = "erc20-bottle-test"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "bottle-test-if",
  "groundhog-erc20-if",
@@ -243,7 +243,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 [[package]]
 name = "gen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "darling",
  "groundhog_xdr",
@@ -273,7 +273,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "groundhog-erc1271-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "sdk",
  "thiserror",
@@ -283,7 +283,7 @@ dependencies = [
 [[package]]
 name = "groundhog-erc20-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "sdk",
  "thiserror",
@@ -399,7 +399,7 @@ dependencies = [
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "darling",
  "gen",
@@ -449,7 +449,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "native_exec"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "bindgen",
  "cmake",
@@ -552,7 +552,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "sdk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#3ddd223bdee6fda7a03c2b102905fa755e4d9983"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#66b34e4184ff57de72d2a1225c8ee67e882474a5"
 dependencies = [
  "delegate",
  "groundhog_xdr",
