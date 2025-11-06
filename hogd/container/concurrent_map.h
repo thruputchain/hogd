@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <bit>
 #include <cassert>
@@ -14,7 +13,6 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -70,10 +68,10 @@ public:
     }
   }
 
-  template<typename... Args> requires std::constructible_from<Value, Args...>
+  template<typename Allocator, typename... Args>
+  requires std::constructible_from<Value, Args...>
   static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
-                       BumpAllocator<value_bucket_t> &allocator,
-                       const KeyType &key, Args &&...args)
+                       Allocator &allocator, const KeyType &key, Args &&...args)
   {
     // The value bucket that we might create in this iteration of insert.
     // Starts as nullptr, instantiated if we try to insert.
@@ -174,7 +172,7 @@ public:
 private:
   std::vector<std::atomic<value_bucket_t *>> buckets_;
 
-  BumpAllocator<value_bucket_t> value_allocator_;
+  BumpAllocator<value_bucket_t, 4096> value_allocator_;
   Hasher hasher_;
 };
 

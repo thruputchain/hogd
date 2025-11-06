@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <optional>
 #include <sys/mman.h>
 #include <vector>
@@ -14,9 +13,9 @@
 
 namespace hogd {
 
-template<typename T> class BumpAllocator {
+template<typename T, size_t NumElementsPerChunk = 128> class BumpAllocator {
 public:
-  static constexpr size_t kPerThreadNumElementsPerChunk = 128;
+  static constexpr size_t kPerThreadNumElementsPerChunk = NumElementsPerChunk;
   static constexpr size_t kPerThreadAllocLength =
       kPerThreadNumElementsPerChunk * sizeof(T);
 
