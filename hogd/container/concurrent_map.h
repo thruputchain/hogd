@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -74,6 +73,20 @@ public:
     return index < kBlockSize ? get(index) : nullptr;
   }
 
+  template<typename Func>
+  void for_each(Func &f)
+  {
+    // cannot be called while objects are being allocated
+    for (size_t i = 0; i < std::min<size_t>(next_free_index_.load(), kBlockSize); i++) {
+      auto* value = get(i);
+      if (value->is_valid_) {
+        f(std::make_pair(std::cref(value->key_), std::ref(value->value_)));
+      }
+    }
+  }
+
+private:
+
   std::atomic<size_t> next_free_index_ = 0;
   ValueType *ptr_;
 };
@@ -98,6 +111,15 @@ public:
 
       new (out) ValueType(std::forward<Args>(args)...);
       return out;
+    }
+  }
+
+  // cannot be called while objects are being allocated
+  template<typename Func>
+  void for_each(Func &f)
+  {
+    for (auto &block : old_blocks_) {
+      block->for_each(f);
     }
   }
 
@@ -140,21 +162,6 @@ public:
   bool is_valid_ = false;
   Value value_;
   std::atomic<value_bucket_t *> next_ptr_;
-
-  template<typename Func>
-  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
-  static void for_each(std::atomic<value_bucket_t *> *scan_ptr, Func &f)
-  {
-    while (auto *next_value_bucket =
-               scan_ptr->load(std::memory_order_relaxed)) {
-      if (next_value_bucket->is_valid_) {
-        f(std::pair<const KeyType &, Value &>(
-            std::cref(next_value_bucket->key_),
-            std::ref(next_value_bucket->value_)));
-      }
-      scan_ptr = &next_value_bucket->next_ptr_;
-    }
-  }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
   static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
@@ -263,36 +270,6 @@ public:
           *std::get_if<std::array<std::atomic<node_t *>, 16>>(&content_);
       for (auto &ptr : content) {
         delete ptr.load();
-      }
-    }
-  }
-
-  // this is a limited, bounded depth recursion; the I parameter bypasses
-  // clang-tidy's recursion limit
-  template<size_t I, typename Func>
-  requires std::invocable<Func, std::pair<const KeyType &, Value &>> &&
-           (I <= sizeof(Shortkey) * 2)
-  void for_each(Func &f)
-  {
-    if (std::holds_alternative<std::atomic<value_bucket_t *>>(content_)) {
-      auto &content = std::get<std::atomic<value_bucket_t *>>(content_);
-      value_bucket_t::for_each(&content, f);
-      return;
-    }
-
-    assert((std::holds_alternative<std::array<std::atomic<node_t *>, 16>>(
-        content_)));
-
-    auto &content = std::get<std::array<std::atomic<node_t *>, 16>>(content_);
-    for (auto &ptr : content) {
-      auto *node = ptr.load();
-      if (node == nullptr)
-        continue;
-      if constexpr (I < sizeof(Shortkey) * 2) {
-        node->template for_each<I + 1>(f);
-      }
-      else {
-        panic("Unreachable");
       }
     }
   }
@@ -453,9 +430,9 @@ public:
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
     pool.for_each_parallel(
-        roots_,
-        [&f](detail::Node<KeyType, Value, shortkey_t> &root) {
-          root.template for_each<0>(f);
+        value_allocators_,
+        [&f](detail::ValueBlockAllocator<bucket_t> &allocator) {
+          allocator.for_each(f);
         },
         width);
   }
