@@ -23,6 +23,12 @@ make_bytestring_change(std::vector<uint8_t> data)
   return Bytes(std::as_bytes(std::span(data)));
 }
 
+ItemChange
+make_deletion_change()
+{
+  return Deletion();
+}
+
 constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 1);
 } // namespace
 
@@ -324,4 +330,61 @@ TEST(ItemLockTest, PermamentExclusiveKeepsLock)
                    .has_value());
 }
 
+TEST(ItemLockTest, DeletionChange)
+{
+  ItemLock lock(0); // creating item from empty storage slot
+  auto first = make_deletion_change();
+  auto second = make_deletion_change();
+  auto third = make_deletion_change();
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), 0);
+
+  r1 = lock.try_atomic_change_lock(&first, &third, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), 0);
+
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), 0);
+
+  EXPECT_EQ(lock.commit_change(second, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(third, &kTestCostModel), 0);
+}
+
+TEST(ItemLockTest, DeletionChangeReleaseCost)
+{
+  ItemLock lock(100); // creating item from empty storage slot
+  auto first = make_deletion_change();
+  auto second = make_deletion_change();
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), 0);
+
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), 0);
+
+  EXPECT_EQ(lock.commit_change(second, &kTestCostModel), -100);
+  EXPECT_EQ(lock.commit_change(first, &kTestCostModel), 0);
+}
+
+TEST(ItemLockTest, DeletionChangePermamentExclusiveRelease)
+{
+  ItemLock lock(100);
+  auto first = make_deletion_change();
+  first.set_permanent_exclusive();
+  auto second = make_deletion_change();
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), -100);
+
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel);
+  ASSERT_FALSE(r2.has_value());
+
+  EXPECT_EQ(lock.commit_change(first, &kTestCostModel), -100);
+}
 } // namespace hogd
