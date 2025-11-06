@@ -330,9 +330,12 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
+std::unique_ptr<ElapsedTimer> nominate_timer = std::make_unique<ElapsedTimer>();
+
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  info("nominate: {} seconds between calls", nominate_timer->elapsed());
   // std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
 
   // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
@@ -423,13 +426,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    ElapsedTimer timer2;
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
                          txs);
+    double schedule_duration = timer2.elapsed();
     size_t num_on_runqueue = scheduler_->size();
 
     size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
-    info("schedulercoord_nominate(), scheduler gave us {} txs, {} are runnable",
-         num_scheduled_this_iteration, num_on_runqueue);
+    info("schedulercoord_nominate(), scheduler gave us {} txs, {} are "
+         "runnable, schedule took {} seconds",
+         num_scheduled_this_iteration, num_on_runqueue, schedule_duration);
     if (!num_scheduled_this_iteration) {
       break;
     }
@@ -545,6 +551,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
        create_handles_duration, get_block_hash_duration,
        wait_for_handles_duration, wait_for_lock_duration);
 
+  nominate_timer = std::make_unique<ElapsedTimer>();
   co_return result;
 }
 

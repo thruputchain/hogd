@@ -159,7 +159,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
       co_await read_average_hog_ages(txs);
 
   auto timer = std::make_unique<ElapsedTimer>();
-  constexpr size_t kNumThreads = 100;
+  constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
   if (txs.size() % kNumThreads) {
     // Have each thread handle an extra tx so that there are no txs leftover.
