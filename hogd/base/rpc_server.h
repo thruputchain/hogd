@@ -75,8 +75,9 @@ public:
     auto ptr = cs_.take();
     if (Conn *c = ptr->connlist)
       do {
-        c->rpcstream_->fail();
-        c = c->next_;
+	auto nextc = c->next_;
+	std::thread([c]{ c->rpcstream_->fail(); }).detach();
+        c = nextc;
       } while (c);
     else
       all_connections_destroyed_ = true;
