@@ -76,11 +76,9 @@ public:
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
-    ElapsedTimer timer;
     if (allocator_.type() != Allocator<Node>::Type::kBump) {
       free_all_nodes(&root_);
     }
-    info("MerkleTrie destructor took {}", timer.elapsed());
   }
 
   // Disable copy and move.
