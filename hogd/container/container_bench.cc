@@ -48,6 +48,7 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
           CHECK(map.insert_or_get(key, val) != nullptr);
         },
         4000);
+    map.clear();
   }
 }
 
@@ -77,25 +78,45 @@ bench_synchronized_map_insert_lowcontention(benchmark::State &state)
 }
 
 BENCHMARK(bench_concurrent_map_insert_lowcontention)
-    ->Args({1, 1000000})
+    ->Args({1, 1'000'000})
     ->Args({4, 1000000})
-    ->Args({8, 1000000})
-    ->Args({16, 1000000})
-    ->Args({32, 1000000})
-    ->Args({64, 1000000})
-    ->Args({128, 1000000})
-    ->Args({256, 1000000})
+    ->Args({8, 1'000'000})
+    ->Args({16, 1'000'000})
+    ->Args({32, 1'000'000})
+    ->Args({64, 1'000'000})
+    ->Args({128, 1'000'000})
+    ->Args({256, 1'000'000})
+    ->Args({1, 10'000'000})
+    ->Args({4, 10'000'000})
+    ->Args({8, 10'000'000})
+    ->Args({16, 10'000'000})
+    ->Args({32, 10'000'000})
+    ->Args({64, 10'000'000})
+    ->Args({128, 10'000'000})
+    ->Args({256, 10'000'000})
+    ->Args({128, 100'000'000})
+    ->Args({256, 100'000'000})
     ->UseRealTime();
 
 BENCHMARK(bench_synchronized_map_insert_lowcontention)
-    ->Args({1, 1000000})
-    ->Args({4, 1000000})
-    ->Args({8, 1000000})
-    ->Args({16, 1000000})
-    ->Args({32, 1000000})
-    ->Args({64, 1000000})
-    ->Args({128, 1000000})
-    ->Args({256, 1000000})
+    ->Args({1, 1'000'000})
+    ->Args({4, 1'000'000})
+    ->Args({8, 1'000'000})
+    ->Args({16, 1'000'000})
+    ->Args({32, 1'000'000})
+    ->Args({64, 1'000'000})
+    ->Args({128, 1'000'000})
+    ->Args({256, 1'000'000})
+    ->Args({1, 10'000'000})
+    ->Args({4, 10'000'000})
+    ->Args({8, 10'000'000})
+    ->Args({16, 10'000'000})
+    ->Args({32, 10'000'000})
+    ->Args({64, 10'000'000})
+    ->Args({128, 10'000'000})
+    ->Args({256, 10'000'000})
+    ->Args({128, 100'000'000})
+    ->Args({256, 100'000'000})
     ->UseRealTime();
 
 } // namespace
