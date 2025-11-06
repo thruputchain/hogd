@@ -52,22 +52,6 @@ BlockTX::do_unlock_item(ItemLock &lock,
   lock.try_atomic_change_lock(&change, nullptr, cost_model);
 }
 
-ATTRIBUTE_ALWAYS_INLINE void
-BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                                const Address & /*unused*/, ItemLock &lock,
-                                const ItemChange &change)
-{
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (--lock.ref == 0) {
-    // We don't need to remove the address balance from the map; the commit()
-    // loop only iterates over address balances with nonzero refcount.
-    return;
-  }
-  lock.change.undo_merge(change);
-}
-
 void
 BlockTX::release_balance(const Address &addr, int128_t delta)
 {
@@ -157,15 +141,14 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-    do_unlock_addr_balance(ul, key.get_address(), *lock, change);
+    do_unlock_item(*lock, change, &cost_model_);
+   // do_unlock_addr_balance(ul, key.get_address(), *lock, change);
     return;
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
-  do_unlock_item(ul, key, *lock, change);
+  do_unlock_item(*lock, change, &cost_model_);
 }
 
 int128_t
@@ -218,7 +201,7 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel_destructive(
       [this, &lock, &ret](std::pair<const ItemKey &, const ItemLock &> v) {
-        if (v.second.ref == 0) {
+        if (!v.second.is_finalized()) {
           return;
         }
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
@@ -235,7 +218,7 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel_destructive(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address &, const ItemLock &> v) {
-        if (v.second.ref == 0) {
+        if (!v.second.is_finalized()) {
           return;
         }
         assert(v.second.change.get_raw_nnint128().has_value());

@@ -100,10 +100,6 @@ private:
   static inline void do_unlock_item(
                                     ItemLock &lock,
                                     const ItemChange &change, const StorageCostModel *cost_model);
-  static inline void
-  do_unlock_addr_balance(
-                         const Address &addr, ItemLock &lock,
-                         const ItemChange &change);
 };
 
 } // namespace hogd
