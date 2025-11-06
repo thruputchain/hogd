@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -44,8 +45,10 @@ public:
 
   ValueBlock()
   {
-    ptr_ = static_cast<ValueType *>(operator new[](
-        sizeof(ValueType) * kBlockSize, std::align_val_t{alignof(ValueType)}));
+    size_t sz = sizeof(ValueType) * (kBlockSize + 1);
+    malloc_ptr_ = malloc(sz);
+    ptr_ = static_cast<ValueType *>(std::align(alignof(ValueType), sizeof(ValueType) * kBlockSize, malloc_ptr_, sz));
+    CHECK_PTR(ptr_);
   }
 
   ~ValueBlock()
@@ -54,7 +57,7 @@ public:
     for (size_t i = 0; i < std::min<size_t>(index, kBlockSize); i++) {
       get(i)->~ValueType();
     }
-    operator delete[](ptr_, std::align_val_t{alignof(ValueType)});
+    free(ptr_);
   }
 
   bool is_full() const { return next_free_index_.load() >= kBlockSize; }
@@ -88,12 +91,13 @@ public:
 private:
 
   std::atomic<size_t> next_free_index_ = 0;
+  void* malloc_ptr_;
   ValueType *ptr_;
 };
 
 template<typename ValueType> class ValueBlockAllocator {
 public:
-  ValueBlockAllocator() {}
+  ValueBlockAllocator() = default;
 
   template<typename... Args>
   requires std::constructible_from<ValueType, Args...>
