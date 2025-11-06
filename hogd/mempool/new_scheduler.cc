@@ -534,10 +534,7 @@ NewScheduler::schedule(size_t num_txs,
 {
   size_t num_scheduled = 0;
   std::unordered_set<ContractAddress> removed_accounts;
-  // I would prefer to make [accounts_excluded_from_block] an
-  // [std::unordered_set], but I have not implemented a hash function for
-  // [AccountKey], so I need to use an [std::set] instead.
-  std::set<AccountKey> accounts_excluded_from_block;
+  std::unordered_set<ContractAddress> accounts_excluded_from_block;
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
@@ -606,7 +603,14 @@ NewScheduler::schedule(size_t num_txs,
           // TODO(jhumphri): Do we want to penalize the account more severely?
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
-          CHECK(accounts_excluded_from_block.insert(account_key).second);
+          // It is possible that the account is already in
+          // [accounts_excluded_from_block], so we do not CHECK that the insert
+          // was successful. This happens when [add_txs()] above is called in
+          // parallel with [schedule()]. [add_txs()] can enqueue another tx for
+          // [account], and then if [schedule()] cycles the accounts above via
+          // [cycle_accounts_during_schedule_helper()], we end up adding
+          // [account] back into [ready_accounts_].
+          accounts_excluded_from_block.insert(account);
         }
         else {
           // The account has enough hogs in total to run this tx, but the
@@ -630,8 +634,10 @@ NewScheduler::schedule(size_t num_txs,
   // still ready.
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
-  for (const AccountKey &account_key : accounts_excluded_from_block) {
-    CHECK(ready_accounts_.insert(account_key).second);
+  for (const ContractAddress &account : accounts_excluded_from_block) {
+    if (account_is_ready(account, /*removed_expired_txs=*/false)) {
+      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+    }
   }
 
   increment_current_block();
