@@ -372,17 +372,20 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   // Scheduler ---
 
-  SchedulerNominationChunk sched_nomination{};
-  sched_nomination.chunk_idx = 0;
-  sched_nomination.total_chunks = 1;
-  sched_nomination.chunk.block_id = block_id;
-  Nomination &nomination = sched_nomination.chunk.nomination;
-  nomination.block_height = db_tip.height + 1;
-  nomination.prev_block_hash = db_tip.hash;
+  x23::Vec<SchedulerNominationChunk> sched_nominations;
+  {
+    SchedulerNominationChunk sched_nomination;
+    sched_nomination.chunk_idx = 0;
+    sched_nomination.total_chunks = kNumSchedulerIterations;
+    sched_nomination.chunk.block_id = block_id;
+    Nomination &nomination = sched_nomination.chunk.nomination;
+    nomination.block_height = db_tip.height + 1;
+    nomination.prev_block_hash = db_tip.hash;
+    sched_nominations.resize(kNumSchedulerIterations, sched_nomination);
+  }
+
   // [nomination.block_hash], [nomination.transaction_hashes], and
   // [nomination.transaction_nominations] are filled in below.
-  nomination.transaction_hashes.reserve(kMaxBlockSize);
-  nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
   x23::Vec<SignedTransactionHash> tx_hashes;
@@ -442,7 +445,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
     co_await *propose_batch_in_chunks_handles[i];
-    nomination.transaction_nominations += transaction_nomination_chunks[i];
+
+    size_t total_nominations_so_far = i * kChunkSize;
+    SchedulerNominationChunk &nomination =
+        sched_nominations[total_nominations_so_far / kNumTxsPerNominationChunk];
+    nomination.chunk.nomination.transaction_nominations +=
+        transaction_nomination_chunks[i];
   }
 
   double just_wait_for_executor_duration = timer2->elapsed();
@@ -450,9 +458,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   timer = std::make_unique<ElapsedTimer>();
 
   x23::Vec<SignedTransaction> failed_txs;
+  x23::Vec<SignedTransactionHash> transaction_hashes;
+  transaction_hashes.reserve(kMaxBlockSize);
+  size_t num_transaction_hashes = 0;
   for (size_t i = 0; i < txs.size(); i++) {
     if (statuses[i]) {
-      nomination.transaction_hashes.push_back(tx_hashes[i]);
+      SchedulerNominationChunk &nomination =
+          sched_nominations[i / kNumTxsPerNominationChunk];
+      nomination.chunk.nomination.transaction_hashes.push_back(tx_hashes[i]);
+      num_transaction_hashes++;
+      transaction_hashes.push_back(tx_hashes[i]);
     }
     else {
       failed_txs.push_back(txs[i]);
@@ -465,7 +480,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double mark_failed_txs_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  if (nomination.transaction_hashes.empty()) {
+  if (!num_transaction_hashes) {
     // It is possible that all txs failed to execute, in which case the block
     // is empty. Thus, we fail the nomination.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -486,8 +501,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   double create_handles_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  nomination.block_hash = get_block_hash(nomination.transaction_hashes,
-                                         /*prev_block_hash=*/db_tip.hash);
+  const SHA256Hash nomination_block_hash =
+      get_block_hash(transaction_hashes,
+                     /*prev_block_hash=*/db_tip.hash);
+  for (size_t i = 0; i < kNumSchedulerIterations; i++) {
+    SchedulerNominationChunk &nomination = sched_nominations[i];
+    nomination.chunk_idx = i;
+    nomination.chunk.nomination.block_hash = nomination_block_hash;
+  }
 
   double get_block_hash_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
@@ -517,7 +538,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   nominate_timer = std::make_unique<ElapsedTimer>();
 
-  co_await coord_client_->coordscheduler_finish_nomination(sched_nomination);
+  std::vector<x23::Async<void>> finish_nomination_handles;
+  finish_nomination_handles.reserve(sched_nominations.size());
+  for (size_t i = 0; i < sched_nominations.size(); i++) {
+    finish_nomination_handles.push_back(
+        coord_client_->coordscheduler_finish_nomination(sched_nominations[i]));
+  }
+  for (x23::Async<void> &handle : finish_nomination_handles) {
+    co_await handle;
+  }
+
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 

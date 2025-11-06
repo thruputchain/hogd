@@ -44,6 +44,8 @@ public:
   static constexpr size_t kMaxBlockSize = 1'000'000;
   static constexpr size_t kNumSchedulerIterations = 20;
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
+  static constexpr size_t kNumTxsPerNominationChunk =
+      kMaxBlockSize / kNumSchedulerIterations;
 
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
