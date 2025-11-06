@@ -42,12 +42,12 @@ runs:
       shell: bash
     - name: launch first hogexec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
       # can't wait for hogexec: that's waiting on the coordinator
       shell: bash
     - name: launch second hogexec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
+      run: ./${{ inputs.build-dir }}/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hogexec/hogexec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
       # can't wait for hogexec: that's waiting on the coordinator
       shell: bash
     - name: check hogexec is running

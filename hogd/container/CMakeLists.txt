@@ -25,4 +25,6 @@ target_link_libraries(
   benchmark::benchmark
 )
 
-set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

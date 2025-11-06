@@ -13,11 +13,11 @@
 
 namespace hogd {
 
-template<typename T, size_t NumElementsPerChunk = 128> class BumpAllocator {
+template<typename T, size_t PerThreadNumElementsPerChunk = 128>
+class BumpAllocator {
 public:
-  static constexpr size_t kPerThreadNumElementsPerChunk = NumElementsPerChunk;
   static constexpr size_t kPerThreadAllocLength =
-      kPerThreadNumElementsPerChunk * sizeof(T);
+      PerThreadNumElementsPerChunk * sizeof(T);
 
   static constexpr size_t kNumMmapPages = 16'384;
   static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
@@ -32,11 +32,9 @@ public:
     if (private_region_->num_elements_ == 0) {
       private_region_->region_ = alloc_from_pool();
       CHECK_PTR(private_region_->region_);
-      private_region_->num_elements_ = kPerThreadNumElementsPerChunk;
+      private_region_->num_elements_ = PerThreadNumElementsPerChunk;
     }
 
-    // The [--] operator (when placed after a variable) has higher precendence
-    // than the [*] operator.
     private_region_->num_elements_--;
     T *ret = reinterpret_cast<T *>(private_region_->region_);
     private_region_->region_ += sizeof(T);
@@ -44,19 +42,24 @@ public:
   }
 
 private:
+  struct PrivateRegion {
+    char *region_{nullptr};
+    size_t num_elements_{0};
+  };
+
   char *alloc_from_pool()
   {
     while (true) {
       char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
 
-      // We may need to allocate a new region. Only one thread should should
-      // do this while the others wait.
       rw_lock_.lock_reader();
       if (!current_region_offset ||
           current_region_offset + kPerThreadAllocLength >
               allocated_regions_.back() + kMmapLength) {
 
+        // We may need to allocate a new region. Only one thread should should
+        // do this while the others wait.
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
           alloc_new_region();
@@ -64,8 +67,8 @@ private:
         }
         else {
           rw_lock_.unlock();
-          // Another thread won the race and is allocating the new region.
-          // Wait until that thread is done.
+          // Another thread won the race and is allocating the new region. Wait
+          // until that thread is done.
           while (current_region_offset_.load(std::memory_order_relaxed) ==
                  current_region_offset) {
             cpu_relax();
@@ -111,12 +114,6 @@ private:
   RwLock rw_lock_;
   std::atomic<char *> current_region_offset_ = nullptr;
   std::vector<char *> allocated_regions_;
-
-  struct PrivateRegion {
-    char *region_{nullptr};
-    size_t num_elements_{0};
-  };
-
   PerThread<PrivateRegion> private_region_;
 };
 

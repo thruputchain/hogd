@@ -48,8 +48,8 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
-  schedule(size_t block_size);
+  void schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
+                x23::Vec<SignedTransaction> &txs);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
