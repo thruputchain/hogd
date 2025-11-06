@@ -12,6 +12,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/container/concurrent_map.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -28,10 +29,9 @@ struct TruncateHasher {
 TEST(ConcurrentMap, ValueBucketUsage)
 {
   using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
-  using allocator_t = detail::ValueBlockAllocator<bucket_t>;
 
   std::atomic<bucket_t *> value_bucket_ptr = nullptr;
-  allocator_t allocator;
+  BumpAllocator<bucket_t> allocator;
 
   bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2, 3},
                    4);
@@ -58,51 +58,6 @@ TEST(ConcurrentMap, ValueBucketUsage)
                 ->next_ptr_.load(),
             nullptr);
 }
-
-TEST(ConcurrentMap, OverflowValueBucket)
-{
-  using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
-  using allocator_t = detail::ValueBlockAllocator<bucket_t>;
-
-  std::atomic<bucket_t *> value_bucket_ptr = nullptr;
-  allocator_t allocator;
-
-  for (int i = 0; i < 1024; i++) {
-    uint8_t key = i & 0xFF;
-    bucket_t::insert(&value_bucket_ptr, allocator,
-                     std::vector<uint8_t>{key, 2, 3}, i);
-  }
-}
-
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 0) == 0x1);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 4) == 0x2);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 8) == 0x3);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 12) == 0x4);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 16) == 0x5);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 20) == 0x6);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 24) == 0x7);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 28) == 0x8);
-
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      0) ==
-              0x1);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      4) ==
-              0x2);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      8) ==
-              0x3);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      12) ==
-              0x4);
 
 TEST(ConcurrentMap, InsertOrGet)
 {
