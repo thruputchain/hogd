@@ -60,6 +60,7 @@ TEST(ConcurrentMap, ValueBucketUsage)
                 ->next_ptr_.load()
                 ->next_ptr_.load(),
             nullptr);
+  bucket_t::clear(value_bucket_ptr.load());
 }
 
 TEST(ConcurrentMap, DestructorLeakTest)
