@@ -46,13 +46,13 @@ public:
   ValueBlock()
   {
     ptr_ = static_cast<ValueType *>(operator new[](
-        kBlockSize, std::align_val_t{alignof(ValueType)}));
+        sizeof(ValueType) * kBlockSize, std::align_val_t{alignof(ValueType)}));
   }
 
   ~ValueBlock()
   {
     size_t index = next_free_index_.load();
-    for (size_t i = 0; i < index; i++) {
+    for (size_t i = 0; i < std::min<size_t>(index, kBlockSize); i++) {
       get(i)->~ValueType();
     }
     operator delete[](ptr_, std::align_val_t{alignof(ValueType)});

@@ -59,6 +59,21 @@ TEST(ConcurrentMap, ValueBucketUsage)
             nullptr);
 }
 
+TEST(ConcurrentMap, OverflowValueBucket)
+{
+  using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
+  using allocator_t = detail::ValueBlockAllocator<bucket_t>;
+
+  std::atomic<bucket_t *> value_bucket_ptr = nullptr;
+  allocator_t allocator;
+
+  for (int i = 0; i < 1024; i++) {
+    uint8_t key = i & 0xFF;
+    bucket_t::insert(&value_bucket_ptr, allocator,
+                     std::vector<uint8_t>{key, 2, 3}, i);
+  }
+}
+
 static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
                   0x1234'5678, 0) == 0x1);
 static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
