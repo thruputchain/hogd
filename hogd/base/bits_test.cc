@@ -11,9 +11,6 @@ namespace hogd {
 
 TEST(BitsTest, Alignment)
 {
-  // force core dump
-  uint8_t *ptr = nullptr;
-  *ptr = 12;
   // cases without an aligned val
   uint64_t val = 0x1234;
   EXPECT_EQ(align_up(val, 0x1000), 0x2000U);
