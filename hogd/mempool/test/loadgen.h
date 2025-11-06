@@ -209,6 +209,13 @@ public:
 
       SchedulerNominationOutcome res_nominate = co_await nominate_handle;
 
+      {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        long long ms = ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+        info("got nominate result: {}", ms);
+      }
+
       double wait_nomination_duration = timer->elapsed();
       timer = std::make_unique<ElapsedTimer>();
 

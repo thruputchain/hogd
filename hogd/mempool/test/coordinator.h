@@ -7,6 +7,7 @@
 #include "coord_sched.hh"
 #include "exec_sched.hh"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/time.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
@@ -41,6 +42,9 @@ public:
       CHECK_EQ(chunk.chunk.block_id, existing.chunk.block_id);
     }
     CHECK_LT(nominations_.size(), chunk.total_chunks);
+    nominations_[chunk.chunk_idx] = {};
+    cg.reset();
+
     nominations_[chunk.chunk_idx] = chunk;
   }
 

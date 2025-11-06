@@ -538,6 +538,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   nominate_timer = std::make_unique<ElapsedTimer>();
 
+  {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long long ms = ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+    info("will send nominate result: {}", ms);
+  }
+
   std::vector<x23::Async<void>> finish_nomination_handles;
   finish_nomination_handles.reserve(sched_nominations.size());
   for (size_t i = 0; i < sched_nominations.size(); i++) {
@@ -547,6 +554,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   for (x23::Async<void> &handle : finish_nomination_handles) {
     co_await handle;
   }
+  info("sending the nomination results back to the coordinator took {}",
+       nominate_timer->elapsed());
 
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
