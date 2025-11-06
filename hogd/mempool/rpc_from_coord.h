@@ -45,9 +45,7 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(std::shared_ptr<MempoolDbRpc> db_rpc)
-    : db_rpc_(std::move(db_rpc))
-  {}
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -208,7 +206,7 @@ private:
 
   x23::Async<void> mark_block_committed(BlockID block_id);
 
-  std::shared_ptr<MempoolDbRpc> db_rpc_;
+  MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

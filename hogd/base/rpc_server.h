@@ -23,6 +23,122 @@
 
 namespace hogd {
 
+#if 1
+
+template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
+requires x23::implements_async_rpc<IMPL *, VERSMETA>
+class RpcServer {
+public:
+  using Impl = IMPL;
+  using VersMeta = VERSMETA;
+
+  x23::CoroPoll &cp_;
+  size_t max_message_size_;
+
+  template<typename... Args> requires std::constructible_from<Impl, Args...>
+  RpcServer(x23::CoroPoll &cp, Args &&...args)
+    : cp_(cp), impl_(std::forward<Args>(args)...)
+  {}
+  template<typename... Args> requires std::constructible_from<Impl, Args...>
+  RpcServer(Args &&...args)
+    : cp_(default_coropoll()), impl_(std::forward<Args>(args)...)
+  {}
+  ~RpcServer() { shut_down(); }
+
+  uint16_t start_server(uint16_t portno)
+  {
+    // If this fails you started the same server twice
+    assert(listen_fd_ == x23::kInvalidFd);
+    // NOLINTBEGIN(readability-identifier-naming)
+    auto [port, lfd] =
+        tcp_rpc_server(cp_, portno,
+                       [this, _d = x23::Defer([this] { eof(); })](auto c) {
+                         c->max_message_size = max_message_size_;
+                         new Conn{*this, c};
+                       });
+    // NOLINTEND(readability-identifier-naming)
+    listen_fd_ = lfd.get();
+    return port_ = port;
+  }
+
+  Impl *impl() noexcept { return &impl_; }
+  uint16_t port() const noexcept { return port_; }
+  RpcServer *operator->() noexcept { return this; }
+
+  void shut_down()
+  {
+    if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
+      cp_.poison(lfd);
+      listen_fd_.wait(lfd);
+    }
+
+    auto ptr = cs_.take();
+    if (Conn *c = ptr->connlist)
+      do {
+        c->rpcstream_->fail();
+        c = c->next_;
+      } while (c);
+    else
+      all_connections_destroyed_ = true;
+    ptr.reset();
+    all_connections_destroyed_.wait(false);
+  }
+
+private:
+  struct Conn {
+    RpcServer &s_;
+    Conn *next_;
+    Conn **prev_;
+    x23::detail::RpcStreamImpl *rpcstream_;
+
+    struct Ptr {
+      Conn *c_;
+      explicit Ptr(Conn *c) : c_(c) {}
+      Ptr(Ptr &&other) noexcept : c_(std::exchange(other.c_, nullptr)) {}
+      ~Ptr() { delete c_; }
+      Impl &operator*() const noexcept { return c_->s_.impl_; }
+      Impl *operator->() const noexcept { return &c_->s_.impl_; }
+    };
+
+    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
+    {
+      auto ptr = s_.cs_.take();
+      if ((next_ = ptr->connlist))
+        next_->prev_ = &next_;
+      prev_ = &ptr->connlist;
+      *prev_ = this;
+      static_assert(x23::implements_async_rpc<Ptr, VersMeta>);
+      c->template server<VersMeta>(Ptr(this));
+    }
+    ~Conn()
+    {
+      auto ptr = s_.cs_.take();
+      if ((*prev_ = next_))
+        next_->prev_ = prev_;
+      if (!ptr->connlist && s_->listen_fd_ == x23::kInvalidFd) {
+        s_.all_connections_destroyed_ = true;
+        s_.all_connections_destroyed_.notify_all();
+      }
+    }
+  };
+  struct ConnState {
+    Conn *connlist{};
+  };
+
+  Impl impl_;
+  x23::MVar<ConnState> cs_;
+  std::atomic_bool all_connections_destroyed_{};
+  std::atomic_int listen_fd_{x23::kInvalidFd};
+  uint16_t port_{};
+
+  void eof() noexcept
+  {
+    listen_fd_ = x23::kInvalidFd;
+    listen_fd_.notify_all();
+  }
+};
+
+#else
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
 class RpcSvcHolder : public x23::RefCount {
@@ -108,6 +224,8 @@ struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
   uint16_t start_server(uint16_t port) { return (*this)->start_server(port); }
   uint16_t port() const { return (*this)->port(); }
 };
+#endif
+
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;
