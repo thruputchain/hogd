@@ -373,6 +373,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // Scheduler ---
 
   SchedulerNominationChunk sched_nomination{};
+  sched_nomination.chunk_idx = 0;
+  sched_nomination.total_chunks = 1;
   sched_nomination.chunk.block_id = block_id;
   Nomination &nomination = sched_nomination.chunk.nomination;
   nomination.block_height = db_tip.height + 1;
@@ -514,6 +516,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
        wait_for_handles_duration, wait_for_lock_duration);
 
   nominate_timer = std::make_unique<ElapsedTimer>();
+
+  co_await coord_client_->coordscheduler_finish_nomination(sched_nomination);
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 

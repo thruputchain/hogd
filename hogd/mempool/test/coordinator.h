@@ -32,7 +32,9 @@ public:
   x23::Async<void>
   coordscheduler_finish_nomination(const SchedulerNominationChunk &chunk)
   {
-    // TODO(jhumphri): Synchronize.
+    x23::CoroGuard cg;
+    co_await cg(nominations_lock_);
+
     CHECK(!nominations_.contains(chunk.chunk_idx));
     if (!nominations_.empty()) {
       const SchedulerNominationChunk &existing = nominations_.begin()->second;
@@ -40,7 +42,6 @@ public:
     }
     CHECK_LT(nominations_.size(), chunk.total_chunks);
     nominations_[chunk.chunk_idx] = chunk;
-    co_return;
   }
 
   SchedulerNomination get_nomination()
@@ -71,6 +72,7 @@ public:
   }
 
 private:
+  x23::CoroLock nominations_lock_;
   std::unordered_map<unsigned int, SchedulerNominationChunk> nominations_;
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
