@@ -77,14 +77,15 @@ BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
 
 ATTRIBUTE_ALWAYS_INLINE void
 BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                        const ItemKey &key, ItemLock &lock,
+                        const ItemKey & /*unused*/, ItemLock &lock,
                         const ItemChange &change)
 {
   assert(ul.owns_lock());
   assert(lock.ref > 0);
 
   if (--lock.ref == 0) {
-    // item_locks_.remove(key, ul);
+    // We don't need to remove the item from the map; the commit() loop
+    // only iterates over items with nonzero refcount.
     return;
   }
   lock.change.undo_merge(change);
@@ -92,14 +93,15 @@ BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
 
 ATTRIBUTE_ALWAYS_INLINE void
 BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                                const Address &addr, ItemLock &lock,
+                                const Address & /*unused*/, ItemLock &lock,
                                 const ItemChange &change)
 {
   assert(ul.owns_lock());
   assert(lock.ref > 0);
 
   if (--lock.ref == 0) {
-    // addr_balance_locks_.remove(addr, ul);
+    // We don't need to remove the address balance from the map; the commit()
+    // loop only iterates over address balances with nonzero refcount.
     return;
   }
   lock.change.undo_merge(change);
