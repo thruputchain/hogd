@@ -176,14 +176,16 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    auto *lock = addr_balance_locks_.get(key.get_address());
+    CHECK_PTR(lock);
     std::unique_lock<std::mutex> ul(get_mutex(key));
     return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
   auto *lock =
-      item_locks_.insert_or_get(key, [&] { return get_snapshot_cost(key); });
+      item_locks_.get(key);
+  CHECK_PTR(lock);
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
   if (!lock->change.has_snapshot_cost()) [[unlikely]] {
     return HogDBError{HogDBCode::kInternal};
@@ -196,16 +198,15 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    auto *lock = addr_balance_locks_.get(key.get_address());
+    CHECK_PTR(lock);
     std::unique_lock<std::mutex> ul(get_mutex(key));
     do_unlock_addr_balance(ul, key.get_address(), *lock, change);
     return;
   }
 
-  auto *lock = item_locks_.insert_or_get(key, [] -> HogDBStatus<int128_t> {
-    CHECK(false);
-    return HogDBError{HogDBCode::kInternal};
-  });
+  auto *lock = item_locks_.get(key);
+  CHECK_PTR(lock);
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
   do_unlock_item(ul, key, *lock, change);
 }
@@ -222,10 +223,8 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
     lock->change.commit_change(change);
     return 0;
   }
-  auto *lock = item_locks_.insert_or_get(key, [] -> HogDBStatus<int128_t> {
-    CHECK(false);
-    return HogDBError{HogDBCode::kInternal};
-  });
+  auto *lock = item_locks_.get(key);
+  CHECK_PTR(lock);
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
 
   int128_t cost_before = lock->change.committed_storage_cost(&cost_model_);

@@ -68,6 +68,17 @@ public:
     }
   }
 
+  static Value* get(std::atomic<value_bucket_t *> *scan_ptr, const KeyType &key) {
+    while (auto *next_value_bucket =
+               scan_ptr->load(std::memory_order_relaxed)) {
+      if (KeyEqual{}(next_value_bucket->key_, key)) {
+        return &next_value_bucket->value_;
+      }
+      scan_ptr = &next_value_bucket->next_ptr_;
+    }
+    return nullptr;
+  }
+
   template<typename Allocator, typename... Args>
   requires std::constructible_from<Value, Args...>
   static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
@@ -142,6 +153,16 @@ public:
   static_assert(sizeof(decltype(Hasher()(std::declval<KeyType>()))) >=
                     sizeof(uint64_t),
                 "insufficient entropy otherwise");
+
+  Value* get(const KeyType &key) {
+    uint64_t overall_shortkey = hasher_(key);
+    size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
+
+    assert(buckets_.size() > bucket_index);
+
+    auto *bucket = &buckets_[bucket_index];
+    return value_bucket_t::get(bucket, key);
+  }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
   Value *insert_or_get(const KeyType &key, Args &&...args)
