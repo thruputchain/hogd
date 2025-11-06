@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
+#include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/status.h"
@@ -82,7 +83,8 @@ private:
   // directly.
   std::mutex mtx_;
   uint32_t pending_refcount_ = 0;
-  std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock>
+  std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
+               DeletionLock>
       lock_contents_ = std::monostate{};
 
   int128_t snapshot_cost_;
