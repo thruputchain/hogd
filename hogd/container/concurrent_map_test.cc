@@ -178,6 +178,32 @@ TEST(ConcurrentMap, ForEachParallel)
   ASSERT_TRUE(values.contains(8));
 }
 
+TEST(ConcurrentMap, ForEachParallelDestructive)
+{
+  ConcurrentMap<std::vector<uint8_t>, int, TruncateHasher> map;
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 1}, 4);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 2}, 5);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 3}, 6);
+  // separate bucket
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1, 0, 0, 0, 4}, 7);
+  map.insert_or_get(std::vector<uint8_t>{0, 0, 0, 1, 0, 0, 0, 5}, 8);
+
+  std::mutex mtx;
+  std::set<int> values;
+  map.for_each_parallel_destructive(
+      [&values, &mtx](std::pair<const std::vector<uint8_t> &, int &> value) {
+        std::scoped_lock lock(mtx);
+        values.insert(value.second);
+      });
+
+  ASSERT_EQ(values.size(), 5);
+  ASSERT_TRUE(values.contains(4));
+  ASSERT_TRUE(values.contains(5));
+  ASSERT_TRUE(values.contains(6));
+  ASSERT_TRUE(values.contains(7));
+  ASSERT_TRUE(values.contains(8));
+}
+
 } // namespace hogd
 
 int

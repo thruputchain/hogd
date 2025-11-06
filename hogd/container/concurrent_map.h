@@ -161,7 +161,12 @@ public:
     assert(std::has_single_bit(n_buckets));
   }
 
-  ~ConcurrentMap() { clear(); }
+  ~ConcurrentMap()
+  {
+    if (!cleared_) {
+      clear();
+    }
+  }
 
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
@@ -206,9 +211,28 @@ public:
         width);
   }
 
+  // This variant clears the associated value buckets in the map as
+  // it performs the iteration.
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
+  void for_each_parallel_destructive(
+      Func f, size_t width = 1024,
+      WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    pool.for_each_parallel(
+        buckets_,
+        [&f](std::atomic<value_bucket_t *> &bucket) {
+          value_bucket_t::for_each(&bucket, f);
+          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+        },
+        width);
+    cleared_ = true;
+  }
+
   void clear(WorkerPool &pool = WorkerPool::get_default_pool(),
              size_t width = 1024)
   {
+    assert(!cleared_);
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
@@ -222,6 +246,7 @@ private:
 
   BumpAllocator<value_bucket_t, 8192> value_allocator_;
   Hasher hasher_;
+  bool cleared_ = false;
 };
 
 } // namespace hogd

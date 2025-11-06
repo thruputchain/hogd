@@ -257,7 +257,7 @@ BlockTX::commit(WorkerPool &pool)
   HogDBStatus<void> ret;
 
   // write item changes.
-  item_locks_.for_each_parallel(
+  item_locks_.for_each_parallel_destructive(
       [this, &lock, &ret](std::pair<const ItemKey &, const ItemLock &> v) {
         if (v.second.ref == 0) {
           return;
@@ -273,7 +273,7 @@ BlockTX::commit(WorkerPool &pool)
   PerThread<std::vector<Delta>> balance_deltas;
 
   // write address balances.
-  addr_balance_locks_.for_each_parallel(
+  addr_balance_locks_.for_each_parallel_destructive(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address &, const ItemLock &> v) {
         if (v.second.ref == 0) {
