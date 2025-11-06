@@ -1,64 +1,52 @@
 #pragma once
 
+#include <atomic>
 #include <optional>
 #include <sys/mman.h>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/types.h"
 #include "hogd/container/merkle/rw_lock.h"
 
 namespace hogd {
 
-template<typename T> class BumpAllocator {
+template<typename T, size_t PerThreadNumElementsPerChunk = 128>
+class BumpAllocator {
 public:
-  static constexpr size_t kPerThreadNumElementsPerChunk = 128;
   static constexpr size_t kPerThreadAllocLength =
-      kPerThreadNumElementsPerChunk * sizeof(T);
+      PerThreadNumElementsPerChunk * sizeof(T);
 
   static constexpr size_t kNumMmapPages = 16'384;
   static constexpr size_t kMmapLength = kNumMmapPages * kPageSize;
   static_assert(kPerThreadAllocLength < kMmapLength);
 
-  BumpAllocator()
-  {
-    {
-      std::unique_lock<std::mutex> per_thread_lock =
-          num_private_elements_.lock_threads();
-      num_private_elements_.for_each(per_thread_lock,
-                                     [](size_t &num_private_elements) {
-                                       num_private_elements = 0;
-                                     });
-    }
-
-    {
-      std::unique_lock<std::mutex> per_thread_lock =
-          private_region_.lock_threads();
-      private_region_.for_each(per_thread_lock, [](char *&private_region) {
-        private_region = nullptr;
-      });
-    }
-  }
+  BumpAllocator() = default;
 
   ~BumpAllocator() { free_all_regions(); }
 
   T *alloc()
   {
-    if (*num_private_elements_ == 0) {
-      *private_region_ = alloc_from_pool();
-      CHECK_PTR(*private_region_);
-      *num_private_elements_ = kPerThreadNumElementsPerChunk;
+    if (private_region_->num_elements_ == 0) {
+      private_region_->region_ = alloc_from_pool();
+      CHECK_PTR(private_region_->region_);
+      private_region_->num_elements_ = PerThreadNumElementsPerChunk;
     }
 
-    // The [--] operator (when placed after a variable) has higher precendence
-    // than the [*] operator.
-    (*num_private_elements_)--;
-    T *ret = reinterpret_cast<T *>(*private_region_);
-    *private_region_ += sizeof(T);
+    private_region_->num_elements_--;
+    T *ret = reinterpret_cast<T *>(private_region_->region_);
+    private_region_->region_ += sizeof(T);
     return ret;
   }
 
 private:
+  struct PrivateRegion {
+    char *region_{nullptr};
+    size_t num_elements_{0};
+  };
+
   char *alloc_from_pool()
   {
     while (true) {
@@ -69,8 +57,9 @@ private:
       if (!current_region_offset ||
           current_region_offset + kPerThreadAllocLength >
               allocated_regions_.back() + kMmapLength) {
-        // We need to allocate a new region. Only one thread should should do
-        // this while the others wait.
+
+        // We may need to allocate a new region. Only one thread should should
+        // do this while the others wait.
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
           alloc_new_region();
@@ -87,9 +76,8 @@ private:
         }
         continue;
       }
-      else {
-        rw_lock_.unlock();
-      }
+      rw_lock_.unlock();
+
       CHECK_PTR(current_region_offset);
 
       if (current_region_offset_.compare_exchange_weak(
@@ -126,9 +114,7 @@ private:
   RwLock rw_lock_;
   std::atomic<char *> current_region_offset_ = nullptr;
   std::vector<char *> allocated_regions_;
-
-  PerThread<char *> private_region_;
-  PerThread<size_t> num_private_elements_;
+  PerThread<PrivateRegion> private_region_;
 };
 
 template<typename T> class Allocator {
