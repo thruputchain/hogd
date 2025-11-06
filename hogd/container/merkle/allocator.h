@@ -65,12 +65,12 @@ private:
       char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
 
+      rw_lock_.lock_reader();
       if (!current_region_offset ||
           current_region_offset + kPerThreadAllocLength >
               allocated_regions_.back() + kMmapLength) {
         // We need to allocate a new region. Only one thread should should do
         // this while the others wait.
-        rw_lock_.lock_reader();
         if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
           // This thread won the race and will allocate the new region.
           alloc_new_region();
@@ -86,6 +86,9 @@ private:
           }
         }
         continue;
+      }
+      else {
+        rw_lock_.unlock();
       }
       CHECK_PTR(current_region_offset);
 
