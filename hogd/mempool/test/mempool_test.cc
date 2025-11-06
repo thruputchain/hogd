@@ -220,15 +220,15 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
 
-  // Remove a transaction from the nomination.
-  nomination.transaction_hashes.pop_back();
-  nomination.transaction_nominations.pop_back();
-
   nomination.block_height++;
   nomination.prev_block_hash = nomination.block_hash;
   nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
       nomination.transaction_hashes,
       /*prev_block_hash=*/nomination.prev_block_hash);
+
+  // Remove a transaction from the nomination.
+  nomination.transaction_hashes.pop_back();
+  nomination.transaction_nominations.pop_back();
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate =
@@ -254,8 +254,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     SchedulerNominationOutcome res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     ASSERT_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+    nomination = server.coord_sched_rpc().get_nomination().nomination;
   }
 
   {
