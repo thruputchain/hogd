@@ -50,32 +50,31 @@ private:
       char *current_region_offset =
           current_region_offset_.load(std::memory_order_relaxed);
 
-      {
-        // We may need to allocate a new region. Only one thread should should
-        // do this while the others wait.
-        rw_lock_.lock_reader();
-        if (!current_region_offset ||
-            current_region_offset + kPerThreadAllocLength >
-                allocated_regions_.back() + kMmapLength) {
+      // We may need to allocate a new region. Only one thread should should
+      // do this while the others wait.
+      rw_lock_.lock_reader();
+      if (!current_region_offset ||
+          current_region_offset + kPerThreadAllocLength >
+              allocated_regions_.back() + kMmapLength) {
 
-          if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
-            // This thread won the race and will allocate the new region.
-            alloc_new_region();
-            rw_lock_.unlock();
-          }
-          else {
-            rw_lock_.unlock();
-            // Another thread won the race and is allocating the new region.
-            // Wait until that thread is done.
-            while (current_region_offset_.load(std::memory_order_relaxed) ==
-                   current_region_offset) {
-              cpu_relax();
-            }
-          }
-          continue;
+        if (rw_lock_.try_upgrade_to_writer_if_only_one()) {
+          // This thread won the race and will allocate the new region.
+          alloc_new_region();
+          rw_lock_.unlock();
         }
-        rw_lock_.unlock();
+        else {
+          rw_lock_.unlock();
+          // Another thread won the race and is allocating the new region.
+          // Wait until that thread is done.
+          while (current_region_offset_.load(std::memory_order_relaxed) ==
+                 current_region_offset) {
+            cpu_relax();
+          }
+        }
+        continue;
       }
+      rw_lock_.unlock();
+
       CHECK_PTR(current_region_offset);
 
       if (current_region_offset_.compare_exchange_weak(
