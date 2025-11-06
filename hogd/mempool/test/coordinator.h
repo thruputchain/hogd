@@ -29,6 +29,37 @@ public:
     co_return;
   }
 
+  x23::Async<void>
+  coordscheduler_finish_nomination(const SchedulerNominationChunk &chunk)
+  {
+    // TODO(jhumphri): Synchronize.
+    CHECK(!nominations_.contains(chunk.chunk_idx));
+    if (!nominations_.empty()) {
+      const SchedulerNominationChunk &existing = nominations_.begin()->second;
+      CHECK_EQ(chunk.chunk.block_id, existing.chunk.block_id);
+    }
+    CHECK_LT(nominations_.size(), chunk.total_chunks);
+    nominations_[chunk.chunk_idx] = chunk;
+    co_return;
+  }
+
+  SchedulerNomination get_nomination()
+  {
+    CHECK(!nominations_.empty());
+    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+
+    SchedulerNomination ret = nominations_[0].chunk;
+    for (size_t i = 1; i < nominations_[0].total_chunks; i++) {
+      ret.nomination.transaction_hashes +=
+          nominations_[i].chunk.nomination.transaction_hashes;
+      ret.nomination.transaction_nominations +=
+          nominations_[i].chunk.nomination.transaction_nominations;
+    }
+
+    nominations_.clear();
+    return ret;
+  }
+
   void shut_down()
   {
     // TODO(jhumphri): Implement.
@@ -38,6 +69,9 @@ public:
   {
     // TODO(jhumphri): Implement.
   }
+
+private:
+  std::unordered_map<unsigned int, SchedulerNominationChunk> nominations_;
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
 

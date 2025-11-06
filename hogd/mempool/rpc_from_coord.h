@@ -94,7 +94,7 @@ public:
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerNominationResult> schedulercoord_nominate(DbTip db_tip);
+  x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
 
   // Have the mempool validate a block. [nomination] holds the block to
   // validate. [db_tip] specifies the last committed block.

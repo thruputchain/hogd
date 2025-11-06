@@ -81,7 +81,7 @@ TEST(Mempool, Nominate)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  EXPECT_EQ(res, SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
 TEST(Mempool, NominateBatch)
@@ -96,7 +96,7 @@ TEST(Mempool, NominateBatch)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  EXPECT_EQ(res, SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
 TEST(Mempool, NominateEmpty)
@@ -107,8 +107,7 @@ TEST(Mempool, NominateEmpty)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationError);
+  EXPECT_EQ(res, SchedulerNominationOutcome::SchedulerNominationError);
 }
 
 TEST(Mempool, Validate)
@@ -128,12 +127,11 @@ TEST(Mempool, Validate)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = res_nominate.scheduler_nomination().nomination;
+  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -164,12 +162,11 @@ TEST(Mempool, ValidateBatch)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = res_nominate.scheduler_nomination().nomination;
+  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -214,12 +211,11 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res_nominate.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationOK);
+  ASSERT_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = res_nominate.scheduler_nomination().nomination;
+  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -235,8 +231,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
       /*prev_block_hash=*/nomination.prev_block_hash);
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id, txs)();
-  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-      db_tip, res_nominate.scheduler_nomination().nomination)();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
@@ -246,7 +242,7 @@ TEST(Mempool, ValidateBatchMissingTx)
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, /*num_txs=*/5);
 
-  SchedulerNominationResult res_nominate;
+  Nomination nomination;
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   {
     MempoolTestInfra server;
@@ -255,9 +251,11 @@ TEST(Mempool, ValidateBatchMissingTx)
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
 
-    res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    ASSERT_EQ(res_nominate.outcome(),
-              SchedulerNominationOutcome::SchedulerNominationOK);
+    SchedulerNominationOutcome res_nominate =
+        server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    Nomination nomination =
+        server.coord_sched_rpc().get_nomination().nomination;
   }
 
   {
@@ -274,8 +272,9 @@ TEST(Mempool, ValidateBatchMissingTx)
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
 
-    auto res_validate = server.mempool_coord_rpc().schedulercoord_validate(
-        db_tip, res_nominate.scheduler_nomination().nomination)();
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate(db_tip,
+                                                           nomination)();
     EXPECT_EQ(res_validate.outcome(),
               SchedulerValidationResult::SchedulerValidationMissingTxs);
   }

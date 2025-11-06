@@ -306,7 +306,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-x23::Async<SchedulerNominationResult>
+x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   static std::unique_ptr<ElapsedTimer> nominate_timer =
@@ -363,8 +363,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // scheduler_->decrement_current_block();
     // co_await scheduler_->add_txs(txs);
 
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
   double wait_for_create_snapshot_and_open_block_handlers_duration =
@@ -373,10 +372,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   // Scheduler ---
 
-  SchedulerNominationResult result(
-      SchedulerNominationOutcome::SchedulerNominationOK);
-  result.scheduler_nomination().block_id = block_id;
-  Nomination &nomination = result.scheduler_nomination().nomination;
+  SchedulerNominationChunk sched_nomination{};
+  sched_nomination.chunk.block_id = block_id;
+  Nomination &nomination = sched_nomination.chunk.nomination;
   nomination.block_height = db_tip.height + 1;
   nomination.prev_block_hash = db_tip.hash;
   // [nomination.block_hash], [nomination.transaction_hashes], and
@@ -434,8 +432,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await finish_block(block_id, /*executor_idx=*/i);
     }
     co_await abandon_snapshot(block_id);
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
   // Scheduler ---
 
@@ -473,8 +470,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       co_await finish_block(block_id, /*executor_idx=*/i);
     }
     co_await abandon_snapshot(block_id);
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
+    co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
   x23::Vec<x23::Async<void>> finish_block_handles;
@@ -518,7 +514,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
        wait_for_handles_duration, wait_for_lock_duration);
 
   nominate_timer = std::make_unique<ElapsedTimer>();
-  co_return result;
+  co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 
 x23::Async<bool>

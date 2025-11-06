@@ -50,7 +50,8 @@ public:
 
   DbTip init_experiment(MempoolTestInfra &infra)
   {
-    return client_->init_experiment(infra.mempool_coord_rpc(), kNumAccounts);
+    return client_->init_experiment(infra.mempool_coord_rpc(),
+                                    infra.coord_sched_rpc(), kNumAccounts);
   }
 
   x23::Async<SignedTransactionBatch> get_transactions(size_t num_txs)
@@ -151,8 +152,7 @@ nominate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate.outcome(),
-             SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
 BENCHMARK(nominate)->Unit(benchmark::kMillisecond)->Iterations(3);
@@ -172,12 +172,12 @@ validate(benchmark::State &state)
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate.outcome(),
-             SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination = res_nominate.scheduler_nomination().nomination;
+    Nomination nomination =
+        server.coord_sched_rpc().get_nomination().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -260,8 +260,7 @@ loadgen_nominate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate.outcome(),
-             SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
 BENCHMARK(loadgen_nominate)->Unit(benchmark::kMillisecond);
@@ -284,12 +283,12 @@ loadgen_validate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate.outcome(),
-             SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination = res_nominate.scheduler_nomination().nomination;
+    Nomination nomination =
+        server.coord_sched_rpc().get_nomination().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -338,11 +337,10 @@ loadgen_nominate_throughput(benchmark::State &state)
 
       auto res_nominate =
           server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-      CHECK_EQ(res_nominate.outcome(),
-               SchedulerNominationOutcome::SchedulerNominationOK);
+      CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
-      const SchedulerNomination nomination =
-          res_nominate.scheduler_nomination();
+      SchedulerNomination nomination =
+          server.coord_sched_rpc().get_nomination();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
@@ -371,13 +369,13 @@ loadgen_validate_throughput(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate.outcome(),
-             SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
 
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
-    Nomination nomination = res_nominate.scheduler_nomination().nomination;
+    Nomination nomination =
+        server.coord_sched_rpc().get_nomination().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
@@ -403,8 +401,7 @@ loadgen_validate_throughput(benchmark::State &state)
                                                              nomination)();
       CHECK_EQ(res_validate.outcome(),
                SchedulerValidationResult::SchedulerValidationOK);
-      txs_so_far += res_nominate.scheduler_nomination()
-                        .nomination.transaction_hashes.size();
+      txs_so_far += nomination.transaction_hashes.size();
     }
   }
 }
