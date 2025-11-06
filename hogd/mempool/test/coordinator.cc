@@ -4,6 +4,7 @@
 #include <print>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -48,6 +49,7 @@ coordinator_init(const std::string &mempool_address,
   }
 
   std::vector<sched_coord_client_t> clients;
+  clients.reserve(LoadgenClientManager::kNumSchedClients);
   for (size_t i = 0; i < LoadgenClientManager::kNumSchedClients; i++) {
     clients.push_back(create_client<SchedulerCoord1>(
         host_port, /*retry=*/true,

@@ -145,13 +145,13 @@ public:
   {
     co_await default_coropoll().pool_.bg();
 
-    constexpr ValidatorID validator_id{};
+    constexpr ValidatorID kValidatorId{};
     x23::Vec<x23::Async<void>> handles;
     for (size_t i = 0; i < kNumSchedClients; i++) {
       x23::span tx_chunk(txs.begin() + (i * kLoadgenTxBatchSize),
                          txs.begin() + ((i + 1) * kLoadgenTxBatchSize));
       handles.push_back(
-          sched_coord_clients_[i].schedulercoord_submit_vetted(validator_id,
+          sched_coord_clients_[i].schedulercoord_submit_vetted(kValidatorId,
                                                                tx_chunk));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
