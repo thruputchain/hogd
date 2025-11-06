@@ -431,7 +431,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_serializable auto &...args)
-  {
+  try {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
@@ -458,7 +458,7 @@ struct RpcStream : public detail::RpcStreamImpl {
       if constexpr (!std::same_as<Logger, RpcNoLogger>)
         logger_.template log_client<ProcMeta>(
             msg, uformat(" deserialization error: {}", e.what()));
-      throw e;
+      throw;
     }
 
     logger_.template log_client<ProcMeta>(msg, ret);
@@ -466,6 +466,10 @@ struct RpcStream : public detail::RpcStreamImpl {
       co_return;
     else
       co_return ret;
+  } catch (XdrException &e) {
+    e.what_ = std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, e.what_);
+    throw;
   }
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
