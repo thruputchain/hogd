@@ -203,16 +203,26 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   double tx_hash_and_enqueue_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
+  info("cg acquire start");
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
+
+  double get_lock_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
   for (const ContractAddress &account : accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
+  cg.reset();
+  info("cg acquire end");
 
   double ready_accounts_duration = timer->elapsed();
   info("NewScheduler::add_txs tx_hash_and_enqueue_duration {}, "
-       "ready_accounts_duration {}",
-       tx_hash_and_enqueue_duration, ready_accounts_duration);
+       "get_lock_duration {}, ready_accounts_duration {}",
+       tx_hash_and_enqueue_duration, get_lock_duration,
+       ready_accounts_duration);
 }
 
 void
@@ -530,14 +540,9 @@ NewScheduler::schedule(size_t num_txs,
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
-  auto while_timer = std::make_unique<ElapsedTimer>();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
     if (ready_accounts_.empty()) {
-      info("block of work took {}", while_timer->elapsed());
-      while_timer = std::make_unique<ElapsedTimer>();
-      ElapsedTimer cycle_timer;
       cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
-      info("cycle took {}", cycle_timer.elapsed());
       removed_accounts.clear();
       if (ready_accounts_.empty()) {
         // If there are still no ready accounts, then break.
@@ -620,7 +625,6 @@ NewScheduler::schedule(size_t num_txs,
                                            current_block_);
     }
   }
-  info("block of work took {}", while_timer->elapsed());
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
