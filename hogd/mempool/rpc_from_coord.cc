@@ -49,10 +49,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       authenticated.push_back(tx);
     }
   }
-  x23::CoroGuard cg;
-  co_await cg(scheduler_->global_lock_);
   co_await scheduler_->add_txs(authenticated);
-  cg.reset();
   co_return co_await coord_client_->coordscheduler_notify_vetted(authenticated);
 }
 
