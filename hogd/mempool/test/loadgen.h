@@ -129,7 +129,6 @@ public:
           loadgen_clients_[i].get_transactions(kLoadgenTxBatchSize));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
-      info("handle {}", i);
       txs += co_await handles[i];
     }
     cb();
