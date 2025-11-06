@@ -7,8 +7,12 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <new>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -35,6 +39,84 @@ namespace hogd {
 
 namespace detail {
 
+template<typename ValueType> class ValueBlock {
+public:
+  constexpr static size_t kBlockSize = 128;
+
+  ValueBlock()
+  {
+    ptr_ = static_cast<ValueType *>(operator new[](
+        kBlockSize, std::align_val_t{alignof(ValueType)}));
+  }
+
+  ~ValueBlock()
+  {
+    size_t index = next_free_index_.load();
+    for (size_t i = 0; i < index; i++) {
+      get(i)->~ValueType();
+    }
+    operator delete[](ptr_, std::align_val_t{alignof(ValueType)});
+  }
+
+  bool is_full() const { return next_free_index_.load() >= kBlockSize; }
+
+  ValueType *get(size_t index)
+  {
+    assert(index < kBlockSize);
+    return &ptr_[index];
+  }
+
+  // Caller is responsible for calling the constructor on this value,
+  // if the return value is not null.
+  ValueType *alloc()
+  {
+    size_t index = next_free_index_.fetch_add(1);
+    return index < kBlockSize ? get(index) : nullptr;
+  }
+
+  std::atomic<size_t> next_free_index_ = 0;
+  ValueType *ptr_;
+};
+
+template<typename ValueType> class ValueBlockAllocator {
+public:
+  ValueBlockAllocator() { alloc_block(); }
+
+  template<typename... Args>
+  requires std::constructible_from<ValueType, Args...>
+  ValueType *allocate(Args &&...args)
+  {
+    while (true) {
+      auto *block = current_block_.load(std::memory_order_relaxed);
+      assert(block != nullptr);
+
+      auto *out = block->alloc();
+      if (out == nullptr) {
+        alloc_block();
+        continue;
+      }
+
+      new (out) ValueType(std::forward<Args>(args)...);
+      return out;
+    }
+  }
+
+private:
+  void alloc_block()
+  {
+    std::scoped_lock lock(mtx_);
+    auto *current_block = current_block_.load(std::memory_order_relaxed);
+    if (current_block == nullptr || current_block->is_full()) {
+      old_blocks_.push_back(std::make_unique<ValueBlock<ValueType>>());
+      current_block_ = old_blocks_.back().get();
+    }
+  }
+
+  std::atomic<ValueBlock<ValueType> *> current_block_ = nullptr;
+  std::mutex mtx_;
+  std::vector<std::unique_ptr<ValueBlock<ValueType>>> old_blocks_;
+};
+
 // Linked list of values, to resolve hash collisions.
 // These are kept in an unsorted (arbitrary) order.  Items are appended to the
 // end.
@@ -54,9 +136,8 @@ public:
   ValueBucket(ValueBucket &&) noexcept = delete;
   ValueBucket &operator=(ValueBucket &&) noexcept = delete;
 
-  ~ValueBucket() { delete next_ptr_.load(std::memory_order_relaxed); }
-
   const KeyType key_;
+  bool is_valid_ = false;
   Value value_;
   std::atomic<value_bucket_t *> next_ptr_;
 
@@ -66,15 +147,18 @@ public:
   {
     while (auto *next_value_bucket =
                scan_ptr->load(std::memory_order_relaxed)) {
-      f(std::pair<const KeyType &, Value &>(std::cref(next_value_bucket->key_),
-                                            std::ref(
-                                                next_value_bucket->value_)));
+      if (next_value_bucket->is_valid_) {
+        f(std::pair<const KeyType &, Value &>(
+            std::cref(next_value_bucket->key_),
+            std::ref(next_value_bucket->value_)));
+      }
       scan_ptr = &next_value_bucket->next_ptr_;
     }
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
   static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
+                       ValueBlockAllocator<value_bucket_t> &allocator,
                        const KeyType &key, Args &&...args)
   {
     // The value bucket that we might create in this iteration of insert.
@@ -92,7 +176,7 @@ public:
           // This call to construct new_value_bucket only happens at most once.
           // NOLINTBEGIN(bugprone-use-after-move)
           new_value_bucket =
-              new value_bucket_t{key, Value(std::forward<Args>(args)...)};
+              allocator.allocate(key, std::forward<Args>(args)...);
           // NOLINTEND(bugprone-use-after-move)
         }
         assert(KeyEqual{}(new_value_bucket->key_, key));
@@ -101,6 +185,7 @@ public:
                                               new_value_bucket,
                                               std::memory_order_release,
                                               std::memory_order_relaxed)) {
+          new_value_bucket->is_valid_ = true;
           return &new_value_bucket->value_;
         }
 
@@ -114,7 +199,8 @@ public:
 
       // Not at a nullptr, so try scanning the current object for a match
       if (KeyEqual{}(next_value_bucket->key_, key)) {
-        delete new_value_bucket;
+        // freeing the allocated values is handled by the allocator.
+        // Do not need to explicitly call free here.
         return &next_value_bucket->value_;
       }
 
@@ -179,11 +265,6 @@ public:
         delete ptr.load();
       }
     }
-
-    if (std::holds_alternative<std::atomic<value_bucket_t *>>(content_)) {
-      auto &content = *std::get_if<std::atomic<value_bucket_t *>>(&content_);
-      delete content.load();
-    }
   }
 
   // this is a limited, bounded depth recursion; the I parameter bypasses
@@ -238,12 +319,13 @@ public:
   }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
-  Value *insert_value(const KeyType &key, Args &&...args)
+  Value *insert_value(detail::ValueBlockAllocator<value_bucket_t> &allocator,
+                      const KeyType &key, Args &&...args)
   {
     assert(std::holds_alternative<std::atomic<value_bucket_t *>>(content_));
     auto &value_bucket = std::get<std::atomic<value_bucket_t *>>(content_);
 
-    return value_bucket_t::insert(&value_bucket, key,
+    return value_bucket_t::insert(&value_bucket, allocator, key,
                                   std::forward<Args>(args)...);
   }
 
@@ -290,7 +372,7 @@ public:
 
   ConcurrentMap(size_t n_roots = scalable_shard_size(),
                 Hasher hasher = Hasher())
-    : roots_(n_roots), hasher_(hasher)
+    : roots_(n_roots), value_allocators_(n_roots), hasher_(hasher)
   {}
 
   static_assert(
@@ -307,6 +389,8 @@ public:
     uint16_t shortkey = overall_shortkey & 0xFFFF;
 
     assert(roots_.size() > root_selector);
+    assert(value_allocators_.size() > root_selector);
+    auto &allocator = value_allocators_[root_selector];
 
     using node_t = typename detail::Node<KeyType, Value, shortkey_t>;
     node_t *current_node = &roots_[root_selector];
@@ -319,7 +403,8 @@ public:
       // We've found the node for the shortkey.
       if (current_node->get_key_len() == kShortkeyBits) {
         assert(current_node->get_key() == shortkey);
-        return current_node->insert_value(key, std::forward<Args>(args)...);
+        return current_node->insert_value(allocator, key,
+                                          std::forward<Args>(args)...);
       }
 
       // full match on current node, try recursing down to child
@@ -333,7 +418,8 @@ public:
         auto *new_leaf = new node_t(typename node_t::leaf_t{}, shortkey);
 
         if (current_node->try_insert_child(branch_bits, child, new_leaf)) {
-          return new_leaf->insert_value(key, std::forward<Args>(args)...);
+          return new_leaf->insert_value(allocator, key,
+                                        std::forward<Args>(args)...);
         }
         delete new_leaf;
         cpu_relax();
@@ -377,7 +463,10 @@ public:
 private:
   constexpr static size_t kShortkeyBits = sizeof(shortkey_t) * 8;
 
+  using bucket_t = detail::ValueBucket<KeyType, Value>;
+
   std::vector<detail::Node<KeyType, Value, shortkey_t>> roots_;
+  std::vector<detail::ValueBlockAllocator<bucket_t>> value_allocators_;
   Hasher hasher_;
 };
 

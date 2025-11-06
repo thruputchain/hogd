@@ -28,17 +28,21 @@ struct TruncateHasher {
 TEST(ConcurrentMap, ValueBucketUsage)
 {
   using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
+  using allocator_t = detail::ValueBlockAllocator<bucket_t>;
 
   std::atomic<bucket_t *> value_bucket_ptr = nullptr;
+  allocator_t allocator;
 
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2, 3}, 4);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2, 3},
+                   4);
 
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2}, 5);
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1}, 6);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2}, 5);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1}, 6);
 
   // double inserts don't change the data structure
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2}, 7);
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2, 3}, 8);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2}, 7);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2, 3},
+                   8);
 
   ASSERT_NE(value_bucket_ptr.load(), nullptr);
   ASSERT_EQ(value_bucket_ptr.load()->value_, 4);
@@ -53,7 +57,6 @@ TEST(ConcurrentMap, ValueBucketUsage)
                 ->next_ptr_.load()
                 ->next_ptr_.load(),
             nullptr);
-  delete value_bucket_ptr.load();
 }
 
 static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
