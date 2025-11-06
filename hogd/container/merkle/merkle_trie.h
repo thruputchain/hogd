@@ -76,11 +76,9 @@ public:
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
-    ElapsedTimer timer;
     if (allocator_.type() != Allocator<Node>::Type::kBump) {
       free_all_nodes(&root_);
     }
-    info("MerkleTrie destructor took {}", timer.elapsed());
   }
 
   // Disable copy and move.
@@ -511,26 +509,6 @@ public:
   {
     for (std::optional<MerkleTrie> &trie : tries_) {
       trie.emplace(allocator_type, no_hash_depth);
-    }
-  }
-
-  ~MerkleTriePrefix()
-  {
-    if (tries_[0]->allocator_.type() != Allocator<Node>::Type::kBump) {
-      try {
-        WorkerPool &worker_pool = WorkerPool::get_default_pool();
-        std::vector<std::future<void>> futures;
-        futures.reserve(tries_.size());
-        for (std::optional<MerkleTrie> &trie : tries_) {
-          futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
-        }
-        for (std::future<void> &future : futures) {
-          future.get();
-        }
-      } catch (...) {
-        // Unexpected exception thrown.
-        CHECK(false);
-      }
     }
   }
 
