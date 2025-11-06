@@ -38,10 +38,9 @@ jobs:
     - uses: ./.github/actions/prepare_env
     - name: check
       run: ./scripts/check.sh -p -b
-    - name: save core dumps
+    - name: save core dumps and binaries
       if: failure()
       run: |
-        echo "Saving core dumps"
-        mkdir -p ../core_dumps
-        find . -name '*.core' -print0 | xargs -0 mv -t ../core_dumps/
+        echo "Saving core dumps and associated binaries"
+        ./scripts/save_core_dumps.sh ../core_dumps
 
