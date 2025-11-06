@@ -175,7 +175,8 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
   // lock.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    auto *lock = addr_balance_locks_.get(key.get_address());
+    CHECK_PTR(lock);
     std::unique_lock<std::mutex> ul(get_mutex(key));
     lock->change.commit_change(change);
     return 0;
