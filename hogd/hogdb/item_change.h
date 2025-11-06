@@ -512,7 +512,7 @@ public:
   void commit_change(AuthDataItem const &auth_data_item);
   bool narrow(const AuthDataItem &auth_data_item);
 
-  HogDBStatus<int128_t> merge(const AuthDataItem &auth_data_item,
+  HogDBStatus<void> merge(const AuthDataItem &auth_data_item,
                               const StorageCostModel *cost_model);
 
   void undo_merge(const AuthDataItem &auth_data_item);
@@ -659,16 +659,6 @@ public:
   ItemChange(ReplayCacheIt &&replay_cache) : type_(std::move(replay_cache)) {}
   ~ItemChange() = default;
 
-  // setters
-  // This should only be called when the snapshot cost is explicitly knowable:
-  // I.e. when the cost is 0 (for balances or other reserved item key types).
-  void set_snapshot_cost(int128_t snapshot_cost)
-  {
-    snapshot_cost_ = snapshot_cost;
-  }
-
-  bool has_snapshot_cost() const { return snapshot_cost_.has_value(); }
-
   // getters
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
@@ -712,7 +702,7 @@ public:
   void narrow(const ItemChange &change);
   // merge merges the reservation and value of a change into this one. It
   // returns kConflict if the change does not commute.
-  HogDBStatus<int128_t> merge(const ItemChange &change,
+  HogDBStatus<void> merge(const ItemChange &change,
                               const StorageCostModel *cost_model);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
@@ -737,43 +727,10 @@ public:
   }
 
 private:
-  struct LazySnapshotCost {
-    // negative values imply that the cost is not set
-    int128_t cost_{std::numeric_limits<int128_t>::min()};
-
-    LazySnapshotCost() = default;
-    LazySnapshotCost &operator=(const LazySnapshotCost &other)
-    {
-      assert(cost_ == other.cost_ || cost_ < 0 || other.cost_ < 0);
-      if (cost_ < 0) {
-        cost_ = other.cost_;
-      }
-      return *this;
-    }
-    LazySnapshotCost &operator=(int128_t cost)
-    {
-      assert(cost_ < 0 || cost_ == cost);
-      cost_ = cost;
-      return *this;
-    }
-
-    bool has_value() const { return cost_ >= 0; }
-    int128_t value() const
-    {
-      assert(cost_ >= 0);
-      return cost_;
-    }
-    auto &operator*(this auto &self)
-    {
-      assert(self.has_value());
-      return self.cost_;
-    }
-  };
 
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData, PointerItem<AuthDataItem>, ReplayCacheIt>
       type_;
-  LazySnapshotCost snapshot_cost_;
   bool exclusive_{false};
   bool permanent_exclusive_{false};
   bool change_committed_{false};
@@ -840,7 +797,6 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
     balance = 0;
   }
   auto out = ItemChange(NNInt128(*balance, delta));
-  out.set_snapshot_cost(0);
   return HogDBStatus<ItemChange>(std::in_place_t{}, std::move(out));
 }
 

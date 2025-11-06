@@ -1,9 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <concepts>
+#include <limits>
 #include <mutex>
+#include <type_traits>
 #include <variant>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
@@ -17,7 +21,21 @@ namespace hogd {
 
 class ItemLock {
 public:
-  ItemLock(int128_t snapshot_cost) : snapshot_cost_(snapshot_cost) {}
+  ItemLock(std::mutex& mtx,int128_t snapshot_cost) : mtx_(mtx), snapshot_cost_(snapshot_cost) {}
+  ItemLock(std::mutex& mtx, auto const& lambda)
+        requires std::invocable<decltype(lambda)> &&
+                 std::same_as<std::invoke_result_t<decltype(lambda)>,
+                              HogDBStatus<int128_t>> : mtx_(mtx)
+    {
+      auto status = lambda();
+      if (!status) [[unlikely]] {
+        error("failed to get snapshot cost: {}", status.error());
+        // any action on this item will fail
+        snapshot_cost_ = std::numeric_limits<int128_t>::min();
+        return;
+      }
+      snapshot_cost_ = *status;
+    }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
   // required to support the after change. Is a no-op on failure.
@@ -81,7 +99,7 @@ private:
   // transaction commits. After that point, lock_contents_ no longer changes
   // between variants, and the contents of the variant can be operated on
   // directly.
-  std::mutex mtx_;
+  std::mutex& mtx_;
   uint32_t pending_refcount_ = 0;
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
                DeletionLock>

@@ -31,64 +31,25 @@
 namespace hogd {
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
-BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                 ItemLock &lock, const ItemChange &change,
+BlockTX::do_lock(ItemLock &lock, const ItemChange &change,
                  const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-
-  if (++lock.ref == 1) {
-    lock.change = change;
-    return lock.change.marginal_storage_cost(cost_model);
-  }
-
-  HogDBStatus<int128_t> ret = lock.change.merge(change, cost_model);
-  if (!ret) {
-    lock.ref--;
-    return ret.error();
-  }
-
-  return ret;
+  return lock.try_atomic_change_lock(nullptr, &change, cost_model);
 }
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
-BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                        ItemLock &lock, const ItemChange &old_change,
+BlockTX::do_modify_lock(ItemLock &lock, const ItemChange &old_change,
                         const ItemChange &new_change,
                         const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (lock.ref == 1) {
-    lock.change = new_change;
-    return lock.change.marginal_storage_cost(cost_model);
-  }
-
-  ItemChange tmp = lock.change;
-  tmp.undo_merge(old_change);
-  HogDBStatus<int128_t> ret = tmp.merge(new_change, cost_model);
-  if (!ret)
-    return ret.error();
-
-  lock.change = std::move(tmp);
-  return ret;
+  return lock.try_atomic_change_lock(&old_change, &new_change, cost_model);
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
-BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                        const ItemKey & /*unused*/, ItemLock &lock,
-                        const ItemChange &change)
+BlockTX::do_unlock_item(ItemLock &lock,
+                        const ItemChange &change, const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (--lock.ref == 0) {
-    // We don't need to remove the item from the map; the commit() loop
-    // only iterates over items with nonzero refcount.
-    return;
-  }
-  lock.change.undo_merge(change);
+  lock.try_atomic_change_lock(&change, nullptr, cost_model);
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
@@ -116,13 +77,10 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   if (!change) [[unlikely]] {
     throw std::runtime_error("failed to make balance change");
   }
-  change->set_snapshot_cost(0);
 
-  auto *lock = addr_balance_locks_.insert_or_get(addr, 0);
-  std::unique_lock<std::mutex> ul(
-      get_mutex(make_address_balance_item_key(addr)));
+  auto *lock = addr_balance_locks_.insert_or_get(addr, get_mutex(make_address_balance_item_key(addr)), 0);
 
-  if (auto r = do_lock(ul, *lock, *change, &cost_model_); !r) [[unlikely]] {
+  if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
 }

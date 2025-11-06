@@ -2,10 +2,13 @@
 
 #pragma once
 
+#include <concepts>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/mutex_cache.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -15,6 +18,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -69,29 +73,6 @@ public:
   void release_balance(const Address &addr, int128_t delta);
 
 private:
-  struct ItemLock {
-    ItemChange change;
-    size_t ref{0};
-
-    ItemLock(int128_t snapshot_cost)
-    {
-      change.set_snapshot_cost(snapshot_cost);
-    }
-
-    // Lazily load the snapshot cost, if the item is constructed
-    ItemLock(auto const &lambda)
-        requires std::invocable<decltype(lambda)> &&
-                 std::same_as<std::invoke_result_t<decltype(lambda)>,
-                              HogDBStatus<int128_t>>
-    {
-      auto status = lambda();
-      if (!status) [[unlikely]] {
-        error("failed to get snapshot cost: {}", status.error());
-        return;
-      }
-      change.set_snapshot_cost(*status);
-    }
-  };
 
   HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
 
@@ -110,17 +91,17 @@ private:
   }
 
   static inline HogDBStatus<int128_t>
-  do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+  do_lock(ItemLock &lock,
           const ItemChange &change, const StorageCostModel *cost_model);
   static inline HogDBStatus<int128_t>
-  do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+  do_modify_lock(ItemLock &lock,
                  const ItemChange &old_change, const ItemChange &new_change,
                  const StorageCostModel *cost_model);
-  static inline void do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                                    const ItemKey &key, ItemLock &lock,
-                                    const ItemChange &change);
+  static inline void do_unlock_item(
+                                    ItemLock &lock,
+                                    const ItemChange &change, const StorageCostModel *cost_model);
   static inline void
-  do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+  do_unlock_addr_balance(
                          const Address &addr, ItemLock &lock,
                          const ItemChange &change);
 };

@@ -564,7 +564,7 @@ ItemChange::narrow(const ItemChange &change)
                    type_);
 }
 
-HogDBStatus<int128_t>
+HogDBStatus<void>
 ItemChange::merge(const ItemChange &change, const StorageCostModel *cost_model)
 {
   if (type_.index() != change.type_.index())
