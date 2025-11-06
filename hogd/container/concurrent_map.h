@@ -68,6 +68,28 @@ public:
     }
   }
 
+  static Value *get(std::atomic<value_bucket_t *> *scan_ptr, const KeyType &key)
+  {
+    while (auto *next_value_bucket =
+               scan_ptr->load(std::memory_order_relaxed)) {
+      if (KeyEqual{}(next_value_bucket->key_, key)) {
+        return &next_value_bucket->value_;
+      }
+      scan_ptr = &next_value_bucket->next_ptr_;
+    }
+    return nullptr;
+  }
+
+  static void clear(value_bucket_t *value_bucket)
+  {
+    while (value_bucket != nullptr) {
+      value_bucket_t *next_value_bucket =
+          value_bucket->next_ptr_.load(std::memory_order_relaxed);
+      value_bucket->~value_bucket_t();
+      value_bucket = next_value_bucket;
+    }
+  }
+
   template<typename Allocator, typename... Args>
   requires std::constructible_from<Value, Args...>
   static Value *insert(std::atomic<value_bucket_t *> *scan_ptr,
@@ -112,7 +134,9 @@ public:
 
       // Not at a nullptr, so try scanning the current object for a match
       if (KeyEqual{}(next_value_bucket->key_, key)) {
-        delete new_value_bucket;
+        if (new_value_bucket) {
+          new_value_bucket->~value_bucket_t();
+        }
         return &next_value_bucket->value_;
       }
 
@@ -137,11 +161,29 @@ public:
     assert(std::has_single_bit(n_buckets));
   }
 
+  ~ConcurrentMap()
+  {
+    if (!cleared_) {
+      clear_slow();
+    }
+  }
+
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
   static_assert(sizeof(decltype(Hasher()(std::declval<KeyType>()))) >=
                     sizeof(uint64_t),
                 "insufficient entropy otherwise");
+
+  Value *get(const KeyType &key)
+  {
+    uint64_t overall_shortkey = hasher_(key);
+    size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
+
+    assert(buckets_.size() > bucket_index);
+
+    auto *bucket = &buckets_[bucket_index];
+    return value_bucket_t::get(bucket, key);
+  }
 
   template<typename... Args> requires std::constructible_from<Value, Args...>
   Value *insert_or_get(const KeyType &key, Args &&...args)
@@ -169,11 +211,50 @@ public:
         width);
   }
 
+  // This variant clears the associated value buckets in the map as
+  // it performs the iteration.
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
+  void for_each_parallel_destructive(
+      Func f, size_t width = 1024,
+      WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    pool.for_each_parallel(
+        buckets_,
+        [&f](std::atomic<value_bucket_t *> &bucket) {
+          value_bucket_t::for_each(&bucket, f);
+          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+        },
+        width);
+    cleared_ = true;
+  }
+
+  void clear(WorkerPool &pool = WorkerPool::get_default_pool(),
+             size_t width = 1024)
+  {
+    assert(!cleared_);
+    pool.for_each_parallel(
+        buckets_,
+        [](std::atomic<value_bucket_t *> &bucket) {
+          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+        },
+        width);
+  }
+
 private:
+  void clear_slow() noexcept
+  {
+    for (auto &bucket : buckets_) {
+      value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+    }
+    cleared_ = true;
+  }
+
   std::vector<std::atomic<value_bucket_t *>> buckets_;
 
   BumpAllocator<value_bucket_t, 8192> value_allocator_;
   Hasher hasher_;
+  bool cleared_ = false;
 };
 
 } // namespace hogd
