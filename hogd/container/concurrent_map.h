@@ -68,7 +68,8 @@ public:
     }
   }
 
-  static Value* get(std::atomic<value_bucket_t *> *scan_ptr, const KeyType &key) {
+  static Value *get(std::atomic<value_bucket_t *> *scan_ptr, const KeyType &key)
+  {
     while (auto *next_value_bucket =
                scan_ptr->load(std::memory_order_relaxed)) {
       if (KeyEqual{}(next_value_bucket->key_, key)) {
@@ -77,6 +78,16 @@ public:
       scan_ptr = &next_value_bucket->next_ptr_;
     }
     return nullptr;
+  }
+
+  static void clear(value_bucket_t *value_bucket)
+  {
+    while (value_bucket != nullptr) {
+      value_bucket_t *next_value_bucket =
+          value_bucket->next_ptr_.load(std::memory_order_relaxed);
+      value_bucket->~value_bucket_t();
+      value_bucket = next_value_bucket;
+    }
   }
 
   template<typename Allocator, typename... Args>
@@ -123,7 +134,9 @@ public:
 
       // Not at a nullptr, so try scanning the current object for a match
       if (KeyEqual{}(next_value_bucket->key_, key)) {
-        delete new_value_bucket;
+        if (new_value_bucket) {
+          new_value_bucket->~value_bucket_t();
+        }
         return &next_value_bucket->value_;
       }
 
@@ -148,13 +161,16 @@ public:
     assert(std::has_single_bit(n_buckets));
   }
 
+  ~ConcurrentMap() { clear(); }
+
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
   static_assert(sizeof(decltype(Hasher()(std::declval<KeyType>()))) >=
                     sizeof(uint64_t),
                 "insufficient entropy otherwise");
 
-  Value* get(const KeyType &key) {
+  Value *get(const KeyType &key)
+  {
     uint64_t overall_shortkey = hasher_(key);
     size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
 
@@ -186,6 +202,17 @@ public:
         buckets_,
         [&f](std::atomic<value_bucket_t *> &bucket) {
           value_bucket_t::for_each(&bucket, f);
+        },
+        width);
+  }
+
+  void clear(WorkerPool &pool = WorkerPool::get_default_pool(),
+             size_t width = 1024)
+  {
+    pool.for_each_parallel(
+        buckets_,
+        [](std::atomic<value_bucket_t *> &bucket) {
+          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
         },
         width);
   }

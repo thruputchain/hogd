@@ -183,8 +183,7 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto *lock =
-      item_locks_.get(key);
+  auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
   auto ul = std::unique_lock<std::mutex>(get_mutex(key));
   if (!lock->change.has_snapshot_cost()) [[unlikely]] {
