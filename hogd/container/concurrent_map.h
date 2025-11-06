@@ -93,7 +93,7 @@ private:
 
 template<typename ValueType> class ValueBlockAllocator {
 public:
-  ValueBlockAllocator() { alloc_block(); }
+  ValueBlockAllocator() {}
 
   template<typename... Args>
   requires std::constructible_from<ValueType, Args...>
@@ -101,6 +101,9 @@ public:
   {
     while (true) {
       auto *block = current_block_.load(std::memory_order_relaxed);
+      if (block == nullptr) [[unlikely]] {
+	      block = alloc_block();
+      }
       assert(block != nullptr);
 
       auto *out = block->alloc();
@@ -124,14 +127,16 @@ public:
   }
 
 private:
-  void alloc_block()
+  ValueBlock<ValueType>*  alloc_block()
   {
     std::scoped_lock lock(mtx_);
     auto *current_block = current_block_.load(std::memory_order_relaxed);
     if (current_block == nullptr || current_block->is_full()) {
       old_blocks_.push_back(std::make_unique<ValueBlock<ValueType>>());
       current_block_ = old_blocks_.back().get();
+      return old_blocks_.back().get();
     }
+    return current_block;
   }
 
   std::atomic<ValueBlock<ValueType> *> current_block_ = nullptr;
