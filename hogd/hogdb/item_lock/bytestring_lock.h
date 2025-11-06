@@ -6,6 +6,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
@@ -46,5 +47,7 @@ public:
 private:
   const OwningSpan<const std::byte> bytestring_;
 };
+
+static_assert(item_lock<BytestringLock>);
 
 } // namespace hogd

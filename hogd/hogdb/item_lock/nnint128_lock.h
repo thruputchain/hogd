@@ -8,6 +8,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
@@ -135,5 +136,6 @@ private:
 };
 
 static_assert(sizeof(NNInt128Lock) == 64, "NNInt128Lock should be 64 bytes");
+static_assert(item_lock<NNInt128Lock>);
 
 } // namespace hogd

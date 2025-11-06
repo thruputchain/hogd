@@ -13,6 +13,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
+#include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/status.h"
@@ -385,6 +386,11 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     lock_contents_.emplace<NNInt128Lock>(
         after->get_raw_nnint128().value().base());
     // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
+  if (after->is_deletion()) {
+    lock_contents_.emplace<DeletionLock>();
     return;
   }
 
