@@ -7,10 +7,12 @@
 #include <mutex>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/container/concurrent_map.h"
+#include "hogd/container/merkle/allocator.h"
 #include "hogd/init.h"
 
 namespace hogd {
@@ -29,15 +31,18 @@ TEST(ConcurrentMap, ValueBucketUsage)
   using bucket_t = detail::ValueBucket<std::vector<uint8_t>, int>;
 
   std::atomic<bucket_t *> value_bucket_ptr = nullptr;
+  BumpAllocator<bucket_t> allocator;
 
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2, 3}, 4);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2, 3},
+                   4);
 
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2}, 5);
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1}, 6);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2}, 5);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1}, 6);
 
   // double inserts don't change the data structure
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2}, 7);
-  bucket_t::insert(&value_bucket_ptr, std::vector<uint8_t>{1, 2, 3}, 8);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2}, 7);
+  bucket_t::insert(&value_bucket_ptr, allocator, std::vector<uint8_t>{1, 2, 3},
+                   8);
 
   ASSERT_NE(value_bucket_ptr.load(), nullptr);
   ASSERT_EQ(value_bucket_ptr.load()->value_, 4);
@@ -52,38 +57,7 @@ TEST(ConcurrentMap, ValueBucketUsage)
                 ->next_ptr_.load()
                 ->next_ptr_.load(),
             nullptr);
-  delete value_bucket_ptr.load();
 }
-
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 0) == 0x1);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 4) == 0x2);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 8) == 0x3);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 12) == 0x4);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 16) == 0x5);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 20) == 0x6);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 24) == 0x7);
-static_assert(hogd::detail::Node<int, int, uint32_t>::get_branch_bits(
-                  0x1234'5678, 28) == 0x8);
-
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      0) ==
-              0x1);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      4) ==
-              0x2);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      8) ==
-              0x3);
-static_assert(hogd::detail::Node<int, int, uint16_t>::get_branch_bits(0x1234,
-                                                                      12) ==
-              0x4);
 
 TEST(ConcurrentMap, InsertOrGet)
 {
@@ -118,10 +92,11 @@ TEST(ConcurrentMap, ForEachParallel)
 
   std::mutex mtx;
   std::set<int> values;
-  map.for_each_parallel([&values, &mtx](int &value) {
-    std::scoped_lock lock(mtx);
-    values.insert(value);
-  });
+  map.for_each_parallel(
+      [&values, &mtx](std::pair<const std::vector<uint8_t> &, int &> value) {
+        std::scoped_lock lock(mtx);
+        values.insert(value.second);
+      });
 
   ASSERT_EQ(values.size(), 5);
   ASSERT_TRUE(values.contains(4));
