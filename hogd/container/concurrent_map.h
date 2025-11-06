@@ -164,7 +164,7 @@ public:
   ~ConcurrentMap()
   {
     if (!cleared_) {
-      clear();
+      clear_slow();
     }
   }
 
@@ -242,6 +242,14 @@ public:
   }
 
 private:
+  void clear_slow() noexcept
+  {
+    for (auto &bucket : buckets_) {
+      value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
+    }
+    cleared_ = true;
+  }
+
   std::vector<std::atomic<value_bucket_t *>> buckets_;
 
   BumpAllocator<value_bucket_t, 8192> value_allocator_;

@@ -48,6 +48,7 @@ bench_concurrent_map_insert_lowcontention(benchmark::State &state)
           CHECK(map.insert_or_get(key, val) != nullptr);
         },
         4000);
+    map.clear();
   }
 }
 
