@@ -35,8 +35,6 @@ public:
       private_region_->num_elements_ = PerThreadNumElementsPerChunk;
     }
 
-    // The [--] operator (when placed after a variable) has higher precendence
-    // than the [*] operator.
     private_region_->num_elements_--;
     T *ret = reinterpret_cast<T *>(private_region_->region_);
     private_region_->region_ += sizeof(T);
