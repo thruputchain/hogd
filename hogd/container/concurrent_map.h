@@ -172,7 +172,7 @@ public:
 private:
   std::vector<std::atomic<value_bucket_t *>> buckets_;
 
-  BumpAllocator<value_bucket_t, 4096> value_allocator_;
+  BumpAllocator<value_bucket_t, 8192> value_allocator_;
   Hasher hasher_;
 };
 
