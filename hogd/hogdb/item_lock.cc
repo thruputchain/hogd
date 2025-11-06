@@ -11,6 +11,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
@@ -404,6 +407,28 @@ ItemLock::reset_lock_contents(std::unique_lock<std::mutex> const &ul)
   assert(pending_refcount_ == 0);
 
   lock_contents_ = std::monostate{};
+}
+
+HogDBStatus<void>
+ItemLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
+                                 MerkleTriePrefix &trie) const
+{
+  assert(is_finalized());
+  assert(!std::holds_alternative<std::monostate>(lock_contents_));
+  assert(!std::holds_alternative<ExclusiveLock>(lock_contents_));
+  return std::visit(
+      [&](auto &lock) -> HogDBStatus<void> {
+        if constexpr (std::is_same_v<std::decay_t<decltype(lock)>,
+                                     std::monostate> ||
+                      std::is_same_v<std::decay_t<decltype(lock)>,
+                                     ExclusiveLock>) {
+          panic("bad finalized state");
+        }
+        else {
+          return lock.write_committed_change(key, dao, trie);
+        }
+      },
+      lock_contents_);
 }
 
 } // namespace hogd

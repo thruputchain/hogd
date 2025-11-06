@@ -3,6 +3,9 @@
 #include <concepts>
 
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
@@ -21,6 +24,11 @@ concept item_lock =
         lock.commit_change(finalize, snapshot_cost, after, cost_model)
       } -> std::same_as<int128_t>;
     } &&
-    requires { sizeof(Lock) <= 64; };
-
+    requires { sizeof(Lock) <= 64; } &&
+    requires(Lock const &lock, ItemKey const &key, HogDBDAO &dao,
+             MerkleTriePrefix &trie) {
+      {
+        lock.write_committed_change(key, dao, trie)
+      } -> std::same_as<HogDBStatus<void>>;
+    };
 } // namespace hogd

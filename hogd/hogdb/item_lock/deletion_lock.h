@@ -31,6 +31,10 @@ public:
     }
     return 0;
   }
+
+  static HogDBStatus<void> write_committed_change(ItemKey const &key,
+                                                  HogDBDAO &dao,
+                                                  MerkleTriePrefix &trie);
 };
 
 static_assert(item_lock<DeletionLock>);

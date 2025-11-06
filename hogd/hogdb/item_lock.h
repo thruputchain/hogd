@@ -33,6 +33,11 @@ public:
   int128_t commit_change(const ItemChange &change,
                          const StorageCostModel *cost_model);
 
+  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+                                           MerkleTriePrefix &trie) const;
+
+  bool is_finalized() const { return lock_state_ != kUncommitted; }
+
 private:
   HogDBStatus<int128_t>
   handle_try_atomic_from_finalized(const ItemChange *before,
