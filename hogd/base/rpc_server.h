@@ -43,20 +43,20 @@ public:
   {}
   ~RpcServer() { shut_down(); }
 
-  uint16_t start_server(uint16_t portno)
+  uint16_t start_server(uint16_t port)
   {
     // If this fails you started the same server twice
     assert(listen_fd_ == x23::kInvalidFd);
     // NOLINTBEGIN(readability-identifier-naming)
-    auto [port, lfd] =
-        tcp_rpc_server(cp_, portno,
+    auto [prt, lfd] =
+        tcp_rpc_server(cp_, port,
                        [this, _d = x23::Defer([this] { eof(); })](auto c) {
                          c->max_message_size = max_message_size_;
                          new Conn{*this, c};
                        });
     // NOLINTEND(readability-identifier-naming)
     listen_fd_ = lfd.get();
-    return port_ = port;
+    return port_ = prt;
   }
 
   Impl *impl() noexcept { return &impl_; }
@@ -99,6 +99,7 @@ private:
       Impl *operator->() const noexcept { return &c_->s_.impl_; }
     };
 
+    // NOLINTBEGIN(bugprone-assignment-in-if-condition)
     Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
     {
       auto ptr = s_.cs_.take();
@@ -119,6 +120,7 @@ private:
         s_.all_connections_destroyed_.notify_all();
       }
     }
+    // NOLINTEND(bugprone-assignment-in-if-condition)
   };
   struct ConnState {
     Conn *connlist{};
