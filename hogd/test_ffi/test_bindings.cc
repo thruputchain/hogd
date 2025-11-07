@@ -275,7 +275,7 @@ root_invoke(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->root_invoke();
-    ffi_trace("FFI: root_invoke(syscall_handler={}) -> (result={})",
+    ffi_trace("FFI: root_invoke(syscall_handler={}) -> ({})",
               syscall_handler, format_foreign_root_invoke_result(res));
     return res;
   } catch (std::exception const &e) {
