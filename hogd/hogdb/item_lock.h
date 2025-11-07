@@ -5,13 +5,21 @@
 #include <variant>
 
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
+#include "hogd/hogdb/item_lock/new_contract_lock.h"
+#include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/testlock.h"
 
 namespace hogd {
 
@@ -47,26 +55,27 @@ private:
   handle_try_atomic_from_pending(const ItemChange *before,
                                  const ItemChange *after,
                                  const StorageCostModel *cost_model,
-                                 std::unique_lock<std::mutex> const &ul);
+                                 std::unique_lock<x23::TestLock> const &ul);
 
   // No change has committed on this item, and we would like to try to acquire a
   // change in a transaction that does not currently hold any lock on this item.
   HogDBStatus<int128_t>
   handle_uncommitted_try_new_lock(const ItemChange *after,
                                   const StorageCostModel *cost_model,
-                                  std::unique_lock<std::mutex> &ul);
-  void handle_release_uncommitted_lock(const ItemChange *before,
-                                       const StorageCostModel *cost_model,
-                                       std::unique_lock<std::mutex> const &ul);
+                                  std::unique_lock<x23::TestLock> &ul);
+  void
+  handle_release_uncommitted_lock(const ItemChange *before,
+                                  const StorageCostModel *cost_model,
+                                  std::unique_lock<x23::TestLock> const &ul);
 
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
   // Does NOT set the type as ExclusiveLock.
   void prepare_lock_contents(const ItemChange *after,
-                             std::unique_lock<std::mutex> const &ul);
-  void reset_lock_contents(std::unique_lock<std::mutex> const &ul);
+                             std::unique_lock<x23::TestLock> const &ul);
+  void reset_lock_contents(std::unique_lock<x23::TestLock> const &ul);
 
-  void set_exclusive_lock(std::unique_lock<std::mutex> const &ul);
+  void set_exclusive_lock(std::unique_lock<x23::TestLock> const &ul);
 
   // No change has committed on this item.
   // As such, its type is not yet known,
@@ -80,19 +89,25 @@ private:
   // No other transactions can modify the item for the rest of the block.
   constexpr static uint32_t kFinalizedPermamentExclusiveLock = 2;
 
+  std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
+               DeletionLock, NewContractLock, NewDeploymentLock,
+               PointerLock<AuthLock>>
+      lock_contents_ = std::monostate{};
+
   std::atomic<uint32_t> lock_state_ = kUncommitted;
 
   // This version of the implementation uses the mutex up until the first
   // transaction commits. After that point, lock_contents_ no longer changes
   // between variants, and the contents of the variant can be operated on
   // directly.
-  std::mutex mtx_;
+
   uint32_t pending_refcount_ = 0;
-  std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
-               DeletionLock>
-      lock_contents_ = std::monostate{};
 
   int128_t snapshot_cost_;
+  x23::TestLock lock_;
 };
+
+// should be less than two cache lines.
+static_assert(sizeof(ItemLock) <= 128);
 
 } // namespace hogd
