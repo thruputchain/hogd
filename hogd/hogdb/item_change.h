@@ -111,7 +111,7 @@ concept is_item_commit_required = requires(T t, const T &arg) {
   { t.commit_change(arg) } -> std::same_as<void>;
 } && is_item<T>;
 
-template<is_item T> class PointerItem : std::unique_ptr<T> {
+template<is_item T> class PointerItem : public std::unique_ptr<T> {
 public:
   template<typename... Args>
   PointerItem(Args &&...args)
@@ -524,6 +524,7 @@ public:
   int128_t marginal_storage_cost(const StorageCostModel *cost_model) const;
 
   AccountAuthData build_result() const;
+  AccountAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
   struct PublicKeyChange {
@@ -539,6 +540,7 @@ private:
   AccountAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;
+  friend class AuthLock;
 };
 
 } // namespace hogd
@@ -674,6 +676,8 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   std::optional<AuthDataItem> to_auth_data() const;
   std::optional<ReplayCacheIt> to_replay_cache() const;
+  std::optional<NewContractData> to_new_contract() const;
+  std::optional<DeployedContractData> to_new_deployment() const;
   bool is_bytes() const { return std::holds_alternative<Bytes>(type_); }
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
@@ -688,6 +692,11 @@ public:
   {
     return std::holds_alternative<NewContractData>(type_);
   }
+  bool is_deploy_contract() const
+  {
+    return std::holds_alternative<DeployedContractData>(type_);
+  }
+
   std::optional<NNInt128> get_raw_nnint128() const;
   std::optional<SHA256Hash> get_raw_deployed_contract_hash() const;
   bool is_auth_data() const
@@ -825,6 +834,22 @@ inline std::optional<ReplayCacheIt>
 ItemChange::to_replay_cache() const
 {
   if (const auto *tmp = std::get_if<ReplayCacheIt>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+inline std::optional<NewContractData>
+ItemChange::to_new_contract() const
+{
+  if (const auto *tmp = std::get_if<NewContractData>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+inline std::optional<DeployedContractData>
+ItemChange::to_new_deployment() const
+{
+  if (const auto *tmp = std::get_if<DeployedContractData>(&type_); tmp)
     return *tmp;
   return std::nullopt;
 }
