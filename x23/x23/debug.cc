@@ -201,7 +201,12 @@ void
 do_panic(std::string_view fmt, std::format_args args,
          std::source_location sloc) noexcept
 {
-  std::string msg = std::vformat(fmt, args);
+  std::string msg = getprogname();
+  if (!msg.empty())
+    msg += ":PANIC: ";
+  else
+    msg += "PANIC: ";
+  uvformat_to(&msg, fmt, args);
   uformat_to(&msg, "\n  in {}\n  function {}\n  at  {}:{}\n", getprogpath(),
              sloc.function_name(), sloc.file_name(), sloc.line());
   if (auto st = stacktrace(4); !st.empty()) {

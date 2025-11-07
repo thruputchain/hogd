@@ -314,10 +314,13 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   setup_grant_storage_token(contract_addr, kInitialBalance);
 
   auto pk1 = make_pk_config(Weight{1});
+  auto pk2 = make_pk_config(Weight{2});
+  ASSERT_NE(pk1, pk2);
+
   AuthDataChangeArgs auth_data1{};
   auth_data1.auth_data_change_signers.push_back({0, pk1});
   AuthDataChangeArgs auth_data2{};
-  auth_data2.auth_data_change_signers.push_back({0, make_pk_config(Weight{2})});
+  auth_data2.auth_data_change_signers.push_back({0, pk2});
 
   AuthDataChangeArgs auth_data_conflict{};
   auth_data_conflict.auth_data_change_signers.push_back({0, nullptr});
@@ -338,6 +341,7 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
 
+  // Can't reserve a lock for a conflicting key; tx2 holds a sharedlock ref
   tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
@@ -345,6 +349,7 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   ASSERT_TRUE(r1_2.has_value());
   ASSERT_FALSE(r1_2.value());
 
+  // how tx2 releases a shared lock ref
   ASSERT_TRUE(tx2.pop_subtransactions(1).has_value());
 
   tx1.add_delta(make_account_auth_data_addrkey(contract_addr),
@@ -354,13 +359,15 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   ASSERT_TRUE(r1_3.has_value());
   ASSERT_TRUE(r1_3.value());
 
+  // tx1 has the lock in exclusive mode
   tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data2),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2_2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2_2.has_value());
-  ASSERT_TRUE(r2_2.value());
+  ASSERT_FALSE(r2_2.value());
 
+  // tx1 still has the lock in exclusive mode
   tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
                 make_auth_data_delta(auth_data_conflict),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
@@ -369,6 +376,15 @@ TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
   ASSERT_FALSE(r2_3.value());
 
   ASSERT_TRUE(tx1.commit_transaction({}).has_value());
+
+  // the exclusive lock is now released
+  tx2.add_delta(make_account_auth_data_addrkey(contract_addr),
+                make_auth_data_delta(auth_data2),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2_4 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2_4.has_value());
+  ASSERT_TRUE(r2_4.value());
+
   ASSERT_TRUE(tx2.commit_transaction({}).has_value());
   advance_block();
   check_balance(contract_addr,

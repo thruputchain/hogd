@@ -330,18 +330,27 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
     write_call(record, [&](rpc_msg *msg, BufView res) {
       if (!msg) {
-        logger_.log_client_fail(xid, "EOF");
-        ret = std::unexpected{XdrBadInput("EOF")};
+        auto err = std::format("EOF waiting for result of {}::{}",
+                               ProcMeta::version_meta::version_name,
+                               ProcMeta::proc_name);
+        logger_.log_client_fail(xid, err);
+        ret = std::unexpected{XdrBadInput(err)};
       }
       else if (!rpc_is_success(*msg)) {
         logger_.template log_client<ProcMeta>(*msg);
-        ret = std::unexpected{XdrCallFailed(std::move(*msg))};
+        XdrCallFailed err(std::move(*msg));
+        err.what_ =
+            std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                        ProcMeta::proc_name, err.what_);
+        ret = std::unexpected{std::move(err)};
       }
       else
         try {
           if constexpr (std::is_void_v<typename decltype(ret)::value_type>) {
             if (!res.empty())
-              throw XdrBadInput("Received bytes for void result");
+              throw XdrBadInput("Received bytes for void result of {}::{}",
+                                ProcMeta::version_meta::version_name,
+                                ProcMeta::proc_name);
           }
           else {
             deserialize(&ret.value(), res);
@@ -351,6 +360,9 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
           if (logging)
             logger_.template log_client<ProcMeta>(
                 *msg, uformat("deserializion error: {}", e.what()));
+          e.what_ =
+              std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, e.what_);
           ret = std::unexpected{std::move(e)};
         }
       done.release();

@@ -311,6 +311,7 @@ public:
   RefPtr<CoroPoll> cp_;
 
   void fail();
+  int get_fd() const { return fd_.get(); }
 
 protected:
   UniqueFd fd_;
@@ -327,7 +328,7 @@ protected:
 private:
   struct ClientState {
     std::uint32_t lastxid_{};
-    std::map<std::uint32_t, CoroCB<Buf>> xidmap_;
+    std::map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_;
   };
   MVar<ClientState> cstate_;
 
@@ -408,9 +409,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     if (!reader_running_) {
       reader_running_ = true;
-      logger_.log_message("launching reader");
       reader();
-      logger_.log_message("reader launched");
     }
   }
 
@@ -431,7 +430,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_serializable auto &...args)
-  {
+  try {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
@@ -458,7 +457,7 @@ struct RpcStream : public detail::RpcStreamImpl {
       if constexpr (!std::same_as<Logger, RpcNoLogger>)
         logger_.template log_client<ProcMeta>(
             msg, uformat(" deserialization error: {}", e.what()));
-      throw e;
+      throw;
     }
 
     logger_.template log_client<ProcMeta>(msg, ret);
@@ -466,6 +465,10 @@ struct RpcStream : public detail::RpcStreamImpl {
       co_return;
     else
       co_return ret;
+  } catch (XdrException &e) {
+    e.what_ = std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, e.what_);
+    throw;
   }
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})

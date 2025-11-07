@@ -104,7 +104,11 @@ TEST_F(ItemChangeAuthTest, Narrow)
 
   EXPECT_TRUE(auth_data_item.narrow(auth_data_3));
 
-  auto res = auth_data_item.build_result();
+  AuthDataItem maintx_item(base_data_);
+  EXPECT_TRUE(maintx_item.merge(auth_data_item, &cost_model_).has_value());
+  maintx_item.commit_change(auth_data_item);
+
+  auto res = maintx_item.build_result();
   EXPECT_FALSE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
   EXPECT_FALSE(res.public_keys[2]);

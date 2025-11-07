@@ -18,9 +18,13 @@
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
+#include "hogd/hogdb/item_lock/new_contract_lock.h"
+#include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "x23/testlock.h"
 
 namespace hogd {
 
@@ -54,7 +58,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
   assert(lock_state == kUncommitted);
 
-  std::unique_lock lock(mtx_);
+  std::unique_lock<x23::TestLock> lock(lock_);
 
   if (before == nullptr) {
     assert(after != nullptr);
@@ -92,7 +96,7 @@ ItemLock::commit_change(const ItemChange &change,
     // In that case, we wind up changing the variant of lock_contents_.
 
     if (change.is_exclusive()) {
-      std::unique_lock lock(mtx_);
+      std::unique_lock<x23::TestLock> lock(lock_);
       assert(pending_refcount_ == 1);
       prepare_lock_contents(&change, lock);
     }
@@ -126,7 +130,7 @@ ItemLock::commit_change(const ItemChange &change,
         else {
           auto const *inner = change.get_inner<typename lock_t::change_type>();
           assert(inner != nullptr);
-          return lock.commit_change(did_finalize, snapshot_cost_, inner,
+          return lock.commit_change(did_finalize, snapshot_cost_, *inner,
                                     cost_model);
         }
       },
@@ -188,10 +192,10 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
 // acquired a ref on this lock.  Does not include current transaction if before
 // is nullptr.
 HogDBStatus<int128_t>
-ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
-                                         const ItemChange *after,
-                                         const StorageCostModel *cost_model,
-                                         std::unique_lock<std::mutex> const &ul)
+ItemLock::handle_try_atomic_from_pending(
+    const ItemChange *before, const ItemChange *after,
+    const StorageCostModel *cost_model,
+    std::unique_lock<x23::TestLock> const &ul)
 {
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
   assert(ul.owns_lock());
@@ -238,9 +242,9 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
           }
         },
         lock_contents_);
-    assert(res.has_value());
-    return snapshot_cost_transform(res.value(), snapshot_cost_,
-                                   after->is_permanent_exclusive());
+    CHECK(res.has_value());
+    CHECK(!after->is_permanent_exclusive());
+    return snapshot_cost_transform(res.value(), snapshot_cost_, false);
   }
 
   if (after != nullptr && after->is_exclusive()) {
@@ -317,7 +321,7 @@ ItemLock::handle_try_atomic_from_pending(const ItemChange *before,
 HogDBStatus<int128_t>
 ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
                                           const StorageCostModel *cost_model,
-                                          std::unique_lock<std::mutex> &ul)
+                                          std::unique_lock<x23::TestLock> &ul)
 {
   if (pending_refcount_ == 0) {
     assert(std::holds_alternative<std::monostate>(lock_contents_));
@@ -342,7 +346,7 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
 void
 ItemLock::handle_release_uncommitted_lock(
     const ItemChange *before, const StorageCostModel *cost_model,
-    std::unique_lock<std::mutex> const &ul)
+    std::unique_lock<x23::TestLock> const &ul)
 {
   assert(ul.owns_lock());
   assert(pending_refcount_ > 0);
@@ -360,7 +364,7 @@ ItemLock::handle_release_uncommitted_lock(
 }
 
 void
-ItemLock::set_exclusive_lock(std::unique_lock<std::mutex> const &ul)
+ItemLock::set_exclusive_lock(std::unique_lock<x23::TestLock> const &ul)
 {
   assert(ul.owns_lock());
   assert(pending_refcount_ <= 1);
@@ -369,7 +373,7 @@ ItemLock::set_exclusive_lock(std::unique_lock<std::mutex> const &ul)
 
 void
 ItemLock::prepare_lock_contents(const ItemChange *after,
-                                std::unique_lock<std::mutex> const &ul)
+                                std::unique_lock<x23::TestLock> const &ul)
 {
   assert((pending_refcount_ == 0 &&
           std::holds_alternative<std::monostate>(lock_contents_)) ||
@@ -397,11 +401,35 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     return;
   }
 
+  if (after->is_create_contract()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewContractLock>(
+        after->to_new_contract().value().new_contract());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
+  if (after->is_deploy_contract()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewDeploymentLock>(
+        after->to_new_deployment().value().deployed_contract_hash());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
+  if (after->is_auth_data()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<PointerLock<AuthLock>>(
+        after->to_auth_data()->base_auth_data());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
   panic("unsupported change type");
 }
 
 void
-ItemLock::reset_lock_contents(std::unique_lock<std::mutex> const &ul)
+ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
 {
   assert(ul.owns_lock());
   assert(pending_refcount_ == 0);

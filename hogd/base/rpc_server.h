@@ -25,89 +25,120 @@ namespace hogd {
 
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
-class RpcSvcHolder : public x23::RefCount {
+class RpcServer {
 public:
   using Impl = IMPL;
   using VersMeta = VERSMETA;
-  using Ptr = x23::RefPtr<RpcSvcHolder>;
-
-  static constexpr bool kAllowRefPtrConversion = true;
 
   x23::CoroPoll &cp_;
+  size_t max_message_size_ = x23::default_max_message_size;
 
   template<typename... Args> requires std::constructible_from<Impl, Args...>
-  static RpcSvcHolder &make(x23::CoroPoll &cp, Args &&...args)
-  {
-    return *new RpcSvcHolder(cp, std::forward<Args>(args)...);
-  }
+  RpcServer(x23::CoroPoll &cp, Args &&...args)
+    : cp_(cp), impl_(std::forward<Args>(args)...)
+  {}
+  template<typename... Args> requires std::constructible_from<Impl, Args...>
+  RpcServer(Args &&...args)
+    : cp_(default_coropoll()), impl_(std::forward<Args>(args)...)
+  {}
+  ~RpcServer() { shut_down(); }
 
-  uint16_t start_server(uint16_t portno)
+  uint16_t start_server(uint16_t port)
   {
     // If this fails you started the same server twice
     assert(listen_fd_ == x23::kInvalidFd);
     // NOLINTBEGIN(readability-identifier-naming)
-    auto [port, lfd] =
-        tcp_rpc_server(cp_, portno,
+    auto [prt, lfd] =
+        tcp_rpc_server(cp_, port,
                        [this, _d = x23::Defer([this] { eof(); })](auto c) {
                          c->max_message_size = max_message_size_;
-                         c->template server<VersMeta>(impl_);
+                         new Conn{*this, c};
                        });
     // NOLINTEND(readability-identifier-naming)
     listen_fd_ = lfd.get();
-    return port_ = port;
+    return port_ = prt;
   }
 
-  const std::shared_ptr<Impl> &impl() const noexcept { return impl_; }
-  uint16_t port() const { return port_; }
-  size_t max_message_size_ = x23::default_max_message_size;
+  Impl *impl() noexcept { return &impl_; }
+  uint16_t port() const noexcept { return port_; }
+  RpcServer *operator->() noexcept { return this; }
+
+  void shut_down()
+  {
+    if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
+      cp_.poison(lfd);
+      listen_fd_.wait(lfd);
+    }
+
+    auto ptr = cs_.take();
+    if (Conn *c = ptr->connlist)
+      do {
+        auto nextc = c->next_;
+        c->rpcstream_->fail();
+        c = nextc;
+      } while (c);
+    else
+      all_connections_destroyed_ = true;
+    ptr.reset();
+    all_connections_destroyed_.wait(false);
+  }
 
 private:
-  std::shared_ptr<Impl> impl_;
+  struct Conn {
+    RpcServer &s_;
+    Conn *next_;
+    Conn **prev_;
+    x23::detail::RpcStreamImpl *rpcstream_;
+
+    struct Ptr {
+      Conn *c_;
+      explicit Ptr(Conn *c) : c_(c) {}
+      Ptr(Ptr &&other) noexcept : c_(std::exchange(other.c_, nullptr)) {}
+      ~Ptr() { delete c_; }
+      Impl &operator*() const noexcept { return c_->s_.impl_; }
+      Impl *operator->() const noexcept { return &c_->s_.impl_; }
+    };
+
+    // NOLINTBEGIN(bugprone-assignment-in-if-condition)
+    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
+    {
+      auto ptr = s_.cs_.take();
+      if ((next_ = ptr->connlist))
+        next_->prev_ = &next_;
+      prev_ = &ptr->connlist;
+      *prev_ = this;
+      static_assert(x23::implements_async_rpc<Ptr, VersMeta>);
+      c->template server<VersMeta>(Ptr(this));
+    }
+    ~Conn()
+    {
+      auto ptr = s_.cs_.take();
+      if ((*prev_ = next_))
+        next_->prev_ = prev_;
+      if (!ptr->connlist && s_->listen_fd_ == x23::kInvalidFd) {
+        s_.all_connections_destroyed_ = true;
+        s_.all_connections_destroyed_.notify_all();
+      }
+    }
+    // NOLINTEND(bugprone-assignment-in-if-condition)
+  };
+  struct ConnState {
+    Conn *connlist{};
+  };
+
+  Impl impl_;
+  x23::MVar<ConnState> cs_;
+  std::atomic_bool all_connections_destroyed_;
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
-  template<typename... Args>
-  RpcSvcHolder(x23::CoroPoll &cp, Args &&...args)
-    : cp_(cp), impl_(std::make_shared<Impl>(std::forward<Args>(args)...))
-  {}
-
-  ~RpcSvcHolder() = default;
-
-  void finalize() noexcept
-  {
-    if (int fd = listen_fd_.exchange(x23::kInvalidFd); fd != x23::kInvalidFd)
-      cp_.poison(fd);
-    else
-      delete this;
-  }
-
   void eof() noexcept
   {
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    Ptr _r(*this);
-    listen_fd_ = -1;
+    listen_fd_ = x23::kInvalidFd;
+    listen_fd_.notify_all();
   }
-
-  friend class x23::RefCount;
 };
 
-template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
-requires x23::implements_async_rpc<IMPL *, VERSMETA>
-struct RpcServer : RpcSvcHolder<IMPL, VERSMETA>::Ptr {
-  template<typename... Args> requires std::constructible_from<IMPL, Args...>
-  RpcServer(x23::CoroPoll &cp, Args &&...args)
-    : RpcSvcHolder<IMPL, VERSMETA>::Ptr(
-          RpcSvcHolder<IMPL, VERSMETA>::make(cp, std::forward<Args>(args)...))
-  {}
-  template<typename... Args> requires std::constructible_from<IMPL, Args...>
-  RpcServer(Args &&...args)
-    : RpcSvcHolder<IMPL, VERSMETA>::Ptr(
-          RpcSvcHolder<IMPL, VERSMETA>::make(default_coropoll(),
-                                             std::forward<Args>(args)...))
-  {}
-  uint16_t start_server(uint16_t port) { return (*this)->start_server(port); }
-  uint16_t port() const { return (*this)->port(); }
-};
 template<typename I>
 requires std::constructible_from<std::remove_cvref_t<I>, I &&>
 RpcServer(x23::CoroPoll &, I &&) -> RpcServer<std::remove_cvref_t<I>>;

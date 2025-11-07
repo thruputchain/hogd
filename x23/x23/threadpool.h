@@ -140,7 +140,9 @@ template<typename T> struct CpuHinted {
   template<std::same_as<T> U = T> requires std::constructible_from<U>
   CpuHinted() noexcept : value{}, cpuhint{}
   {}
-  CpuHinted(T v, unsigned h) noexcept : value(std::move(v)), cpuhint(h) {}
+  CpuHinted(T v, unsigned h = cpuid()) noexcept
+    : value(std::move(v)), cpuhint(h)
+  {}
 
   template<std::convertible_to<T> U>
   CpuHinted(const CpuHinted<U> &u) : value(u.value), cpuhint(u.cpuhint)
