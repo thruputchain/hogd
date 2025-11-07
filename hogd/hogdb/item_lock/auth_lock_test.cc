@@ -501,4 +501,54 @@ TEST(AuthLockTest, ConcurrentExclusiveLocks)
                 kTestCostModel.get_auth_data_cost(1));
 }
 
+TEST(AuthLockTest, AcquireCosts1)
+{
+  // start with 3 keys in base
+  const AccountAuthData base = make_base_auth_data({0, 1, 2});
+  AuthLock lock(base);
+
+  auto item1 =
+      make_auth_item({{0, make_test_pk_config(1)}, {1, nullptr}, {4, nullptr}});
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(3));
+
+  // doesn't pay for the nullptr on 4
+  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2));
+}
+
+TEST(AuthLockTest, AcquireCosts2)
+{
+  // start with 1 key in base
+  const AccountAuthData base = make_base_auth_data({0});
+  const int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(1);
+  AuthLock lock(base);
+
+  // We can't refund deleting keys in auth data because we don't pass the
+  // permament exclusive lock flag into the auth data item. These two changes
+  // are both valid, but if committed together with a tx-local refund would have
+  // the possibility of double-refunding the deleted key.
+
+  auto item1 = make_auth_item({{0, nullptr}, {1, make_test_pk_config(2)}});
+  auto item2 = make_auth_item({{0, nullptr}, {2, make_test_pk_config(3)}});
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  // pay for new key on 1, doesn't get refund for deleting 0
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
+
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  // pay for new key on 2, doesn't get refund for deleting 0
+  EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
+
+  EXPECT_EQ(lock.commit_change(true, snapshot_cost, item1, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(1) - snapshot_cost);
+  EXPECT_EQ(lock.commit_change(false, snapshot_cost, item2, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2) -
+                kTestCostModel.get_auth_data_cost(1));
+}
+
 } // namespace hogd

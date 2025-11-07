@@ -71,9 +71,6 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
         ((before_item != nullptr) && (before_item->pk_changes_[i].exclusive_));
     bool after_exclusive =
         ((after_item != nullptr) && (after_item->pk_changes_[i].exclusive_));
-    info("i {} before_modifies {} after_modifies {} before_exclusive {} "
-         "after_exclusive {}",
-         i, before_modifies, after_modifies, before_exclusive, after_exclusive);
     assert(before_item == nullptr ||
            (before_item->pk_changes_[i].refcount_ <= 1));
     assert(after_item == nullptr ||
