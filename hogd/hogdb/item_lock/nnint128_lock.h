@@ -41,7 +41,7 @@ public:
   // value returned by this function is the amount of tokens that can be
   // released after the transaction commits.
   static int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                                const NNInt128 * /*unused*/,
+                                const NNInt128 & /*unused*/,
                                 const StorageCostModel *cost_model)
   {
     if (did_finalize) {

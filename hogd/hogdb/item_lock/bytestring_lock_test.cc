@@ -45,4 +45,18 @@ TEST(BytestringLockTest, BasicUsage)
                    .has_value());
 }
 
+TEST(BytestringLockTest, CommitCost)
+{
+  BytestringLock lock(make_owning_span({0, 1, 2, 3}));
+
+  Bytes item1(make_owning_span({0, 1, 2, 3}));
+
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+                  .has_value());
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+                  .has_value());
+  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+            kTestCostModel.get_bytestring_cost(4));
+  EXPECT_EQ(lock.commit_change(false, 0, item1, &kTestCostModel), 0);
+}
 } // namespace hogd

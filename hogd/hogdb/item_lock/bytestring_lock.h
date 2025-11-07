@@ -37,7 +37,7 @@ public:
   }
 
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                         const Bytes * /*unused*/,
+                         const Bytes & /*unused*/,
                          const StorageCostModel *cost_model) const
   {
     if (did_finalize) {
