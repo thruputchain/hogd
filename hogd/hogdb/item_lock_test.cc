@@ -45,7 +45,7 @@ make_base_auth_data(
   return base_auth_data;
 }
 
-ItemChange
+AuthDataItem
 make_auth_data_change(
     std::unordered_map<uint32_t, PublicKeyConfigOpt> const &public_keys)
 {
@@ -435,8 +435,9 @@ TEST(ItemLockTest, BaseDataConflict)
   // snapshot, so it will always be the same. Still, worth checking to make sure
   // we don't have some bizarre errors there.
   ItemLock lock(0);
-  auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
-  auto second = make_auth_data_change({{1, make_test_pk_config(2)}});
+  auto first = ItemChange(make_auth_data_change({{0, make_test_pk_config(1)}}));
+  auto second =
+      ItemChange(make_auth_data_change({{1, make_test_pk_config(2)}}));
 
   auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
   ASSERT_TRUE(r1.has_value());
@@ -451,4 +452,71 @@ TEST(ItemLockTest, BaseDataConflict)
   EXPECT_EQ(lock.commit_change(first, &kTestCostModel),
             kTestCostModel.get_auth_data_cost(1));
 }
+
+TEST(ItemLockTest, AuthAddKey)
+{
+  ItemLock lock(0);
+  // start with 1 initial key
+  auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
+  first.set_new_pk(1, make_test_pk_config(2));
+  ItemChange first_change(std::move(first));
+
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
+
+  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2));
+}
+
+TEST(ItemLockTest, ChangeKey)
+{
+  ItemLock lock(0);
+  auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
+  first.set_new_pk(0, make_test_pk_config(2));
+  ItemChange first_change(std::move(first));
+
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(1));
+
+  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(1));
+}
+
+TEST(ItemLockTest, AuthAddKeyMultiple)
+{
+  ItemLock lock(0);
+  auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
+  first.set_new_pk(1, make_test_pk_config(2));
+  ItemChange first_change(std::move(first));
+
+  // NOLINTBEGIN(performance-unnecessary-copy-initialization)
+  ItemChange second_change = first_change;
+  ItemChange third_change = first_change;
+  // NOLINTEND(performance-unnecessary-copy-initialization)
+
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
+
+  auto r2 =
+      lock.try_atomic_change_lock(nullptr, &second_change, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
+
+  auto r3 =
+      lock.try_atomic_change_lock(nullptr, &third_change, &kTestCostModel);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(r3.value(), kTestCostModel.get_auth_data_cost(2));
+
+  EXPECT_EQ(lock.commit_change(second_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2));
+  EXPECT_EQ(lock.commit_change(third_change, &kTestCostModel), 0);
+  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel), 0);
+}
+
 } // namespace hogd
