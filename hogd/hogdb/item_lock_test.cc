@@ -38,7 +38,7 @@ AccountAuthData
 make_base_auth_data(
     std::unordered_map<uint32_t, PublicKeyConfigOpt> public_keys)
 {
-  AccountAuthData base_auth_data;
+  AccountAuthData base_auth_data{};
   for (auto &[key_id, pk] : public_keys) {
     base_auth_data.public_keys[key_id] = std::move(pk);
   }
@@ -517,6 +517,53 @@ TEST(ItemLockTest, AuthAddKeyMultiple)
             kTestCostModel.get_auth_data_cost(2));
   EXPECT_EQ(lock.commit_change(third_change, &kTestCostModel), 0);
   EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel), 0);
+}
+
+TEST(ItemLockTest, MoveKeys)
+{
+  // This test starts with 1 initial key.  Each transaction deletes that key and
+  // creates another key elsewhere.
+  auto pk = make_test_pk_config(1);
+  ItemLock lock(0);
+  auto first = make_auth_data_change({{0, pk}});
+  auto second = make_auth_data_change({{0, pk}});
+  auto third = make_auth_data_change({{0, pk}});
+
+  first.set_new_pk(0, nullptr);
+  second.set_new_pk(0, nullptr);
+  third.set_new_pk(0, nullptr);
+
+  first.set_new_pk(1, make_test_pk_config(2));
+  second.set_new_pk(2, make_test_pk_config(2));
+  third.set_new_pk(3, make_test_pk_config(2));
+
+  ItemChange first_change(std::move(first));
+  ItemChange second_change(std::move(second));
+  ItemChange third_change(std::move(third));
+
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
+
+  auto r2 =
+      lock.try_atomic_change_lock(nullptr, &second_change, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+  EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
+
+  auto r3 =
+      lock.try_atomic_change_lock(nullptr, &third_change, &kTestCostModel);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(r3.value(), kTestCostModel.get_auth_data_cost(2));
+
+  EXPECT_EQ(lock.commit_change(second_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(1));
+  EXPECT_EQ(lock.commit_change(third_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2) -
+                kTestCostModel.get_auth_data_cost(1));
+  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(3) -
+                kTestCostModel.get_auth_data_cost(2));
 }
 
 } // namespace hogd
