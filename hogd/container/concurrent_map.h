@@ -230,9 +230,9 @@ public:
               cleared_count.fetch_add(width, std::memory_order_relaxed);
           size_t end = std::min<size_t>(start + width, buckets_.size());
           for (size_t i = start; i < end; i++) {
+            value_bucket_t::for_each(&buckets_[i], f);
             value_bucket_t *bucket =
-                buckets_[i].load(std::memory_order_relaxed);
-            value_bucket_t::for_each(bucket, f);
+              buckets_[i].load(std::memory_order_relaxed);
             value_bucket_t::clear(bucket);
           }
         }
