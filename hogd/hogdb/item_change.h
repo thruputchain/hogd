@@ -667,6 +667,8 @@ public:
     snapshot_cost_ = snapshot_cost;
   }
 
+  bool has_snapshot_cost() const { return snapshot_cost_.has_value(); }
+
   // getters
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;

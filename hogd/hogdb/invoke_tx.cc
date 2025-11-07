@@ -450,8 +450,9 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 
   HogDBStatus<int128_t> base = block_.get().get_db().read_nnint128(key);
   if (!base) {
-    if (base.error() != HogDBCode::kNotFound)
+    if (base.error() != HogDBCode::kNotFound) {
       return base.error();
+    }
     base = 0;
   }
   return request_nnint128(key, *base, delta, flags);
