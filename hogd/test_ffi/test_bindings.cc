@@ -366,6 +366,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   std::memcpy(addr.data(), contract_addr, addr.size());
 
   try {
+    trace("granting {} storage tokens for address {}", tokens, x23::show(addr));
     db_cast->get_base_db().grant_storage_token(addr, tokens);
   } catch (std::exception const &e) {
     log_error("error granting storage tokens: {}", e);

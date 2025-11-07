@@ -78,6 +78,7 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     return {{nnint->base(), false}};
   }();
   if (!r) {
+    warn("failed to load snapshot balance for {}", addr);
     return r.error();
   }
   auto [snapshot_base, force_create] = r.value();
@@ -90,6 +91,12 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     auto [ign, of] = overflowing_sub(bal.back().manual_transfer_amount,
                                      bal.back().total_locked_storage_amount);
     if (of) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        trace(
+            "subtraction overflow when computing balance change for address {}",
+            x23::show(contract_addr));
+      }
       return HogDBError(HogDBCode::kOverflow);
     }
     delta = ign;
@@ -97,9 +104,20 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
 
   auto [ign, of] = overflowing_add(snapshot_base, delta);
   if (of) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      trace("addition overflow when computing balance change for address {}",
+            x23::show(contract_addr));
+    }
     return HogDBError(HogDBCode::kOverflow);
   }
   if (ign < 0) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      trace("storage required exceeds snapshot base when computing balance "
+            "change for address {}: {} vs {}",
+            x23::show(contract_addr), snapshot_base, delta);
+    }
     // invalid delta
     // TODO(geoff): if we add in retrocausal nnint, we will need to allow this
     // case
