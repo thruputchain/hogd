@@ -551,4 +551,120 @@ TEST(AuthLockTest, AcquireCosts2)
                 kTestCostModel.get_auth_data_cost(1));
 }
 
+TEST(AuthLockTest, SwapKeys)
+{
+  AccountAuthData base = make_base_auth_data();
+  AuthLock lock(base);
+
+  // Tx acquires key 0
+  auto item1 = make_auth_item({{0, make_test_pk_config(1)}});
+  // conflicts with item1 on key 0
+  auto other_tx = make_auth_item({{0, make_test_pk_config(5)}});
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+                  .has_value());
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &other_tx, &kTestCostModel)
+                   .has_value());
+
+  // Tx changes to release key 0 and acquire key 1 instead
+  auto item2 = make_auth_item({{1, make_test_pk_config(2)}});
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel).has_value());
+
+  // Now another tx can acquire key 0 (was released)
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx, &kTestCostModel)
+                  .has_value());
+}
+
+TEST(AuthLockTest, ThreeConcurrentTransactionsSameKey)
+{
+  AccountAuthData base = make_base_auth_data();
+  AuthLock lock(base);
+
+  auto pk = make_test_pk_config(1);
+
+  // Three transactions all acquire locks on same key with same value
+  auto tx1 = make_auth_item({{0, pk}});
+  auto tx2 = make_auth_item({{0, pk}});
+  auto tx3 = make_auth_item({{0, pk}});
+
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1, &kTestCostModel).has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2, &kTestCostModel).has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx3, &kTestCostModel).has_value());
+
+  // None can upgrade to exclusive
+  auto tx1_excl = make_auth_item({{0, make_test_pk_config(2)}});
+  tx1_excl.narrow(tx1);
+  EXPECT_FALSE(lock.try_atomic_change_lock(&tx1, &tx1_excl, &kTestCostModel)
+                   .has_value());
+
+  // Release tx2 and tx3
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx2, nullptr, &kTestCostModel).has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx3, nullptr, &kTestCostModel).has_value());
+
+  // Now tx3 can upgrade to exclusive
+  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1, &tx1_excl, &kTestCostModel)
+                  .has_value());
+}
+
+TEST(AuthLockTest, AllKeysUsed)
+{
+  AccountAuthData base = make_base_auth_data();
+  AuthLock lock(base);
+
+  // Create a transaction that modifies all MAX_SIGNERS keys
+  std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> all_keys;
+  all_keys.reserve(MAX_SIGNERS);
+  for (uint32_t i = 0; i < MAX_SIGNERS; ++i) {
+    all_keys.emplace_back(i, make_test_pk_config(static_cast<uint8_t>(i)));
+  }
+
+  auto item = make_auth_item(all_keys);
+  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel);
+  EXPECT_TRUE(status.has_value());
+  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(MAX_SIGNERS));
+
+  // Commit
+  int128_t cost = lock.commit_change(true, 0, item, &kTestCostModel);
+  EXPECT_EQ(cost, kTestCostModel.get_auth_data_cost(MAX_SIGNERS));
+}
+
+TEST(AuthLockTest, PartialRelease)
+{
+  AccountAuthData base = make_base_auth_data();
+  AuthLock lock(base);
+
+  // Tx acquires keys 0, 1, 2
+  auto item1 = make_auth_item({{0, make_test_pk_config(1)},
+                               {1, make_test_pk_config(2)},
+                               {2, make_test_pk_config(3)}});
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+                  .has_value());
+
+  // Tx releases keys 0 and 2, keeps key 1
+  auto item2 = make_auth_item({{1, make_test_pk_config(2)}});
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel).has_value());
+
+  // Another tx can now acquire key 0
+  auto other_tx1 = make_auth_item({{0, make_test_pk_config(1)}});
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx1, &kTestCostModel)
+                  .has_value());
+
+  // And key 2
+  auto other_tx2 = make_auth_item({{2, make_test_pk_config(3)}});
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx2, &kTestCostModel)
+                  .has_value());
+
+  // But not key 1 with different value
+  auto conflicting_tx = make_auth_item({{1, make_test_pk_config(99)}});
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &conflicting_tx, &kTestCostModel)
+          .has_value());
+}
+
 } // namespace hogd

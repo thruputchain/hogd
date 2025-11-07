@@ -199,6 +199,9 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 
   const AuthDataItem &after_item = *after.get();
 
+  // It's this kind of logic that prevents us from pulling the
+  // did_finalize/snapshot logic out of the type-specific locks and into the
+  // base ItemLock.
   int128_t previous_cost =
       did_finalize ? snapshot_cost
                    : cost_model->get_auth_data_cost(count_active_keys());

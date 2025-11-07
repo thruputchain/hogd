@@ -16,6 +16,7 @@
 #include "hogd/hogdb/item_lock/new_contract_lock.h"
 #include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
@@ -89,7 +90,7 @@ private:
   constexpr static uint32_t kFinalizedPermamentExclusiveLock = 2;
 
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
-               DeletionLock, NewContractLock, NewDeploymentLock, AuthLock>
+               DeletionLock, NewContractLock, NewDeploymentLock, PointerLock<AuthLock>>
       lock_contents_ = std::monostate{};
 
   std::atomic<uint32_t> lock_state_ = kUncommitted;
@@ -106,8 +107,6 @@ private:
 };
 
 // should be less than two cache lines.
-// Note: AuthLock is large (contains full AccountAuthData and pk_changes array),
-// so ItemLock exceeds the 128-byte limit. User explicitly said not to worry
-// about size. static_assert(sizeof(ItemLock) <= 128);
+static_assert(sizeof(ItemLock) <= 128);
 
 } // namespace hogd

@@ -9,6 +9,8 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
@@ -51,8 +53,7 @@ private:
   friend class AuthDataItem;
 };
 
-// Note: AuthLock does not meet the sizeof <= 64 requirement in the item_lock
-// concept, but user explicitly said not to worry about size restriction.
-// static_assert(item_lock<AuthLock>);
+static_assert(item_lock_unsized<AuthLock>);
+static_assert(item_lock<PointerLock<AuthLock>>);
 
 } // namespace hogd

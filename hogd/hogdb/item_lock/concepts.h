@@ -12,7 +12,7 @@
 namespace hogd {
 
 template<typename Lock>
-concept item_lock =
+concept item_lock_unsized =
     requires { typename Lock::change_type; } &&
     requires(Lock lock, const Lock::change_type *before,
              const Lock::change_type *after, const StorageCostModel *cost_model,
@@ -24,11 +24,13 @@ concept item_lock =
         lock.commit_change(finalize, snapshot_cost, *after, cost_model)
       } -> std::same_as<int128_t>;
     } &&
-    requires { sizeof(Lock) <= 64; } &&
     requires(Lock const &lock, ItemKey const &key, HogDBDAO &dao,
              MerkleTriePrefix &trie) {
       {
         lock.write_committed_change(key, dao, trie)
       } -> std::same_as<HogDBStatus<void>>;
     };
+
+template<typename Lock>
+concept item_lock = item_lock_unsized<Lock> && requires { sizeof(Lock) <= 64; };
 } // namespace hogd
