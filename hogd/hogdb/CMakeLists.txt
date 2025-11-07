@@ -4,6 +4,7 @@ add_library(hogdb_objects OBJECT
   block_tx.cc
   block_id_manager.cc
   item_lock/bytestring_lock.cc
+  item_lock/deletion_lock.cc
   item_lock/exclusive_lock.cc
   item_lock/nnint128_lock.cc
   item_lock.cc
