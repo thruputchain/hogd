@@ -1,13 +1,11 @@
 #pragma once
 
-#include <atomic>
 #include <map>
 #include <mutex>
 #include <optional>
 
 #include "event.hh"
 #include "event_rpc.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
