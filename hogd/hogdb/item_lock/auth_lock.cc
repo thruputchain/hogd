@@ -7,7 +7,6 @@
 #include "account.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -72,6 +71,9 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
         ((before_item != nullptr) && (before_item->pk_changes_[i].exclusive_));
     bool after_exclusive =
         ((after_item != nullptr) && (after_item->pk_changes_[i].exclusive_));
+    info("i {} before_modifies {} after_modifies {} before_exclusive {} "
+         "after_exclusive {}",
+         i, before_modifies, after_modifies, before_exclusive, after_exclusive);
     assert(before_item == nullptr ||
            (before_item->pk_changes_[i].refcount_ <= 1));
     assert(after_item == nullptr ||
@@ -181,8 +183,9 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     // base_auth_data_ and after_item. We also can't release storage costs until
     // commit time. As such, a key is charged if: (1) it exists in the base auth
     // data (2) it is possibly created by this tx
-    bool possibly_created = (after_item->pk_changes_[i].refcount_ > 0) &&
-                            (after_item->pk_changes_[i].pk_ != nullptr);
+    bool possibly_created = (after_item != nullptr) &&
+                            ((after_item->pk_changes_[i].refcount_ > 0) &&
+                             (after_item->pk_changes_[i].pk_ != nullptr));
     if (possibly_created || base_auth_data_.public_keys[i]) {
       max_keys++;
     }
