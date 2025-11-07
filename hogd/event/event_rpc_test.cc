@@ -1,5 +1,6 @@
-#include <filesystem>
 #include <gtest/gtest.h>
+
+#include <memory>
 #include <string>
 
 #include "event.hh"
@@ -17,14 +18,22 @@ namespace hogd {
 class EventRpcTest : public ::testing::Test {
 public:
   EventRpcTest() = default;
-  void SetUp() override { temp_dir_ = TmpDir().directory(); }
-  void TearDown() override { std::filesystem::remove_all(temp_dir_); }
-  std::string temp_dir_;
+  void SetUp() override { temp_dir_ = std::make_unique<TmpDir>(); }
+  void TearDown() override { temp_dir_.reset(); }
+
+  std::string temp_dir() const
+  {
+    info("temp dir: {}", temp_dir_->directory());
+    return temp_dir_->directory();
+  }
+
+private:
+  std::unique_ptr<TmpDir> temp_dir_;
 };
 
 TEST_F(EventRpcTest, BasicUsage)
 {
-  EventRPCContext ctx(temp_dir_);
+  EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
@@ -47,7 +56,7 @@ TEST_F(EventRpcTest, BasicUsage)
 
 TEST_F(EventRpcTest, TestAbandonBlock)
 {
-  EventRPCContext ctx(temp_dir_);
+  EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
@@ -69,7 +78,7 @@ TEST_F(EventRpcTest, TestAbandonBlock)
 
 TEST_F(EventRpcTest, TestEmptyBlock)
 {
-  EventRPCContext ctx(temp_dir_);
+  EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
@@ -80,7 +89,7 @@ TEST_F(EventRpcTest, TestEmptyBlock)
 
 TEST_F(EventRpcTest, TestFromRPC)
 {
-  EventRPCContext ctx(temp_dir_);
+  EventRPCContext ctx(temp_dir());
   RpcServer<EventExecRpc> exec_rpc(ctx);
   RpcServer<EventMempoolRpc> mempool_rpc(ctx);
 
