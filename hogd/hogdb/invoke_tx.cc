@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -22,6 +23,8 @@
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -134,6 +137,12 @@ InvokeTX::update_balance_lock(Address const &addr)
 
     auto status = block_.get().lock(key, new_item);
     if (!status) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        trace("failed to lock balance item for address {}: {}",
+              x23::show(contract_addr), *nnint);
+      }
       return status.error();
     }
 
@@ -161,6 +170,12 @@ InvokeTX::update_balance_lock(Address const &addr)
 
   auto status = block_.get().modify_lock(key, last.change, new_item);
   if (!status) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      trace("failed to modify lock for address {}: {}",
+            x23::show(contract_addr), *last.change.get_raw_nnint128());
+    }
     return status.error();
   }
   if (last.tx_depth == tx_depth_) {
