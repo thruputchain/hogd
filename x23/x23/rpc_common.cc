@@ -20,6 +20,8 @@ static const auto _init = ([] {
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
   peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
+  if (active())
+    log_message("local address {}", show_addr(local_addr(peerfd)));
 }
 
 RpcCsvLogger::RpcCsvLogger(int peerfd, int logfd) : logfd_(logfd)
