@@ -2,14 +2,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bits/time.h>
 #include <cassert>
 #include <cstddef>
+#include <ctime>
 #include <future>
 #include <memory>
 #include <span>
+#include <time.h>
 #include <vector>
 
 #include "block.hh"
+#include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
 #include "exec_sched.hh"
@@ -24,6 +28,7 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/authentication.h"
+#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -306,7 +311,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-std::unique_ptr<ElapsedTimer> nominate_return_timer =
+static std::unique_ptr<ElapsedTimer> nominate_return_timer =
     std::make_unique<ElapsedTimer>();
 
 x23::Async<SchedulerNominationOutcome>
@@ -582,7 +587,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    long long ms = ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+    long long ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
     info("will send nominate result: {}", ms);
   }
 
