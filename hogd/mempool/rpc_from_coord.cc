@@ -144,7 +144,7 @@ MempoolCoordinatorRpc::get_block_hash(
   // are adding to the trie. For example, if we are adding 128 hashes to the
   // trie, it is probably slower to use 128 threads rather than 1-2 threads due
   // to lock contention.
-  size_t num_threads = 100; // worker_pool.worker_count();
+  size_t num_threads = 108; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
@@ -306,8 +306,20 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
+std::unique_ptr<ElapsedTimer> nominate_return_timer =
+    std::make_unique<ElapsedTimer>();
+
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
+{
+  auto ret = schedulercoord_nominate_helper(db_tip);
+  info("nominate return from function took {} s",
+       nominate_return_timer->elapsed());
+  return ret;
+}
+
+x23::Async<SchedulerNominationOutcome>
+MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 {
   static std::unique_ptr<ElapsedTimer> nominate_timer =
       std::make_unique<ElapsedTimer>();
@@ -574,6 +586,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     info("will send nominate result: {}", ms);
   }
 
+  nominate_return_timer = std::make_unique<ElapsedTimer>();
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 
