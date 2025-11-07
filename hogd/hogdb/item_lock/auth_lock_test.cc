@@ -36,7 +36,7 @@ make_test_pk_config(uint8_t value, Weight weight = 100)
 
 // Helper to create an AccountAuthData with some keys
 AccountAuthData
-make_base_auth_data(std::vector<uint8_t> const& key_ids = {})
+make_base_auth_data(std::vector<uint8_t> const &key_ids = {})
 {
   AccountAuthData auth_data;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
@@ -52,8 +52,9 @@ make_base_auth_data(std::vector<uint8_t> const& key_ids = {})
 
 // Helper to create an AuthDataItem with specific key modifications
 PointerItem<AuthDataItem>
-make_auth_item(AccountAuthData base,
-               std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> const& changes)
+make_auth_item(
+    AccountAuthData base,
+    std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> const &changes)
 {
   PointerItem<AuthDataItem> item(std::move(base));
   for (const auto &[key_id, pk] : changes) {
@@ -64,7 +65,8 @@ make_auth_item(AccountAuthData base,
 
 // Overload that creates with empty base
 PointerItem<AuthDataItem>
-make_auth_item(std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> const& changes)
+make_auth_item(
+    std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> const &changes)
 {
   return make_auth_item(make_base_auth_data(), changes);
 }
@@ -473,6 +475,30 @@ TEST(AuthLockTest, KeepLockNoChange)
   // Release
   EXPECT_TRUE(
       lock.try_atomic_change_lock(&item, nullptr, &kTestCostModel).has_value());
+}
+
+TEST(AuthLockTest, ConcurrentExclusiveLocks)
+{
+  AccountAuthData base = make_base_auth_data();
+  AuthLock lock(base);
+
+  auto item1 = make_auth_item({{0, make_test_pk_config(1)}});
+  auto item2 = make_auth_item({{1, make_test_pk_config(2)}});
+  auto item1_narrow = make_auth_item({{0, make_test_pk_config(2)}});
+  item1.narrow(item1_narrow);
+  auto item2_narrow = make_auth_item({{1, make_test_pk_config(1)}});
+  item2.narrow(item2_narrow);
+
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+                  .has_value());
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel)
+                  .has_value());
+
+  EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(1));
+  EXPECT_EQ(lock.commit_change(false, 0, item2, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(2) -
+                kTestCostModel.get_auth_data_cost(1));
 }
 
 } // namespace hogd
