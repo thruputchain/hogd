@@ -2,13 +2,13 @@
 
 #include <algorithm>
 #include <atomic>
-#include <time.h>
 #include <cassert>
 #include <cstddef>
 #include <ctime>
 #include <future>
 #include <memory>
 #include <span>
+#include <time.h>
 #include <vector>
 
 #include "block.hh"
