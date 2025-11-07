@@ -269,7 +269,7 @@ BlockTX::commit(WorkerPool &pool)
           ret = tmp;
         }
       },
-      kDefaultParallelRangeWidth, pool);
+      1024, pool);
 
   PerThread<std::vector<Delta>> balance_deltas;
 
@@ -305,7 +305,8 @@ BlockTX::commit(WorkerPool &pool)
                   get_trie(), make_address_balance_item_key(v.first), kNNInt128,
                   byte_view(cpu_to_le(new_val)))
                   .has_value());
-      });
+      },
+      1024, pool);
 
   if (sched_db_client_) {
     async_dispatch_balance_deltas(block_height_, std::move(balance_deltas),

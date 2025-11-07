@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <utility>
 #include <vector>
 
@@ -219,13 +220,27 @@ public:
       Func f, size_t width = 1024,
       WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    pool.for_each_parallel(
-        buckets_,
-        [&f](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t::for_each(&bucket, f);
-          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
-        },
-        width);
+    std::atomic<size_t> cleared_count = 0;
+    std::vector<std::future<void>> futures;
+    futures.reserve(pool.worker_count());
+    for (size_t i = 0; i < pool.worker_count(); i++) {
+      futures.push_back(pool.submit([&] {
+        while (true) {
+          size_t start =
+              cleared_count.fetch_add(width, std::memory_order_relaxed);
+          size_t end = std::min<size_t>(start + width, buckets_.size());
+          for (size_t i = start; i < end; i++) {
+            value_bucket_t *bucket =
+                buckets_[i].load(std::memory_order_relaxed);
+            value_bucket_t::for_each(bucket, f);
+            value_bucket_t::clear(bucket);
+          }
+        }
+      }));
+    }
+    for (auto &future : futures) {
+      future.wait();
+    }
     cleared_ = true;
   }
 
