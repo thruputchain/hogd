@@ -8,7 +8,6 @@
 #include <future>
 #include <memory>
 #include <span>
-#include <time.h>
 #include <vector>
 
 #include "block.hh"
@@ -589,7 +588,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   {
     struct timespec ts;
+    // NOLINTBEGIN(misc-include-cleaner)
     clock_gettime(CLOCK_REALTIME, &ts);
+    // NOLINTEND(misc-include-cleaner)
     int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
     info("will send nominate result: {}", ms);
   }
