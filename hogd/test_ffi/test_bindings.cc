@@ -22,7 +22,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
