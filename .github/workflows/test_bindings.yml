@@ -53,5 +53,7 @@ jobs:
     - name: build test bindings
       run: make -C build -j test_ffi_test
     - name: run ffi tests
-      run: ./build/hogd/test_ffi/test_ffi_test
+      run: |
+        export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+        ./build/hogd/test_ffi/test_ffi_test
 
