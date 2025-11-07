@@ -128,7 +128,7 @@ private:
 
   Impl impl_;
   x23::MVar<ConnState> cs_;
-  std::atomic_bool all_connections_destroyed_{};
+  std::atomic_bool all_connections_destroyed_;
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
 
