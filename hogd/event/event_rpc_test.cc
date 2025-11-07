@@ -23,7 +23,6 @@ public:
 
   std::string temp_dir() const
   {
-    info("temp dir: {}", temp_dir_->directory());
     return temp_dir_->directory();
   }
 
