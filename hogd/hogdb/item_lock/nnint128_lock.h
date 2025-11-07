@@ -7,6 +7,9 @@
 #include "hogd/base/atomic.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -68,6 +71,9 @@ public:
     }
     return snapshot_value;
   }
+
+  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+                                           MerkleTriePrefix &trie) const;
 
   // For testing only
   int128_t get_add_capacity() const { return add_.load(); }

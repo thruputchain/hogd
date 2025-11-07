@@ -1,6 +1,9 @@
 #pragma once
 
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -31,6 +34,10 @@ public:
     }
     return 0;
   }
+
+  static HogDBStatus<void> write_committed_change(ItemKey const &key,
+                                                  HogDBDAO &dao,
+                                                  MerkleTriePrefix &trie);
 };
 
 static_assert(item_lock<DeletionLock>);
