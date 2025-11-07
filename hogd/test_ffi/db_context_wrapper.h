@@ -7,14 +7,17 @@
 #include <optional>
 
 #include "event.hh"
-#include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_executor_server.h"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
-#include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
+#include "storage_cost.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -59,11 +62,6 @@ public:
                                           identifier.tx_id);
   }
 
-  // Allows direct modification of the committed database -- not for use
-  // within a contract, just within setup.
-  auto &get_base_db() { return db_; }
-  auto &get_block_manager() { return block_manager_; }
-
   BlockID get_current_block_id() const { return current_block_id_; }
 
   std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier identifier)
@@ -71,13 +69,20 @@ public:
     return event_server_.get_events(identifier.block_id, identifier.tx_id);
   }
 
+  auto &get_base_db() { return hogdb_wrapper_; }
+
 private:
   TransactionID allocate_txid() { return current_tx_id_.fetch_add(1); }
 
+  using db_sched_client_t =
+      DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+
   BlockID current_block_id_ = 0;
-  InMemoryDatabase db_;
-  BlockManager block_manager_;
-  DbExecutorServer executor_server_;
+
+  HogdbWrapper hogdb_wrapper_{StorageCostModel(get_default_cost_model_xdr())};
+
+  db_sched_client_t db_sched_client_;
+
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_exec_server_ =
       TestEventAggregatorExecServer(event_server_);
@@ -86,6 +91,19 @@ private:
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;
+
+  static constexpr StorageCostModelXdr get_default_cost_model_xdr()
+  {
+    return StorageCostModelXdr{
+        .ext = ExtensionPoint(0),
+        .base_data_item_cost = to_xdr(int128_t{12000}),
+        .bytestring_cost_per_byte = 10,
+        .base_contract_deployment_cost = to_xdr(int128_t{12000}),
+        .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
+        .auth_per_key_cost = to_xdr(int128_t{1111}),
+        .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+    };
+  }
 };
 
 } // namespace hogd

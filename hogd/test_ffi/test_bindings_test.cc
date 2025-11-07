@@ -215,4 +215,23 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   EXPECT_EQ(std::memcmp(event.serialized_event.data(), "test_event", 11), 0);
 }
 
+TEST(TestBindingsTest, GrantStorageTokensTest)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ContractAddress deployment_addr{};
+
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1000),
+            kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+}
+
 } // namespace hogd
