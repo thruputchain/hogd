@@ -27,7 +27,7 @@ public:
                          const DeployedContractData *after,
                          const StorageCostModel * /*unused*/);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
-                         const DeployedContractData * /*unused*/,
+                         const DeployedContractData & /*unused*/,
                          const StorageCostModel *cost_model) const;
   HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
                                            MerkleTriePrefix &trie) const;

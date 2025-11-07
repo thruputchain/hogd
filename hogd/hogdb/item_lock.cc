@@ -18,6 +18,8 @@
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
+#include "hogd/hogdb/item_lock/new_contract_lock.h"
+#include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -127,7 +129,7 @@ ItemLock::commit_change(const ItemChange &change,
         else {
           auto const *inner = change.get_inner<typename lock_t::change_type>();
           assert(inner != nullptr);
-          return lock.commit_change(did_finalize, snapshot_cost_, inner,
+          return lock.commit_change(did_finalize, snapshot_cost_, *inner,
                                     cost_model);
         }
       },
@@ -395,6 +397,18 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
 
   if (after->is_deletion()) {
     lock_contents_.emplace<DeletionLock>();
+    return;
+  }
+  
+  if (after->is_create_contract()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewContractLock>(after->to_new_contract().value().new_contract());
+    return;
+  }
+
+  if (after->is_deploy_contract()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewDeploymentLock>(after->to_new_deployment().value().deployed_contract_hash());
     return;
   }
 

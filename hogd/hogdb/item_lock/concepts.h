@@ -21,7 +21,7 @@ concept item_lock =
         lock.try_atomic_change_lock(before, after, cost_model)
       } -> std::same_as<HogDBStatus<int128_t>>;
       {
-        lock.commit_change(finalize, snapshot_cost, after, cost_model)
+        lock.commit_change(finalize, snapshot_cost, *after, cost_model)
       } -> std::same_as<int128_t>;
     } &&
     requires { sizeof(Lock) <= 64; } &&

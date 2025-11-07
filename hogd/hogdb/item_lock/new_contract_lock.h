@@ -25,7 +25,7 @@ public:
                          const NewContractData *after,
                          const StorageCostModel * /*unused*/);
   static int128_t commit_change(bool /*unused*/, int128_t /*unused*/,
-                                const NewContractData * /*unused*/,
+                                const NewContractData & /*unused*/,
                                 const StorageCostModel * /*unused*/)
   {
     return 0;

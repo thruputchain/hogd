@@ -67,7 +67,7 @@ NewDeploymentLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
 
 int128_t
 NewDeploymentLock::commit_change(bool did_finalize, int128_t snapshot_cost,
-                                 const DeployedContractData * /*unused*/,
+                                 const DeployedContractData & /*unused*/,
                                  const StorageCostModel *cost_model) const
 {
   if (did_finalize) {
