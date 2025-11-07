@@ -25,7 +25,6 @@ target_link_libraries(
   test_ffi
   precompiles
   runtime
-  db_interface
   runtime_test_util
 )
 
