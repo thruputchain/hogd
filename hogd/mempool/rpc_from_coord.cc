@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <bits/time.h>
+#include <time.h>
 #include <cassert>
 #include <cstddef>
 #include <ctime>
