@@ -2,7 +2,7 @@
 
 URL="https://github.com/brendangregg/FlameGraph.git"
 INSTALL="$HOME/.cache/FlameGraph"
-OUTPUT=flamegraph.html
+OUTPUT=flamegraph.svg
 
 if ! test -d "$INSTALL"; then
     git clone "$URL" "$INSTALL" || exit 1
@@ -59,5 +59,5 @@ perf record -g -o "$data" "${args[@]}"
 trap - SIGINT
 
 perf script -i "$data" | "$INSTALL/stackcollapse-perf.pl" > "$folded"
-mv -f "$OUTPUT" "$OUTPUT"~
+mv -f "$OUTPUT" "$OUTPUT"~ 2> /dev/null
 "$INSTALL/flamegraph.pl" "$folded" > "$OUTPUT"

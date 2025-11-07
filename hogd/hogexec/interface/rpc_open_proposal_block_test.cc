@@ -14,7 +14,9 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -53,7 +55,8 @@ public:
   // void TearDown() override { rpc_server_.shut_down(); }
 
 protected:
-  HogdbWrapper db_wrapper_;
+  HogdbWrapper db_wrapper_ =
+      HogdbWrapper(StorageCostModel(get_default_cost_model_xdr()));
   EventServerWrapper event_wrapper_;
 
   RpcServer<ExecutorMempoolRpc> rpc_server_{default_coropoll()};

@@ -46,10 +46,42 @@ BlockTX::do_modify_lock(ItemLock &lock, const ItemChange &old_change,
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
+<<<<<<< HEAD
 BlockTX::do_unlock_item(ItemLock &lock,
                         const ItemChange &change, const StorageCostModel *cost_model)
 {
   lock.try_atomic_change_lock(&change, nullptr, cost_model);
+=======
+BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
+                        const ItemKey & /*unused*/, ItemLock &lock,
+                        const ItemChange &change)
+{
+  assert(ul.owns_lock());
+  assert(lock.ref > 0);
+
+  if (--lock.ref == 0) {
+    // We don't need to remove the item from the map; the commit() loop
+    // only iterates over items with nonzero refcount.
+    return;
+  }
+  lock.change.undo_merge(change);
+}
+
+ATTRIBUTE_ALWAYS_INLINE void
+BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+                                const Address & /*unused*/, ItemLock &lock,
+                                const ItemChange &change)
+{
+  assert(ul.owns_lock());
+  assert(lock.ref > 0);
+
+  if (--lock.ref == 0) {
+    // We don't need to remove the address balance from the map; the commit()
+    // loop only iterates over address balances with nonzero refcount.
+    return;
+  }
+  lock.change.undo_merge(change);
+>>>>>>> main
 }
 
 void
@@ -62,9 +94,17 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
     throw std::runtime_error("failed to make balance change");
   }
 
+<<<<<<< HEAD
   auto *lock = addr_balance_locks_.insert_or_get(addr, get_mutex(make_address_balance_item_key(addr)), 0);
 
   if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {
+=======
+  auto *lock = addr_balance_locks_.insert_or_get(addr, 0);
+  std::unique_lock<std::mutex> ul(
+      get_mutex(make_address_balance_item_key(addr)));
+
+  if (auto r = do_lock(ul, *lock, *change, &cost_model_); !r) [[unlikely]] {
+>>>>>>> main
     throw std::runtime_error("failed to lock balance");
   }
 }
@@ -141,14 +181,24 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
+<<<<<<< HEAD
     do_unlock_item(*lock, change, &cost_model_);
    // do_unlock_addr_balance(ul, key.get_address(), *lock, change);
+=======
+    std::unique_lock<std::mutex> ul(get_mutex(key));
+    do_unlock_addr_balance(ul, key.get_address(), *lock, change);
+>>>>>>> main
     return;
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
+<<<<<<< HEAD
   do_unlock_item(*lock, change, &cost_model_);
+=======
+  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
+  do_unlock_item(ul, key, *lock, change);
+>>>>>>> main
 }
 
 int128_t
@@ -201,7 +251,11 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel_destructive(
       [this, &lock, &ret](std::pair<const ItemKey &, const ItemLock &> v) {
+<<<<<<< HEAD
         if (!v.second.is_finalized()) {
+=======
+        if (v.second.ref == 0) {
+>>>>>>> main
           return;
         }
         HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
@@ -218,7 +272,11 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel_destructive(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address &, const ItemLock &> v) {
+<<<<<<< HEAD
         if (!v.second.is_finalized()) {
+=======
+        if (v.second.ref == 0) {
+>>>>>>> main
           return;
         }
         assert(v.second.change.get_raw_nnint128().has_value());

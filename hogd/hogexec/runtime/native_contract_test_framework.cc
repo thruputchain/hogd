@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <memory>
-#include <span>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -10,25 +9,16 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/base/io.h"
 #include "hogd/base/log.h"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "sched_db.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
-#include "x23/serialize.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -176,99 +166,6 @@ NativeContractTestFramework::run_genesis_initialization(
         "run_genesis_initialization: dbsched_load_genesis_block failed");
   }
   open_block(mode);
-}
-
-void
-HogdbWrapper::grant_storage_token(ContractAddress const &address,
-                                  int128_t amount)
-{
-  auto ret = ctx_.get_db().write_address_balance(address, amount);
-  if (!ret) {
-    throw std::runtime_error(
-        "grant_storage_token: write_address_balance failed");
-  }
-}
-
-void
-HogdbWrapper::write_item(AddressAndKey const &addrkey,
-                         std::shared_ptr<const StorageItemWrapper> const &item)
-{
-  switch (item->type()) {
-  case StorageItemType::kItemTypeBytestring:
-  {
-    auto ret =
-        ctx_.get_db().write_bytes(make_item_key(addrkey),
-                                  std::as_bytes(std::span(item->bytestring())));
-    if (!ret) {
-      throw std::runtime_error("write_item: write_bytes failed");
-    }
-    return;
-  }
-  case StorageItemType::kItemTypeNonnegativeInt:
-  {
-    auto ret =
-        ctx_.get_db().write_nnint128(make_item_key(addrkey), item->nnint());
-    if (!ret) {
-      throw std::runtime_error("write_item: write_wasm_code failed");
-    }
-    return;
-  }
-  case StorageItemType::kItemTypeDeleted:
-  {
-    info("write_item: removing item");
-    auto ret = ctx_.get_db().remove_item(make_item_key(addrkey));
-    if (!ret) {
-      throw std::runtime_error("write_item: remove_item failed");
-    }
-    return;
-  }
-  default:
-    throw std::runtime_error(
-        "write_item on HogdbWrapper: unsupported item type");
-  }
-}
-
-void
-HogdbWrapper::write_contract(ContractAddress const &addr,
-                             std::shared_ptr<const Contract> const &contract)
-{
-  assert(contract);
-  auto bytes = x23::serialize(*contract);
-  auto ret =
-      ctx_.get_db().write_wasm_code(addr, std::as_bytes(std::span(bytes)));
-  if (!ret) {
-    throw std::runtime_error("write_contract: write_contract failed");
-  }
-}
-
-void
-HogdbWrapper::write_deployment(ContractAddress const &addr,
-                               DeployedContractHash const &deployment,
-                               StorageCostModel const * /*unused*/)
-{
-  auto ret = ctx_.get_db().write_address_metadata(addr, deployment);
-  if (!ret) {
-    throw std::runtime_error("write_deployment: write_deployment failed");
-  }
-}
-
-HogDBDAO
-HogdbWrapper::open_db()
-{
-  Directory dir = Directory::open_temporary().value();
-  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
-  return HogDBDAO(RAMDB(std::move(db)));
-}
-
-std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-HogdbWrapper::make_sched_db_client()
-{
-  auto sched_db_port = test_sched_db_server_.start_server(/*port=*/0);
-  return std::make_unique<
-      SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
-      make_rpc_client<SchedDb1>(x23::HostPort{"localhost", sched_db_port},
-                                false));
 }
 
 void

@@ -4,6 +4,7 @@ add_library(hogdb_objects OBJECT
   block_tx.cc
   block_id_manager.cc
   item_lock/bytestring_lock.cc
+  item_lock/deletion_lock.cc
   item_lock/exclusive_lock.cc
   item_lock/nnint128_lock.cc
   item_lock.cc
@@ -45,6 +46,7 @@ target_link_libraries(
   hogdb_exec
   hogdb
 )
+add_dependencies(hogdb_exec all_wasm_contracts)
 
 # Build the hogdb_bench executable
 add_executable(
@@ -74,6 +76,7 @@ target_link_libraries(
   model_checker
   GTest::gtest_main
 )
+add_dependencies(hogdb_test all_wasm_contracts)
 gtest_discover_tests(
   hogdb_test
 )

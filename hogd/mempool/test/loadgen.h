@@ -31,6 +31,7 @@ public:
   // do not want that setup when using loadgen.
   template<typename SchedCoordClient>
   DbTip init_experiment(SchedCoordClient &sched_coord_client,
+                        CoordinatorSchedRpc &coord_sched_rpc,
                         uint32_t num_accounts)
   {
     // Initialize the experiment.
@@ -66,9 +67,9 @@ public:
                      .id = nomination.block_id};
         auto res_nominate =
             sched_coord_client.schedulercoord_nominate(db_tip)();
-        CHECK_EQ(res_nominate.outcome(),
+        CHECK_EQ(res_nominate,
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = res_nominate.scheduler_nomination();
+        nomination = coord_sched_rpc.get_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
       }
@@ -105,8 +106,10 @@ public:
 
   LoadgenClientManager(const std::string &loadgen_address,
                        std::vector<sched_coord_client_t> &sched_coord_clients,
+                       CoordinatorSchedRpc &coord_sched_rpc,
                        size_t num_accounts)
-    : sched_coord_clients_(sched_coord_clients)
+    : sched_coord_clients_(sched_coord_clients),
+      coord_sched_rpc_(coord_sched_rpc)
   {
     CHECK_EQ(sched_coord_clients_.size(), kNumSchedClients);
 
@@ -117,7 +120,7 @@ public:
     info("Initializing loadgen experiment...");
     init_block_db_tip_ =
         loadgen_clients_[0].init_experiment(sched_coord_clients_[0],
-                                            num_accounts);
+                                            coord_sched_rpc_, num_accounts);
     for (size_t i = 1; i < kNumLoadgenClients; i++) {
       loadgen_clients_[i].context_id_ = loadgen_clients_[0].context_id_;
     }
@@ -186,7 +189,7 @@ public:
 
       auto timer = std::make_unique<ElapsedTimer>();
 
-      x23::Async<SchedulerNominationResult> nominate_handle =
+      x23::Async<SchedulerNominationOutcome> nominate_handle =
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
@@ -204,7 +207,14 @@ public:
       double wait_transactions_duration = timer->elapsed();
       timer = std::make_unique<ElapsedTimer>();
 
-      SchedulerNominationResult res_nominate = co_await nominate_handle;
+      SchedulerNominationOutcome res_nominate = co_await nominate_handle;
+
+      {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
+        info("got nominate result: {}", ms);
+      }
 
       double wait_nomination_duration = timer->elapsed();
       timer = std::make_unique<ElapsedTimer>();
@@ -213,10 +223,8 @@ public:
 
       double wait_submit_vetted_duration = timer->elapsed();
 
-      CHECK_EQ(res_nominate.outcome(),
-               SchedulerNominationOutcome::SchedulerNominationOK);
-      const SchedulerNomination nomination =
-          res_nominate.scheduler_nomination();
+      CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+      const SchedulerNomination nomination = coord_sched_rpc_.get_nomination();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
@@ -283,6 +291,7 @@ private:
 
   std::vector<LoadgenClient> loadgen_clients_;
   std::vector<sched_coord_client_t> &sched_coord_clients_;
+  CoordinatorSchedRpc &coord_sched_rpc_;
   DbTip init_block_db_tip_;
 
   std::atomic<bool> shutdown_flag_ = false;

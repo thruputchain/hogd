@@ -9,6 +9,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
@@ -50,6 +53,9 @@ public:
   // change must be non-null.
   int128_t commit_change(const ItemChange &change,
                          const StorageCostModel *cost_model);
+
+  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+                                           MerkleTriePrefix &trie) const;
 
   bool is_finalized() const { return lock_state_ != kUncommitted; }
 

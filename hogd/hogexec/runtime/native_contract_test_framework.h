@@ -3,19 +3,16 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <condition_variable>
 #include <cstring>
 #include <format>
 #include <limits>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -27,19 +24,13 @@
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/db_interface/db_sched_server.h"
 #include "hogd/hogdb/block_id_manager.h"
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_exec.h"
-#include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -47,13 +38,13 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
-#include "sched_db.hh"
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
@@ -153,102 +144,6 @@ private:
   DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
   DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
-};
-
-class TestSchedDBServer {
-public:
-  using rpc_service = SchedDb1;
-
-  void scheddb_intro_shard(ShardCard const & /*unused*/) {};
-  void scheddb_hogs_transferred(HogsTransferred const &hogs)
-  {
-    std::map<ContractAddress, int128_t> hogs_transferred;
-    for (const auto &delta : hogs.deltas) {
-      hogs_transferred[delta.address] = from_xdr(delta.hog_delta);
-    }
-    register_height(hogs.block, hogs_transferred);
-  };
-
-  // access methods
-
-  void wait_for_height(BlockHeight height)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock,
-             [this, height] { return hogs_transferred_.contains(height); });
-  }
-
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    return hogs_transferred_.at(height);
-  }
-
-private:
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
-
-  void register_height(BlockHeight height,
-                       std::map<ContractAddress, int128_t> hogs_transferred)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    assert(!hogs_transferred_.contains(height));
-    hogs_transferred_[height] = std::move(hogs_transferred);
-    cv_.notify_all();
-  }
-};
-
-static_assert(is_SchedDb1<TestSchedDBServer *, std::type_identity_t>);
-
-class HogdbWrapper {
-public:
-  HogdbWrapper()
-    : ctx_(HogDBDAO(open_db()), std::make_unique<MerkleTriePrefix>(),
-           make_sched_db_client())
-  {
-    db_sched_server_.start_server(/*port=*/0);
-    db_executor_server_.start_server(/*port=*/0);
-  }
-
-  uint16_t exec_port() { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_sched_server_.port(); }
-
-  void grant_storage_token(ContractAddress const &address, int128_t amount);
-
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> const &item);
-
-  void write_contract(ContractAddress const &addr,
-                      std::shared_ptr<const Contract> const &contract);
-  void write_deployment(ContractAddress const &addr,
-                        DeployedContractHash const &deployment,
-                        StorageCostModel const *cost_model);
-
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
-  {
-    test_sched_db_server_->impl()->wait_for_height(height);
-    return test_sched_db_server_->impl()->get_hogs_transferred(height);
-  }
-
-  // different storage cost models unimplemented currently
-  const StorageCostModel kDefaultCostModel =
-      StorageCostModel(get_default_cost_model_xdr());
-
-  const StorageCostModel *get_default_cost_model()
-  {
-    return &ctx_.get_cost_model();
-  }
-
-private:
-  static HogDBDAO open_db();
-  std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
-  make_sched_db_client();
-
-  RpcServer<TestSchedDBServer> test_sched_db_server_;
-  RPCContext ctx_;
-  HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
-  HogDBSchedServer db_sched_server_ = HogDBSchedServer(ctx_);
 };
 
 class CoordWrapper {
@@ -355,7 +250,7 @@ public:
           std::in_place_type<MockDBWrapper>);
     case TestDB::kHogDB:
       return std::variant<MockDBWrapper, HogdbWrapper>(
-          std::in_place_type<HogdbWrapper>);
+          std::in_place_type<HogdbWrapper>, get_default_cost_model_xdr());
     default:
       throw std::runtime_error("make_db_wrapper: invalid test_db");
     }
@@ -692,7 +587,7 @@ private:
 };
 
 inline std::string
-test_db_to_string(const ::testing::TestParamInfo<TestDB> &info)
+test_db_to_string(const ::testing::TestParamInfo<TestDB> info)
 {
   switch (info.param) {
   case TestDB::kMockInMemory:

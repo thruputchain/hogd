@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -22,6 +23,8 @@
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -75,6 +78,7 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     return {{nnint->base(), false}};
   }();
   if (!r) {
+    warn("failed to load snapshot balance for {}", addr);
     return r.error();
   }
   auto [snapshot_base, force_create] = r.value();
@@ -87,6 +91,12 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
     auto [ign, of] = overflowing_sub(bal.back().manual_transfer_amount,
                                      bal.back().total_locked_storage_amount);
     if (of) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        trace(
+            "subtraction overflow when computing balance change for address {}",
+            x23::show(contract_addr));
+      }
       return HogDBError(HogDBCode::kOverflow);
     }
     delta = ign;
@@ -94,9 +104,20 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
 
   auto [ign, of] = overflowing_add(snapshot_base, delta);
   if (of) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      trace("addition overflow when computing balance change for address {}",
+            x23::show(contract_addr));
+    }
     return HogDBError(HogDBCode::kOverflow);
   }
   if (ign < 0) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      trace("storage required exceeds snapshot base when computing balance "
+            "change for address {}: {} vs {}",
+            x23::show(contract_addr), snapshot_base, delta);
+    }
     // invalid delta
     // TODO(geoff): if we add in retrocausal nnint, we will need to allow this
     // case
@@ -134,6 +155,12 @@ InvokeTX::update_balance_lock(Address const &addr)
 
     auto status = block_.get().lock(key, new_item);
     if (!status) {
+      if constexpr (is_debug_build()) {
+        ContractAddress contract_addr = addr.get_raw();
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        trace("failed to lock balance item for address {}: {}",
+              x23::show(contract_addr), *nnint);
+      }
       return status.error();
     }
 
@@ -161,6 +188,12 @@ InvokeTX::update_balance_lock(Address const &addr)
 
   auto status = block_.get().modify_lock(key, last.change, new_item);
   if (!status) {
+    if constexpr (is_debug_build()) {
+      ContractAddress contract_addr = addr.get_raw();
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      trace("failed to modify lock for address {}: {}",
+            x23::show(contract_addr), *last.change.get_raw_nnint128());
+    }
     return status.error();
   }
   if (last.tx_depth == tx_depth_) {

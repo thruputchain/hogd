@@ -693,31 +693,5 @@ ItemChange::committed_storage_cost(const StorageCostModel *cost_model) const
       type_);
 }
 
-HogDBStatus<void>
-ItemChange::load_snapshot_cost(HogDBDAO &db, const ItemKey &key,
-                               StorageCostModel const *cost_model)
-{
-  if (snapshot_cost_.has_value()) {
-    assert(*snapshot_cost_ >= 0);
-    return {};
-  }
-
-  auto snapshot_cost = [&db, key, cost_model] -> HogDBStatus<size_t> {
-    HogDBStatus<size_t> ret = db.get_charged_storage_cost(key, cost_model);
-    if (!ret && ret.error() == HogDBCode::kNotFound) {
-      // item does not exist in the snapshot
-      return 0UL;
-    }
-    if (!ret)
-      return ret.error();
-
-    return *ret;
-  }();
-  if (!snapshot_cost)
-    return snapshot_cost.error();
-  assert(*snapshot_cost >= 0);
-  snapshot_cost_ = *snapshot_cost;
-  return {};
-}
 
 } // namespace hogd
