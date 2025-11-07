@@ -399,16 +399,20 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     lock_contents_.emplace<DeletionLock>();
     return;
   }
-  
+
   if (after->is_create_contract()) {
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    lock_contents_.emplace<NewContractLock>(after->to_new_contract().value().new_contract());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewContractLock>(
+        after->to_new_contract().value().new_contract());
+    // NOLINTEND(bugprone-unchecked-optional-access)
     return;
   }
 
   if (after->is_deploy_contract()) {
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    lock_contents_.emplace<NewDeploymentLock>(after->to_new_deployment().value().deployed_contract_hash());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<NewDeploymentLock>(
+        after->to_new_deployment().value().deployed_contract_hash());
+    // NOLINTEND(bugprone-unchecked-optional-access)
     return;
   }
 
