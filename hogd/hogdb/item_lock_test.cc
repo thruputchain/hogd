@@ -1,12 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <span>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -27,6 +32,42 @@ ItemChange
 make_deletion_change()
 {
   return Deletion();
+}
+
+AccountAuthData
+make_base_auth_data(
+    std::unordered_map<uint32_t, PublicKeyConfigOpt> public_keys)
+{
+  AccountAuthData base_auth_data;
+  for (auto &[key_id, pk] : public_keys) {
+    base_auth_data.public_keys[key_id] = std::move(pk);
+  }
+  return base_auth_data;
+}
+
+ItemChange
+make_auth_data_change(
+    std::unordered_map<uint32_t, PublicKeyConfigOpt> const &public_keys)
+{
+  return AuthDataItem(make_base_auth_data(public_keys));
+}
+
+// Helper to create a PublicKey
+PublicKey
+make_test_key(uint8_t value)
+{
+  PublicKey key;
+  key.ed25519().fill(value);
+  return key;
+}
+
+// Helper to create a PublicKeyConfig
+PublicKeyConfigOpt
+make_test_pk_config(uint8_t value, Weight weight = 100)
+{
+  PublicKey key = make_test_key(value);
+  return x23::Ptr<PublicKeyConfig>(
+      new PublicKeyConfig{.key = key, .max_weight = weight});
 }
 
 constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 1);
@@ -386,5 +427,28 @@ TEST(ItemLockTest, DeletionChangePermamentExclusiveRelease)
   ASSERT_FALSE(r2.has_value());
 
   EXPECT_EQ(lock.commit_change(first, &kTestCostModel), -100);
+}
+
+TEST(ItemLockTest, BaseDataConflict)
+{
+  // In practice, auth data will always have the base data be from the previous
+  // snapshot, so it will always be the same. Still, worth checking to make sure
+  // we don't have some bizarre errors there.
+  ItemLock lock(0);
+  auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
+  auto second = make_auth_data_change({{1, make_test_pk_config(2)}});
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(1));
+
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel);
+  ASSERT_FALSE(r2.has_value());
+
+  ASSERT_FALSE(lock.try_atomic_change_lock(&first, &second, &kTestCostModel)
+                   .has_value());
+
+  EXPECT_EQ(lock.commit_change(first, &kTestCostModel),
+            kTestCostModel.get_auth_data_cost(1));
 }
 } // namespace hogd

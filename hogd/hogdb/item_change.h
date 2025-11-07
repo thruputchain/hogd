@@ -524,6 +524,7 @@ public:
   int128_t marginal_storage_cost(const StorageCostModel *cost_model) const;
 
   AccountAuthData build_result() const;
+  AccountAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
   struct PublicKeyChange {

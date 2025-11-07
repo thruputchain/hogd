@@ -90,7 +90,8 @@ private:
   constexpr static uint32_t kFinalizedPermamentExclusiveLock = 2;
 
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
-               DeletionLock, NewContractLock, NewDeploymentLock, PointerLock<AuthLock>>
+               DeletionLock, NewContractLock, NewDeploymentLock,
+               PointerLock<AuthLock>>
       lock_contents_ = std::monostate{};
 
   std::atomic<uint32_t> lock_state_ = kUncommitted;

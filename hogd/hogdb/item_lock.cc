@@ -21,6 +21,7 @@
 #include "hogd/hogdb/item_lock/new_contract_lock.h"
 #include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
@@ -241,9 +242,9 @@ ItemLock::handle_try_atomic_from_pending(
           }
         },
         lock_contents_);
-    assert(res.has_value());
-    return snapshot_cost_transform(res.value(), snapshot_cost_,
-                                   after->is_permanent_exclusive());
+    CHECK(res.has_value());
+    CHECK(!after->is_permanent_exclusive());
+    return snapshot_cost_transform(res.value(), snapshot_cost_, false);
   }
 
   if (after != nullptr && after->is_exclusive()) {
@@ -412,6 +413,14 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     lock_contents_.emplace<NewDeploymentLock>(
         after->to_new_deployment().value().deployed_contract_hash());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
+  if (after->is_auth_data()) {
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    lock_contents_.emplace<PointerLock<AuthLock>>(
+        after->to_auth_data()->base_auth_data());
     // NOLINTEND(bugprone-unchecked-optional-access)
     return;
   }

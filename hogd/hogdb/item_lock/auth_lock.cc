@@ -61,6 +61,13 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
   const AuthDataItem *before_item = before ? before->get() : nullptr;
   const AuthDataItem *after_item = after ? after->get() : nullptr;
 
+  assert(before_item == nullptr ||
+         before_item->base_auth_data() == base_auth_data_);
+  if (after_item != nullptr &&
+      after_item->base_auth_data() != base_auth_data_) {
+    return HogDBError{HogDBCode::kConflict};
+  }
+
   // First pass: check for conflicts (must be done before modifying state)
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     bool before_modifies = ((before_item != nullptr) &&
