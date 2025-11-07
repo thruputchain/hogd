@@ -42,15 +42,23 @@ RpcStreamImpl::fail()
   cp_->poison(fd_);
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
-    cb(Buf{});
+    cp_->pool_.make_callback(cb, Buf{});
 }
 
 Async<std::expected<std::uint32_t, Errno>>
 RpcStreamImpl::read_uint(SLOC_ARG0)
 {
   Buf b;
-  if (co_await co_await cp_->read(fd_, &b, 4, true, true) != 4)
+  auto r = co_await cp_->read(fd_, &b, 4, true, true);
+  if (!r) {
+    debug("read_uint(fd {}): {}", get_fd(), r.error());
+    co_return r.error();
+  }
+  if (*r != 4) {
+    if (*r)
+      debug("read_uint(fd {}): received only {} bytes", get_fd(), *r);
     co_return Errno{ENOMSG};
+  }
   co_return getbe<std::uint32_t>(b.data());
 }
 
@@ -67,12 +75,21 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
       len = *res;
     done = len & 0x80000000;
     len &= 0x7fffffff;
-    if (bp->size() + len > max_message_size)
+    if (bp->size() + len > max_message_size) {
+      debug.err(
+          "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
+          get_fd(), bp->size() + len, max_message_size);
       co_return Errno{ENOMSG};
-    if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res)
+    }
+    if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res) {
+      debug("RpcStreamImpl: read(fd {}): {}", get_fd(), res.error());
       co_return res.error();
-    else if (*res != len)
+    }
+    else if (*res != len) {
+      debug.err("RpcStreamImpl: read(fd {}, n {}) returned {} bytes", get_fd(),
+                len, *res);
       co_return Errno{ENOMSG};
+    }
   }
   co_return 0;
 }
@@ -98,6 +115,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
   // bounds checks in deserialization.
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
+  Defer _d([fd = get_fd()] { std::println("fd {} reader returning", fd); });
   Buf b;
   if constexpr (kMinBuf)
     b.reserve(kMinBuf);
@@ -110,7 +128,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
     size_t hdrbytes;
     try {
       hdrbytes = deserialize_from(&msg, b);
-    } catch (XdrException &) {
+    } catch (XdrException &e) {
+      debug("RpcStreamImpl deserialization: {}", e.what());
       fail();
       break;
     }
@@ -119,10 +138,11 @@ RpcStreamImpl::reader(SLOC_ARG0)
       auto it = cs->xidmap_.find(msg.xid);
       if (it == cs->xidmap_.end())
         continue;
-      auto cb = it->second;
+      auto cb = std::move(it->second);
       cs->xidmap_.erase(it);
       cs.reset();
-      cb(std::move(b));
+      // cb(std::move(b));
+      cp_->pool_.make_callback(cb, std::move(b));
       if constexpr (kMinBuf)
         b.reserve(kMinBuf);
     }
