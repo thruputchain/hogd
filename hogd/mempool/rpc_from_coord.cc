@@ -9,7 +9,6 @@
 #include <future>
 #include <memory>
 #include <span>
-#include <time.h>
 #include <vector>
 
 #include "block.hh"
@@ -311,8 +310,12 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-static std::unique_ptr<ElapsedTimer> nominate_return_timer =
+namespace {
+
+std::unique_ptr<ElapsedTimer> nominate_return_timer =
     std::make_unique<ElapsedTimer>();
+
+} // namespace
 
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
@@ -587,7 +590,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    long long ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
+    int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
     info("will send nominate result: {}", ms);
   }
 

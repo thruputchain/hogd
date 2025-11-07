@@ -212,7 +212,7 @@ public:
       {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        long long ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
+        int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
         info("got nominate result: {}", ms);
       }
 
