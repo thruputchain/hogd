@@ -115,7 +115,6 @@ RpcStreamImpl::reader(SLOC_ARG0)
   // bounds checks in deserialization.
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
-  Defer _d([fd = get_fd()] { std::println("fd {} reader returning", fd); });
   Buf b;
   if constexpr (kMinBuf)
     b.reserve(kMinBuf);
