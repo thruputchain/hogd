@@ -138,6 +138,11 @@ template<std::size_t StructSize> struct GenReadBuffer : RefCount {
     iov[1].iov_base = m_.data();
     iov[1].iov_len = m_.size();
     auto n = ::readv(fd, iov, 2);
+    if (debug && n == -1 && errno != EAGAIN) {
+      int old_errno = errno;
+      debug("readv(fd {}): {}", fd, Errno{});
+      errno = old_errno;
+    }
 
     if (n <= ptrdiff_t(len))
       return n;

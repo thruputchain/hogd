@@ -311,6 +311,7 @@ public:
   RefPtr<CoroPoll> cp_;
 
   void fail();
+  int get_fd() const { return fd_.get(); }
 
 protected:
   UniqueFd fd_;
@@ -327,7 +328,7 @@ protected:
 private:
   struct ClientState {
     std::uint32_t lastxid_{};
-    std::map<std::uint32_t, CoroCB<Buf>> xidmap_;
+    std::map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_;
   };
   MVar<ClientState> cstate_;
 
@@ -408,9 +409,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   {
     if (!reader_running_) {
       reader_running_ = true;
-      logger_.log_message("launching reader");
       reader();
-      logger_.log_message("reader launched");
     }
   }
 
