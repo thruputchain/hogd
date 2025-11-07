@@ -6,6 +6,8 @@ add_library(hogdb_objects OBJECT
   item_lock/bytestring_lock.cc
   item_lock/deletion_lock.cc
   item_lock/exclusive_lock.cc
+  item_lock/new_contract_lock.cc
+  item_lock/new_deployment_lock.cc
   item_lock/nnint128_lock.cc
   item_lock.cc
   invariant_hog_conservation.cc
