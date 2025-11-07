@@ -29,6 +29,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -157,6 +158,11 @@ RPCError
 HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch const &batch)
 {
+  if constexpr (is_debug_build()) {
+    trace("Trying to push new subtransaction for block {} and transaction {}",
+          block, tx);
+  }
+
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
@@ -169,12 +175,20 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
+
+      if constexpr (is_debug_build()) {
+        trace("Failed to request delta: {}", x23::show(delta));
+      }
       itx->rollback_to_savepoint(depth - 1);
       return err;
     }
   }
   auto bal_req = itx->sync_balance_locks();
   if (!bal_req) {
+    if constexpr (is_debug_build()) {
+      trace("Failed to acquire balance locks after batch of deltas: {}",
+            bal_req.error());
+    }
     itx->rollback_to_savepoint(depth - 1);
     return to_rpc_error(bal_req.error());
   }

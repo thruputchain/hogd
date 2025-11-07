@@ -22,7 +22,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/logger.h"
 #include "hogd/test_ffi/mock_runtime.h"
@@ -276,8 +275,8 @@ root_invoke(void *syscall_handler) noexcept
   try {
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->root_invoke();
-    ffi_trace("FFI: root_invoke(syscall_handler={}) -> (result={})",
-              syscall_handler, format_foreign_root_invoke_result(res));
+    ffi_trace("FFI: root_invoke(syscall_handler={}) -> ({})", syscall_handler,
+              format_foreign_root_invoke_result(res));
     return res;
   } catch (std::exception const &e) {
     log_error("unhandled error during root_invoke: {}", e);
@@ -367,13 +366,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   std::memcpy(addr.data(), contract_addr, addr.size());
 
   try {
-    db_cast->get_base_db().write_item(
-        AddressAndKey{
-            .address = addr,
-            .key = StorageKey(
-                StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
-        },
-        std::make_shared<StorageItemWrapper>(int128_t{tokens}, &kCostModel));
+    db_cast->get_base_db().grant_storage_token(addr, tokens);
   } catch (std::exception const &e) {
     log_error("error granting storage tokens: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
@@ -521,23 +514,18 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   ContractAddress addr;
   std::memcpy(addr.data(), deployment_addr, addr.size());
 
-  // check that the contract hash has been created
-  if (db_cast->get_base_db().get_post_block_contract(h) == nullptr) {
+  auto &dao = db_cast->get_base_db().get_db();
+  auto res = dao.read_wasm_code(h);
+  if (!res) {
     error(
         "Attempt to deploy contract that has not been created in the database");
     return kTestFFIErrorCodeDeployNonexistentContract;
   }
 
-  std::shared_ptr<StorageItemWrapper> item =
-      std::make_shared<StorageItemWrapper>(
-          DeployedContractHash{.hash = h, .contract_size = contract_size},
-          &kCostModel);
+  db_cast->get_base_db().write_deployment(
+      addr, DeployedContractHash{.hash = h, .contract_size = contract_size},
+      &kCostModel);
 
-  db_cast->get_base_db().write_item(
-      AddressAndKey{.address = addr,
-                    .key = StorageKey(
-                        StorageKeyType::kStorageKeyTypeAddressMetadata)},
-      std::move(item));
   return kTestFFIErrorCodeNone;
 }
 
