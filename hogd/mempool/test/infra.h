@@ -150,6 +150,12 @@ public:
     return *mempool_coord_server_->impl();
   }
 
+  // This getter is used by [mempool_test.cc].
+  CoordinatorSchedRpc &coord_sched_rpc()
+  {
+    return *coordinator_sched_server_->impl();
+  }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
