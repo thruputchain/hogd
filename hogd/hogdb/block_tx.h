@@ -76,11 +76,24 @@ private:
 
   HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
 
+  struct SipHash24Hasher {
+    size_t operator()(const Address &key) const
+    {
+      static SipHash24 hasher;
+      return hasher(key.as_bytes());
+    }
+    size_t operator()(const ItemKey &key) const
+    {
+      static SipHash24 hasher;
+      return hasher(key.as_bytes());
+    }
+  };
+
   HogDBDAO &db_;
   MerkleTriePrefix &trie_;
   StorageCostModel cost_model_;
-  ConcurrentMap<Address, ItemLock> addr_balance_locks_;
-  ConcurrentMap<ItemKey, ItemLock> item_locks_;
+  ConcurrentMap<Address, ItemLock, SipHash24Hasher> addr_balance_locks_;
+  ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
