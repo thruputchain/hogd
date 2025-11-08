@@ -408,10 +408,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   // [nomination.block_hash], [nomination.transaction_hashes], and
   // [nomination.transaction_nominations] are filled in below.
 
-  x23::Vec<SignedTransaction> txs;
-  x23::Vec<SignedTransactionHash> tx_hashes;
-  txs.reserve(kMaxBlockSize);
-  tx_hashes.reserve(kMaxBlockSize);
+  static x23::Vec<SignedTransaction> txs;
+  static x23::Vec<SignedTransactionHash> tx_hashes;
+  txs.clear();
+  tx_hashes.clear();
 
   x23::CoroGuard cg;
   auto timer2 = std::make_unique<ElapsedTimer>();
@@ -421,9 +421,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>>
       propose_batch_in_chunks_handles;
   propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
-  x23::Vec<bool> statuses(kMaxBlockSize, false);
-  x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks(
-      kNumSchedulerIterations, {});
+  static x23::Vec<bool> statuses(kMaxBlockSize, false);
+  static x23::Vec<x23::XdrVec<NominatedTransaction>>
+      transaction_nomination_chunks;
+  transaction_nomination_chunks.clear();
+  transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
@@ -478,17 +480,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   double run_on_executor_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  x23::Vec<SignedTransaction> failed_txs;
-  x23::Vec<SignedTransactionHash> transaction_hashes;
-  transaction_hashes.reserve(kMaxBlockSize);
-  size_t num_transaction_hashes = 0;
+  static x23::Vec<SignedTransaction> failed_txs;
+  failed_txs.clear();
   for (size_t i = 0; i < txs.size(); i++) {
     if (statuses[i]) {
       SchedulerNominationChunk &nomination =
           sched_nominations[i / kNumTxsPerNominationChunk];
       nomination.chunk.nomination.transaction_hashes.push_back(tx_hashes[i]);
-      num_transaction_hashes++;
-      transaction_hashes.push_back(tx_hashes[i]);
     }
     else {
       failed_txs.push_back(txs[i]);
@@ -501,7 +499,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   double mark_failed_txs_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  if (!num_transaction_hashes) {
+  if (tx_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
     // is empty. Thus, we fail the nomination.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -542,7 +540,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   timer = std::make_unique<ElapsedTimer>();
 
   const SHA256Hash nomination_block_hash =
-      get_block_hash(transaction_hashes,
+      get_block_hash(tx_hashes,
                      /*prev_block_hash=*/db_tip.hash);
   double get_block_hash_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
