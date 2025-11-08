@@ -34,7 +34,7 @@ RpcStreamImpl::~RpcStreamImpl()
 }
 
 void
-RpcStreamImpl::fail()
+RpcStreamImpl::fail(bool wait_for_callbacks)
 {
   if (ss_.stop_requested())
     return;
@@ -42,7 +42,10 @@ RpcStreamImpl::fail()
   cp_->poison(fd_);
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
-    cp_->pool_.make_callback(cb, Buf{});
+    if (wait_for_callbacks)
+      cb(Buf{});
+    else
+      cp_->pool_.make_callback(cb, Buf{});
 }
 
 Async<std::expected<std::uint32_t, Errno>>
@@ -140,8 +143,12 @@ RpcStreamImpl::reader(SLOC_ARG0)
       auto cb = std::move(it->second);
       cs->xidmap_.erase(it);
       cs.reset();
-      // cb(std::move(b));
-      cp_->pool_.make_callback(cb, std::move(b));
+      // Re-enqueing this on a CPU of the LLC it came from cuts RPC
+      // throughput by about a factor of 10.  Seems to be much better
+      // to resume the client directly.
+      //
+      // cp_->pool_.make_callback(cb, std::move(b));
+      cb(std::move(b));
       if constexpr (kMinBuf)
         b.reserve(kMinBuf);
     }
