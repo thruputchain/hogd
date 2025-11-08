@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <utility>
 #include <vector>
 
@@ -65,6 +66,19 @@ public:
       f(std::make_pair(std::cref(next_value_bucket->key_),
                        std::ref(next_value_bucket->value_)));
       scan_ptr = &next_value_bucket->next_ptr_;
+    }
+  }
+
+  template<typename Func>
+  requires std::invocable<Func, std::pair<const KeyType &, Value &>>
+  static void for_each_destructive(value_bucket_t *value_bucket, Func &f)
+  {
+    while (value_bucket != nullptr) {
+      f(std::make_pair(std::cref(value_bucket->key_),
+                       std::ref(value_bucket->value_)));
+      auto *next_bucket = value_bucket->next_ptr_.load();
+      value_bucket->~value_bucket_t();
+      value_bucket = next_bucket;
     }
   }
 
@@ -176,6 +190,7 @@ public:
 
   Value *get(const KeyType &key)
   {
+    assert(!cleared_);
     uint64_t overall_shortkey = hasher_(key);
     size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
 
@@ -188,6 +203,7 @@ public:
   template<typename... Args> requires std::constructible_from<Value, Args...>
   Value *insert_or_get(const KeyType &key, Args &&...args)
   {
+    assert(!cleared_);
     uint64_t overall_shortkey = hasher_(key);
     size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
 
@@ -203,6 +219,7 @@ public:
   void for_each_parallel(Func f, size_t width = 1024,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
+    assert(!cleared_);
     pool.for_each_parallel(
         buckets_,
         [&f](std::atomic<value_bucket_t *> &bucket) {
@@ -219,13 +236,30 @@ public:
       Func f, size_t width = 1024,
       WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    pool.for_each_parallel(
-        buckets_,
-        [&f](std::atomic<value_bucket_t *> &bucket) {
-          value_bucket_t::for_each(&bucket, f);
-          value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
-        },
-        width);
+    assert(!cleared_);
+    std::atomic<size_t> cleared_count = 0;
+    std::vector<std::future<void>> futures;
+    futures.reserve(pool.worker_count());
+    for (size_t i = 0; i < pool.worker_count(); i++) {
+      futures.push_back(pool.submit([&] {
+        while (true) {
+          size_t start =
+              cleared_count.fetch_add(width, std::memory_order_relaxed);
+          size_t end = std::min<size_t>(start + width, buckets_.size());
+          for (size_t i = start; i < end; i++) {
+            value_bucket_t *bucket =
+                buckets_[i].load(std::memory_order_relaxed);
+            value_bucket_t::for_each_destructive(bucket, f);
+          }
+          if (start >= end) {
+            return;
+          }
+        }
+      }));
+    }
+    for (auto &future : futures) {
+      future.wait();
+    }
     cleared_ = true;
   }
 
