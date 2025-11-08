@@ -21,10 +21,7 @@ public:
   void SetUp() override { temp_dir_ = std::make_unique<TmpDir>(); }
   void TearDown() override { temp_dir_.reset(); }
 
-  std::string temp_dir() const
-  {
-    return temp_dir_->directory();
-  }
+  std::string temp_dir() const { return temp_dir_->directory(); }
 
 private:
   std::unique_ptr<TmpDir> temp_dir_;
