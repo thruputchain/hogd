@@ -238,8 +238,8 @@ struct std::coroutine_traits<void, Args...> {
 
 namespace x23 {
 
-// Supertype of Awaitable so Awaitable can be specialized for void
-// without duplicating a lot of code.
+// A non-moveable Awaitable type that can be implicitly converted to a
+// CoroCB.
 template<typename R> class Awaitable : public detail::CoroDoReturn<R> {
 public:
   using resume_type = R;

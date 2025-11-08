@@ -84,12 +84,6 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  static std::mutex &get_mutex(const ItemKey &key)
-  {
-    static MutexCache<SipHash24> mutex_cache;
-    return mutex_cache.get_mutex(key.as_bytes());
-  }
-
   static inline HogDBStatus<int128_t>
   do_lock(ItemLock &lock,
           const ItemChange &change, const StorageCostModel *cost_model);

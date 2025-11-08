@@ -164,8 +164,26 @@ private:
 
 #endif // !X23_CORO_TRACE
 
+// Trace the chain of coroutines leading to a particular promise object.
 std::string trace(const PromiseBase *pb, unsigned indent = 0,
                   std::string ret = {});
+
+// If you compiled with X23_CORO_TRACE and are in a coroutine whose
+// base type is derived from PromiseBase, you can retrieve a trace of
+// the current coroutine with:
+//
+//   std::string ct = co_await GetCoroTrace{};
+struct [[nodiscard]] GetCoroTrace {
+  const PromiseBase *pb_{};
+  constexpr bool await_ready() const noexcept { return false; }
+  template<typename P> bool await_suspend(std::coroutine_handle<P> h)
+  {
+    if constexpr (requires { pb_ = &h.promise(); })
+      pb_ = std::addressof(h.promise());
+    return false;
+  }
+  std::string await_resume() const { return pb_ ? trace(pb_) : std::string{}; }
+};
 
 // Dump trace information about an unhandled exception before
 // terminating.
