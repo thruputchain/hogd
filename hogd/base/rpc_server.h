@@ -73,9 +73,8 @@ public:
     auto ptr = cs_.take();
     if (Conn *c = ptr->connlist)
       do {
-        auto nextc = c->next_;
-        c->rpcstream_->fail();
-        c = nextc;
+        c->rpcstream_->fail(false);
+        c = c->next_;
       } while (c);
     else
       all_connections_destroyed_ = true;

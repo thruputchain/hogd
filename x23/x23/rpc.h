@@ -307,10 +307,11 @@ concept implements_async_rpc =
 namespace detail {
 class RpcStreamImpl : public RefCount {
 public:
+  static constexpr bool kAllowRefPtrConversion = true;
   size_t max_message_size = default_max_message_size;
   RefPtr<CoroPoll> cp_;
 
-  void fail();
+  void fail(bool wait_for_callbacks = true);
   int get_fd() const { return fd_.get(); }
 
 protected:
@@ -347,7 +348,6 @@ private:
 template<typename Logger = RpcNoLogger>
 struct RpcStream : public detail::RpcStreamImpl {
   using super = detail::RpcStreamImpl;
-  static constexpr bool kAllowRefPtrConversion = true;
 
   Logger logger_;
   bool reader_running_{false};
