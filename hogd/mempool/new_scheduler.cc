@@ -537,8 +537,10 @@ NewScheduler::schedule(size_t num_txs,
                        x23::Vec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
-  std::unordered_set<ContractAddress> removed_accounts;
-  std::unordered_set<ContractAddress> accounts_excluded_from_block;
+  static std::unordered_set<ContractAddress> removed_accounts;
+  static std::unordered_set<ContractAddress> accounts_excluded_from_block;
+  removed_accounts.clear();
+  accounts_excluded_from_block.clear();
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
