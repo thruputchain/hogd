@@ -98,8 +98,8 @@ private:
       Impl *operator->() const noexcept { return &c_->s_.impl_; }
     };
 
-    // NOLINTBEGIN(bugprone-assignment-in-if-condition)
-    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
+    // NOLINTBEGIN(bugprone-assignment-in-if-condition,bugprone-exception-escape)
+    Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(c.get())
     {
       auto ptr = s_.cs_.take();
       if ((next_ = ptr->connlist))
@@ -119,7 +119,7 @@ private:
         s_.all_connections_destroyed_.notify_all();
       }
     }
-    // NOLINTEND(bugprone-assignment-in-if-condition)
+    // NOLINTEND(bugprone-assignment-in-if-condition,bugprone-exception-escape)
   };
   struct ConnState {
     Conn *connlist{};

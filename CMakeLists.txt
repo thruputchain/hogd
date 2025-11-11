@@ -50,9 +50,9 @@ message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
 message(STATUS "GIT_COMMIT_HASH: ${GIT_COMMIT_HASH}")
 
 # Handle configuration options
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
-endif()
+#if(NOT CMAKE_BUILD_TYPE)
+#  set(CMAKE_BUILD_TYPE Release)
+#endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()

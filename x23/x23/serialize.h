@@ -275,7 +275,7 @@ struct Serializer {
       memcpy(p, buf, len);
       p += len + (4 - rem);
     }
-    else {
+    else if (len) {
       memcpy(p, buf, len);
       p += len;
     }
@@ -655,8 +655,10 @@ struct Deserializer
       if constexpr (Safe)
         need(size);
       x.resize_uninitialized(size);
-      memcpy(x.data(), p, size);
-      p += size;
+      if (size) {
+        memcpy(x.data(), p, size);
+        p += size;
+      }
     }
     else {
       std::size_t binlen = (size + 3UZ) & ~3UZ;
