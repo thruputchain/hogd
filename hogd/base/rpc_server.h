@@ -99,7 +99,7 @@ private:
     };
 
     // NOLINTBEGIN(bugprone-assignment-in-if-condition)
-    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
+    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get()) noexcept
     {
       auto ptr = s_.cs_.take();
       if ((next_ = ptr->connlist))
