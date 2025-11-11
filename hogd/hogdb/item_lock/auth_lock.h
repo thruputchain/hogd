@@ -45,8 +45,9 @@ public:
   HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
                                            MerkleTriePrefix &trie) const;
 
-private:
   AccountAuthData build_result() const;
+
+private:
   size_t count_active_keys() const;
 
   AccountAuthData base_auth_data_;

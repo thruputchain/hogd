@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <stdexcept>
+
 #include <utility>
 
 #include "account.hh"
@@ -7,10 +7,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/item_change.h"
-#include "hogd/hogdb/status.h"
+#include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "model_checker/async.h"
-#include "model_checker/work_queue.h"
 #include "storage_cost.hh"
 #include "types.hh"
 #include "x23/x23.h"
@@ -89,6 +88,8 @@ TEST_F(ItemChangeAuthTest, MergeConflict)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
+*/
+
 TEST_F(ItemChangeAuthTest, Narrow)
 {
   AuthDataItem auth_data_item(base_data_);
@@ -105,11 +106,20 @@ TEST_F(ItemChangeAuthTest, Narrow)
 
   EXPECT_TRUE(auth_data_item.narrow(auth_data_3));
 
-  AuthDataItem maintx_item(base_data_);
-  EXPECT_TRUE(maintx_item.merge(auth_data_item, &cost_model_).has_value());
-  maintx_item.commit_change(auth_data_item);
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
 
-  auto res = maintx_item.build_result();
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
+
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_FALSE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
   EXPECT_FALSE(res.public_keys[2]);
@@ -129,13 +139,26 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
   AuthDataItem narrowed = auth_data_item;
   EXPECT_TRUE(narrowed.narrow(auth_data_2));
 
-  narrowed.commit_change(auth_data_item);
+  ItemChange change = ItemChange(std::move(narrowed));
 
-  auto res = narrowed.build_result();
+  ItemLock lock(0);
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
+
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_TRUE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
   EXPECT_TRUE(res.public_keys[3]);
 }
+
+/*
 
 TEST_F(ItemChangeAuthTest, NarrowExclusiveConflict)
 {
@@ -171,6 +194,8 @@ TEST_F(ItemChangeAuthTest, MergeAndUndo)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
+*/
+
 TEST_F(ItemChangeAuthTest, CommitAndBuild)
 {
   AuthDataItem auth_data_item(base_data_);
@@ -179,11 +204,43 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
   auth_data_item.set_new_pk(0, pk_1);
   auth_data_item.set_new_pk(1, nullptr);
 
-  auth_data_item.commit_change(auth_data_item);
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  auto res = auth_data_item.build_result();
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_EQ(res.public_keys[0], pk_1);
   EXPECT_EQ(res.public_keys[1], nullptr);
-} */
+}
+
+TEST_F(ItemChangeAuthTest, DeleteKey)
+{
+  AuthDataItem auth_data_item(base_data_);
+
+  auth_data_item.set_new_pk(3, nullptr);
+
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
+
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(2));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
+  EXPECT_EQ(res.public_keys[3], nullptr);
+}
 
 } // namespace hogd

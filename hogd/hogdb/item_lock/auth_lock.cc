@@ -25,6 +25,7 @@ AuthLock::build_result() const
   AccountAuthData result = base_auth_data_;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     if (pk_changes_[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       result.public_keys[i] = pk_changes_[i].value();
     }
   }
@@ -37,6 +38,7 @@ AuthLock::count_active_keys() const
   size_t active_keys = 0;
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     if (pk_changes_[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (pk_changes_[i].value()) {
         active_keys++;
       }
@@ -77,6 +79,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
   // count number of keys created by after
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
     if (after != nullptr && after->get()->pk_changes_[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto const &change = after->get()->pk_changes_[i].value();
       if (change || base_auth_data_.public_keys[i]) {
         keys++;
@@ -112,6 +115,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
 
     if (after_item.pk_changes_[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto const &change = after_item.pk_changes_[i].value();
       pk_changes_[i] = change;
     }

@@ -9,14 +9,13 @@
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
-#include <tuple>
 #include <type_traits>
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
-#include "x23/refcnt.h"
+#include "x23/mvar.h"
 #include "x23/x23/event.h"
 #include "x23/x23/rpc.h" // IWYU pragma: keep
 #include "x23/x23/sockio.h"
@@ -99,7 +98,7 @@ private:
     };
 
     // NOLINTBEGIN(bugprone-assignment-in-if-condition)
-    Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(c.get())
+    Conn(RpcServer &s, auto &c) : s_(s), rpcstream_(c.get())
     {
       auto ptr = s_.cs_.take();
       if ((next_ = ptr->connlist))
