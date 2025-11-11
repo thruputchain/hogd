@@ -65,7 +65,6 @@ concept is_item = requires(T t, HogDBDAO &db, MerkleTriePrefix &trie,
   // then the change becomes exclusive and all future changes (merges)
   // attempted by other transactions for this item will fail.
   { t.narrow(arg) } -> std::same_as<bool>;
-
 } && std::formattable<T, char>;
 
 template<is_item T> class PointerItem : public std::unique_ptr<T> {
@@ -133,7 +132,7 @@ public:
   }
 
   bool narrow(const NNInt128 &nnint);
- 
+
   int128_t value() const { return base_ + delta_; }
 
   int128_t base() const { return base_; }
@@ -187,7 +186,7 @@ public:
   Bytes(std::span<const std::byte> buf) : buf_(buf.begin(), buf.end()) {}
 
   bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
- 
+
   OwningSpan<const std::byte> value() const
   {
     std::vector<std::byte> buf(buf_);
@@ -257,7 +256,7 @@ public:
            deployed_contract_data.deployed_contract_hash_);
     return true;
   }
- 
+
   const DeployedContractHash &deployed_contract_hash() const
   {
     return deployed_contract_hash_;
@@ -333,7 +332,6 @@ public:
   AccountAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
-
   std::array<std::optional<PublicKeyConfigOpt>, MAX_SIGNERS> pk_changes_;
   AccountAuthData base_auth_data_;
 
@@ -352,16 +350,14 @@ template<> struct std::formatter<hogd::AuthDataItem> {
     for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
       auto pk = auth_data_item.pk_changes_[i];
       if (pk) {
-        format_to(ctx.out(), "{{index:{}, pk:{}}}",
-                  i, x23::show(*pk));
+        format_to(ctx.out(), "{{index:{}, pk:{}}}", i, x23::show(*pk));
       }
     }
     format_to(ctx.out(), "}}");
     return ctx.out();
   }
 };
-static_assert(
-    hogd::is_item<hogd::PointerItem<hogd::AuthDataItem>>);
+static_assert(hogd::is_item<hogd::PointerItem<hogd::AuthDataItem>>);
 
 namespace hogd {
 
@@ -506,7 +502,6 @@ public:
   auto get_type() const { return type_.index(); }
 
 private:
-
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
                NewContractData, PointerItem<AuthDataItem>, ReplayCacheIt>
       type_;

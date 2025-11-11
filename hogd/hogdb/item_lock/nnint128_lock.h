@@ -78,7 +78,8 @@ public:
 
   // For balance items
   // Only should be called after all txs in a block are done.
-  std::pair<int128_t, int128_t> get_base_and_delta() const {
+  std::pair<int128_t, int128_t> get_base_and_delta() const
+  {
     return {base_, delta_.load()};
   }
 

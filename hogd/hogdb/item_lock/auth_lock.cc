@@ -23,11 +23,11 @@ AccountAuthData
 AuthLock::build_result() const
 {
   AccountAuthData result = base_auth_data_;
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-        if (pk_changes_[i].has_value()) {
-            result.public_keys[i] = pk_changes_[i].value();
-        }
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (pk_changes_[i].has_value()) {
+      result.public_keys[i] = pk_changes_[i].value();
     }
+  }
   return result;
 }
 
@@ -56,37 +56,40 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
                                  const StorageCostModel *cost_model)
 {
 
-    std::unique_lock<x23::TestLock> ul(lock_);
-    if (locked_ && before == nullptr) {
-        return HogDBError{HogDBCode::kConflict};
-    }
-    assert(before == nullptr || before->get()->base_auth_data() == base_auth_data_);
+  std::unique_lock<x23::TestLock> ul(lock_);
+  if (locked_ && before == nullptr) {
+    return HogDBError{HogDBCode::kConflict};
+  }
+  assert(before == nullptr ||
+         before->get()->base_auth_data() == base_auth_data_);
 
-    if (after != nullptr) {
-        if (after->get()->base_auth_data() != base_auth_data_) {
-            return HogDBError{HogDBCode::kConflict};
-        }
-        locked_ = true;
-    } else {
-        locked_ = false;
+  if (after != nullptr) {
+    if (after->get()->base_auth_data() != base_auth_data_) {
+      return HogDBError{HogDBCode::kConflict};
     }
+    locked_ = true;
+  }
+  else {
+    locked_ = false;
+  }
 
-    size_t keys = 0;
-    // count number of keys created by after
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-        if (after != nullptr && after->get()->pk_changes_[i].has_value()) {
-            auto const& change = after->get()->pk_changes_[i].value();
-            if (change || base_auth_data_.public_keys[i]) {
-                keys ++;
-            }
-        } else {
-            if (base_auth_data_.public_keys[i]) {
-                keys ++;
-            }
-        }
+  size_t keys = 0;
+  // count number of keys created by after
+  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    if (after != nullptr && after->get()->pk_changes_[i].has_value()) {
+      auto const &change = after->get()->pk_changes_[i].value();
+      if (change || base_auth_data_.public_keys[i]) {
+        keys++;
+      }
     }
+    else {
+      if (base_auth_data_.public_keys[i]) {
+        keys++;
+      }
+    }
+  }
 
-    return cost_model->get_auth_data_cost(keys);
+  return cost_model->get_auth_data_cost(keys);
 }
 
 int128_t
@@ -109,7 +112,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
 
     if (after_item.pk_changes_[i].has_value()) {
-      auto const& change = after_item.pk_changes_[i].value();
+      auto const &change = after_item.pk_changes_[i].value();
       pk_changes_[i] = change;
     }
   }

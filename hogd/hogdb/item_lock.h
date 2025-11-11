@@ -31,20 +31,20 @@ namespace hogd {
 class ItemLock {
 public:
   ItemLock(int128_t snapshot_cost) : snapshot_cost_(snapshot_cost) {}
-  ItemLock(auto const& lambda)
-        requires std::invocable<decltype(lambda)> &&
-                 std::same_as<std::invoke_result_t<decltype(lambda)>,
-                              HogDBStatus<int128_t>> 
-    {
-      auto status = lambda();
-      if (!status) [[unlikely]] {
-        error("failed to get snapshot cost: {}", status.error());
-        // any action on this item will fail
-        snapshot_cost_ = std::numeric_limits<int128_t>::min();
-        return;
-      }
-      snapshot_cost_ = *status;
+  ItemLock(auto const &lambda)
+      requires std::invocable<decltype(lambda)> &&
+               std::same_as<std::invoke_result_t<decltype(lambda)>,
+                            HogDBStatus<int128_t>>
+  {
+    auto status = lambda();
+    if (!status) [[unlikely]] {
+      error("failed to get snapshot cost: {}", status.error());
+      // any action on this item will fail
+      snapshot_cost_ = std::numeric_limits<int128_t>::min();
+      return;
     }
+    snapshot_cost_ = *status;
+  }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
   // required to support the after change. Is a no-op on failure.
@@ -66,9 +66,10 @@ public:
   bool is_finalized() const { return lock_state_ != kUncommitted; }
 
   // not at all threadsafe.  Only use after all txs in a block are done.
-  template<typename T>
-  const T *get_inner() const {
-    assert(lock_state_ == kFinalized || lock_state_ == kFinalizedPermamentExclusiveLock);
+  template<typename T> const T *get_inner() const
+  {
+    assert(lock_state_ == kFinalized ||
+           lock_state_ == kFinalizedPermamentExclusiveLock);
     return std::get_if<T>(&lock_contents_);
   }
 

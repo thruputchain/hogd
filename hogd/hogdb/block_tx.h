@@ -68,7 +68,6 @@ public:
   void release_balance(const Address &addr, int128_t delta);
 
 private:
-
   HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
 
   struct SipHash24Hasher {
@@ -93,15 +92,14 @@ private:
   BlockHeight block_height_;
 
   static inline HogDBStatus<int128_t>
-  do_lock(ItemLock &lock,
-          const ItemChange &change, const StorageCostModel *cost_model);
+  do_lock(ItemLock &lock, const ItemChange &change,
+          const StorageCostModel *cost_model);
   static inline HogDBStatus<int128_t>
-  do_modify_lock(ItemLock &lock,
-                 const ItemChange &old_change, const ItemChange &new_change,
+  do_modify_lock(ItemLock &lock, const ItemChange &old_change,
+                 const ItemChange &new_change,
                  const StorageCostModel *cost_model);
-  static inline void do_unlock_item(
-                                    ItemLock &lock,
-                                    const ItemChange &change, const StorageCostModel *cost_model);
+  static inline void do_unlock_item(ItemLock &lock, const ItemChange &change,
+                                    const StorageCostModel *cost_model);
 };
 
 } // namespace hogd

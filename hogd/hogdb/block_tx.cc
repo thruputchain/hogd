@@ -46,8 +46,8 @@ BlockTX::do_modify_lock(ItemLock &lock, const ItemChange &old_change,
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
-BlockTX::do_unlock_item(ItemLock &lock,
-                        const ItemChange &change, const StorageCostModel *cost_model)
+BlockTX::do_unlock_item(ItemLock &lock, const ItemChange &change,
+                        const StorageCostModel *cost_model)
 {
   auto r = lock.try_atomic_change_lock(&change, nullptr, cost_model);
   CHECK(r.has_value());
@@ -96,7 +96,6 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
 
     auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
-
 
     return do_lock(*lock, change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
@@ -192,7 +191,8 @@ BlockTX::commit(WorkerPool &pool)
         if (!v.second.is_finalized()) {
           return;
         }
-        HogDBStatus<void> tmp = v.second.write_committed_change(v.first, db_, trie_);
+        HogDBStatus<void> tmp =
+            v.second.write_committed_change(v.first, db_, trie_);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -219,7 +219,7 @@ BlockTX::commit(WorkerPool &pool)
           std::scoped_lock guard(lock);
           ret = tmp;
         }
-        
+
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
 
