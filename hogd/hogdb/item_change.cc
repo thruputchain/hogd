@@ -29,24 +29,6 @@
 
 namespace hogd {
 
-HogDBStatus<void>
-NNInt128::commit(HogDBDAO &db, MerkleTriePrefix &trie, const ItemKey &key) const
-{
-  int128_t v = value();
-  HogDBStatus<void> ret = db.write_nnint128(key, v);
-  if (ret) {
-    std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
-                                    sizeof(v));
-    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
-    // [trie.insert_or_update()] only fails if we attempt to insert an empty
-    // key.
-    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kNNInt128,
-                                                    value_span)
-              .has_value());
-  }
-  return ret;
-}
-
 bool
 NNInt128::narrow(const NNInt128 &nnint)
 {

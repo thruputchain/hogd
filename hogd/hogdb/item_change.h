@@ -131,9 +131,7 @@ public:
     }
     minus_ = delta_;
   }
-
-  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
-                           const ItemKey &key) const;
+  
   bool narrow(const NNInt128 &nnint);
  
   int128_t value() const { return base_ + delta_; }
