@@ -79,6 +79,10 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
             if (change || base_auth_data_.public_keys[i]) {
                 keys ++;
             }
+        } else {
+            if (base_auth_data_.public_keys[i]) {
+                keys ++;
+            }
         }
     }
 

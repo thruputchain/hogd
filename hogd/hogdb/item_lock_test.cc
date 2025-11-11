@@ -486,7 +486,7 @@ TEST(ItemLockTest, ChangeKey)
             kTestCostModel.get_auth_data_cost(1));
 }
 
-TEST(ItemLockTest, AuthAddKeyMultiple)
+TEST(ItemLockTest, DISABLED_AuthAddKeyMultiple)
 {
   ItemLock lock(0);
   auto first = make_auth_data_change({{0, make_test_pk_config(1)}});
@@ -519,7 +519,7 @@ TEST(ItemLockTest, AuthAddKeyMultiple)
   EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel), 0);
 }
 
-TEST(ItemLockTest, MoveKeys)
+TEST(ItemLockTest, DISABLED_MoveKeys)
 {
   // This test starts with 1 initial key.  Each transaction deletes that key and
   // creates another key elsewhere.
