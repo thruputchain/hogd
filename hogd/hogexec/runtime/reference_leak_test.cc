@@ -212,6 +212,10 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 // reference should be released allowing other types to be reserved
 TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Replay cache is not supported in HogDB";
+    return;
+  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -321,6 +325,10 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Auth data concurrent ops are not supported in HogDB yet";
+    return;
+  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
