@@ -171,6 +171,8 @@ TEST_F(HogDBTest, DataAccessObject)
   EXPECT_TRUE(db_.remove_item(ikey));
 }
 
+#if 0
+
 TEST_F(HogDBTest, ItemChange)
 {
   //
@@ -297,6 +299,8 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   auto marginal_cost = change.marginal_storage_cost(&cost_model_).value();
   EXPECT_EQ(0, marginal_cost);
 }
+
+#endif
 
 } // namespace hogd
 

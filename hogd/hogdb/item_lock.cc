@@ -49,6 +49,9 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 {
   auto lock_state = lock_state_.load(std::memory_order_relaxed);
 
+  info("try_atomic_change_lock before {} after {}", (before == nullptr ? "nullptr" : std::format("{}", *before)),
+   (after == nullptr ? "nullptr" : std::format("{}", *after)));
+
   if (lock_state == kFinalized) {
     return handle_try_atomic_from_finalized(before, after, cost_model);
   }

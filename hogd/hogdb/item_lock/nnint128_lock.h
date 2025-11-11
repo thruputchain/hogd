@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 #include <limits>
+#include <utility>
 
 #include "hogd/base/atomic.h"
 #include "hogd/base/compiler.h"
@@ -74,6 +75,12 @@ public:
 
   HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
                                            MerkleTriePrefix &trie) const;
+
+  // For balance items
+  // Only should be called after all txs in a block are done.
+  std::pair<int128_t, int128_t> get_base_and_delta() const {
+    return {base_, delta_.load()};
+  }
 
   // For testing only
   int128_t get_add_capacity() const { return add_.load(); }

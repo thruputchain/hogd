@@ -82,20 +82,9 @@ bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item)
 {
   for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    // Narrow is only called on the changes held by individual invokeTx objects.
-    assert(auth_data_item.pk_changes_[i].refcount_ == 0 ||
-           auth_data_item.pk_changes_[i].refcount_ == 1);
-    assert(pk_changes_[i].refcount_ == 0 || pk_changes_[i].refcount_ == 1);
-    if (pk_changes_[i].refcount_ == 1 &&
-        auth_data_item.pk_changes_[i].refcount_ == 1) {
-      if (pk_changes_[i].pk_ != auth_data_item.pk_changes_[i].pk_) {
-        pk_changes_[i].exclusive_ = true;
-      }
+    if (auth_data_item.pk_changes_[i].locked_) {
+      pk_changes_[i].locked_ = true;
     }
-    if (auth_data_item.pk_changes_[i].refcount_ == 1) {
-      pk_changes_[i].refcount_ = 1;
-    }
-    pk_changes_[i].exclusive_ |= auth_data_item.pk_changes_[i].exclusive_;
   }
   return true;
 }

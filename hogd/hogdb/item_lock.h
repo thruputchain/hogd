@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <concepts>
 #include <limits>
 #include <mutex>
@@ -63,6 +64,13 @@ public:
                                            MerkleTriePrefix &trie) const;
 
   bool is_finalized() const { return lock_state_ != kUncommitted; }
+
+  // not at all threadsafe.  Only use after all txs in a block are done.
+  template<typename T>
+  const T *get_inner() const {
+    assert(lock_state_ == kFinalized || lock_state_ == kFinalizedPermamentExclusiveLock);
+    return std::get_if<T>(&lock_contents_);
+  }
 
 private:
   HogDBStatus<int128_t>

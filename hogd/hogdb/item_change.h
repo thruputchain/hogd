@@ -328,9 +328,8 @@ public:
   {
     assert(key_id < MAX_SIGNERS);
     pk_changes_[key_id].pk_ = std::move(pk);
-    assert(pk_changes_[key_id].refcount_ == 0);
-    assert(!pk_changes_[key_id].exclusive_);
-    pk_changes_[key_id].refcount_ = 1;
+    assert(!pk_changes_[key_id].locked_);
+    pk_changes_[key_id].locked_ = true;
   }
 
   bool narrow(const AuthDataItem &auth_data_item);
@@ -341,10 +340,12 @@ private:
   struct PublicKeyChange {
     PublicKeyChange(PublicKeyConfigOpt pk) : pk_(std::move(pk)) {}
     PublicKeyChange() = default;
-    uint32_t refcount_{0};
-    bool exclusive_{false};
-    bool committed_{false};
-    PublicKeyConfigOpt pk_ = nullptr;
+    // Does this change, or any prior change in the transaction (from narrow)
+    // attempt to modify this particular public key?
+    bool locked_{false};
+    // The public key that will be written if this change commits.
+    // nullopt means that no write will take place, and the lock will be released.
+    std::optional<PublicKeyConfigOpt> pk_ = std::nullopt;
   };
 
   std::array<PublicKeyChange, MAX_SIGNERS> pk_changes_;
@@ -365,9 +366,9 @@ template<> struct std::formatter<hogd::AuthDataItem> {
     for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
       auto pk = auth_data_item.pk_changes_[i].pk_;
       if (pk) {
-        format_to(ctx.out(), "{{index:{}, pk:{}, exclusive:{}, refcount:{}}}",
-                  i, x23::show(pk), auth_data_item.pk_changes_[i].exclusive_,
-                  auth_data_item.pk_changes_[i].refcount_);
+        format_to(ctx.out(), "{{index:{}, pk:{}, locked:{}}}",
+                  i, x23::show(*pk),
+                  auth_data_item.pk_changes_[i].locked_);
       }
     }
     format_to(ctx.out(), "}}");
@@ -528,13 +529,11 @@ private:
   bool permanent_exclusive_{false};
   bool change_committed_{false};
 
-  size_t storage_size() const;
-
   friend struct std::formatter<ItemChange>;
 };
 
 // Performance can degrade if an ItemChange becomes too large.
-// This is not a hard limit; the current size is 112.  This is a check
+// This is not a hard limit; the current size is 96.  This is a check
 // so that we do not accidentally increase the size.
 // The biggest type in the ItemChange is NNInt128, which is 64 bytes.
 static_assert(sizeof(ItemChange) <= 128);

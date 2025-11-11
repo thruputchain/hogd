@@ -3,7 +3,6 @@
 #include <cassert>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -21,6 +20,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -115,18 +115,14 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-    return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_)
+    return do_modify_lock(*lock, old_change, new_change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
-  if (!lock->change.has_snapshot_cost()) [[unlikely]] {
-    return HogDBError{HogDBCode::kInternal};
-  }
-  return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_);
+
+  return do_modify_lock(*lock, old_change, new_change, &cost_model_);
 }
 
 void
@@ -210,18 +206,17 @@ BlockTX::commit(WorkerPool &pool)
         if (!v.second.is_finalized()) {
           return;
         }
-        assert(v.second.change.get_raw_nnint128().has_value());
-        auto raw_nnint128 = v.second.change.get_raw_nnint128().value();
-        int128_t prev_val = raw_nnint128.base();
-        int128_t new_val = v.second.change.to_nnint128().value();
+        const auto *inner = v.second.get_inner<NNInt128Lock>();
+        CHECK(inner != nullptr);
+        auto [base, delta] = inner->get_base_and_delta();
+        auto [new_val, of] = overflowing_add(base, delta);
+        assert(!of);
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, new_val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
         }
-
-        auto [delta, of] = overflowing_sub(new_val, prev_val);
-        assert(!of);
+        
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
 

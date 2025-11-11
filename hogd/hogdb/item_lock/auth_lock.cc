@@ -56,6 +56,9 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
                                  const PointerItem<AuthDataItem> *after,
                                  const StorageCostModel *cost_model)
 {
+
+    return HogDBError{HogDBCode::kInternal};
+    /*
   std::unique_lock<x23::TestLock> ul(lock_);
 
   const AuthDataItem *before_item = before ? before->get() : nullptr;
@@ -118,6 +121,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
       if (pk_changes_[i].refcount_ != 1) {
         return HogDBError{HogDBCode::kConflict};
       }
+      info("i {} before pk {} after pk {}", i, x23::show(before_item->pk_changes_[i].pk_), x23::show(pk_changes_[i].pk_));
       // The pk values should match
       assert(before_item->pk_changes_[i].pk_ == pk_changes_[i].pk_);
     }
@@ -145,6 +149,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
         ((before_item != nullptr) && (before_item->pk_changes_[i].exclusive_));
     bool after_exclusive =
         ((after_item != nullptr) && (after_item->pk_changes_[i].exclusive_));
+        
 
     // Release lock
     if (before_modifies && !after_modifies) {
@@ -195,6 +200,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     }
   }
   return cost_model->get_auth_data_cost(max_keys);
+  */
 }
 
 int128_t
@@ -202,6 +208,9 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
                         const PointerItem<AuthDataItem> &after,
                         const StorageCostModel *cost_model)
 {
+
+    return 0;
+    /*
   std::unique_lock<x23::TestLock> ul(lock_);
 
   const AuthDataItem &after_item = *after.get();
@@ -237,6 +246,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 
   int128_t new_cost = cost_model->get_auth_data_cost(count_active_keys());
   return new_cost - previous_cost;
+  */
 }
 
 HogDBStatus<void>
