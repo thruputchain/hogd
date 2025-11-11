@@ -131,7 +131,7 @@ public:
     }
     minus_ = delta_;
   }
-  
+
   bool narrow(const NNInt128 &nnint);
  
   int128_t value() const { return base_ + delta_; }
@@ -325,28 +325,16 @@ public:
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
     assert(key_id < MAX_SIGNERS);
-    pk_changes_[key_id].pk_ = std::move(pk);
-    assert(!pk_changes_[key_id].locked_);
-    pk_changes_[key_id].locked_ = true;
+    pk_changes_[key_id].emplace(std::move(pk));
   }
 
-  bool narrow(const AuthDataItem &auth_data_item);
+  bool narrow(const AuthDataItem &auth_data_item) const;
 
   AccountAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
-  struct PublicKeyChange {
-    PublicKeyChange(PublicKeyConfigOpt pk) : pk_(std::move(pk)) {}
-    PublicKeyChange() = default;
-    // Does this change, or any prior change in the transaction (from narrow)
-    // attempt to modify this particular public key?
-    bool locked_{false};
-    // The public key that will be written if this change commits.
-    // nullopt means that no write will take place, and the lock will be released.
-    std::optional<PublicKeyConfigOpt> pk_ = std::nullopt;
-  };
 
-  std::array<PublicKeyChange, MAX_SIGNERS> pk_changes_;
+  std::array<std::optional<PublicKeyConfigOpt>, MAX_SIGNERS> pk_changes_;
   AccountAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;
@@ -362,11 +350,10 @@ template<> struct std::formatter<hogd::AuthDataItem> {
   {
     format_to(ctx.out(), "AuthDataItem{{");
     for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
-      auto pk = auth_data_item.pk_changes_[i].pk_;
+      auto pk = auth_data_item.pk_changes_[i];
       if (pk) {
-        format_to(ctx.out(), "{{index:{}, pk:{}, locked:{}}}",
-                  i, x23::show(*pk),
-                  auth_data_item.pk_changes_[i].locked_);
+        format_to(ctx.out(), "{{index:{}, pk:{}}}",
+                  i, x23::show(*pk));
       }
     }
     format_to(ctx.out(), "}}");

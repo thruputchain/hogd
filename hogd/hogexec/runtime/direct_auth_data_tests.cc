@@ -303,7 +303,7 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   ASSERT_EQ(db_auth_data, db_auth_data_ref);
 }
 
-TEST_P(DirectAuthDataTest, AuthDataConcurrentLocks)
+TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
@@ -510,7 +510,7 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
   check_balance(contract_addr, 0);
 }
 
-TEST_P(DirectAuthDataTest, AuthDataInterleavings)
+TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";

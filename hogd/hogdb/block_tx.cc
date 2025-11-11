@@ -49,7 +49,8 @@ ATTRIBUTE_ALWAYS_INLINE void
 BlockTX::do_unlock_item(ItemLock &lock,
                         const ItemChange &change, const StorageCostModel *cost_model)
 {
-  lock.try_atomic_change_lock(&change, nullptr, cost_model);
+  auto r = lock.try_atomic_change_lock(&change, nullptr, cost_model);
+  CHECK(r.has_value());
 }
 
 void
@@ -62,7 +63,7 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
     throw std::runtime_error("failed to make balance change");
   }
 
-  auto *lock = addr_balance_locks_.get(addr);
+  auto *lock = addr_balance_locks_.insert_or_get(addr, 0);
   CHECK_PTR(lock);
 
   if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {

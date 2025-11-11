@@ -61,13 +61,9 @@ NNInt128::narrow(const NNInt128 &nnint)
 }
 
 bool
-AuthDataItem::narrow(const AuthDataItem &auth_data_item)
+AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
-    if (auth_data_item.pk_changes_[i].locked_) {
-      pk_changes_[i].locked_ = true;
-    }
-  }
+  CHECK(base_auth_data() == auth_data_item.base_auth_data());
   return true;
 }
 

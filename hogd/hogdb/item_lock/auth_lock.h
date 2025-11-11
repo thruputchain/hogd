@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <utility>
 
 #include "account.hh"
@@ -17,6 +18,13 @@
 
 namespace hogd {
 
+// TODO(geoff): This version of the auth lock does not implement multiple transactions modifying
+// the auth data in one block.  We can, and probably should, implement that eventually.
+// However, before we lock down what the precise format of the auth data is, and how pieces of it
+// other than the public keys are modified, I'm leaving this as the simple implementation.
+// Getting the concurrent version right requires sufficiently complex, bugprone code that is difficult to change.
+// Once we finalize what are all the ways to modify the auth data and the auth data's exact format,
+// we can revisit this to implement a concurrent version.
 class AuthLock {
 public:
   using change_type = PointerItem<AuthDataItem>;
@@ -36,19 +44,14 @@ public:
                                            MerkleTriePrefix &trie) const;
 
 private:
-  struct PublicKeyChange {
-    PublicKeyConfigOpt pk_ = nullptr;
-    uint32_t refcount_{0};
-    bool exclusive_{false};
-    bool committed_{false};
-  };
 
   AccountAuthData build_result() const;
   size_t count_active_keys() const;
 
   AccountAuthData base_auth_data_;
-  std::array<PublicKeyChange, MAX_SIGNERS> pk_changes_;
   x23::TestLock lock_;
+  bool locked_{false};
+  std::array<std::optional<PublicKeyConfigOpt>, MAX_SIGNERS> pk_changes_;
 
   friend class AuthDataItem;
 };
