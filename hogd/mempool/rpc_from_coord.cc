@@ -391,18 +391,32 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   // Scheduler ---
 
-  x23::Vec<SchedulerNominationChunk> sched_nominations;
-  SchedulerNominationChunk last_chunk;
-  {
-    SchedulerNominationChunk sched_nomination;
-    sched_nomination.chunk_idx = 0;
+  // TODO(jhumphri): Remove allocation.
+  static x23::Vec<SchedulerNominationChunk> sched_nominations(
+      kNumSchedulerIterations, {});
+  for (size_t i = 0; i < sched_nominations.size(); i++) {
+    SchedulerNominationChunk &sched_nomination = sched_nominations[i];
+    sched_nomination.chunk_idx = i;
     sched_nomination.total_chunks = kNumSchedulerIterations + 1;
+
     sched_nomination.chunk.block_id = block_id;
     Nomination &nomination = sched_nomination.chunk.nomination;
     nomination.block_height = db_tip.height + 1;
     nomination.prev_block_hash = db_tip.hash;
-    sched_nominations.resize(kNumSchedulerIterations, sched_nomination);
-    last_chunk = sched_nomination;
+    nomination.transaction_hashes.clear();
+    nomination.transaction_nominations.clear();
+  }
+  static SchedulerNominationChunk last_chunk;
+  {
+    last_chunk.chunk_idx = kNumSchedulerIterations;
+    last_chunk.total_chunks = kNumSchedulerIterations + 1;
+    last_chunk.chunk.block_id = block_id;
+
+    Nomination &nomination = last_chunk.chunk.nomination;
+    nomination.block_height = db_tip.height + 1;
+    nomination.prev_block_hash = db_tip.hash;
+    nomination.transaction_hashes.clear();
+    nomination.transaction_nominations.clear();
   }
 
   // [nomination.block_hash], [nomination.transaction_hashes], and

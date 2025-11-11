@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "account.hh"
-#include "db_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -506,11 +505,7 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
     base_replay_cache = ReplayCacheData{};
   }
 
-  HogDBStatus<DbTip> tip = block_.get().get_db().read_dbtip();
-  if (!tip)
-    return tip.error();
-
-  ReplayCacheIt replay_cache_item(tip->height,
+  ReplayCacheIt replay_cache_item(block_.get().get_height() - 1,
                                   std::move(base_replay_cache.value()));
   HogDBStatus<void> ret = replay_cache_item.try_consume_uniquifier(uniquifier);
   if (!ret)
