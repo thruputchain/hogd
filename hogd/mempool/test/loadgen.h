@@ -167,8 +167,10 @@ public:
   {
     DbTip db_tip = init_block_db_tip_;
 
-    const std::chrono::steady_clock::time_point start =
-        std::chrono::steady_clock::now();
+    // We do not count the first 20 blocks when measuring stats since the system
+    // needs time to warm up.
+    constexpr size_t kIgnoreFirstNBlocks = 20;
+    std::chrono::steady_clock::time_point start;
     size_t total_transactions_nominated = 0;
 
     x23::Vec<SignedTransaction> txs;
@@ -183,7 +185,10 @@ public:
       submit_vetted(txs, x23::CoroCB<void>(awaitable));
       co_await awaitable;
     }
+
+    size_t block_iteration_count = 0;
     while (!shutdown_flag_.load(std::memory_order_acquire)) {
+      block_iteration_count++;
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
@@ -228,8 +233,6 @@ public:
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
-      total_transactions_nominated +=
-          nomination.nomination.transaction_hashes.size();
 
       info("create_handles_duration {}, "
            "wait_nomination_duration {}, wait_transactions_duration {}, "
@@ -237,8 +240,12 @@ public:
            create_handles_duration, wait_nomination_duration,
            wait_transactions_duration, wait_submit_vetted_duration);
 
-      if (print_stats) {
+      if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.
+
+        total_transactions_nominated +=
+            nomination.nomination.transaction_hashes.size();
+
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
         int64_t block_duration_us =
@@ -270,6 +277,10 @@ public:
         info("Block throughput (tx/s), {:.2f}, Overall throughput (tx/s), "
              "{:.2f}",
              block_throughput_sec, overall_throughput_sec);
+      }
+      else {
+        start = std::chrono::steady_clock::now();
+        total_transactions_nominated = 0;
       }
     }
   }
