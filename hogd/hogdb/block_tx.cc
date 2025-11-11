@@ -69,6 +69,8 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
+
+  lock->commit_change(*change, &cost_model_);
 }
 
 HogDBStatus<int128_t>
