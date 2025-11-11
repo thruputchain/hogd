@@ -30,12 +30,12 @@ public:
   class Ptr {
   public:
     Ptr() noexcept = default;
-    Ptr(MVar &mv)
+    Ptr(MVar &mv) noexcept
     {
       mv.m_.lock();
       mv_ = &mv;
     }
-    Ptr(MVar &mv, std::try_to_lock_t)
+    Ptr(MVar &mv, std::try_to_lock_t) noexcept
     {
       if (mv.m_.try_lock())
         mv_ = &mv;
@@ -53,10 +53,10 @@ public:
       mv_ = std::exchange(other.mv_, nullptr);
       return *this;
     }
-    T *operator->() const { return &mv_->t_; }
-    T &operator*() const { return mv_->t_; }
-    explicit operator bool() const { return mv_; }
-    void reset()
+    T *operator->() const noexcept { return &mv_->t_; }
+    T &operator*() const noexcept { return mv_->t_; }
+    explicit operator bool() const noexcept { return mv_; }
+    void reset() noexcept
     {
       if (mv_) {
         auto &m = mv_->m_;
@@ -80,7 +80,7 @@ public:
       return f(ul);
     }
 
-    MVar *get_mvar() const { return mv_; }
+    MVar *get_mvar() const noexcept { return mv_; }
 
   private:
     MVar *mv_{};
@@ -100,11 +100,11 @@ public:
   //     if (auto ptr = mvar.take()) {
   //       // access object as *ptr or ptr->fields
   //     }
-  Ptr take() { return *this; }
+  Ptr take() noexcept { return *this; }
 
   // Like take(), but returns a NULL smart pointer if the lock is
   // unavailable.
-  Ptr try_take() { return {*this, std::try_to_lock}; }
+  Ptr try_take() noexcept { return {*this, std::try_to_lock}; }
 
   // Given an MVar<T> mvar, you can directly access fields of the
   // underlying T as in mvar->field.  The lock will be held by a
@@ -118,7 +118,7 @@ public:
   // The second would need to be rewritten as, for instance:
   //
   //    auto v = mvar.with([](auto &t) { return t.field1 + t.field2; });
-  Ptr operator->() { return *this; }
+  Ptr operator->() noexcept { return *this; }
 
   value_type exchange(value_type v)
       noexcept(std::is_nothrow_move_assignable_v<value_type> &&
