@@ -51,13 +51,21 @@ jobs:
         ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
     
     - name: build gcc ubsan
-      run: ./scripts/build.sh -d build/gcc_ubsan -c gcc -f "-fsanitize=undefined" -t Debug -x "-DENABLE_TEST_FFI=ON"
+      run: ./scripts/build.sh -d build/gcc_ubsan -c gcc -f "-fsanitize=undefined -fno-sanitize-recover=all" -t Debug -x "-DENABLE_TEST_FFI=ON"
     - name: run gcc ubsan tests
       run: |
         ctest --test-dir build/gcc_ubsan --parallel --timeout 100 --output-on-failure
-    
+    - name: save gcc ubsan core dumps
+      if: failure()
+      run: |
+        ./scripts/save_core_dumps.sh ../core_dumps
+
     - name: build clang ubsan
-      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined" -t Debug -x "-DENABLE_TEST_FFI=ON"
+      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all" -t Debug -x "-DENABLE_TEST_FFI=ON"
     - name: run llvm ubsan tests
       run: |
         ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
+    - name: save llvm ubsan core dumps
+      if: failure()
+      run: |
+        ./scripts/save_core_dumps.sh ../core_dumps
