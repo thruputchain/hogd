@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <limits>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
@@ -174,4 +175,26 @@ TEST(NNInt128LockTest, HalfAcquireLock)
   EXPECT_EQ(lock.get_sub_capacity(), 50);
 }
 
+TEST(NNInt128LockTest, MultipleAddsOnValue)
+{
+  NNInt128Lock lock(100);
+
+  NNInt128 add(100, 100);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &add, &kTestCostModel).has_value());
+
+  NNInt128 add2(100, 50);
+  add2.narrow(add);
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&add, &add2, &kTestCostModel).has_value());
+  EXPECT_EQ(lock.get_add_capacity(),
+            std::numeric_limits<int128_t>::max() - 200);
+  EXPECT_EQ(lock.get_sub_capacity(), 100);
+
+  EXPECT_EQ(lock.commit_change(true, 0, add2, &kTestCostModel),
+            kTestCostModel.kBaseItemCost);
+
+  EXPECT_EQ(lock.get_base_and_delta(),
+            (std::pair<int128_t, int128_t>(100, 50)));
+}
 } // namespace hogd

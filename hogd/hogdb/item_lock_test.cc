@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 #include "x23/x23.h"
@@ -564,6 +565,31 @@ TEST(ItemLockTest, DISABLED_MoveKeys)
   EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel),
             kTestCostModel.get_auth_data_cost(3) -
                 kTestCostModel.get_auth_data_cost(2));
+}
+
+TEST(ItemLockTest, FinalizeExclusive)
+{
+  // Reproducing for clarity an error case from
+  // TryInvokeTest.NNIntAddSimpleInterleavings
+  ItemLock lock(0);
+  auto first = make_nnint_change(100, 10);
+  auto second = make_nnint_change(200, 20);
+  second.narrow(first);
+
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
+
+  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel);
+  ASSERT_TRUE(r2.has_value());
+
+  EXPECT_EQ(lock.commit_change(second, &kTestCostModel),
+            kTestCostModel.kBaseItemCost);
+
+  auto const *inner = lock.get_inner<NNInt128Lock>();
+  ASSERT_TRUE(inner != nullptr);
+  EXPECT_EQ(inner->get_base_and_delta(),
+            (std::pair<int128_t, int128_t>(200, 20)));
 }
 
 } // namespace hogd

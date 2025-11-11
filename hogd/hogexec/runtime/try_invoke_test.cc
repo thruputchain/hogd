@@ -2410,7 +2410,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     ASSERT_EQ(res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
     int128_t value = from_xdr(res.value().nnint());
 
-    EXPECT_TRUE(value == 100 || value == 0);
+    ASSERT_TRUE(value == 100 || value == 0);
 
     work_queue.advance_cursor();
   }
