@@ -9,7 +9,7 @@ jobs:
   bench_servers:
     strategy:
       matrix:
-        runner: [client, hog7, hog8, hog6] # [client] is hog11
+        runner: [client, hog1, hog7, hog8, hog6] # [client] is hog11
     runs-on: ${{ matrix.runner }}
     steps:
     - name: clean up .gitconfig
@@ -96,9 +96,10 @@ jobs:
       with:
         build-dir: release
         work-dir: ci_work_dir/
-    - name: release hog6, hog7, and hog8
+    - name: release hog1, hog6, hog7, and hog8
       if: always()
       run: |
+        ./release/hogd/hogexec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} shutdown
         ./release/hogd/hogexec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} shutdown
         ./release/hogd/hogexec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} shutdown
         ./release/hogd/hogexec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} shutdown
