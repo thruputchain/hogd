@@ -88,6 +88,7 @@ public:
       num_txs += chunk.chunk.nomination.transaction_hashes.size();
     }
 
+    nominations_.clear();
     return {ret, num_txs};
   }
 
