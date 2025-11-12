@@ -82,7 +82,8 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
     if (snapshot_cost.error() != HogDBCode::kNotFound) {
       return snapshot_cost.error();
     }
-    return std::make_pair(0, ItemLockCacheData{});
+
+    return std::make_pair(0, ItemLockCacheData{kItemLockCacheDataTypeNone});
   }
   return *snapshot_cost;
 }
@@ -172,7 +173,7 @@ BlockTX::read_nnint128_base(const ItemKey &key)
   if (base) {
     return *base;
   }
-  return db_.read_nnint128(key);
+  return 0;
 }
 
 namespace {

@@ -411,10 +411,10 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       if (!r && r.error() != HogDBCode::kNotFound) {
         return r.error();
       }
-      ItemLockCacheData cache_data;
-      cache_data[0] = kItemLockCacheDataNNInt128BaseValue;
+      ItemLockCacheData cache_data{kItemLockCacheDataNNInt128BaseValue};
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
+        memset(cache_data.data() + 1, 0, cache_data.size() - 1);
         return std::make_pair(0, cache_data);
       }
       std::memcpy(cache_data.data() + 1, &r.value(), sizeof(int128_t));
@@ -430,7 +430,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       }
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
-        return std::make_pair(0, ItemLockCacheData{});
+        return HogDBError(HogDBCode::kNotFound);
       }
       size_t active_keys = 0;
       for (size_t i = 0; i < MAX_SIGNERS; ++i) {
@@ -439,7 +439,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         }
       }
       return std::make_pair(cost_model->get_auth_data_cost(active_keys),
-                            ItemLockCacheData{});
+                            ItemLockCacheData{kItemLockCacheDataTypeNone});
     }
   case ItemKeyType::kItemKeyTypeReplayCache:
     assert(key.is_replay_cache());
@@ -450,11 +450,11 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       }
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
-        return std::make_pair(0, ItemLockCacheData{});
+        return HogDBError(HogDBCode::kNotFound);
       }
       return std::make_pair(cost_model->get_replay_cache_cost(
                                 r->uniquifiers.size()),
-                            ItemLockCacheData{});
+                            ItemLockCacheData{kItemLockCacheDataTypeNone});
     }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
@@ -475,7 +475,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       }
       return std::make_pair(cost_model->get_contract_size_cost(
                                 deployed_contract_hash.contract_size),
-                            ItemLockCacheData{});
+                            ItemLockCacheData{kItemLockCacheDataTypeNone});
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
@@ -501,7 +501,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
     case kBytes:
       return std::make_pair(cost_model->get_bytestring_cost(
                                 item.value().value.size()),
-                            ItemLockCacheData{});
+                            ItemLockCacheData{kItemLockCacheDataTypeNone});
     default:
       error("unknown item type loaded from db: key={} type={}", key,
             item.value().type);
