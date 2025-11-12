@@ -63,8 +63,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
       std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
-  std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
-              calldata.data(), output_written_len);
+  if (output_written_len > 0) {
+    std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
+                calldata.data(), output_written_len);
+  }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
@@ -80,9 +82,11 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
-  std::memcpy(calldata.data(),
-              reinterpret_cast<const uint8_t *>(input_calldata.data()),
-              input_calldata.size());
+  if (input_calldata.size() > 0) {
+    std::memcpy(calldata.data(),
+                reinterpret_cast<const uint8_t *>(input_calldata.data()),
+                input_calldata.size());
+  }
 
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(input_address, input_method,
@@ -122,9 +126,11 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 
   ReturnBuffer buffer;
   buffer.resize_uninitialized(input_buffer.size());
-  std::memcpy(buffer.data(),
-              reinterpret_cast<const uint8_t *>(input_buffer.data()),
-              input_buffer.size());
+  if (input_buffer.size() > 0) {
+    std::memcpy(buffer.data(),
+                reinterpret_cast<const uint8_t *>(input_buffer.data()),
+                input_buffer.size());
+  }
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
 
   return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
@@ -141,7 +147,9 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   }
 
   size_t write_len = std::min(output_buffer.size(), (*status)->size());
-  std::memcpy(output_buffer.data(), (*status)->data(), write_len);
+  if (write_len > 0) {
+    std::memcpy(output_buffer.data(), (*status)->data(), write_len);
+  }
   output_written_len = write_len;
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};

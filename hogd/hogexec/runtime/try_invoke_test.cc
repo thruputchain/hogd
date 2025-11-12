@@ -174,6 +174,26 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+
+  advance_block();
+
+  // Now runs the same transaction again, with an empty string for the
+  // bytestring/calldata.
+  auto handler2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = ContractAddress{},
+                                           .entrypoint =
+                                               entrypoint_from_method_id(2),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res2 = handler2.root_invoke();
+  ASSERT_TRUE(res2.is_root_success());
+
+  auto r2 = handler2.try_commit_transaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(*r2);
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
