@@ -73,18 +73,16 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   lock->commit_change(*change, &cost_model_);
 }
 
-HogDBStatus<int128_t>
-BlockTX::get_snapshot_cost(const ItemKey &key)
+HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
+BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 {
-  if (key.is_address_balance()) {
-    return 0;
-  }
-  auto snapshot_cost = db_.get_charged_storage_cost(key, &cost_model_);
+  auto snapshot_cost =
+      db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
     if (snapshot_cost.error() != HogDBCode::kNotFound) {
       return snapshot_cost.error();
     }
-    return 0;
+    return std::make_pair(0, ItemLockCacheData{});
   }
   return *snapshot_cost;
 }
@@ -101,8 +99,9 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto *item =
-      item_locks_.insert_or_get(key, [&] { return get_snapshot_cost(key); });
+  auto *item = item_locks_.insert_or_get(key, [&] {
+    return get_snapshot_cost_and_cache_data(key);
+  });
 
   assert(item != nullptr);
 
@@ -159,6 +158,21 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   CHECK_PTR(lock);
 
   return lock->commit_change(change, &cost_model_);
+}
+
+HogDBStatus<int128_t>
+BlockTX::read_nnint128_base(const ItemKey &key)
+{
+  auto *lock = item_locks_.get(key);
+  if (!lock) {
+    return db_.read_nnint128(key);
+  }
+
+  auto base = lock->get_cached_nnint128_base();
+  if (base) {
+    return *base;
+  }
+  return db_.read_nnint128(key);
 }
 
 namespace {

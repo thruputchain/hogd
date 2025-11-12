@@ -3,9 +3,12 @@
 #include <atomic>
 #include <cassert>
 #include <concepts>
+#include <cstring>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "hogd/base/log.h"
@@ -34,7 +37,7 @@ public:
   ItemLock(auto const &lambda)
       requires std::invocable<decltype(lambda)> &&
                std::same_as<std::invoke_result_t<decltype(lambda)>,
-                            HogDBStatus<int128_t>>
+                            HogDBStatus<std::pair<int128_t, ItemLockCacheData>>>
   {
     auto status = lambda();
     if (!status) [[unlikely]] {
@@ -43,7 +46,8 @@ public:
       snapshot_cost_ = std::numeric_limits<int128_t>::min();
       return;
     }
-    snapshot_cost_ = *status;
+    snapshot_cost_ = status->first;
+    padding_ = status->second;
   }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
@@ -71,6 +75,16 @@ public:
     assert(lock_state_ == kFinalized ||
            lock_state_ == kFinalizedPermamentExclusiveLock);
     return std::get_if<T>(&lock_contents_);
+  }
+
+  std::optional<int128_t> get_cached_nnint128_base() const
+  {
+    if (padding_[0] != kItemLockCacheDataNNInt128BaseValue) {
+      return std::nullopt;
+    }
+    int128_t base;
+    std::memcpy(&base, padding_.data() + 1, sizeof(int128_t));
+    return base;
   }
 
 private:
@@ -128,9 +142,17 @@ private:
   // between variants, and the contents of the variant can be operated on
   // directly.
   uint32_t pending_refcount_ = 0;
-
-  int128_t snapshot_cost_;
   x23::TestLock lock_;
+
+  // readonly fields: set during the constructor.
+  // TODO(geoff): These are only modified during the constructor;
+  // some more clever work could make them const.
+  //
+  // Padding is the extra data we use to cache type-specific info,
+  // like the nnint base value, so we don't have to load that on each
+  // request_nnint128.
+  ItemLockCacheData padding_ = ItemLockCacheData{kItemLockCacheDataTypeNone};
+  int128_t snapshot_cost_;
 };
 
 // should be less than two cache lines.

@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <string>
@@ -397,15 +398,29 @@ HogDBDAO::write_bytes(const ItemKey &key, std::span<const std::byte> buf)
   return ret;
 }
 
-HogDBStatus<size_t>
-HogDBDAO::get_charged_storage_cost(const ItemKey &key,
-                                   StorageCostModel const *cost_model)
+HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
+HogDBDAO::get_charged_storage_cost_and_cache_data(
+    const ItemKey &key, StorageCostModel const *cost_model)
 {
   switch (key.key_type()) {
   case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
     assert(key.is_address_balance());
-    // this is not charged
-    return HogDBError(HogDBCode::kNotFound);
+    {
+      // this is not charged
+      auto r = read_address_balance(key.get_address());
+      if (!r && r.error() != HogDBCode::kNotFound) {
+        return r.error();
+      }
+      ItemLockCacheData cache_data;
+      cache_data[0] = kItemLockCacheDataNNInt128BaseValue;
+      if (!r) {
+        assert(r.error() == HogDBCode::kNotFound);
+        return std::make_pair(0, cache_data);
+      }
+      std::memcpy(cache_data.data() + 1, &r.value(), sizeof(int128_t));
+      return std::make_pair(0, cache_data);
+    }
+
   case ItemKeyType::kItemKeyTypeAccountAuthData:
     assert(key.is_account_auth_data());
     {
@@ -415,7 +430,7 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
       }
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
-        return 0;
+        return std::make_pair(0, ItemLockCacheData{});
       }
       size_t active_keys = 0;
       for (size_t i = 0; i < MAX_SIGNERS; ++i) {
@@ -423,7 +438,8 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
           active_keys++;
         }
       }
-      return cost_model->get_auth_data_cost(active_keys);
+      return std::make_pair(cost_model->get_auth_data_cost(active_keys),
+                            ItemLockCacheData{});
     }
   case ItemKeyType::kItemKeyTypeReplayCache:
     assert(key.is_replay_cache());
@@ -434,9 +450,11 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
       }
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
-        return 0;
+        return std::make_pair(0, ItemLockCacheData{});
       }
-      return cost_model->get_replay_cache_cost(r->uniquifiers.size());
+      return std::make_pair(cost_model->get_replay_cache_cost(
+                                r->uniquifiers.size()),
+                            ItemLockCacheData{});
     }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
@@ -455,20 +473,35 @@ HogDBDAO::get_charged_storage_cost(const ItemKey &key,
         error("failed to deserialize deployed contract hash: {}", e.what());
         return HogDBError(HogDBCode::kInternal);
       }
-      return cost_model->get_contract_size_cost(
-          deployed_contract_hash.contract_size);
+      return std::make_pair(cost_model->get_contract_size_cost(
+                                deployed_contract_hash.contract_size),
+                            ItemLockCacheData{});
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
     auto item = db_.get(make_contract_data_key(key.as_bytes()));
     if (!item) {
+      if (item.error() != HogDBCode::kNotFound) {
+        return item.error();
+      }
       return HogDBError(HogDBCode::kNotFound);
     }
     switch (item.value().type) {
     case kNNInt128:
-      return cost_model->get_nnint_cost();
+    {
+      int128_t base_value;
+      std::memcpy(&base_value, item.value().value.data(), sizeof(int128_t));
+      int128_t out = le_to_cpu(base_value);
+
+      ItemLockCacheData cache_data;
+      cache_data[0] = kItemLockCacheDataNNInt128BaseValue;
+      std::memcpy(cache_data.data() + 1, &out, sizeof(int128_t));
+      return std::make_pair(cost_model->get_nnint_cost(), cache_data);
+    }
     case kBytes:
-      return cost_model->get_bytestring_cost(item.value().value.size());
+      return std::make_pair(cost_model->get_bytestring_cost(
+                                item.value().value.size()),
+                            ItemLockCacheData{});
     default:
       error("unknown item type loaded from db: key={} type={}", key,
             item.value().type);
