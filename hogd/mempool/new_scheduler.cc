@@ -216,9 +216,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   timer = std::make_unique<ElapsedTimer>();
 
   for (const ContractAddress &account : accounts) {
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      ready_accounts_.insert(get_account_key(account));
-    }
+    ready_accounts_.insert(get_account_key(account));
   }
   cg.reset();
   info("cg acquire end");
