@@ -94,11 +94,35 @@ ItemLock::commit_change(const ItemChange &change,
   if (lock_state == kUncommitted) {
     // We only need to acquire the lock here if change_ is an exclusive change.
     // In that case, we wind up changing the variant of lock_contents_.
-
+    // It's not possible for a method to call commit_change concurrently,
+    // if we're committing an exclusive change.
     if (change.is_exclusive()) {
       std::unique_lock<x23::TestLock> lock(lock_);
       assert(pending_refcount_ == 1);
+
+      // The workflow for downgrading from exclusive to nonexclusive is to
+      // initialize the lock as the proper type, but with no changes applied.
+      // Then apply the change (which must succeed).
+      // This is the same workflow as when attempting to lock the first change
+      // on the item.
       prepare_lock_contents(&change, lock);
+
+      std::visit(
+          [&](auto &lock) -> void {
+            using lock_t = std::decay_t<decltype(lock)>;
+            if constexpr (std::is_same_v<lock_t, std::monostate> ||
+                          std::is_same_v<lock_t, ExclusiveLock>) {
+              panic("bad exclusive state");
+            }
+            else {
+              using change_type = typename lock_t::change_type;
+              auto const *inner = change.get_inner<change_type>();
+              assert(inner != nullptr);
+              auto r = lock.try_atomic_change_lock(nullptr, inner, cost_model);
+              CHECK(r.has_value());
+            }
+          },
+          lock_contents_);
     }
 
     // If change_ is not exclusive, then there may be

@@ -2,14 +2,9 @@
 
 #pragma once
 
-#include <concepts>
 #include <memory>
-#include <mutex>
-#include <type_traits>
 #include <utility>
 
-#include "hogd/base/log.h"
-#include "hogd/base/mutex_cache.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
@@ -18,6 +13,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -72,30 +68,6 @@ public:
   void release_balance(const Address &addr, int128_t delta);
 
 private:
-  struct ItemLock {
-    ItemChange change;
-    size_t ref{0};
-
-    ItemLock(int128_t snapshot_cost)
-    {
-      change.set_snapshot_cost(snapshot_cost);
-    }
-
-    // Lazily load the snapshot cost, if the item is constructed
-    ItemLock(auto const &lambda)
-        requires std::invocable<decltype(lambda)> &&
-                 std::same_as<std::invoke_result_t<decltype(lambda)>,
-                              HogDBStatus<int128_t>>
-    {
-      auto status = lambda();
-      if (!status) [[unlikely]] {
-        error("failed to get snapshot cost: {}", status.error());
-        return;
-      }
-      change.set_snapshot_cost(*status);
-    }
-  };
-
   HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
 
   struct SipHash24Hasher {
@@ -119,26 +91,15 @@ private:
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   BlockHeight block_height_;
 
-  static std::mutex &get_mutex(const ItemKey &key)
-  {
-    static MutexCache<SipHash24> mutex_cache;
-    return mutex_cache.get_mutex(key.as_bytes());
-  }
-
   static inline HogDBStatus<int128_t>
-  do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-          const ItemChange &change, const StorageCostModel *cost_model);
+  do_lock(ItemLock &lock, const ItemChange &change,
+          const StorageCostModel *cost_model);
   static inline HogDBStatus<int128_t>
-  do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
-                 const ItemChange &old_change, const ItemChange &new_change,
+  do_modify_lock(ItemLock &lock, const ItemChange &old_change,
+                 const ItemChange &new_change,
                  const StorageCostModel *cost_model);
-  static inline void do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                                    const ItemKey &key, ItemLock &lock,
-                                    const ItemChange &change);
-  static inline void
-  do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                         const Address &addr, ItemLock &lock,
-                         const ItemChange &change);
+  static inline void do_unlock_item(ItemLock &lock, const ItemChange &change,
+                                    const StorageCostModel *cost_model);
 };
 
 } // namespace hogd

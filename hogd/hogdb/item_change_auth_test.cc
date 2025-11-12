@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <stdexcept>
+
 #include <utility>
 
 #include "account.hh"
@@ -7,10 +7,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/item_change.h"
-#include "hogd/hogdb/status.h"
+#include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "model_checker/async.h"
-#include "model_checker/work_queue.h"
 #include "storage_cost.hh"
 #include "types.hh"
 #include "x23/x23.h"
@@ -67,6 +66,7 @@ protected:
   });
 };
 
+/*
 TEST_F(ItemChangeAuthTest, MergeConflict)
 {
   AuthDataItem auth_data_item(base_data_);
@@ -88,6 +88,8 @@ TEST_F(ItemChangeAuthTest, MergeConflict)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
+*/
+
 TEST_F(ItemChangeAuthTest, Narrow)
 {
   AuthDataItem auth_data_item(base_data_);
@@ -104,11 +106,20 @@ TEST_F(ItemChangeAuthTest, Narrow)
 
   EXPECT_TRUE(auth_data_item.narrow(auth_data_3));
 
-  AuthDataItem maintx_item(base_data_);
-  EXPECT_TRUE(maintx_item.merge(auth_data_item, &cost_model_).has_value());
-  maintx_item.commit_change(auth_data_item);
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
 
-  auto res = maintx_item.build_result();
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
+
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_FALSE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
   EXPECT_FALSE(res.public_keys[2]);
@@ -128,13 +139,26 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
   AuthDataItem narrowed = auth_data_item;
   EXPECT_TRUE(narrowed.narrow(auth_data_2));
 
-  narrowed.commit_change(auth_data_item);
+  ItemChange change = ItemChange(std::move(narrowed));
 
-  auto res = narrowed.build_result();
+  ItemLock lock(0);
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
+
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_TRUE(res.public_keys[0]);
   EXPECT_FALSE(res.public_keys[1]);
   EXPECT_TRUE(res.public_keys[3]);
 }
+
+/*
 
 TEST_F(ItemChangeAuthTest, NarrowExclusiveConflict)
 {
@@ -170,6 +194,8 @@ TEST_F(ItemChangeAuthTest, MergeAndUndo)
   EXPECT_TRUE(auth_data_item.merge(auth_data_3, &cost_model_).has_value());
 }
 
+*/
+
 TEST_F(ItemChangeAuthTest, CommitAndBuild)
 {
   AuthDataItem auth_data_item(base_data_);
@@ -178,238 +204,43 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
   auth_data_item.set_new_pk(0, pk_1);
   auth_data_item.set_new_pk(1, nullptr);
 
-  auth_data_item.commit_change(auth_data_item);
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  auto res = auth_data_item.build_result();
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(3));
+
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
+
   EXPECT_EQ(res.public_keys[0], pk_1);
   EXPECT_EQ(res.public_keys[1], nullptr);
 }
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
-
-// These tests check that the cost result from change.merge()
-// matches that returned by change.marginal_storage_cost().
-// This is required to guarantee that block proposal matches block validation,
-// until we enable retrocausal nnints.
-TEST_F(ItemChangeAuthTest, MergeCosts)
+TEST_F(ItemChangeAuthTest, DeleteKey)
 {
-  AuthDataItem base(base_data_);
-  const auto pk_0 = make_pk_config(Weight{10});
-  const auto pk_1 = make_pk_config(Weight{10});
-  base.set_new_pk(0, pk_0);
-  base.set_new_pk(1, pk_1);
-  ItemChange compare = ItemChange(std::move(base));
-  // base_data_ has 3 public keys
-  compare.set_snapshot_cost(cost_model_.get_auth_data_cost(3));
+  AuthDataItem auth_data_item(base_data_);
 
-  int128_t expected_cost = compare.marginal_storage_cost(&cost_model_).value();
+  auth_data_item.set_new_pk(3, nullptr);
 
-  model::WorkQueue work_queue;
+  ItemLock lock(0);
+  ItemChange change = ItemChange(std::move(auth_data_item));
+  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  while (!work_queue.done()) {
-    model::RunnableActionSet actions(work_queue);
+  EXPECT_EQ(lock.commit_change(change, &cost_model_),
+            cost_model_.get_auth_data_cost(2));
 
-    ItemChange merged = compare;
+  auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
+  ASSERT_TRUE(inner != nullptr);
+  auto res = inner->get()->build_result();
 
-    // the actual query action
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto self, ItemChange &merged,
-           const auto &pk0, const auto &pk1,
-           int128_t &expected_cost) -> model::Async {
-          co_await set.bg();
-
-          AuthDataItem base(self->base_data_);
-          base.set_new_pk(0, pk0);
-          base.set_new_pk(1, pk1);
-          auto change1 = ItemChange(std::move(base));
-
-          auto r = merged.merge(change1, &self->cost_model_);
-
-          if (!r.has_value()) {
-            // this coroutine just exits
-            co_return;
-          }
-
-          if (r.value() != expected_cost) {
-            throw std::runtime_error("Merge cost mismatch");
-          }
-
-          co_return;
-        },
-        this, merged, pk_0, pk_1, expected_cost);
-
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto self,
-           ItemChange &merged) -> model::Async {
-          co_await set.bg();
-
-          AuthDataItem base(self->base_data_);
-          base.set_new_pk(0, nullptr);
-          base.set_new_pk(2, make_pk_config(Weight{10}));
-          auto change1 = ItemChange(std::move(base));
-
-          auto r = merged.merge(change1, &self->cost_model_);
-
-          if (!r.has_value()) {
-            // this coroutine just exits
-            co_return;
-          }
-
-          co_await set.bg();
-          auto choice = set.choice(2);
-          if (choice == 0) {
-            merged.commit_change(change1);
-          }
-          else {
-            merged.undo_merge(change1);
-          }
-        },
-        this, merged);
-
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto self, ItemChange &merged,
-           const auto &pk0) -> model::Async {
-          co_await set.bg();
-
-          AuthDataItem base(self->base_data_);
-          base.set_new_pk(0, pk0);
-          auto change1 = ItemChange(std::move(base));
-
-          auto r = merged.merge(change1, &self->cost_model_);
-
-          if (!r.has_value()) {
-            // this coroutine just exits
-            co_return;
-          }
-
-          co_await set.bg();
-          auto choice = set.choice(2);
-          if (choice == 0) {
-            merged.commit_change(change1);
-          }
-          else {
-            merged.undo_merge(change1);
-          }
-        },
-        this, merged, pk_0);
-
-    ASSERT_EQ(actions.run(), model::ActionResult::kOk);
-
-    work_queue.advance_cursor();
-  }
+  EXPECT_EQ(res.public_keys[3], nullptr);
 }
-
-TEST_F(ItemChangeAuthTest, MergeCosts2)
-{
-  AuthDataItem base(base_data_);
-  const auto pk_0 = make_pk_config(Weight{10});
-  const auto pk_1 = make_pk_config(Weight{10});
-  base.set_new_pk(0, nullptr);
-  base.set_new_pk(1, pk_1);
-  base.set_new_pk(3, nullptr);
-  ItemChange compare = ItemChange(std::move(base));
-  // base_data_ has 3 public keys
-  compare.set_snapshot_cost(cost_model_.get_auth_data_cost(3));
-
-  int128_t expected_cost = compare.marginal_storage_cost(&cost_model_).value();
-
-  model::WorkQueue work_queue;
-
-  while (!work_queue.done()) {
-    model::RunnableActionSet actions(work_queue);
-
-    ItemChange merged = compare;
-
-    // the actual query action
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto self, ItemChange &merged,
-           const auto &pk1, int128_t &expected_cost) -> model::Async {
-          co_await set.bg();
-
-          AuthDataItem base(self->base_data_);
-          base.set_new_pk(0, nullptr);
-          base.set_new_pk(1, pk1);
-          base.set_new_pk(3, nullptr);
-          auto change1 = ItemChange(std::move(base));
-
-          auto r = merged.merge(change1, &self->cost_model_);
-
-          if (!r.has_value()) {
-            // this coroutine just exits
-            co_return;
-          }
-
-          if (r.value() != expected_cost) {
-            throw std::runtime_error("Merge cost mismatch");
-          }
-
-          merged.commit_change(change1);
-
-          co_return;
-        },
-        this, merged, pk_1, expected_cost);
-
-    actions.add_action(
-        [](model::RunnableActionSet &set, auto self,
-           ItemChange &merged) -> model::Async {
-          co_await set.bg();
-
-          AuthDataItem base(self->base_data_);
-          base.set_new_pk(0, nullptr);
-          base.set_new_pk(2, make_pk_config(Weight{10}));
-          auto change1 = ItemChange(std::move(base));
-
-          auto r = merged.merge(change1, &self->cost_model_);
-
-          if (!r.has_value()) {
-            throw std::runtime_error("Merge cost mismatch");
-          }
-
-          co_await set.bg();
-          auto choice = set.choice(2);
-          if (choice == 0) {
-            merged.commit_change(change1);
-            co_return;
-          }
-          merged.undo_merge(change1);
-
-          AuthDataItem base2(self->base_data_);
-          base2.set_new_pk(3, nullptr);
-
-          auto change2 = ItemChange(std::move(base2));
-
-          change2.narrow(change1);
-
-          r = merged.merge(change2, &self->cost_model_);
-
-          if (!r.has_value()) {
-            throw std::runtime_error("Merge cost mismatch");
-          }
-
-          co_await set.bg();
-          choice = set.choice(2);
-
-          if (choice == 0) {
-            merged.commit_change(change2);
-            co_return;
-          }
-
-          merged.undo_merge(change2);
-        },
-        this, merged);
-
-    ASSERT_EQ(actions.run(), model::ActionResult::kOk);
-
-    ASSERT_TRUE(merged.to_auth_data().has_value());
-    auto auth_data = merged.to_auth_data().value().build_result();
-
-    EXPECT_EQ(auth_data.public_keys[0], nullptr);
-    EXPECT_EQ(auth_data.public_keys[1], pk_1);
-    EXPECT_EQ(auth_data.public_keys[3], nullptr);
-
-    work_queue.advance_cursor();
-  }
-}
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

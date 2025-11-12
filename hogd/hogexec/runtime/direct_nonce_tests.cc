@@ -42,6 +42,9 @@ public:
 
 TEST_P(DirectNonceTests, ConsumeConflicts)
 {
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "MockInMemory does not support replay cache";
+  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 

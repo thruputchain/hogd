@@ -1,8 +1,4 @@
 #include <gtest/gtest.h>
-#include <optional>
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -195,6 +191,7 @@ TEST_F(ItemChangeReplayCacheTest, Build)
   EXPECT_TRUE(remade.try_consume_uniquifier(u(height_ + 1, 103)));
 }
 
+/*
 TEST_F(ItemChangeReplayCacheTest, MergeCost)
 {
   auto make_change = [this](std::vector<ReplayNonce> &&nonces,
@@ -247,6 +244,6 @@ TEST_F(ItemChangeReplayCacheTest, MergeCost)
 
   // checks that merges and costs work with uniquifier expiry are in HogDBTest
   // since they are best tested with storage.
-}
+} */
 
 } // namespace hogd

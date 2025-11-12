@@ -1,9 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
+#include <concepts>
+#include <limits>
 #include <mutex>
+#include <type_traits>
 #include <variant>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/hog_types.h"
@@ -26,6 +31,20 @@ namespace hogd {
 class ItemLock {
 public:
   ItemLock(int128_t snapshot_cost) : snapshot_cost_(snapshot_cost) {}
+  ItemLock(auto const &lambda)
+      requires std::invocable<decltype(lambda)> &&
+               std::same_as<std::invoke_result_t<decltype(lambda)>,
+                            HogDBStatus<int128_t>>
+  {
+    auto status = lambda();
+    if (!status) [[unlikely]] {
+      error("failed to get snapshot cost: {}", status.error());
+      // any action on this item will fail
+      snapshot_cost_ = std::numeric_limits<int128_t>::min();
+      return;
+    }
+    snapshot_cost_ = *status;
+  }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
   // required to support the after change. Is a no-op on failure.
@@ -45,6 +64,14 @@ public:
                                            MerkleTriePrefix &trie) const;
 
   bool is_finalized() const { return lock_state_ != kUncommitted; }
+
+  // not at all threadsafe.  Only use after all txs in a block are done.
+  template<typename T> const T *get_inner() const
+  {
+    assert(lock_state_ == kFinalized ||
+           lock_state_ == kFinalizedPermamentExclusiveLock);
+    return std::get_if<T>(&lock_contents_);
+  }
 
 private:
   HogDBStatus<int128_t>
@@ -100,7 +127,6 @@ private:
   // transaction commits. After that point, lock_contents_ no longer changes
   // between variants, and the contents of the variant can be operated on
   // directly.
-
   uint32_t pending_refcount_ = 0;
 
   int128_t snapshot_cost_;

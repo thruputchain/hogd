@@ -3,7 +3,6 @@
 #include <cassert>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -20,6 +19,8 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -30,80 +31,26 @@
 namespace hogd {
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
-BlockTX::do_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                 ItemLock &lock, const ItemChange &change,
+BlockTX::do_lock(ItemLock &lock, const ItemChange &change,
                  const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-
-  if (++lock.ref == 1) {
-    lock.change = change;
-    return lock.change.marginal_storage_cost(cost_model);
-  }
-
-  HogDBStatus<int128_t> ret = lock.change.merge(change, cost_model);
-  if (!ret) {
-    lock.ref--;
-    return ret.error();
-  }
-
-  return ret;
+  return lock.try_atomic_change_lock(nullptr, &change, cost_model);
 }
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
-BlockTX::do_modify_lock([[maybe_unused]] const std::unique_lock<std::mutex> &ul,
-                        ItemLock &lock, const ItemChange &old_change,
+BlockTX::do_modify_lock(ItemLock &lock, const ItemChange &old_change,
                         const ItemChange &new_change,
                         const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (lock.ref == 1) {
-    lock.change = new_change;
-    return lock.change.marginal_storage_cost(cost_model);
-  }
-
-  ItemChange tmp = lock.change;
-  tmp.undo_merge(old_change);
-  HogDBStatus<int128_t> ret = tmp.merge(new_change, cost_model);
-  if (!ret)
-    return ret.error();
-
-  lock.change = std::move(tmp);
-  return ret;
+  return lock.try_atomic_change_lock(&old_change, &new_change, cost_model);
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
-BlockTX::do_unlock_item(const std::unique_lock<std::mutex> &ul,
-                        const ItemKey & /*unused*/, ItemLock &lock,
-                        const ItemChange &change)
+BlockTX::do_unlock_item(ItemLock &lock, const ItemChange &change,
+                        const StorageCostModel *cost_model)
 {
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (--lock.ref == 0) {
-    // We don't need to remove the item from the map; the commit() loop
-    // only iterates over items with nonzero refcount.
-    return;
-  }
-  lock.change.undo_merge(change);
-}
-
-ATTRIBUTE_ALWAYS_INLINE void
-BlockTX::do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
-                                const Address & /*unused*/, ItemLock &lock,
-                                const ItemChange &change)
-{
-  assert(ul.owns_lock());
-  assert(lock.ref > 0);
-
-  if (--lock.ref == 0) {
-    // We don't need to remove the address balance from the map; the commit()
-    // loop only iterates over address balances with nonzero refcount.
-    return;
-  }
-  lock.change.undo_merge(change);
+  auto r = lock.try_atomic_change_lock(&change, nullptr, cost_model);
+  CHECK(r.has_value());
 }
 
 void
@@ -115,15 +62,15 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   if (!change) [[unlikely]] {
     throw std::runtime_error("failed to make balance change");
   }
-  change->set_snapshot_cost(0);
 
   auto *lock = addr_balance_locks_.insert_or_get(addr, 0);
-  std::unique_lock<std::mutex> ul(
-      get_mutex(make_address_balance_item_key(addr)));
+  CHECK_PTR(lock);
 
-  if (auto r = do_lock(ul, *lock, *change, &cost_model_); !r) [[unlikely]] {
+  if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
+
+  lock->commit_change(*change, &cost_model_);
 }
 
 HogDBStatus<int128_t>
@@ -150,9 +97,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
 
     auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
 
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-
-    return do_lock(ul, *lock, change, &cost_model_)
+    return do_lock(*lock, change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
@@ -161,12 +106,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
 
   assert(item != nullptr);
 
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
-  if (!item->change.has_snapshot_cost()) {
-    return HogDBError{HogDBCode::kInternal};
-  }
-
-  return do_lock(ul, *item, change, &cost_model_);
+  return do_lock(*item, change, &cost_model_);
 }
 
 HogDBStatus<int128_t>
@@ -177,18 +117,14 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-    return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_)
+    return do_modify_lock(*lock, old_change, new_change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
-  if (!lock->change.has_snapshot_cost()) [[unlikely]] {
-    return HogDBError{HogDBCode::kInternal};
-  }
-  return do_modify_lock(ul, *lock, old_change, new_change, &cost_model_);
+
+  return do_modify_lock(*lock, old_change, new_change, &cost_model_);
 }
 
 void
@@ -198,15 +134,13 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-    do_unlock_addr_balance(ul, key.get_address(), *lock, change);
+    do_unlock_item(*lock, change, &cost_model_);
     return;
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
-  do_unlock_item(ul, key, *lock, change);
+  do_unlock_item(*lock, change, &cost_model_);
 }
 
 int128_t
@@ -218,18 +152,13 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    std::unique_lock<std::mutex> ul(get_mutex(key));
-    lock->change.commit_change(change);
+    lock->commit_change(change, &cost_model_);
     return 0;
   }
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  auto ul = std::unique_lock<std::mutex>(get_mutex(key));
 
-  int128_t cost_before = lock->change.committed_storage_cost(&cost_model_);
-  lock->change.commit_change(change);
-  int128_t cost_after = lock->change.committed_storage_cost(&cost_model_);
-  return cost_after - cost_before;
+  return lock->commit_change(change, &cost_model_);
 }
 
 namespace {
@@ -259,10 +188,11 @@ BlockTX::commit(WorkerPool &pool)
   // write item changes.
   item_locks_.for_each_parallel_destructive(
       [this, &lock, &ret](std::pair<const ItemKey &, const ItemLock &> v) {
-        if (v.second.ref == 0) {
+        if (!v.second.is_finalized()) {
           return;
         }
-        HogDBStatus<void> tmp = v.second.change.commit(db_, trie_, v.first);
+        HogDBStatus<void> tmp =
+            v.second.write_committed_change(v.first, db_, trie_);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -276,21 +206,20 @@ BlockTX::commit(WorkerPool &pool)
   addr_balance_locks_.for_each_parallel_destructive(
       [this, &lock, &ret,
        &balance_deltas](std::pair<const Address &, const ItemLock &> v) {
-        if (v.second.ref == 0) {
+        if (!v.second.is_finalized()) {
           return;
         }
-        assert(v.second.change.get_raw_nnint128().has_value());
-        auto raw_nnint128 = v.second.change.get_raw_nnint128().value();
-        int128_t prev_val = raw_nnint128.base();
-        int128_t new_val = v.second.change.to_nnint128().value();
+        const auto *inner = v.second.get_inner<NNInt128Lock>();
+        CHECK(inner != nullptr);
+        auto [base, delta] = inner->get_base_and_delta();
+        auto [new_val, of] = overflowing_add(base, delta);
+        assert(!of);
         HogDBStatus<void> tmp = db_.write_address_balance(v.first, new_val);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
         }
 
-        auto [delta, of] = overflowing_sub(new_val, prev_val);
-        assert(!of);
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(delta)});
 

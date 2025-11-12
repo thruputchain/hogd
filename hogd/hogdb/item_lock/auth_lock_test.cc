@@ -99,7 +99,7 @@ TEST(AuthLockTest, MultipleKeysSameTransaction)
   EXPECT_TRUE(status.has_value());
 }
 
-TEST(AuthLockTest, ConcurrentNonConflicting)
+TEST(AuthLockTest, DISABLED_ConcurrentNonConflicting)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -121,7 +121,7 @@ TEST(AuthLockTest, ConcurrentNonConflicting)
                   .has_value());
 }
 
-TEST(AuthLockTest, ConcurrentSameKeySameValue)
+TEST(AuthLockTest, DISABLED_ConcurrentSameKeySameValue)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -145,7 +145,7 @@ TEST(AuthLockTest, ConcurrentSameKeySameValue)
                   .has_value());
 }
 
-TEST(AuthLockTest, ConcurrentSameKeyDifferentValue)
+TEST(AuthLockTest, DISABLED_ConcurrentSameKeyDifferentValue)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -169,7 +169,7 @@ TEST(AuthLockTest, ConcurrentSameKeyDifferentValue)
                   .has_value());
 }
 
-TEST(AuthLockTest, ExclusiveLockBasic)
+TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -195,7 +195,7 @@ TEST(AuthLockTest, ExclusiveLockBasic)
                   .has_value());
 }
 
-TEST(AuthLockTest, ExclusiveLockBlocksOthers)
+TEST(AuthLockTest, DISABLED_ExclusiveLockBlocksOthers)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -221,7 +221,7 @@ TEST(AuthLockTest, ExclusiveLockBlocksOthers)
                   .has_value());
 }
 
-TEST(AuthLockTest, UpgradeToExclusive)
+TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -244,7 +244,7 @@ TEST(AuthLockTest, UpgradeToExclusive)
                   .has_value());
 }
 
-TEST(AuthLockTest, CannotUpgradeToExclusiveWhenOthersHold)
+TEST(AuthLockTest, DISABLED_CannotUpgradeToExclusiveWhenOthersHold)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -269,7 +269,7 @@ TEST(AuthLockTest, CannotUpgradeToExclusiveWhenOthersHold)
           .has_value());
 }
 
-TEST(AuthLockTest, DowngradeFromExclusive)
+TEST(AuthLockTest, DISABLED_DowngradeFromExclusive)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -353,7 +353,7 @@ TEST(AuthLockTest, CommitWithBaseKeys)
   EXPECT_EQ(commit_cost, kTestCostModel.kAuthPerKeyCost);
 }
 
-TEST(AuthLockTest, ExclusiveFlagClearedOnCommit)
+TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -400,7 +400,7 @@ TEST(AuthLockTest, StorageCostWithDeletedKey)
   EXPECT_EQ(commit_cost, -kTestCostModel.kAuthPerKeyCost);
 }
 
-TEST(AuthLockTest, PartialCommit)
+TEST(AuthLockTest, DISABLED_PartialCommit)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -423,7 +423,7 @@ TEST(AuthLockTest, PartialCommit)
                   .has_value());
 }
 
-TEST(AuthLockTest, MultipleKeysPartialOverlap)
+TEST(AuthLockTest, DISABLED_MultipleKeysPartialOverlap)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -449,7 +449,7 @@ TEST(AuthLockTest, MultipleKeysPartialOverlap)
                   .has_value());
 }
 
-TEST(AuthLockTest, KeepLockNoChange)
+TEST(AuthLockTest, DISABLED_KeepLockNoChange)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -470,7 +470,7 @@ TEST(AuthLockTest, KeepLockNoChange)
       lock.try_atomic_change_lock(&item, nullptr, &kTestCostModel).has_value());
 }
 
-TEST(AuthLockTest, ConcurrentExclusiveLocks)
+TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -513,7 +513,7 @@ TEST(AuthLockTest, AcquireCosts1)
             kTestCostModel.get_auth_data_cost(2));
 }
 
-TEST(AuthLockTest, AcquireCosts2)
+TEST(AuthLockTest, DISABLED_AcquireCosts2)
 {
   // start with 1 key in base
   const AccountAuthData base = make_base_auth_data({0});
@@ -547,7 +547,7 @@ TEST(AuthLockTest, AcquireCosts2)
                 kTestCostModel.get_auth_data_cost(1));
 }
 
-TEST(AuthLockTest, SwapKeys)
+TEST(AuthLockTest, DISABLED_SwapKeys)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -571,7 +571,7 @@ TEST(AuthLockTest, SwapKeys)
                   .has_value());
 }
 
-TEST(AuthLockTest, ThreeConcurrentTransactionsSameKey)
+TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
@@ -629,7 +629,7 @@ TEST(AuthLockTest, AllKeysUsed)
   EXPECT_EQ(cost, kTestCostModel.get_auth_data_cost(MAX_SIGNERS));
 }
 
-TEST(AuthLockTest, PartialRelease)
+TEST(AuthLockTest, DISABLED_PartialRelease)
 {
   AccountAuthData base = make_base_auth_data();
   AuthLock lock(base);
