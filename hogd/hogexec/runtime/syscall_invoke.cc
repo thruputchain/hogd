@@ -82,7 +82,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
-  if (input_calldata.size() > 0) {
+  if (!input_calldata.empty()) {
     std::memcpy(calldata.data(),
                 reinterpret_cast<const uint8_t *>(input_calldata.data()),
                 input_calldata.size());
@@ -126,7 +126,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
 
   ReturnBuffer buffer;
   buffer.resize_uninitialized(input_buffer.size());
-  if (input_buffer.size() > 0) {
+  if (!input_buffer.empty()) {
     std::memcpy(buffer.data(),
                 reinterpret_cast<const uint8_t *>(input_buffer.data()),
                 input_buffer.size());

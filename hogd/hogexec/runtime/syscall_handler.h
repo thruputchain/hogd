@@ -28,7 +28,6 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/x23.h"
 
 namespace hogd {
 
