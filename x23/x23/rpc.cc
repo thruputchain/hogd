@@ -39,13 +39,13 @@ RpcStreamImpl::fail(bool wait_for_callbacks)
   if (ss_.stop_requested())
     return;
   ss_.request_stop();
-  cp_->poison(fd_);
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     if (wait_for_callbacks)
       cb(Buf{});
     else
       cp_->pool_.make_callback(cb, Buf{});
+  cp_->poison(fd_); // might delete this
 }
 
 Async<std::expected<std::uint32_t, Errno>>

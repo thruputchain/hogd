@@ -98,6 +98,9 @@ private:
     };
 
     // NOLINTBEGIN(bugprone-assignment-in-if-condition,bugprone-exception-escape)
+    // noexcept because it's UB to delete objects before constructors
+    // return.  If c->server throws it could delete this, so at least
+    // crash close to the bug.
     Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(c.get())
     {
       auto ptr = s_.cs_.take();
