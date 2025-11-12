@@ -227,25 +227,29 @@ public:
       co_await submit_vetted_handle;
 
       double wait_submit_vetted_duration = timer->elapsed();
+      timer = std::make_unique<ElapsedTimer>();
 
       CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
-      const SchedulerNomination nomination = coord_sched_rpc_.get_nomination();
+      const auto &[nomination, num_txs] =
+          coord_sched_rpc_.get_nomination_no_txs();
+      double get_nomination_from_local_cache_duration = timer->elapsed();
+
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
 
       info("create_handles_duration {}, "
            "wait_nomination_duration {}, wait_transactions_duration {}, "
-           "wait_submit_vetted_duration, {}",
+           "wait_submit_vetted_duration {}, "
+           "get_nomination_from_local_cache_duration {}",
            create_handles_duration, wait_nomination_duration,
-           wait_transactions_duration, wait_submit_vetted_duration);
+           wait_transactions_duration, wait_submit_vetted_duration,
+           get_nomination_from_local_cache_duration);
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.
 
-        total_transactions_nominated +=
-            nomination.nomination.transaction_hashes.size();
-
+        total_transactions_nominated += num_txs;
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
         int64_t block_duration_us =
@@ -264,16 +268,13 @@ public:
         CHECK_GT(overall_duration_us, 0L);
         CHECK_GT(overall_duration_sec, 0.0);
 
-        double block_throughput_sec =
-            nomination.nomination.transaction_hashes.size() /
-            block_duration_sec;
+        double block_throughput_sec = num_txs / block_duration_sec;
         double overall_throughput_sec =
             total_transactions_nominated / overall_duration_sec;
         info("Block duration (s), {:.2f}, Num txs in block, {}, Overall "
              "duration (s), {:.2f}, Overall number of txs, {}",
-             block_duration_sec,
-             nomination.nomination.transaction_hashes.size(),
-             overall_duration_sec, total_transactions_nominated);
+             block_duration_sec, num_txs, overall_duration_sec,
+             total_transactions_nominated);
         info("Block throughput (tx/s), {:.2f}, Overall throughput (tx/s), "
              "{:.2f}",
              block_throughput_sec, overall_throughput_sec);
