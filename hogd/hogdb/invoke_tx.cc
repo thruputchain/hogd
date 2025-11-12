@@ -61,7 +61,7 @@ InvokeTX::get_storage_balance_change(Address const &addr) const
   auto r = [&] -> HogDBStatus<std::pair<int128_t, bool>> {
     auto it = changes_.find(make_address_balance_item_key(addr));
     if (it == changes_.end() || it->second.empty()) {
-      auto val = block_.get().get_db().read_address_balance(addr);
+      auto val = block_.get().read_balance_base(addr);
       if (!val) {
         if (val.error() == HogDBCode::kNotFound) {
           return {{0, true}};

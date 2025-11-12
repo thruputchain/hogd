@@ -68,6 +68,7 @@ public:
   void release_balance(const Address &addr, int128_t delta);
 
   HogDBStatus<int128_t> read_nnint128_base(const ItemKey &key);
+  HogDBStatus<int128_t> read_balance_base(const Address &addr);
 
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
