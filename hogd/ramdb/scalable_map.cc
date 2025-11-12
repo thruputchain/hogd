@@ -332,6 +332,12 @@ ScalableMap::prepare_expand()
 {
   // calculate ideal size.
   int new_bucket_order = std::countr_zero(std::bit_floor(size()));
+  if (new_bucket_order == 64) {
+    // new_bucket_order == 64 if and only if size() == 0.
+    // We don't support shrinking.  This check serves as a ubsan guard
+    // for the subsequent shift.
+    return false;
+  }
   size_t new_size = 1UL << new_bucket_order;
 
   // we don't support shrinking.

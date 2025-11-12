@@ -1,9 +1,23 @@
+
 #include <gtest/gtest.h>
 
-#include <print>
+#include <algorithm>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <expected>
 #include <random>
+#include <ranges>
+#include <utility>
 
+#include <x23/cleanup.h>
+#include <x23/debug.h>
+#include <x23/err.h>
+#include <x23/fileio.h>
 #include <x23/uiobuf.h>
+#include <x23/utility.h>
+#include <x23/vec.h>
 
 namespace x23 {
 struct AltBufVec {

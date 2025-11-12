@@ -18,7 +18,6 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -70,7 +69,9 @@ public:
 
     init();
 
-    memcpy(backing_store_.data(), bytes.data(), bytes.size());
+    if (!bytes.empty()) {
+      std::memcpy(backing_store_.data(), bytes.data(), bytes.size());
+    }
     size_ = bytes.size() * 2;
   }
 
