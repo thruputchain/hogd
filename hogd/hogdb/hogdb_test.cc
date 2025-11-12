@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <string>
@@ -136,10 +137,11 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rnnint128) {
     EXPECT_EQ(test_nnint128, *rnnint128);
   }
-  HogDBStatus<size_t> rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
+  HogDBStatus<std::pair<int128_t, ItemLockCacheData>> rsize =
+      db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
-    EXPECT_EQ(cost_model_.get_nnint_cost(), *rsize);
+    EXPECT_EQ(cost_model_.get_nnint_cost(), rsize->first);
   }
   HogDBStatus<uint8_t> rtype = db_.get_item_type(ikey);
   EXPECT_TRUE(rtype);
@@ -156,10 +158,10 @@ TEST_F(HogDBTest, DataAccessObject)
   if (rbytes) {
     EXPECT_EQ(std::as_bytes(std::span(test_bytes)), *rbytes);
   }
-  rsize = db_.get_charged_storage_cost(ikey, &cost_model_);
+  rsize = db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
   EXPECT_TRUE(rsize);
   if (rsize) {
-    EXPECT_EQ(cost_model_.get_bytestring_cost(test_bytes.size()), *rsize);
+    EXPECT_EQ(cost_model_.get_bytestring_cost(test_bytes.size()), rsize->first);
   }
   rtype = db_.get_item_type(ikey);
   EXPECT_TRUE(rtype);
@@ -168,6 +170,25 @@ TEST_F(HogDBTest, DataAccessObject)
   }
   EXPECT_TRUE(db_.remove_item(ikey));
 }
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+TEST_F(HogDBTest, ItemLockCacheData)
+{
+  ItemKey ikey = make_key(kAddress, kAddress);
+  EXPECT_TRUE(db_.write_nnint128(ikey, 0xABCD'EF01'2345'6789));
+  HogDBStatus<int128_t> rnnint128 = db_.read_nnint128(ikey);
+  ASSERT_TRUE(rnnint128);
+  EXPECT_EQ(0xABCD'EF01'2345'6789, *rnnint128);
+
+  HogDBStatus<std::pair<int128_t, ItemLockCacheData>> rsize =
+      db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
+  ASSERT_TRUE(rsize);
+  EXPECT_EQ(cost_model_.get_nnint_cost(), rsize->first);
+  int128_t base;
+  std::memcpy(&base, rsize->second.data() + 1, sizeof(int128_t));
+  EXPECT_EQ(0xABCD'EF01'2345'6789, base);
+}
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 #if 0 // NOLINT
 

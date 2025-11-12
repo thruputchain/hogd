@@ -101,6 +101,9 @@ private:
   bool try_reserve_add_capacity(int128_t amount)
   {
     assert(amount >= 0);
+    if (amount == 0) {
+      return true;
+    }
 
     int128_t current_add = add_.load();
 
@@ -119,12 +122,18 @@ private:
   void release_add_capacity(int128_t amount)
   {
     assert(amount >= 0);
+    if (amount == 0) {
+      return;
+    }
     add_.fetch_add(amount, std::memory_order_relaxed);
   }
 
   bool try_reserve_sub_capacity(int128_t amount)
   {
     assert(amount <= 0);
+    if (amount == 0) {
+      return true;
+    }
 
     int128_t current_sub = sub_.load();
 
@@ -145,6 +154,9 @@ private:
   void release_sub_capacity(int128_t amount)
   {
     assert(amount <= 0);
+    if (amount == 0) {
+      return;
+    }
     sub_.fetch_sub(amount, std::memory_order_relaxed);
   }
 };

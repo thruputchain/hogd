@@ -58,33 +58,35 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   assert(delta > 0);
 
-  HogDBStatus<ItemChange> change = make_balance_change(db_, addr, delta);
-  if (!change) [[unlikely]] {
-    throw std::runtime_error("failed to make balance change");
-  }
-
-  auto *lock = addr_balance_locks_.insert_or_get(addr, 0);
+  auto *lock = addr_balance_locks_.insert_or_get(addr, [&] {
+    return get_snapshot_cost_and_cache_data(
+        make_address_balance_item_key(addr));
+  });
   CHECK_PTR(lock);
 
-  if (auto r = do_lock(*lock, *change, &cost_model_); !r) [[unlikely]] {
+  auto base = read_balance_base(addr);
+  CHECK(base.has_value());
+
+  ItemChange change = ItemChange(NNInt128(*base, delta));
+
+  if (auto r = do_lock(*lock, change, &cost_model_); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
 
-  lock->commit_change(*change, &cost_model_);
+  lock->commit_change(change, &cost_model_);
 }
 
-HogDBStatus<int128_t>
-BlockTX::get_snapshot_cost(const ItemKey &key)
+HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
+BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
 {
-  if (key.is_address_balance()) {
-    return 0;
-  }
-  auto snapshot_cost = db_.get_charged_storage_cost(key, &cost_model_);
+  auto snapshot_cost =
+      db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
     if (snapshot_cost.error() != HogDBCode::kNotFound) {
       return snapshot_cost.error();
     }
-    return 0;
+
+    return std::make_pair(0, ItemLockCacheData{kItemLockCacheDataTypeNone});
   }
   return *snapshot_cost;
 }
@@ -95,14 +97,18 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
   // no storage cost for address balances.
   if (key.is_address_balance()) {
 
-    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), 0);
+    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), [&] {
+      return get_snapshot_cost_and_cache_data(
+          make_address_balance_item_key(key.get_address()));
+    });
 
     return do_lock(*lock, change, &cost_model_)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
-  auto *item =
-      item_locks_.insert_or_get(key, [&] { return get_snapshot_cost(key); });
+  auto *item = item_locks_.insert_or_get(key, [&] {
+    return get_snapshot_cost_and_cache_data(key);
+  });
 
   assert(item != nullptr);
 
@@ -161,6 +167,31 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   return lock->commit_change(change, &cost_model_);
 }
 
+HogDBStatus<int128_t>
+BlockTX::read_nnint128_base(const ItemKey &key)
+{
+  auto *lock = item_locks_.get(key);
+  if (!lock) {
+    return db_.read_nnint128(key);
+  }
+
+  auto base = lock->get_cached_nnint128_base();
+  if (base) {
+    return *base;
+  }
+  return 0;
+}
+
+HogDBStatus<int128_t>
+BlockTX::read_balance_base(const Address &addr)
+{
+  auto *lock = addr_balance_locks_.get(addr);
+  if (!lock) {
+    return db_.read_address_balance(addr);
+  }
+  auto base = lock->get_cached_nnint128_base();
+  return base.has_value() ? *base : 0;
+}
 namespace {
 x23::Detached
 async_dispatch_balance_deltas(BlockHeight block_height,
