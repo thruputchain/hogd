@@ -47,7 +47,13 @@ public:
       return;
     }
     snapshot_cost_ = status->first;
-    padding_ = status->second;
+    if (status->second[0] == kItemLockCacheDataNNInt128BaseValue) {
+      padding_type_ = kItemLockCacheDataNNInt128BaseValue;
+      std::memcpy(&nnint_base_, status->second.data() + 1, sizeof(int128_t));
+    }
+    else {
+      CHECK(status->second[0] == kItemLockCacheDataTypeNone);
+    }
   }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
@@ -79,12 +85,10 @@ public:
 
   std::optional<int128_t> get_cached_nnint128_base() const
   {
-    if (padding_[0] != kItemLockCacheDataNNInt128BaseValue) {
+    if (padding_type_ != kItemLockCacheDataNNInt128BaseValue) {
       return std::nullopt;
     }
-    int128_t base;
-    std::memcpy(&base, padding_.data() + 1, sizeof(int128_t));
-    return base;
+    return nnint_base_;
   }
 
 private:
@@ -134,25 +138,30 @@ private:
                DeletionLock, NewContractLock, NewDeploymentLock,
                PointerLock<AuthLock>>
       lock_contents_ = std::monostate{};
-
-  std::atomic<uint32_t> lock_state_ = kUncommitted;
-
-  // This version of the implementation uses the mutex up until the first
-  // transaction commits. After that point, lock_contents_ no longer changes
-  // between variants, and the contents of the variant can be operated on
-  // directly.
-  uint32_t pending_refcount_ = 0;
-  x23::TestLock lock_;
-
-  // readonly fields: set during the constructor.
+  // padding_ and snapshot_cost_ are readonly fields: set during the
+  // constructor.
   // TODO(geoff): These are only modified during the constructor;
   // some more clever work could make them const.
   //
   // Padding is the extra data we use to cache type-specific info,
   // like the nnint base value, so we don't have to load that on each
   // request_nnint128.
-  ItemLockCacheData padding_ = ItemLockCacheData{kItemLockCacheDataTypeNone};
+
   int128_t snapshot_cost_;
+
+  union {
+    std::monostate padding_none_;
+    int128_t nnint_base_;
+  };
+  uint8_t padding_type_ = kItemLockCacheDataTypeNone;
+
+  // This version of the implementation uses the mutex up until the first
+  // transaction commits. After that point, lock_contents_ no longer changes
+  // between variants, and the contents of the variant can be operated on
+  // directly.
+  std::atomic<uint32_t> lock_state_ = kUncommitted;
+  uint32_t pending_refcount_ = 0;
+  x23::TestLock lock_;
 };
 
 // should be less than two cache lines.
