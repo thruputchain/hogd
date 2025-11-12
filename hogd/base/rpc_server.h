@@ -87,7 +87,7 @@ private:
     RpcServer &s_;
     Conn *next_;
     Conn **prev_;
-    x23::RefPtr<x23::detail::RpcStreamImpl> rpcstream_;
+    x23::detail::RpcStreamImpl *rpcstream_;
 
     struct Ptr {
       Conn *c_;
@@ -100,8 +100,9 @@ private:
 
     // NOLINTBEGIN(bugprone-assignment-in-if-condition,bugprone-exception-escape)
     // noexcept because it's UB to delete objects before constructors
-    // return.  If c->server throws it could delete this.
-    Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(*c)
+    // return.  If c->server throws it could delete this, so at least
+    // crash close to the bug.
+    Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(c.get())
     {
       auto ptr = s_.cs_.take();
       if ((next_ = ptr->connlist))
