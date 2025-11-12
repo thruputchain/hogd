@@ -18,6 +18,7 @@ TEST(BitsTest, Alignment)
   EXPECT_EQ(align_up(val, 0x200), 0x1400U);
   EXPECT_EQ(align_down(val, 0x200), 0x1200U);
 
+
   // cases with an already aligned val
   val = 0x1000;
   EXPECT_EQ(align_up(val, 0x200), 0x1000U);
