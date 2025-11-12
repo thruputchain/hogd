@@ -135,9 +135,11 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
-                             calldata.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             if (!returned_buffer_data->empty()) {
+               if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                               calldata.size()) != 0) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
              }
 
              return {};

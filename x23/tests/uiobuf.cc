@@ -222,7 +222,7 @@ buf_eq(x23::BufView flat, const auto &iov)
   for (const auto &v : iov) {
     if (flat.size() < v.iov_len)
       return false;
-    if (memcmp(flat.data(), v.iov_base, v.iov_len) != 0)
+    if (v.iov_len > 0 && memcmp(flat.data(), v.iov_base, v.iov_len) != 0)
       return false;
     flat = flat.subspan(v.iov_len);
   }
