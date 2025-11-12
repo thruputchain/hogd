@@ -79,7 +79,9 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
   }
 
   // no more locks to acquire
-  delta_.fetch_add(delta_delta, std::memory_order_relaxed);
+  if (delta_delta != 0) {
+    delta_.fetch_add(delta_delta, std::memory_order_relaxed);
+  }
 
   release_add_capacity(-add_release);
   // negation is safe
