@@ -45,7 +45,7 @@ RpcStreamImpl::fail(bool wait_for_callbacks)
       cb(Buf{});
     else
       cp_->pool_.make_callback(cb, Buf{});
-  cp_->poison(fd_);		// might delete this
+  cp_->poison(fd_); // might delete this
 }
 
 Async<std::expected<std::uint32_t, Errno>>
