@@ -30,7 +30,7 @@ class DatabaseProxy;
 class SnapshotStorageItem {
 public:
   // Construct from a StorageItem (by value)
-  explicit SnapshotStorageItem(StorageItem item, AddressAndKey const &addrkey,
+  explicit SnapshotStorageItem(StorageItem item, AddressAndKey addrkey,
                                BlockID block_id, DatabaseProxy &db_proxy)
     : addrkey_(std::move(addrkey)),
       entry_(make_variant(std::move(item), addrkey_.key)), block_id_(block_id),
