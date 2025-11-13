@@ -1,4 +1,5 @@
 # UBSan suppressions for external libraries
 # Suppress alignment UBSan violations in RocksDB (misaligned load in util/crc32c.cc)
-alignment:*/external/rocksdb/*
+alignment:external/rocksdb/util/crc32c.cc
+alignment:external/rocksdb/util/crc32c_arm64.cc
 
