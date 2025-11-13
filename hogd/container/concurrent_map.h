@@ -273,6 +273,7 @@ public:
           value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
         },
         width);
+    cleared_ = true;
   }
 
 private:
