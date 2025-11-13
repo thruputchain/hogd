@@ -93,22 +93,21 @@ private:
   struct CacheKeyHash {
     size_t operator()(CacheKey const &key) const
     {
-      static SipHash24 hasher;
+      //static SipHash24 hasher;
       return std::visit(
           [&](auto &&arg) {
             if constexpr (std::is_same_v<std::decay_t<decltype(arg)>,
                                          ContractCacheKey>) {
-              return hasher(arg.hash_);
+              return std::hash<SHA256Hash>()(arg.hash_);
             }
             else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>,
                                               DeploymentCacheKey>) {
-              return hasher(arg.addr_);
+              return std::hash<ContractAddress>()(arg.addr_);
             }
             else {
               static_assert(
                   std::is_same_v<std::decay_t<decltype(arg)>, AddressAndKey>);
-              auto buf = x23::serialize(arg);
-              return hasher(buf);
+              return std::hash<AddressAndKey>()(arg);
             }
           },
           key);
