@@ -54,7 +54,7 @@ jobs:
       run: ./scripts/build.sh -d build/gcc_ubsan -c gcc -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON"
     - name: run gcc ubsan tests
       run: |
-        export UBSAN_OPTIONS=suppressions=$(pwd)/.ubsan_suppress:print_stacktrace=1
+        export UBSAN_OPTIONS=print_stacktrace=1
         ctest --test-dir build/gcc_ubsan --parallel --timeout 100 --output-on-failure
     - name: save gcc ubsan core dumps
       if: failure()
@@ -65,7 +65,7 @@ jobs:
       run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON"
     - name: run llvm ubsan tests
       run: |
-        export UBSAN_OPTIONS=suppressions=$(pwd)/.ubsan_suppress:print_stacktrace=1
+        export UBSAN_OPTIONS=print_stacktrace=1
         ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
     - name: save llvm ubsan core dumps
       if: failure()
