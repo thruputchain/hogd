@@ -13,12 +13,14 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -65,7 +67,8 @@ void
 DiskWriter::write_worker(const std::stop_token &stoken)
 {
   // initialize the buffer used for commit records.
-  uint8_t commit_buf[sizeof(ItemHeader) + sizeof(uint32_t)];
+  // the uint32 is the crc32c of the committed data.
+  alignas(ItemHeader) uint8_t commit_buf[sizeof(ItemHeader) + sizeof(uint32_t)];
   auto *commit_hdr =
       new (commit_buf) ItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0);
 
