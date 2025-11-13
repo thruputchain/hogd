@@ -58,24 +58,16 @@ ERC20ExperimentState::generate_experiment()
 
   auto erc20_contract = erc20_meta::load_wasm();
   auto wallet_contract = wallet_meta::load_wasm();
-  CHECK(erc20_contract != nullptr);
-  CHECK(wallet_contract != nullptr);
-
-  warn("Loaded contracts");
+  assert(erc20_contract);
+  assert(wallet_contract);
 
   initialize_wallets(sha256(*wallet_contract));
 
-  warn("wallets initialized");
   if (!check_config_valid()) {
-    warn("config invalid");
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
-  warn("config valid");
-
   const ContractAddress owner_address = get_owner_address();
-
-  warn("owner address: {}", owner_address);
 
   GenesisBlockBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
@@ -84,11 +76,9 @@ ERC20ExperimentState::generate_experiment()
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              int128_t{500'000} * config_.num_accounts);
-  warn("initial config added");
   erc20_address_ =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
-  warn("erc20 address: {}", erc20_address_);
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -101,22 +91,16 @@ ERC20ExperimentState::generate_experiment()
                                wallet_meta::make_calldata<"initialize">(
                                    wallet.public_key),
                                500'000);
-    warn("initial config added for wallet {}", wallet.address);
   }
-
-  warn("wallets initialized");
 
   // make unfurl txs
   x23::Vec<SignedTransaction> unfurl_txs;
   unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
 
-  warn("unfurl txs made");
-
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
   mint_txs.reserve(config_.num_accounts);
   for (size_t i = 1; i <= config_.num_accounts; ++i) {
-    warn("making mint tx for wallet {}", wallets_[i].address);
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata = x23::serialize(
@@ -124,39 +108,38 @@ ERC20ExperimentState::generate_experiment()
         erc20_meta::make_calldata<"mint">(wallets_[i].address,
                                           to_xdr(uint128_t{1'000'000'000})));
 
-    warn("serialized calldata for mint tx: {}", x23::show(internal_calldata));
-
-    auto invocation = Invocation {
-          .invoked_address = owner_address,
-          .entrypoint = wallet_meta::entrypoint<"do_action">(),
-          .gas_limit = GasAmount{20'000},
-          .calldata = wallet_meta::make_calldata<"do_action">(
-              ed25519_sign(wallets_[0].secret_key,
-                           internal_calldata),
-              internal_calldata),
-    };
-    warn("invocation: {}", x23::show(invocation));
+    auto calldata = wallet_meta::make_calldata<"do_action">(
+        ed25519_sign(wallets_[0].secret_key, internal_calldata),
+        internal_calldata);
 
     auto tx = SignedTransaction{
         .tx =
             Transaction{
-                .invocation = invocation,
-                .uniquifier = {.block_expiry_height =
+                .invocation =
+                    Invocation{
+                        .invoked_address = owner_address,
+                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                        .gas_limit = GasAmount{20'000},
+                        .calldata = std::move(calldata),
+                    },
+                .uniquifier =
+                    Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
             },
     };
-    warn("signed mint tx");
     mint_txs.push_back(tx);
-    warn("added mint tx to vector");
   }
 
-  warn("mint txs made");
+  x23::Vec<InitializationBlock> initialization_txs;
+  initialization_txs.reserve(2);
+  initialization_txs.emplace_back(std::move(unfurl_txs));
+  initialization_txs.emplace_back(std::move(mint_txs));
 
-  return {LoadgenSuccessResult{
+  return LoadgenSuccessResult{
       .genesis_block = builder.build(),
-      .initialization_txs = {std::move(unfurl_txs), std::move(mint_txs)},
-  }};
+      .initialization_txs = std::move(initialization_txs),
+  };
 }
 
 LoadgenStatus<LoadgenExtension>
@@ -196,7 +179,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
           uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
               0, std::numeric_limits<uint64_t>::max())(gen);
 
-          auto make_account_pair = [&]() {
+          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
             auto sender = dist(gen);
             auto receiver = sender;
             while (receiver == sender) {
@@ -219,26 +202,23 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                GasAmount{1'000'000},
                                erc20_meta::make_calldata<"transfer">(
                                    wallets_[receiver].address, to_xdr(amount)));
-                                   
+
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
-                .entrypoint =
-                    wallet_meta::entrypoint<"do_action">(),
+                .entrypoint = wallet_meta::entrypoint<"do_action">(),
                 .gas_limit = GasAmount{20'000},
-                .calldata =
-                    wallet_meta::make_calldata<"do_action">(
-                        ed25519_sign(
-                            wallets_[sender].secret_key,
-                            internal_calldata),
-                        internal_calldata),
+                .calldata = wallet_meta::make_calldata<"do_action">(
+                    ed25519_sign(wallets_[sender].secret_key,
+                                 internal_calldata),
+                    internal_calldata),
             };
 
             work_txs[j] = SignedTransaction{
                 .tx =
                     Transaction{
-                        .invocation =
-                            invocation,
-                        .uniquifier = {.block_expiry_height = expiry_height,
+                        .invocation = std::move(invocation),
+                        .uniquifier =
+                            Uniquifier{.block_expiry_height = expiry_height,
                                        .nonce = base_nonce + j},
                     },
             };
