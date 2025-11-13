@@ -147,7 +147,7 @@ MempoolCoordinatorRpc::get_block_hash(
   // are adding to the trie. For example, if we are adding 128 hashes to the
   // trie, it is probably slower to use 128 threads rather than 1-2 threads due
   // to lock contention.
-  size_t num_threads = 108; // worker_pool.worker_count();
+  size_t num_threads = 98; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
@@ -604,7 +604,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
        "wait_for_finish_nomination_handles {}, wait_for_lock_duration {}, "
-       "wait_for_lcock_duration_again {}",
+       "wait_for_lock_duration_again {}",
        wait_for_transfer_duration,
        wait_for_create_snapshot_and_open_block_handlers_duration,
        schedule_duration, run_on_executor_duration,
