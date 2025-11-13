@@ -141,7 +141,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                         BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -173,7 +173,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
           uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
               0, std::numeric_limits<uint64_t>::max())(gen);
 
-          auto make_account_pair = [&]() {
+          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
             auto sender = dist(gen);
             auto receiver = sender;
             while (receiver == sender) {
