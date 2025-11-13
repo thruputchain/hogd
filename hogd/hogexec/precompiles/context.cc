@@ -28,11 +28,13 @@ make_hogexec_precompiles_context()
 std::shared_ptr<RuntimeContext>
 make_hogexec_context()
 {
+  static std::shared_ptr<RuntimeContext> hogexec_native_context = make_hogexec_precompiles_context();
+  
   return std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
           {ContractType::kWasmi,
            make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
-          {ContractType::kNative, make_hogexec_precompiles_context()},
+          {ContractType::kNative, hogexec_native_context},
       });
 }
 
