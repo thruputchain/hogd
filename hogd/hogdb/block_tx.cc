@@ -229,7 +229,7 @@ BlockTX::commit(WorkerPool &pool)
           ret = tmp;
         }
       },
-      1024, pool);
+      0, pool);
 
   PerThread<std::vector<Delta>> balance_deltas;
 
@@ -265,7 +265,7 @@ BlockTX::commit(WorkerPool &pool)
                   byte_view(cpu_to_le(new_val)))
                   .has_value());
       },
-      1024, pool);
+      0, pool);
 
   if (sched_db_client_) {
     async_dispatch_balance_deltas(block_height_, std::move(balance_deltas),

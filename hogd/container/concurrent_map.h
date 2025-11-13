@@ -216,10 +216,13 @@ public:
 
   template<typename Func>
   requires std::invocable<Func, std::pair<const KeyType &, Value &>>
-  void for_each_parallel(Func f, size_t width = 1024,
+  void for_each_parallel(Func f, size_t width = 0,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
     assert(!cleared_);
+    if (width == 0) {
+      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+    }
     pool.for_each_parallel(
         buckets_,
         [&f](std::atomic<value_bucket_t *> &bucket) {
@@ -233,10 +236,13 @@ public:
   template<typename Func>
   requires std::invocable<Func, std::pair<const KeyType &, Value &>>
   void for_each_parallel_destructive(
-      Func f, size_t width = 1024,
+      Func f, size_t width = 0,
       WorkerPool &pool = WorkerPool::get_default_pool())
   {
     assert(!cleared_);
+    if (width == 0) {
+      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+    }
     std::atomic<size_t> cleared_count = 0;
     std::vector<std::future<void>> futures;
     futures.reserve(pool.worker_count());
@@ -264,9 +270,12 @@ public:
   }
 
   void clear(WorkerPool &pool = WorkerPool::get_default_pool(),
-             size_t width = 1024)
+             size_t width = 0)
   {
     assert(!cleared_);
+    if (width == 0) {
+      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+    }
     pool.for_each_parallel(
         buckets_,
         [](std::atomic<value_bucket_t *> &bucket) {
