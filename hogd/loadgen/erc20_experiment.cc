@@ -112,7 +112,7 @@ ERC20ExperimentState::generate_experiment()
         .tx =
             Transaction{
                 .invocation =
-                    {
+                    Invocation{
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<"do_action">(),
                         .gas_limit = GasAmount{20'000},
@@ -121,7 +121,8 @@ ERC20ExperimentState::generate_experiment()
                                          internal_calldata),
                             internal_calldata),
                     },
-                .uniquifier = {.block_expiry_height =
+                .uniquifier =
+                    Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
             },
@@ -200,7 +201,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                 .tx =
                     Transaction{
                         .invocation =
-                            {
+                            Invocation{
                                 .invoked_address = wallets_[sender].address,
                                 .entrypoint =
                                     wallet_meta::entrypoint<"do_action">(),
@@ -212,7 +213,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                             internal_calldata),
                                         internal_calldata),
                             },
-                        .uniquifier = {.block_expiry_height = expiry_height,
+                        .uniquifier =
+                            Uniquifier{.block_expiry_height = expiry_height,
                                        .nonce = base_nonce + j},
                     },
             };
@@ -224,9 +226,9 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return {LoadgenExtension{
+  return LoadgenExtension{
       .work_txs = std::move(work_txs),
-  }};
+  };
 }
 
 } // namespace hogd
