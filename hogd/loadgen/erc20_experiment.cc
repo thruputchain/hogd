@@ -137,7 +137,7 @@ ERC20ExperimentState::generate_experiment()
 
   return LoadgenSuccessResult{
       .genesis_block = builder.build(),
-      .initialization_txs = x23::Vec<InitializationBlock>{std::move(unfurl_txs), std::move(mint_txs)},
+      .initialization_txs = {unfurl_txs, mint_txs},
   };
 }
 

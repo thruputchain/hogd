@@ -126,24 +126,6 @@ template<typename T> struct VecBuf {
   T *begin;
   T *end;
   T *bufend;
-  
-  constexpr VecBuf() = default;
-  constexpr VecBuf(const VecBuf&) = default;
-  constexpr VecBuf& operator=(const VecBuf&) = default;
-  
-  constexpr VecBuf(VecBuf&& other) noexcept 
-    : begin(other.begin), end(other.end), bufend(other.bufend)
-  {
-    other.begin = other.end = other.bufend = nullptr;
-  }
-  
-  constexpr VecBuf& operator=(VecBuf&& other) noexcept {
-    begin = other.begin;
-    end = other.end;
-    bufend = other.bufend;
-    other.begin = other.end = other.bufend = nullptr;
-    return *this;
-  }
 };
 
 // Like std::strlen, but constexpr
@@ -373,8 +355,9 @@ protected:
 
 public:
   constexpr Vec(const allocator_type &a = {}) noexcept : a_(a) {}
-  constexpr Vec(Vec &&other) noexcept : a_(std::move(other.a_)), b_(std::move(other.b_))
+  constexpr Vec(Vec &&other) noexcept : a_(std::move(other.a_)), b_(other.b_)
   {
+    other.b_ = {};
   }
   constexpr Vec(const Vec &other) : Vec(std::from_range, other) {}
 
@@ -386,8 +369,9 @@ public:
                   max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
-    b_ = std::move(other.b_);
+    b_ = other.b_;
     a_ = std::move(other.a_);
+    other.b_ = {};
   }
   template<size_t MS>
   constexpr Vec(const Vec<value_type, MS, allocator_type> &other)
@@ -429,7 +413,8 @@ public:
   {
     realloc(0);
     a_ = std::move(other.a_);
-    b_ = std::move(other.b_);
+    b_ = other.b_;
+    other.b_ = {};
     return *this;
   }
   constexpr Vec &operator=(const Vec &other)
@@ -447,7 +432,8 @@ public:
       check_size(other.size());
     realloc(0);
     a_ = std::move(other.a_);
-    b_ = std::move(other.b_);
+    b_ = other.b_;
+    other.b_ = {};
     return *this;
   }
   template<size_t MS, typename R>
