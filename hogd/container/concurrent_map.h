@@ -221,7 +221,7 @@ public:
   {
     assert(!cleared_);
     if (width == 0) {
-      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+      width = default_width(pool);
     }
     pool.for_each_parallel(
         buckets_,
@@ -241,7 +241,7 @@ public:
   {
     assert(!cleared_);
     if (width == 0) {
-      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+      width = default_width(pool);
     }
     std::atomic<size_t> cleared_count = 0;
     std::vector<std::future<void>> futures;
@@ -274,7 +274,7 @@ public:
   {
     assert(!cleared_);
     if (width == 0) {
-      width = std::max<size_t>(1, buckets_.size() / (2 * pool.worker_count()));
+      width = default_width(pool);
     }
     pool.for_each_parallel(
         buckets_,
@@ -292,6 +292,11 @@ private:
       value_bucket_t::clear(bucket.load(std::memory_order_relaxed));
     }
     cleared_ = true;
+  }
+
+  size_t default_width(WorkerPool &pool) const
+  {
+    return std::max<size_t>(1, buckets_.size() / (4 * pool.worker_count()));
   }
 
   std::vector<std::atomic<value_bucket_t *>> buckets_;
