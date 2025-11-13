@@ -41,21 +41,21 @@ jobs:
     # We disable it overall just to save build time, but it's required for the gcc release build with asan.
     
     - name: build gcc asan
-      run: ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DENABLE_BENCHMARK_TESTING=OFF"
+      run: ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run gcc tests
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
         ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
    
     - name: build clang asan
-      run: ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DENABLE_BENCHMARK_TESTING=OFF"
+      run: ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run llvm tests
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
         ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
   
     - name: build gcc asan release
-      run: ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DENABLE_BENCHMARK_TESTING=OFF"
+      run: ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DBUILD_BENCHMARKS=OFF"
     - name: run gcc tests release
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
@@ -63,7 +63,7 @@ jobs:
 
     # Gcc doesn't support ignorelist with ubsan
     - name: build clang ubsan
-      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DENABLE_BENCHMARK_TESTING=OFF"
+      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run llvm ubsan tests
       run: |
         export UBSAN_OPTIONS=print_stacktrace=1
