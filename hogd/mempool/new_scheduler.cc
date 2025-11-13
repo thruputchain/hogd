@@ -237,8 +237,8 @@ void
 NewScheduler::cycle_if_needed(const ContractAddress &account,
                               GasAmount gas_limit)
 {
-  auto [hog_age, lock] = get_cached_hog_age(account);
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
+    auto [hog_age, lock] = get_cached_hog_age(account);
 
     const uint128_t to_schedule =
         from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]);

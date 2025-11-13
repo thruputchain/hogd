@@ -359,10 +359,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
         open_proposal_block(block_id, /*executor_idx=*/i));
   }
 
+  x23::CoroGuard cg;
+  auto timer2 = std::make_unique<ElapsedTimer>();
+  co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_duration = timer2->elapsed();
+
   // This is the first call to [schedule()]. We do it up here rather than with
   // the remaining calls in the loop below because we want to overlap the first
   // call with opening the snapshot and the block.
   scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes, txs);
+  cg.reset();
 
   bool create_snapshot_handler_ret = co_await create_snapshot_handler;
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
@@ -403,6 +409,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   static x23::Vec<SchedulerNominationChunk> sched_nominations(
       kNumSchedulerIterations, {});
+
+  timer2 = std::make_unique<ElapsedTimer>();
+  co_await cg(scheduler_->global_lock_);
+  double wait_for_lock_duration_again = timer2->elapsed();
+
   for (size_t i = 0; i < sched_nominations.size(); i++) {
     SchedulerNominationChunk &sched_nomination = sched_nominations[i];
     sched_nomination.chunk_idx = i;
@@ -430,11 +441,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   // [nomination.block_hash], [nomination.transaction_hashes], and
   // [nomination.transaction_nominations] are filled in below.
-
-  x23::CoroGuard cg;
-  auto timer2 = std::make_unique<ElapsedTimer>();
-  co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_duration = timer2->elapsed();
 
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>>
       propose_batch_in_chunks_handles;
@@ -597,14 +603,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
        "just_wait_for_executor_duration {}, "
        "mark_failed_txs_duration {}, create_handles_duration {}, "
        "get_block_hash_duration {}, wait_for_handles_duration {}, "
-       "wait_for_finish_nomination_handles {}, wait_for_lock_duration {}",
+       "wait_for_finish_nomination_handles {}, wait_for_lock_duration {}, "
+       "wait_for_lcock_duration_again {}",
        wait_for_transfer_duration,
        wait_for_create_snapshot_and_open_block_handlers_duration,
        schedule_duration, run_on_executor_duration,
        just_wait_for_executor_duration, mark_failed_txs_duration,
        create_handles_duration, get_block_hash_duration,
        wait_for_handles_duration, wait_for_finish_nomination_handles,
-       wait_for_lock_duration);
+       wait_for_lock_duration, wait_for_lock_duration_again);
 
   nominate_timer = std::make_unique<ElapsedTimer>();
 
