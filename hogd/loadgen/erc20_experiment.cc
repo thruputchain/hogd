@@ -124,6 +124,7 @@ ERC20ExperimentState::generate_experiment()
         erc20_meta::make_calldata<"mint">(wallets_[i].address,
                                           to_xdr(uint128_t{1'000'000'000})));
 
+    warn("serialized calldata for mint tx: {}", x23::show(internal_calldata));
     auto tx = SignedTransaction{
         .tx =
             Transaction{
@@ -142,7 +143,9 @@ ERC20ExperimentState::generate_experiment()
                                .nonce = unfurl_txs.size() + i},
             },
     };
+    warn("signed mint tx");
     mint_txs.push_back(tx);
+    warn("added mint tx to vector");
   }
 
   warn("mint txs made");
