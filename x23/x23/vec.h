@@ -123,9 +123,9 @@ struct merged_allocator<T> {
 };
 
 template<typename T> struct VecBuf {
-  T *begin;
-  T *end;
-  T *bufend;
+  T begin;
+  T end;
+  T bufend;
 };
 
 // Like std::strlen, but constexpr
@@ -345,7 +345,7 @@ public:
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using allocator_type = Allocator;
 
-  using Buf = detail::VecBuf<T>;
+  using Buf = detail::VecBuf<T*>;
 
   static constexpr size_type kMaxSize = MaxSize;
 

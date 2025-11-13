@@ -21,6 +21,8 @@ add_library(x23
   format.h
   heap.h
   mvar.h
+  nmvec.cc
+  nmvec.h
   progname.cc
   progname.h
   refcnt.h

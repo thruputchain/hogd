@@ -10,7 +10,6 @@
 #include <format>
 #include <functional>
 #include <memory>
-#include <semaphore>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -259,6 +258,9 @@ private:
 #endif // HAVE_SCHED_SETAFFINITY
 };
 
+struct populate_t {};
+constexpr populate_t populate;
+
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
 // ValidOnly is false, then it will only construct a T for CpuSets on
 // which we can actually be scheduled.
@@ -273,6 +275,13 @@ public:
     if constexpr (ValidOnly)
       constructed_.resize(map_.nbuckets());
   }
+  template<typename... Args>
+  explicit PerCpuSet(const CpuMap &map, populate_t, Args &&...args)
+    : PerCpuSet(map)
+  {
+    populate(std::forward<Args>(args)...);
+  }
+
   ~PerCpuSet()
   {
     for (auto i : valid_indices_)
@@ -381,50 +390,6 @@ private:
   }
 };
 
-class IndexAllocator {
-public:
-  using index_type = size_t;
-
-  ~IndexAllocator()
-  {
-    // If this fails, you have indices still allocated, but can no
-    // longer free them because this object has been destroyed.
-    // (Probably means you have a global destruction order bug.)
-    assert(max_ == 0);
-  }
-
-  index_type alloc()
-  {
-    lk_.acquire();
-    Defer _ul([this] { lk_.release(); });
-    if (free_.empty())
-      return max_++;
-    auto ret = free_.back();
-    free_.pop_back();
-    return ret;
-  }
-  void free(index_type i)
-  {
-    lk_.acquire();
-    Defer _ul([this] { lk_.release(); });
-#if DEBUG
-    assert(i < max_ && std::ranges::find(free_, i) == free_.end());
-#endif // DEBUG
-    free_.push_back(i);
-    if (free_.size() == max_) {
-      free_.clear();
-      max_ = 0;
-    }
-  }
-
-private:
-  // Use 8-byte semaphore because 40-byte mutex overflows cache line.
-  std::binary_semaphore lk_{1};
-  index_type max_{};
-  std::vector<index_type> free_;
-};
-static_assert(sizeof(IndexAllocator) <= hardware_destructive_interference_size);
-
 // Return a mapping of CPU numbers to buckets on linux.  For a given
 // argument PATH, iterates over the following file for each CPU N:
 //
@@ -454,6 +419,16 @@ CpuMap make_llc_map();
 // Global CPU topology mappings initialized at startup.
 extern const CpuMap *core_map; // Groups CPUs by physical core
 extern const CpuMap *llc_map;  // Groups CPUs by last-level cache
+
+// Reified type represent a specific CpuMap
+template<const CpuMap *&Map> struct cpu_map_t {
+  static constexpr const CpuMap *&map = Map;
+  consteval cpu_map_t() noexcept = default;
+  constexpr operator const CpuMap &() const noexcept { return *map; }
+};
+template<typename T> concept is_cpu_map = std::same_as<T, cpu_map_t<T::map>>;
+using CoreMap = cpu_map_t<core_map>;
+using LLCMap = cpu_map_t<llc_map>;
 
 // Initialize global CPU topology mappings during static
 // initialization.  Called automatically before main() starts, but can
