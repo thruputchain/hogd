@@ -71,6 +71,7 @@ target_link_libraries(
 )
 gtest_discover_tests(crypto_test)
 
+if(BENCHMARK_ENABLE_TESTING)
 # create crypto module benchmark binary
 add_executable(
   crypto_bench
@@ -83,3 +84,4 @@ target_link_libraries(
 )
 
 set_property(TARGET crypto_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()

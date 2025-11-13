@@ -14,17 +14,18 @@ target_link_libraries(
 )
 gtest_discover_tests(container_test)
 
+if(BENCHMARK_ENABLE_TESTING)
+  add_executable(
+    container_bench
+    container_bench.cc
+  )
+  target_link_libraries(
+    container_bench
+    hogd
+    benchmark::benchmark
+  )
 
-add_executable(
-  container_bench
-  container_bench.cc
-)
-target_link_libraries(
-  container_bench
-  hogd
-  benchmark::benchmark
-)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET container_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
 endif()

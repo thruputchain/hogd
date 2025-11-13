@@ -55,14 +55,19 @@ target_link_libraries(
 )
 gtest_discover_tests(merkle_trie_test)
 
-add_executable(
-  merkle_trie_bench
-  merkle_trie_bench.cc
-)
-target_link_libraries(
-  merkle_trie_bench
-  base
-  hogd
-  merkle
-  benchmark::benchmark
-)
+if(BENCHMARK_ENABLE_TESTING)
+  add_executable(
+    merkle_trie_bench
+    merkle_trie_bench.cc
+  )
+  target_link_libraries(
+    merkle_trie_bench
+    base
+    hogd
+    merkle
+    benchmark::benchmark
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET merkle_trie_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

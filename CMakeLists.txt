@@ -135,9 +135,9 @@ include(GoogleTest)
 
 
 # Enable performance (Google's benchmarking library)
-option(BENCHMARK_ENABLE_TESTING "" OFF)
-add_subdirectory(external/benchmark)
+option(BENCHMARK_ENABLE_TESTING "" ON)
 if(BENCHMARK_ENABLE_TESTING)
+add_subdirectory(external/benchmark)
 set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
   CACHE PATH "Path to Google benchmark" FORCE)
 endif()
