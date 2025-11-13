@@ -58,16 +58,24 @@ ERC20ExperimentState::generate_experiment()
 
   auto erc20_contract = erc20_meta::load_wasm();
   auto wallet_contract = wallet_meta::load_wasm();
-  assert(erc20_contract);
-  assert(wallet_contract);
+  CHECK(erc20_contract != nullptr);
+  CHECK(wallet_contract != nullptr);
+
+  warn("Loaded contracts");
 
   initialize_wallets(sha256(*wallet_contract));
 
+  warn("wallets initialized");
   if (!check_config_valid()) {
+    warn("config invalid");
     return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
   }
 
+  warn("config valid");
+
   const ContractAddress owner_address = get_owner_address();
+
+  warn("owner address: {}", owner_address);
 
   GenesisBlockBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
@@ -76,9 +84,11 @@ ERC20ExperimentState::generate_experiment()
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              int128_t{500'000} * config_.num_accounts);
+  warn("initial config added");
   erc20_address_ =
       GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
                                                      make_nonce(0));
+  warn("erc20 address: {}", erc20_address_);
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -91,16 +101,22 @@ ERC20ExperimentState::generate_experiment()
                                wallet_meta::make_calldata<"initialize">(
                                    wallet.public_key),
                                500'000);
+    warn("initial config added for wallet {}", wallet.address);
   }
+
+  warn("wallets initialized");
 
   // make unfurl txs
   x23::Vec<SignedTransaction> unfurl_txs;
   unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
 
+  warn("unfurl txs made");
+
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
   mint_txs.reserve(config_.num_accounts);
   for (size_t i = 1; i <= config_.num_accounts; ++i) {
+    warn("making mint tx for wallet {}", wallets_[i].address);
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata = x23::serialize(
@@ -129,6 +145,8 @@ ERC20ExperimentState::generate_experiment()
     mint_txs.push_back(tx);
   }
 
+  warn("mint txs made");
+
   return {LoadgenSuccessResult{
       .genesis_block = builder.build(),
       .initialization_txs = {std::move(unfurl_txs), std::move(mint_txs)},
@@ -140,7 +158,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                         BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -224,9 +242,9 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return {LoadgenExtension{
+  return LoadgenExtension{
       .work_txs = std::move(work_txs),
-  }};
+  };
 }
 
 } // namespace hogd
