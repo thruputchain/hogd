@@ -125,19 +125,22 @@ ERC20ExperimentState::generate_experiment()
                                           to_xdr(uint128_t{1'000'000'000})));
 
     warn("serialized calldata for mint tx: {}", x23::show(internal_calldata));
+
+    auto invocation = Invocation {
+          .invoked_address = owner_address,
+          .entrypoint = wallet_meta::entrypoint<"do_action">(),
+          .gas_limit = GasAmount{20'000},
+          .calldata = wallet_meta::make_calldata<"do_action">(
+              ed25519_sign(wallets_[0].secret_key,
+                           internal_calldata),
+              internal_calldata),
+    };
+    warn("invocation: {}", x23::show(invocation));
+
     auto tx = SignedTransaction{
         .tx =
             Transaction{
-                .invocation =
-                    {
-                        .invoked_address = owner_address,
-                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
-                        .gas_limit = GasAmount{20'000},
-                        .calldata = wallet_meta::make_calldata<"do_action">(
-                            ed25519_sign(wallets_[0].secret_key,
-                                         internal_calldata),
-                            internal_calldata),
-                    },
+                .invocation = invocation,
                 .uniquifier = {.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
