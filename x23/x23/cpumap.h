@@ -10,6 +10,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <semaphore>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -146,6 +147,7 @@ public:
 private:
   alignas(cpu_set_t) char buf_[kSize];
 };
+
 } // namespace x23
 
 template<> struct std::formatter<x23::CpuSet> {
@@ -266,7 +268,7 @@ public:
 
   const CpuMap &map_;
 
-  PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
+  explicit PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
   {
     if constexpr (ValidOnly)
       constructed_.resize(map_.nbuckets());
@@ -292,7 +294,15 @@ public:
   {
     // If this assert fails, you probably tried to populate twice
     assert(!valid_indices_.size());
-    for (int i = 0; i < map_.nbuckets(); ++i) {
+    int i;
+    [[maybe_unused]] auto _d = [&] {
+      if constexpr (ValidOnly)
+        return std::tuple{};
+      else
+        return Defer{
+            [this, &i] { valid_indices_ = decltype(valid_indices_)(0, i); }};
+    }();
+    for (i = 0; i < map_.nbuckets(); ++i) {
       const auto &s = map_.cpuset(i);
       if (!ValidOnly || s.valid())
         construct(i, std::forward<Args>(args)...);
@@ -336,9 +346,10 @@ private:
   // Record which indices of values_ have been constructed
   [[no_unique_address]] std::conditional_t<ValidOnly, std::vector<bool>,
                                            std::tuple<>> constructed_;
-
-  value_type *values_;          // Per-CpuSet values
-  Vec<unsigned> valid_indices_; // List of valid indices to values_
+  value_type *values_; // Per-CpuSet values
+  std::conditional_t<ValidOnly, Vec<unsigned>,
+                     std::ranges::iota_view<unsigned, unsigned>>
+      valid_indices_; // List of valid indices to values_
 
   // Simple emplace
   template<typename... Args>
@@ -349,8 +360,8 @@ private:
     if constexpr (ValidOnly) {
       assert(!constructed_[i]);
       constructed_[i] = true;
+      valid_indices_.push_back(i);
     }
-    valid_indices_.push_back(i);
   }
 
   // Emplace from invocation result on CpuSet
@@ -364,10 +375,55 @@ private:
     std::construct_at(values_ + i,
                       std::invoke(std::forward<F>(f),
                                   std::forward<Args>(args)..., map_.cpuset(i)));
-    constructed_[i] = true;
+    if constexpr (ValidOnly)
+      constructed_[i] = true;
     valid_indices_.push_back(i);
   }
 };
+
+class IndexAllocator {
+public:
+  using index_type = size_t;
+
+  ~IndexAllocator()
+  {
+    // If this fails, you have indices still allocated, but can no
+    // longer free them because this object has been destroyed.
+    // (Probably means you have a global destruction order bug.)
+    assert(max_ == 0);
+  }
+
+  index_type alloc()
+  {
+    lk_.acquire();
+    Defer _ul([this] { lk_.release(); });
+    if (free_.empty())
+      return max_++;
+    auto ret = free_.back();
+    free_.pop_back();
+    return ret;
+  }
+  void free(index_type i)
+  {
+    lk_.acquire();
+    Defer _ul([this] { lk_.release(); });
+#if DEBUG
+    assert(i < max_ && std::ranges::find(free_, i) == free_.end());
+#endif // DEBUG
+    free_.push_back(i);
+    if (free_.size() == max_) {
+      free_.clear();
+      max_ = 0;
+    }
+  }
+
+private:
+  // Use 8-byte semaphore because 40-byte mutex overflows cache line.
+  std::binary_semaphore lk_{1};
+  index_type max_{};
+  std::vector<index_type> free_;
+};
+static_assert(sizeof(IndexAllocator) <= hardware_destructive_interference_size);
 
 // Return a mapping of CPU numbers to buckets on linux.  For a given
 // argument PATH, iterates over the following file for each CPU N:
@@ -404,11 +460,13 @@ extern const CpuMap *llc_map;  // Groups CPUs by last-level cache
 // be called explicitly to ensure early initialization.
 void init_cpumaps();
 
+/*
 // Wrapper that aligns type T to cache line boundaries to prevent
 // false sharing between CPU cores.
 template<typename T>
 struct alignas(hardware_destructive_interference_size) CacheAligned : T {
   using T::T;
 };
+*/
 
 } // namespace x23

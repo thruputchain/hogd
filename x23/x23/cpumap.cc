@@ -2,11 +2,11 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <print>
 #include <thread>
 #include <unordered_map>
 
 #include "x23/cpumap.h"
+#include "x23/debug.h"
 #include "x23/fileio.h"
 
 namespace x23 {
@@ -26,8 +26,8 @@ init_cpumaps()
 #if HAVE_SCHED_SETAFFINITY
       allowed_cpus = new auto{get_allowed_cpus()};
 #endif // HAVE_SCHED_SETAFFINITY
-      core_map = new auto{make_cpu_map("topology/core_id")};
-      llc_map = new auto{make_llc_map()};
+      core_map = &make_nodestroy(new auto{make_cpu_map("topology/core_id")});
+      llc_map = &make_nodestroy(new auto{make_llc_map()});
       state = 2;
       state.notify_all();
     }
@@ -70,7 +70,7 @@ CpuSet::set_affinity(pid_t pid) const
   if (sched_setaffinity(pid, size(), set()) == 0)
     return 0;
   Errno err;
-  std::println(stderr, "sched_setaffinity({}): {}", *this, err);
+  debug.err("sched_setaffinity({}): {}", *this, err);
   return err;
 }
 
@@ -180,7 +180,7 @@ try {
     std::filesystem::path idpath = cpudir.path() / path;
     auto idstr = readfile<std::string>(idpath);
     if (!idstr) {
-      std::println(stderr, "{}: {}", idpath.string(), idstr.error());
+      debug("{}: {}", idpath.string(), idstr.error());
       // This probably means that we are on a mobile CPU with some
       // "efficiency cores" missing an L3 cache.  That's not the kind
       // of high-core-count or multi-socket machine where L3-cache

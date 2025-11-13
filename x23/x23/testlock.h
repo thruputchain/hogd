@@ -4,7 +4,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <utility>
 
 #include <x23/debug.h>
 #include <x23/refcnt.h>
@@ -15,24 +14,35 @@
 
 namespace x23 {
 
-// A simple futex-based mutex with some features missing from
-// std::mutex:
+// A simple futex-based mutex supporting some features that are
+// missing from std::mutex:
 //
-// 1. As the name suggests, you can *test* whether or not the lock is
-//    busy without acquiring or exclusively caching it.  The busy()
-//    method tells you whether a TestLock is locked.
+// * As the name suggests, you can *test* whether or not the lock is
+//   busy without acquiring or exclusively caching it.  The busy()
+//   method tells you whether a TestLock is locked.
 //
-// 2. You can unlock the TestLock in a different thread from the one
-//    in which you acquired it, which is important for coroutines that
-//    may migrate across threads.  Note you still can't lock a
-//    TestLock in a coroutine exexuting in ThreadPool, as coroutines
-//    should never block, but it is safe to use try_lock().
+// * You can unlock the TestLock in a different thread from the one
+//   in which you acquired it, which is important for coroutines that
+//   may migrate across threads.  Note you still can't lock a
+//   TestLock in a coroutine exexuting in ThreadPool, as coroutines
+//   should never block, but it is safe to use try_lock().
 //
-// 3. There's a block_while_inhibited() hook for derived types
-//    implementing shared locks.
+// * There's a block_while_inhibited() hook for derived types
+//   implementing shared locks.
+//
+// * Because TestLock is really small (1 byte, compared to 40 bytes
+//   for std::mutex), you can more easily fit it on the same cache
+//   line as what you are locking.
 //
 // TestLock has the same interface as std::mutex, so it can be used
 // with std::lock_guard or std::unique_lock.
+//
+// Unlike std::mutex, there could be undefined behavior if you destroy
+// a TestLock right after unlocking it when another thread is still
+// unlocking it.  In this case, the second-to-last unlocker could call
+// atomic::notify_all() on a destroyed atomic.  Calling methods on
+// destroyed objects is UB, even though the underlying FUTEX_WAKE
+// system call is fine, so this is probably fine in practice.
 class TestLock {
 public:
   using Holder = std::unique_lock<TestLock>;
