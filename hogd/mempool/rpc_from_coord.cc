@@ -449,8 +449,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     if (i > 0) {
       // The first call to [schedule()] is done above since we want to overlap
       // it with opening the snapshot and the block.
+      ElapsedTimer sched_timer;
       scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
                            txs);
+      info("sched took {}", sched_timer.elapsed());
     }
     size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {

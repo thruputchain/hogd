@@ -159,12 +159,15 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   info("cg acquire start");
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+  auto timer = std::make_unique<ElapsedTimer>();
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
+
+  double read_average_hog_ages_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
   cg.reset();
   info("cg acquire end");
 
-  auto timer = std::make_unique<ElapsedTimer>();
   constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
   if (txs.size() % kNumThreads) {
@@ -222,18 +225,20 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   info("cg acquire end");
 
   double ready_accounts_duration = timer->elapsed();
-  info("NewScheduler::add_txs tx_hash_and_enqueue_duration {}, "
-       "get_lock_duration {}, ready_accounts_duration {}",
-       tx_hash_and_enqueue_duration, get_lock_duration,
-       ready_accounts_duration);
+  info("NewScheduler::add_txs read_average_hog_ages_duration {}, "
+       "tx_hash_and_enqueue_duration {}, "
+       "get_lock_duration {}, ready_accounts_duration {}, ready accounts "
+       "inserted {}",
+       read_average_hog_ages_duration, tx_hash_and_enqueue_duration,
+       get_lock_duration, ready_accounts_duration, accounts.size());
 }
 
 void
 NewScheduler::cycle_if_needed(const ContractAddress &account,
                               GasAmount gas_limit)
 {
+  auto [hog_age, lock] = get_cached_hog_age(account);
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
-    auto [hog_age, lock] = get_cached_hog_age(account);
 
     const uint128_t to_schedule =
         from_xdr(hog_age->num_hogs[kHogAgeGroupToSchedule]);
