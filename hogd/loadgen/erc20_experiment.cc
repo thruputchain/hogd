@@ -125,6 +125,9 @@ ERC20ExperimentState::generate_experiment()
                     Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
+                .contracts_to_deploy = {},
+                .auth_claims = {},
+                .gas_claims = {},
             },
     };
     mint_txs.push_back(tx);
