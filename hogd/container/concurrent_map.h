@@ -296,7 +296,7 @@ private:
 
   size_t default_width(WorkerPool &pool) const
   {
-    return std::max<size_t>(1, buckets_.size() / (4 * pool.worker_count()));
+    return 1024;// std::max<size_t>(1, buckets_.size() / (4 * pool.worker_count()));
   }
 
   std::vector<std::atomic<value_bucket_t *>> buckets_;
