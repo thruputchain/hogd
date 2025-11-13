@@ -64,7 +64,7 @@ ERC20ExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -130,10 +130,10 @@ ERC20ExperimentState::generate_experiment()
     mint_txs.push_back(tx);
   }
 
-  return {LoadgenSuccessResult{
+  return LoadgenSuccessResult{
       .genesis_block = builder.build(),
-      .initialization_txs = {std::move(unfurl_txs), std::move(mint_txs)},
-  }};
+      .initialization_txs = x23::Vec<InitializationBlock>{std::move(unfurl_txs), std::move(mint_txs)},
+  };
 }
 
 LoadgenStatus<LoadgenExtension>
