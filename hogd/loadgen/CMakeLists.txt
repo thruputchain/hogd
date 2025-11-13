@@ -47,7 +47,7 @@ target_link_libraries(
   hogd
 )
 
-if(BENCHMARK_ENABLE_TESTING)
+if(BUILD_BENCHMARKS)
   # create loadgen benchmark binary
   add_executable(
     erc20_experiment_bench

@@ -14,7 +14,7 @@ target_link_libraries(
 )
 gtest_discover_tests(container_test)
 
-if(BENCHMARK_ENABLE_TESTING)
+if(BUILD_BENCHMARKS)
   add_executable(
     container_bench
     container_bench.cc

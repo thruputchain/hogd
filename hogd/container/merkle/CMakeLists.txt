@@ -55,7 +55,7 @@ target_link_libraries(
 )
 gtest_discover_tests(merkle_trie_test)
 
-if(BENCHMARK_ENABLE_TESTING)
+if(BUILD_BENCHMARKS)
   add_executable(
     merkle_trie_bench
     merkle_trie_bench.cc

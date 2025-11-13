@@ -48,7 +48,7 @@ target_link_libraries(mempool_test
 
 gtest_discover_tests(mempool_test)
 
-if(BENCHMARK_ENABLE_TESTING)
+if(BUILD_BENCHMARKS)
   add_executable(
     mempool_bench
     mempool_bench.cc
