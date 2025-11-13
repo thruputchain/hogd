@@ -219,23 +219,25 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                GasAmount{1'000'000},
                                erc20_meta::make_calldata<"transfer">(
                                    wallets_[receiver].address, to_xdr(amount)));
+                                   
+            Invocation invocation = {
+                .invoked_address = wallets_[sender].address,
+                .entrypoint =
+                    wallet_meta::entrypoint<"do_action">(),
+                .gas_limit = GasAmount{20'000},
+                .calldata =
+                    wallet_meta::make_calldata<"do_action">(
+                        ed25519_sign(
+                            wallets_[sender].secret_key,
+                            internal_calldata),
+                        internal_calldata),
+            };
 
             work_txs[j] = SignedTransaction{
                 .tx =
                     Transaction{
                         .invocation =
-                            {
-                                .invoked_address = wallets_[sender].address,
-                                .entrypoint =
-                                    wallet_meta::entrypoint<"do_action">(),
-                                .gas_limit = GasAmount{20'000},
-                                .calldata =
-                                    wallet_meta::make_calldata<"do_action">(
-                                        ed25519_sign(
-                                            wallets_[sender].secret_key,
-                                            internal_calldata),
-                                        internal_calldata),
-                            },
+                            invocation,
                         .uniquifier = {.block_expiry_height = expiry_height,
                                        .nonce = base_nonce + j},
                     },
