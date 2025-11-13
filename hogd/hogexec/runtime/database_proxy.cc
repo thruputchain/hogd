@@ -116,14 +116,14 @@ remove_syserr_from_call(auto syserr, auto &&f)
 
 } // namespace
 
-DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
+DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier, bool retry)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
         return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false);
+            retry);
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
@@ -137,7 +137,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
           throw std::runtime_error("Failed to parse database shard address");
         }
         return make_srpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                    false);
+                                                                    retry);
       }
       throw std::runtime_error("unimplemented");
     }())

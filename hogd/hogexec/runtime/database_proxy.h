@@ -45,7 +45,7 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // that the executor can handle (or abort on).
 class DatabaseProxy {
 public:
-  DatabaseProxy(DatabaseIdentifier identifier);
+  DatabaseProxy(DatabaseIdentifier identifier, bool retry = false);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;
