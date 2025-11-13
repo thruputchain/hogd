@@ -65,7 +65,6 @@ set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 endif()
 
 if(BENCHMARK_PATH)
-message(STATUS "Building benchmark: PATH=${BENCHMARK_PATH}")
 add_executable(bench bench.cc)
 use_x23(bench)
 target_link_libraries(bench x23 benchmark::benchmark xdrtest)

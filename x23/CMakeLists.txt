@@ -209,7 +209,6 @@ if(BUILD_BENCHMARKS AND GOOGLETEST_PATH AND NOT BENCHMARK_PATH)
   endforeach()
 endif()
 
-message(STATUS "X23_IS_TOP_LEVEL: ${X23_IS_TOP_LEVEL}")
 if(X23_IS_TOP_LEVEL)
   if(BENCHMARK_PATH)
     message(STATUS "Enabling benchmark")
