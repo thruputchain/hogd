@@ -60,12 +60,19 @@ public:
 
 private:
   struct DatabaseCacheEntry {
-    DatabaseCacheEntry(std::shared_ptr<const Contract> contract) : data_(contract) {}
+    DatabaseCacheEntry(std::shared_ptr<const Contract> contract)
+      : data_(contract)
+    {}
     DatabaseCacheEntry(std::optional<SHA256Hash> hash) : data_(hash) {}
-    DatabaseCacheEntry(StorageItem item, AddressAndKey const& addrkey, BlockID block_id, DatabaseProxy &db_proxy)
-     : data_(std::in_place_type<SnapshotStorageItem>, std::move(item), addrkey, block_id, db_proxy) {}
-    
-    std::variant<std::shared_ptr<const Contract>, std::optional<SHA256Hash>, SnapshotStorageItem> data_;
+    DatabaseCacheEntry(StorageItem item, AddressAndKey const &addrkey,
+                       BlockID block_id, DatabaseProxy &db_proxy)
+      : data_(std::in_place_type<SnapshotStorageItem>, std::move(item), addrkey,
+              block_id, db_proxy)
+    {}
+
+    std::variant<std::shared_ptr<const Contract>, std::optional<SHA256Hash>,
+                 SnapshotStorageItem>
+        data_;
   };
 
   // ContractAddress and SHA256Hash are both std::array<uint8_t, 32>,
@@ -80,22 +87,31 @@ private:
     bool operator==(ContractCacheKey const &other) const = default;
   };
 
-  using CacheKey = std::variant<ContractCacheKey, DeploymentCacheKey, AddressAndKey>;
+  using CacheKey =
+      std::variant<ContractCacheKey, DeploymentCacheKey, AddressAndKey>;
 
   struct CacheKeyHash {
-    size_t operator()(CacheKey const &key) const {
+    size_t operator()(CacheKey const &key) const
+    {
       static SipHash24 hasher;
-      return std::visit([&](auto &&arg) {
-        if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, ContractCacheKey>) {
-          return hasher(arg.hash_);
-        } else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, DeploymentCacheKey>) {
-          return hasher(arg.addr_);
-        } else {
-          static_assert(std::is_same_v<std::decay_t<decltype(arg)>, AddressAndKey>);
-          auto buf = x23::serialize(arg);
-          return hasher(buf);
-        }
-      }, key);
+      return std::visit(
+          [&](auto &&arg) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(arg)>,
+                                         ContractCacheKey>) {
+              return hasher(arg.hash_);
+            }
+            else if constexpr (std::is_same_v<std::decay_t<decltype(arg)>,
+                                              DeploymentCacheKey>) {
+              return hasher(arg.addr_);
+            }
+            else {
+              static_assert(
+                  std::is_same_v<std::decay_t<decltype(arg)>, AddressAndKey>);
+              auto buf = x23::serialize(arg);
+              return hasher(buf);
+            }
+          },
+          key);
     }
   };
 

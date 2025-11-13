@@ -25,7 +25,8 @@ StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
   : block_id_(block_id), db_proxy_(db_proxy)
 {}
 
-StorageSnapshotCache::~StorageSnapshotCache() {
+StorageSnapshotCache::~StorageSnapshotCache()
+{
   cache_.clear();
 }
 
@@ -35,7 +36,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
 {
   DeploymentCacheKey key{addr};
 
-  if (const auto* entry = cache_.get(key)) {
+  if (const auto *entry = cache_.get(key)) {
     CHECK(std::holds_alternative<std::optional<SHA256Hash>>(entry->data_));
     return std::get<std::optional<SHA256Hash>>(entry->data_);
   }
@@ -55,8 +56,9 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   ContractCacheKey key{hash};
 
-  if (const auto* entry = cache_.get(key)) {
-    CHECK(std::holds_alternative<std::shared_ptr<const Contract>>(entry->data_));
+  if (const auto *entry = cache_.get(key)) {
+    CHECK(
+        std::holds_alternative<std::shared_ptr<const Contract>>(entry->data_));
     return std::get<std::shared_ptr<const Contract>>(entry->data_);
   }
 
@@ -85,7 +87,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
-  if (auto* entry = cache_.get(addrkey)) {
+  if (auto *entry = cache_.get(addrkey)) {
     CHECK(std::holds_alternative<SnapshotStorageItem>(entry->data_));
     return &std::get<SnapshotStorageItem>(entry->data_);
   }
@@ -95,13 +97,15 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     return db_res.error();
   }
 
-  const static StorageItem deleted_item = StorageItem(StorageItemType::kItemTypeDeleted);
-  const auto* item = &deleted_item;
+  const static StorageItem deleted_item =
+      StorageItem(StorageItemType::kItemTypeDeleted);
+  const auto *item = &deleted_item;
   if (db_res.value().has_value()) {
     item = &*db_res.value();
   }
 
-  auto* entry = cache_.insert_or_get(addrkey, *item, addrkey, block_id_, db_proxy_);
+  auto *entry =
+      cache_.insert_or_get(addrkey, *item, addrkey, block_id_, db_proxy_);
   CHECK_PTR(entry);
   return &std::get<SnapshotStorageItem>(entry->data_);
 }
