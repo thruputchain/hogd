@@ -108,6 +108,11 @@ ERC20ExperimentState::generate_experiment()
         erc20_meta::make_calldata<"mint">(wallets_[i].address,
                                           to_xdr(uint128_t{1'000'000'000})));
 
+    auto calldata = wallet_meta::make_calldata<"do_action">(
+        ed25519_sign(wallets_[0].secret_key,
+                     internal_calldata),
+        internal_calldata);
+                                        
     auto tx = SignedTransaction{
         .tx =
             Transaction{
@@ -116,11 +121,8 @@ ERC20ExperimentState::generate_experiment()
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<"do_action">(),
                         .gas_limit = GasAmount{20'000},
-                        .calldata = wallet_meta::make_calldata<"do_action">(
-                            ed25519_sign(wallets_[0].secret_key,
-                                         internal_calldata),
-                            internal_calldata),
-                    },
+                        .calldata = calldata,
+                      },
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
