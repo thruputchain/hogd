@@ -342,6 +342,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   double wait_for_transfer_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
+
+  static x23::Vec<SignedTransaction> txs;
+  static x23::Vec<SignedTransactionHash> tx_hashes;
+  txs.clear();
+  tx_hashes.clear();
+
   BlockID block_id = get_ns_since_epoch();
 
   x23::Async<bool> create_snapshot_handler =
@@ -352,6 +358,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     open_proposal_block_handlers.push_back(
         open_proposal_block(block_id, /*executor_idx=*/i));
   }
+
+  // This is the first call to [schedule()]. We do it up here rather than with
+  // the remaining calls in the loop below because we want to overlap the first
+  // call with opening the snapshot and the block.
+  scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes, txs);
 
   bool create_snapshot_handler_ret = co_await create_snapshot_handler;
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
@@ -391,7 +402,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
 
   // Scheduler ---
 
-  // TODO(jhumphri): Remove allocation.
   static x23::Vec<SchedulerNominationChunk> sched_nominations(
       kNumSchedulerIterations, {});
   for (size_t i = 0; i < sched_nominations.size(); i++) {
@@ -422,11 +432,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   // [nomination.block_hash], [nomination.transaction_hashes], and
   // [nomination.transaction_nominations] are filled in below.
 
-  static x23::Vec<SignedTransaction> txs;
-  static x23::Vec<SignedTransactionHash> tx_hashes;
-  txs.clear();
-  tx_hashes.clear();
-
   x23::CoroGuard cg;
   auto timer2 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
@@ -442,8 +447,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
-    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
-                         txs);
+    if (i > 0) {
+      // The first call to [schedule()] is done above since we want to overlap
+      // it with opening the snapshot and the block.
+      scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
+                           txs);
+    }
     size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
       break;
