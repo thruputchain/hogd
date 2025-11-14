@@ -37,10 +37,6 @@ public:
   {}
 
 protected:
-  void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
-
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_;
-
   void check_uniquifier(const Uniquifier &uniquifier)
   {
     auto r = uniquifiers_.insert(uniquifier);
@@ -104,7 +100,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -125,7 +121,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        wasm_runtime_context_);
+        make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -214,7 +210,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -229,9 +225,8 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
   EXPECT_FALSE(lookup_contract_from_db(sha256(*caller_contract)));
 
   // run the unfurl transactions
-
   for (auto const &tx : unfurl_txns) {
-    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -255,7 +250,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        wasm_runtime_context_);
+        make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -318,7 +313,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -342,7 +337,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        wasm_runtime_context_);
+        make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -380,7 +375,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, wasm_runtime_context_);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -423,7 +418,7 @@ TEST_P(GenesisBlockUnfurlTest, InitialTokenClaimPropagatesReverts)
   // run the unfurl transactions
 
   auto const &stx = unfurl_txns[0];
-  auto handler = make_new_system_call_handler(stx, wasm_runtime_context_);
+  auto handler = make_new_system_call_handler(stx, make_hogexec_context());
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 }

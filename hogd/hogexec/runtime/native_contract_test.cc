@@ -43,6 +43,45 @@ protected:
   {
     snapshot_server_.start_server(/*port=*/0);
 
+    auto event_exec_port = event_server_exec_server_.start_server(0);
+
+    db_proxy_ = std::make_unique<DatabaseProxy>(
+        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
+    event_server_proxy_ = std::make_unique<EventServerProxy>(
+        x23::HostPort{"localhost", event_exec_port});
+    event_server_.open_block(0);
+  }
+
+  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
+  TestEventAggregator event_server_;
+  TestEventAggregatorExecServer event_server_exec_server_ =
+      TestEventAggregatorExecServer(event_server_);
+
+  std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<EventServerProxy> event_server_proxy_;
+
+  SystemCallHandler
+  make_handler(SignedTransaction const &signed_tx,
+               StorageSnapshotCache &snapshot, BlockID block_id,
+               TransactionID tx_id,
+               std::unique_ptr<RuntimeContext> runtime_context)
+  {
+    return SystemCallHandler(
+        signed_tx, snapshot,
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
+        ProposalModeCtor{}, std::move(runtime_context));
+  }
+};
+
+TEST_F(NativeContractTest, BasicInstantiate)
+{
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
+
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     auto contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
@@ -91,48 +130,16 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_0));
     contract_map.emplace(1, std::move(contract_1));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+  auto context = make_context();
+  auto *context_ptr = context.get();
 
-    auto event_exec_port = event_server_exec_server_.start_server(0);
+  SystemCallHandler handler =
+      make_handler(SignedTransaction{}, snapshot, 0, 0, std::move(context));
 
-    runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
-    event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_exec_port});
-    event_server_.open_block(0);
-  }
-
-  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<EventServerProxy> event_server_proxy_;
-  std::shared_ptr<RuntimeContext> runtime_context_;
-
-  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
-                                 StorageSnapshotCache &snapshot,
-                                 BlockID block_id, TransactionID tx_id)
-  {
-    return SystemCallHandler(
-        signed_tx, snapshot,
-        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
-        PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
-        ProposalModeCtor{}, runtime_context_);
-  }
-};
-
-TEST_F(NativeContractTest, BasicInstantiate)
-{
-  StorageSnapshotCache snapshot(0, *db_proxy_);
-  SystemCallHandler handler = make_handler(SignedTransaction{}, snapshot, 0, 0);
-
-  Contract contract(ContractType::kNative);
-  contract.native_contract_id() = 0;
-
-  auto runtime = runtime_context_->make_new_runtime(contract, sha256(contract),
-                                                    &handler, true);
+  auto runtime =
+      context_ptr->make_new_runtime(contract, sha256(contract), &handler, true);
 
   auto res = runtime->invoke(0, UINT64_MAX);
 
@@ -234,7 +241,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
 
-  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
@@ -256,7 +264,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                           .calldata = {},
                       },
               }},
-      snapshot, 0, 0);
+      snapshot, 0, 0, std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -315,7 +323,8 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
 
-  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
@@ -340,7 +349,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
                       },
               },
       },
-      snapshot, 0, 0);
+      snapshot, 0, 0, std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -349,89 +358,91 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 TEST_F(NativeContractTest, LazyLoadingNNInt)
 {
   // Test to verify that items are loaded lazily
-  NativeContractBuilder builder;
   ContractAddress address{};
-
   constexpr static StorageKeyContractData kBadKey{};
 
   StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
   bad_full_key.contract_data_key() = kBadKey;
 
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-        // get_nnint() with force_load_from_snapshot=false from clean state
-        // should not query db
-        auto r0 = handler.get_nnint(kBadKey, false);
-        if (!r0.has_value() || !r0.value().has_value() ||
-            r0.value().value().first.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    NativeContractBuilder builder;
 
-        // add ops shouldn't query db
-        auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr, 100);
-        if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        0, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          // get_nnint() with force_load_from_snapshot=false from clean state
+          // should not query db
+          auto r0 = handler.get_nnint(kBadKey, false);
+          if (!r0.has_value() || !r0.value().has_value() ||
+              r0.value().value().first.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-        auto [r2, _gas2] =
-            syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr, -200);
-        if (!r2.has_value() ||
-            r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+          // add ops shouldn't query db
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
+                                                              nullptr, 100);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-        // assert that get_nnint() without a load doesn't query db
-        auto r3 = handler.get_nnint(kBadKey, false);
-        if (!r3.has_value() || !r3.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        if (r3.value().value().first.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
+          auto [r2, _gas2] =
+              syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr,
+                                                 -200);
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-        int128_t set_value = 100;
-        auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
-                                                            &set_value, 200);
-        if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+          // assert that get_nnint() without a load doesn't query db
+          auto r3 = handler.get_nnint(kBadKey, false);
+          if (!r3.has_value() || !r3.value().has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (r3.value().value().first.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
 
-        // assert that get_nnint() after a set doesn't query db, even with
-        // force_load_from_snapshot=true
-        auto r2 = handler.get_nnint(kBadKey, true);
-        if (!r2.has_value() || !r2.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        if (!r2.value().value().first.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          int128_t set_value = 100;
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
+                                                              &set_value, 200);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-        // get_nnint() after a set with force_load_from_snapshot=false should
-        // return the set value if it exists
-        auto r3 = handler.get_nnint(kBadKey, false);
-        if (!r3.has_value() || !r3.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        if (!r3.value().value().first.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
+          // assert that get_nnint() after a set doesn't query db, even with
+          // force_load_from_snapshot=true
+          auto r2 = handler.get_nnint(kBadKey, true);
+          if (!r2.has_value() || !r2.value().has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (!r2.value().value().first.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-        return {};
-      });
+          // get_nnint() after a set with force_load_from_snapshot=false should
+          // return the set value if it exists
+          auto r3 = handler.get_nnint(kBadKey, false);
+          if (!r3.has_value() || !r3.value().has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          if (!r3.value().value().first.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
 
-  auto native_contract = builder.build();
+          return {};
+        });
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
+    auto native_contract = builder.build();
 
-  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
@@ -457,7 +468,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, 0, 0);
+        snapshot, 0, 0, make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -476,7 +487,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, 0, 1);
+        snapshot, 0, 1, make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);

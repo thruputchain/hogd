@@ -14,13 +14,13 @@
 
 namespace hogd {
 
-SyscallHandlerContext::SyscallHandlerContext(
-    std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
-    DBContext &db)
+SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
+                                             SignedTransaction const &stx,
+                                             DBContext &db)
   : identifier_(db.allocate_identifier()), db_(db),
     handler_(stx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             std::move(context))
+             context->clone())
 
 {}
 

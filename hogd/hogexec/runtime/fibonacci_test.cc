@@ -5,6 +5,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
@@ -34,12 +35,12 @@ public:
   {}
 
 protected:
-  void SetUp() override
-  {
-    wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-  }
+  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
 
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_;
+  static std::unique_ptr<RuntimeContext> make_context()
+  {
+    return make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+  };
 
   using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
@@ -65,7 +66,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
         SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
                                   kSufficientGas, 5U)}},
-        wasm_runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -91,7 +92,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
                 Transaction{
                     .invocation =
                         client.make_invocation<"slow_fibonacci">(2000, 20U)}},
-        wasm_runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 2000);
@@ -140,10 +141,19 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kNative, native_runtime_context},
-          {ContractType::kWasmi, wasm_runtime_context_}});
+  auto make_multiplexed_context = [&]() -> std::unique_ptr<MultiplexedContext> {
+    auto wasm_context = make_context();
+    auto *wasm_context_ptr = wasm_context.get();
+    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts;
+    owned_contexts.reserve(1);
+    owned_contexts.emplace_back(std::move(wasm_context));
+
+    return std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, RuntimeContext *>{
+            {ContractType::kNative, native_runtime_context.get()},
+            {ContractType::kWasmi, wasm_context_ptr}},
+        std::move(owned_contexts));
+  };
 
   fib_client_t client(kFibContractAddr);
 
@@ -164,7 +174,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(10U, 55U)
                                         .value()}}},
-        multiplexed_context);
+        make_multiplexed_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -189,7 +199,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                     serialize<uint32_t, uint32_t>(40U,
                                                                   102334155U)
                                         .value()}}},
-        multiplexed_context);
+        make_multiplexed_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

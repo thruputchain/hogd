@@ -59,7 +59,7 @@ public:
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
-                    std::shared_ptr<RuntimeContext> runtime_context);
+                    std::unique_ptr<RuntimeContext> runtime_context);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;

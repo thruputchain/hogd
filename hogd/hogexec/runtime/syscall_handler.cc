@@ -61,7 +61,7 @@ SystemCallHandler::SystemCallHandler(
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor,
-    std::shared_ptr<RuntimeContext> runtime_context)
+    std::unique_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),

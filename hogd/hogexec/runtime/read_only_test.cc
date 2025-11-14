@@ -5,6 +5,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/read_only_test.h"
@@ -40,8 +41,6 @@ protected:
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_ =
-      make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   std::shared_ptr<Contract> contract_ =
       hogd::load_contract("read_only_test.wasm");
   ContractAddress const contract_addr_ = make_contract_address(0);
@@ -86,12 +85,20 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto native_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kWasmi, wasm_runtime_context_},
-          {ContractType::kNative, native_context}});
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    auto *wasm_context_ptr = wasm_context.get();
+    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts;
+    owned_contexts.reserve(1);
+    owned_contexts.emplace_back(std::move(wasm_context));
+    return std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, RuntimeContext *>{
+            {ContractType::kWasmi, wasm_context_ptr},
+            {ContractType::kNative, native_context.get()}},
+        std::move(owned_contexts));
+  };
 
   auto native_contract_addr = make_contract_address(1);
   auto native_contract_xdr = make_native_contract(0);
@@ -111,7 +118,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        multiplexed_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -132,7 +139,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        multiplexed_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -192,12 +199,14 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto native_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kWasmi, wasm_runtime_context_},
-          {ContractType::kNative, native_context}});
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, RuntimeContext *>{
+          {ContractType::kWasmi, wasm_context.get()},
+          {ContractType::kNative, native_context.get()}},
+      std::vector<std::unique_ptr<RuntimeContext>>{});
 
   auto native_contract_xdr = make_native_contract(0);
   write_contract(native_contract_xdr);
@@ -215,7 +224,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        multiplexed_context);
+        std::move(multiplexed_context));
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

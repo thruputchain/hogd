@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
@@ -134,7 +135,7 @@ TEST_F(EventTest, EventSuccess)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -159,7 +160,7 @@ TEST_F(EventTest, EventSuccess)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context, &tx_id);
+      std::move(runtime_context), &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -255,7 +256,7 @@ TEST_F(EventTest, BadEventInputs)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -277,7 +278,7 @@ TEST_F(EventTest, BadEventInputs)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context, &tx_id);
+      std::move(runtime_context), &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -307,207 +308,219 @@ TEST_F(EventTest, EventWithRevertingFrames)
   // the events at the end; there should be 0 events (checking manual revert of
   // the top frame)
 
-  auto native_contract_0 = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
-      // Method 0: Produces an event with 0 topics, with event data from
-      // calldata
-      {0,
-       [](SystemCallHandler &handler,
-          NativeRuntime &runtime) -> InvokeStatus<void> {
-         // Use calldata as event data
-         auto const &calldata = handler.get_calldata();
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            // Method 0: Produces an event with 0 topics, with event data from
+            // calldata
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Use calldata as event data
+               auto const &calldata = handler.get_calldata();
 
-         auto [status, gas] =
-             syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
-                                    std::as_bytes(std::span(calldata)));
-         if (!status.has_value()) {
-           return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-         }
+               auto [status, gas] =
+                   syscall_LogEvent_inner(handler, nullptr, nullptr, nullptr,
+                                          std::as_bytes(std::span(calldata)));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
 
-         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-         }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-         if (!runtime.consume_gas(gas)) {
-           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-         }
+               if (!runtime.consume_gas(gas)) {
+                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               }
 
-         return {};
-       }},
-      // Method 1: Calls method 0, then manually reverts the frame
-      {1,
-       [](SystemCallHandler &handler,
-          NativeRuntime &runtime) -> InvokeStatus<void> {
-         // Call method 0 with some test data
-         std::string test_data = "method1_event";
-         Calldata calldata(test_data.begin(), test_data.end());
+               return {};
+             }},
+            // Method 1: Calls method 0, then manually reverts the frame
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Call method 0 with some test data
+               std::string test_data = "method1_event";
+               Calldata calldata(test_data.begin(), test_data.end());
 
-         auto [status, gas] =
-             handler.invoke(handler.get_current_address(), 0,
-                            runtime.get_available_gas(), calldata,
-                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
-         if (!status.has_value()) {
-           return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-         }
+               auto [status, gas] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), calldata,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
 
-         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-         }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-         if (!runtime.consume_gas(gas)) {
-           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-         }
+               if (!runtime.consume_gas(gas)) {
+                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               }
 
-         // Manually revert the frame - this should revert the event
-         handler.set_return_buffer(ReturnBuffer{}, true);
-         return {};
-       }},
-      // Method 2: Calls method 0, then returns a Deterministic error
-      {2,
-       [](SystemCallHandler &handler,
-          NativeRuntime &runtime) -> InvokeStatus<void> {
-         // Call method 0 with some test data
-         std::string test_data = "method2_event";
-         Calldata calldata(test_data.begin(), test_data.end());
+               // Manually revert the frame - this should revert the event
+               handler.set_return_buffer(ReturnBuffer{}, true);
+               return {};
+             }},
+            // Method 2: Calls method 0, then returns a Deterministic error
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Call method 0 with some test data
+               std::string test_data = "method2_event";
+               Calldata calldata(test_data.begin(), test_data.end());
 
-         auto [status, gas] =
-             handler.invoke(handler.get_current_address(), 0,
-                            runtime.get_available_gas(), calldata,
-                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
-         if (!status.has_value()) {
-           return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-         }
+               auto [status, gas] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), calldata,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
+               if (!status.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
 
-         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-         }
+               if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-         if (!runtime.consume_gas(gas)) {
-           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-         }
+               if (!runtime.consume_gas(gas)) {
+                 return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+               }
 
-         // Return a deterministic error - this should revert the event
-         return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-       }},
-      // Method 3: Calls method 0, then 1, then 0, then 2, then 0
-      {3,
-       [](SystemCallHandler &handler,
-          NativeRuntime &runtime) -> InvokeStatus<void> {
-         // Call method 0 (first event - should succeed)
-         {
-           std::string test_data = "first_event";
-           Calldata calldata(test_data.begin(), test_data.end());
+               // Return a deterministic error - this should revert the event
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }},
+            // Method 3: Calls method 0, then 1, then 0, then 2, then 0
+            {3,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Call method 0 (first event - should succeed)
+               {
+                 std::string test_data = "first_event";
+                 Calldata calldata(test_data.begin(), test_data.end());
 
-           auto [status, gas] =
-               handler.invoke(handler.get_current_address(), 0,
-                              runtime.get_available_gas(), calldata,
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-           if (!status.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }
+                 auto [status, gas] =
+                     handler.invoke(handler.get_current_address(), 0,
+                                    runtime.get_available_gas(), calldata,
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagNone));
+                 if (!status.has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 }
 
-           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
+                 if (status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeNone) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
 
-           if (!runtime.consume_gas(gas)) {
-             return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-           }
-         }
+                 if (!runtime.consume_gas(gas)) {
+                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 }
+               }
 
-         // Call method 1 (should revert, so no event)
-         {
-           auto [status, gas] =
-               handler.invoke(handler.get_current_address(), 1,
-                              runtime.get_available_gas(), {},
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-           if (!status.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }
+               // Call method 1 (should revert, so no event)
+               {
+                 auto [status, gas] =
+                     handler.invoke(handler.get_current_address(), 1,
+                                    runtime.get_available_gas(), {},
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagNone));
+                 if (!status.has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 }
 
-           // Method 1 should have manually reverted
-           if (status.value() !=
-               SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
+                 // Method 1 should have manually reverted
+                 if (status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeFrameReverted) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
 
-           if (!runtime.consume_gas(gas)) {
-             return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-           }
-         }
+                 if (!runtime.consume_gas(gas)) {
+                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 }
+               }
 
-         // Call method 0 again (second event - should succeed)
-         {
-           std::string test_data = "second_event";
-           Calldata calldata(test_data.begin(), test_data.end());
+               // Call method 0 again (second event - should succeed)
+               {
+                 std::string test_data = "second_event";
+                 Calldata calldata(test_data.begin(), test_data.end());
 
-           auto [status, gas] =
-               handler.invoke(handler.get_current_address(), 0,
-                              runtime.get_available_gas(), calldata,
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-           if (!status.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }
+                 auto [status, gas] =
+                     handler.invoke(handler.get_current_address(), 0,
+                                    runtime.get_available_gas(), calldata,
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagNone));
+                 if (!status.has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 }
 
-           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
+                 if (status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeNone) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
 
-           if (!runtime.consume_gas(gas)) {
-             return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-           }
-         }
+                 if (!runtime.consume_gas(gas)) {
+                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 }
+               }
 
-         // Call method 2 (should fail with deterministic error, so no event)
-         {
-           auto [status, gas] =
-               handler.invoke(handler.get_current_address(), 2,
-                              runtime.get_available_gas(), {},
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-           if (!status.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }
+               // Call method 2 (should fail with deterministic error, so no
+               // event)
+               {
+                 auto [status, gas] =
+                     handler.invoke(handler.get_current_address(), 2,
+                                    runtime.get_available_gas(), {},
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagNone));
+                 if (!status.has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 }
 
-           // Method 2 should have failed with deterministic error
-           if (status.value() !=
-               SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
+                 // Method 2 should have failed with deterministic error
+                 if (status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
 
-           if (!runtime.consume_gas(gas)) {
-             return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-           }
-         }
+                 if (!runtime.consume_gas(gas)) {
+                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 }
+               }
 
-         // Call method 0 one more time (third event - should succeed)
-         {
-           std::string test_data = "third_event";
-           Calldata calldata(test_data.begin(), test_data.end());
+               // Call method 0 one more time (third event - should succeed)
+               {
+                 std::string test_data = "third_event";
+                 Calldata calldata(test_data.begin(), test_data.end());
 
-           auto [status, gas] =
-               handler.invoke(handler.get_current_address(), 0,
-                              runtime.get_available_gas(), calldata,
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-           if (!status.has_value()) {
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }
+                 auto [status, gas] =
+                     handler.invoke(handler.get_current_address(), 0,
+                                    runtime.get_available_gas(), calldata,
+                                    std::to_underlying(
+                                        InvokeFlag::kInvokeFlagNone));
+                 if (!status.has_value()) {
+                   return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+                 }
 
-           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
+                 if (status.value() !=
+                     SyscallErrorCode::kSyscallErrorCodeNone) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
 
-           if (!runtime.consume_gas(gas)) {
-             return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-           }
-         }
+                 if (!runtime.consume_gas(gas)) {
+                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                 }
+               }
 
-         return {};
-       }}});
+               return {};
+             }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -531,7 +544,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context, &tx_id_1);
+      make_context(), &tx_id_1);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -551,7 +564,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context, &tx_id_2);
+      make_context(), &tx_id_2);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());

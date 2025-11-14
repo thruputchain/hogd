@@ -93,10 +93,11 @@ static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
 TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context;
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
 
-  SyscallHandlerContext context(std::make_shared<hogd::MockRuntimeContext>(
-                                    make_hogexec_context()),
-                                SignedTransaction{}, db_context);
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
   ASSERT_TRUE(context.push_context());
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
@@ -132,10 +133,10 @@ TEST(MockSyscallTest, IntTypeTest)
 TEST(MockSyscallTest, SpanTest)
 {
   DBContext db_context;
-
-  SyscallHandlerContext context(std::make_shared<hogd::MockRuntimeContext>(
-                                    make_hogexec_context()),
-                                SignedTransaction{}, db_context);
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
   ASSERT_TRUE(context.push_context());
 
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));

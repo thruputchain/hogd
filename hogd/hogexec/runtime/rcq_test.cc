@@ -27,12 +27,8 @@ protected:
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
-  void SetUp() override
+  std::unique_ptr<RuntimeContext> make_context()
   {
-    if (GetParam() == TestDB::kHogDB) {
-      GTEST_SKIP() << "Pending hogdb retrocausal queue";
-      return;
-    }
     // Setup native contract
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
@@ -75,7 +71,15 @@ protected:
              }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
-    runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  }
+
+  void SetUp() override
+  {
+    if (GetParam() == TestDB::kHogDB) {
+      GTEST_SKIP() << "Pending hogdb retrocausal queue";
+      return;
+    }
 
     // mark the contract as existing and deployed within the database
     auto contract_0 = make_native_contract(0);
@@ -85,7 +89,6 @@ protected:
 
   ContractAddress contract_address_{
       make_contract_address(0)}; // Default address
-  std::shared_ptr<NativeContext> runtime_context_;
 };
 
 TEST_P(RCQTest, ConsumeFromPastBlock)
@@ -119,7 +122,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4, 3, 2, 1}},
                 }},
-        runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -140,7 +143,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4}},
                 }},
-        runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -164,7 +167,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {0, 100}},
                 }},
-        runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -189,7 +192,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {1, 2, 3, 0, 100}},
                 }},
-        runtime_context_);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();

@@ -223,7 +223,7 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
     hogd::SignedTransaction stx;
     x23::deserialize(&stx, x23::BufView{signed_tx, signed_tx_len});
     auto *out = static_cast<void *>(
-        new SyscallHandlerContext(*runtime_context, stx, *db_context));
+        new SyscallHandlerContext(runtime_context->get(), stx, *db_context));
     return {.syscall_handler = out, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (x23::XdrBadInput const &e) {
     log_error("error deserializing signed transaction: {}", e);

@@ -28,22 +28,22 @@ reset_module_cache()
 }
 } // namespace test
 
-std::shared_ptr<RuntimeContext>
+std::unique_ptr<RuntimeContext>
 make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
-    return std::make_shared<WasmiContext>(&module_cache);
+    return std::make_unique<WasmiContext>(&module_cache);
     break;
   default:
     return nullptr;
   }
 }
 
-std::shared_ptr<RuntimeContext>
+std::unique_ptr<RuntimeContext>
 make_hogexec_wasm_context(RuntimeEngine engine)
 {
-  std::shared_ptr<RuntimeContext> out = make_runtime_context(engine);
+  std::unique_ptr<RuntimeContext> out = make_runtime_context(engine);
   if (out) {
     out->link_fn("marmot", "syscall", &syscall_entry);
   }

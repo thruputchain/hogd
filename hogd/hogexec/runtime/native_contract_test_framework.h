@@ -278,7 +278,7 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::shared_ptr<RuntimeContext> runtime_context,
+                               std::unique_ptr<RuntimeContext> runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);

@@ -4,6 +4,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -13,8 +14,9 @@
 namespace hogd {
 
 MultiplexedContext::MultiplexedContext(
-    std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>> contexts)
-  : contexts_(std::move(contexts))
+    std::unordered_map<ContractType, RuntimeContext *> contexts,
+    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts)
+  : contexts_(std::move(contexts)), owned_contexts_(std::move(owned_contexts))
 {}
 
 std::unique_ptr<Runtime>

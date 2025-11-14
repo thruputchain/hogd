@@ -52,6 +52,11 @@ public:
     return mocked_contracts_.contains(id);
   }
 
+  std::unique_ptr<MockRuntimeContext> clone() const
+  {
+    return std::make_unique<MockRuntimeContext>(base_context_);
+  }
+
 private:
   std::map<int32_t, MockContract> mocked_contracts_;
   std::shared_ptr<RuntimeContext> base_context_;

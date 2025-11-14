@@ -4,6 +4,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_test.h"
@@ -43,8 +44,6 @@ public:
 protected:
   void SetUp() override
   {
-    wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-
     // Load and deploy the manual_revert_test contract
     auto contract = hogd::load_contract("manual_revert_test.wasm");
     contract_addr_ = make_contract_address(0);
@@ -152,11 +151,13 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kNative, native_runtime_context},
-          {ContractType::kWasmi, wasm_runtime_context_}});
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, RuntimeContext *>{
+          {ContractType::kNative, native_runtime_context.get()},
+          {ContractType::kWasmi, wasm_context.get()}},
+      std::vector<std::unique_ptr<RuntimeContext>>{});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -167,7 +168,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      multiplexed_context);
+      std::move(multiplexed_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "Manual revert test should succeed";
@@ -236,11 +237,12 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
-
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kNative, native_runtime_context},
-          {ContractType::kWasmi, wasm_runtime_context_}});
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, RuntimeContext *>{
+          {ContractType::kNative, native_runtime_context.get()},
+          {ContractType::kWasmi, wasm_context.get()}},
+      std::vector<std::unique_ptr<RuntimeContext>>{});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -251,7 +253,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      multiplexed_context);
+      std::move(multiplexed_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "No revert test should succeed";
@@ -307,10 +309,12 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kNative, native_runtime_context},
-          {ContractType::kWasmi, wasm_runtime_context_}});
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, RuntimeContext *>{
+          {ContractType::kNative, native_runtime_context.get()},
+          {ContractType::kWasmi, wasm_context.get()}},
+      std::vector<std::unique_ptr<RuntimeContext>>{});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -321,7 +325,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      multiplexed_context);
+      std::move(multiplexed_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())
@@ -381,10 +385,12 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto multiplexed_context = std::make_shared<MultiplexedContext>(
-        std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-            {ContractType::kNative, native_runtime_context},
-            {ContractType::kWasmi, wasm_runtime_context_}});
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    auto multiplexed_context = std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, RuntimeContext *>{
+            {ContractType::kNative, native_runtime_context.get()},
+            {ContractType::kWasmi, wasm_context.get()}},
+        std::vector<std::unique_ptr<RuntimeContext>>{});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -395,7 +401,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        multiplexed_context);
+        std::move(multiplexed_context));
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -453,10 +459,12 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
 
-  auto multiplexed_context = std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kNative, native_runtime_context},
-          {ContractType::kWasmi, wasm_runtime_context_}});
+  auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, RuntimeContext *>{
+          {ContractType::kNative, native_runtime_context.get()},
+          {ContractType::kWasmi, wasm_context.get()}},
+      std::vector<std::unique_ptr<RuntimeContext>>{});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -467,7 +475,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      multiplexed_context);
+      std::move(multiplexed_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "Error type 0 should succeed normally";
@@ -526,10 +534,12 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto multiplexed_context = std::make_shared<MultiplexedContext>(
-        std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-            {ContractType::kNative, native_runtime_context},
-            {ContractType::kWasmi, wasm_runtime_context_}});
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    auto multiplexed_context = std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, RuntimeContext *>{
+            {ContractType::kNative, native_runtime_context.get()},
+            {ContractType::kWasmi, wasm_context.get()}},
+        std::vector<std::unique_ptr<RuntimeContext>>{});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -540,7 +550,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        multiplexed_context);
+        std::move(multiplexed_context));
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -585,10 +595,12 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto multiplexed_context = std::make_shared<MultiplexedContext>(
-        std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-            {ContractType::kNative, native_runtime_context},
-            {ContractType::kWasmi, wasm_runtime_context_}});
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    auto multiplexed_context = std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, RuntimeContext *>{
+            {ContractType::kNative, native_runtime_context.get()},
+            {ContractType::kWasmi, wasm_context.get()}},
+        std::vector<std::unique_ptr<RuntimeContext>>{});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -599,7 +611,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        multiplexed_context);
+        std::move(multiplexed_context));
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
