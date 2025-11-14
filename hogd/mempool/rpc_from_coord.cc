@@ -569,9 +569,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   double create_handles_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  const SHA256Hash nomination_block_hash = {};
-  //   get_block_hash(tx_hashes,
-  //               /*prev_block_hash=*/db_tip.hash);
+  const SHA256Hash nomination_block_hash =
+      get_block_hash(tx_hashes,
+                     /*prev_block_hash=*/db_tip.hash);
   double get_block_hash_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 

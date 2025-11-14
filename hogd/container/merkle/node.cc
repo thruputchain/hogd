@@ -96,7 +96,7 @@ get_path_encoding(std::vector<std::byte> &encoding, const HexArray &path)
 
 void
 get_child_encoding(std::vector<std::byte> &encoding,
-                   const std::array<Node *, Node::kMaxNumBranches> children,
+                   const std::array<Node *, Node::kMaxNumBranches> &children,
                    size_t num_children)
 {
   size_t cur_size = encoding.size();
