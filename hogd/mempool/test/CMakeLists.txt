@@ -48,34 +48,36 @@ target_link_libraries(mempool_test
 
 gtest_discover_tests(mempool_test)
 
-add_executable(
-  mempool_bench
-  mempool_bench.cc
-  $<TARGET_OBJECTS:mempool_test_infra>
-)
-target_link_libraries(
-  mempool_bench
-  base
-  crypto
-  db_interface
-  exec_interface
-  hogd
-  loadgen
-  mempool
-  merkle
-  protocol
-  runtime
-  runtime_test_util
-  contract_loader
-  benchmark::benchmark
-)
-# for the generated contract headers
-target_include_directories(
-  mempool_bench
-  PRIVATE
-  ${CMAKE_BINARY_DIR}
-)
-set_property(TARGET mempool_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+if(BUILD_BENCHMARKS)
+  add_executable(
+    mempool_bench
+    mempool_bench.cc
+    $<TARGET_OBJECTS:mempool_test_infra>
+  )
+  target_link_libraries(
+    mempool_bench
+    base
+    crypto
+    db_interface
+    exec_interface
+    hogd
+    loadgen
+    mempool
+    merkle
+    protocol
+    runtime
+    runtime_test_util
+    contract_loader
+    benchmark::benchmark
+  )
+  # for the generated contract headers
+  target_include_directories(
+    mempool_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+  )
+  set_property(TARGET mempool_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
 
 add_executable(
   coordinator

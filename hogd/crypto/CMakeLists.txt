@@ -71,15 +71,19 @@ target_link_libraries(
 )
 gtest_discover_tests(crypto_test)
 
-# create crypto module benchmark binary
-add_executable(
-  crypto_bench
-  crypto_bench.cc
-)
-target_link_libraries(
-  crypto_bench
-  crypto
-  benchmark::benchmark
-)
+if(BUILD_BENCHMARKS)
+  # create crypto module benchmark binary
+  add_executable(
+    crypto_bench
+    crypto_bench.cc
+  )
+  target_link_libraries(
+    crypto_bench
+    crypto
+    benchmark::benchmark
+  )
 
-set_property(TARGET crypto_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET crypto_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
