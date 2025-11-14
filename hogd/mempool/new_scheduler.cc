@@ -233,7 +233,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   double ready_accounts_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  cg.reset();
+  cg.reset_no_yield();
   double cg_reset_duration = timer->elapsed();
 
   info("cg acquire end");
