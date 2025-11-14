@@ -11,6 +11,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
@@ -27,7 +28,7 @@ protected:
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
-  std::unique_ptr<RuntimeContext> make_context()
+  static std::unique_ptr<RuntimeContext> make_context()
   {
     // Setup native contract
     auto native_contract = std::make_unique<NativeContract>(
