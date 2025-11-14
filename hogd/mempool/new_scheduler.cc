@@ -168,7 +168,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   cg.reset();
   info("cg acquire end");
 
-  constexpr size_t kNumThreads = 108;
+  constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
   if (txs.size() % kNumThreads) {
     // Have each thread handle an extra tx so that there are no txs leftover.
