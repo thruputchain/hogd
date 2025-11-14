@@ -205,12 +205,6 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
                                                        *this);
   }
-  for (x23::Awaitable<void> &awaitable : awaitables) {
-    co_await awaitable;
-  }
-
-  double tx_hash_and_enqueue_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   info("cg acquire start");
   co_await cg(global_lock_);
@@ -223,6 +217,13 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   }
   cg.reset();
   info("cg acquire end");
+
+  for (x23::Awaitable<void> &awaitable : awaitables) {
+    co_await awaitable;
+  }
+
+  double tx_hash_and_enqueue_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   double ready_accounts_duration = timer->elapsed();
   info("NewScheduler::add_txs read_average_hog_ages_duration {}, "
