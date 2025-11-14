@@ -235,7 +235,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 
   size_t ready_accounts_size = ready_accounts_.size();
 
-  cg.reset_no_yield();
+  cg.reset();
   double cg_reset_duration = timer->elapsed();
 
   info("cg acquire end");
