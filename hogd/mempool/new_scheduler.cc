@@ -441,7 +441,7 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
   x23::CoroGuard cg;
-  co_await cg(scheduler_->global_lock_);
+  co_await cg(global_lock_);
   co_await read_average_hog_ages(transfers);
 
   constexpr size_t kNumThreads = 100;
