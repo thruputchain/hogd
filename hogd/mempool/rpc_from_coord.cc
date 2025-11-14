@@ -147,7 +147,7 @@ MempoolCoordinatorRpc::get_block_hash(
   // are adding to the trie. For example, if we are adding 128 hashes to the
   // trie, it is probably slower to use 128 threads rather than 1-2 threads due
   // to lock contention.
-  size_t num_threads = 98; // worker_pool.worker_count();
+  size_t num_threads = 112; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
