@@ -68,6 +68,15 @@
 
 namespace x23 {
 
+namespace detail {
+
+// Resume the coroutine in a ThreadPool.  If the pool argument is
+// nullptr, resumes it synchronously in this thread.
+void resume_in_another_thread(CoroHandle,
+                              ThreadPool *pool = ThreadPool::get_thread_pool());
+
+} // namespace detail
+
 class CoroLock {
 public:
   // Every coroutine that wants to acquire the lock needs a LockerState
@@ -110,6 +119,15 @@ public:
   {
     if (std::coroutine_handle<> h = next(ls))
       h();
+  }
+
+  // Release the lock and schedule the next locker in a different
+  // thread.
+  void unlock_no_yield(LockerState *ls,
+                       ThreadPool *pool = ThreadPool::get_thread_pool())
+  {
+    if (std::coroutine_handle<> h = next(ls))
+      detail::resume_in_another_thread(h, pool);
   }
 
   Async<void> await_free()
@@ -182,14 +200,6 @@ private:
     return h;
   }
 };
-
-namespace detail {
-
-// If we are in a thread pool, resume the coroutine in another thread.
-// If not, resume it synchronously in this thread.
-void resume_in_another_thread(CoroHandle);
-
-} // namespace detail
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
@@ -300,6 +310,12 @@ struct CoroGuard : CoroLock::LockerState {
   {
     if (lkp_)
       std::exchange(lkp_, nullptr)->unlock(this);
+  }
+
+  void reset_no_yield(ThreadPool *pool = ThreadPool::get_thread_pool())
+  {
+    if (lkp_)
+      std::exchange(lkp_, nullptr)->unlock_no_yield(this, pool);
   }
 
   // reset_and_return can only be called when the CoroGuard contains a
