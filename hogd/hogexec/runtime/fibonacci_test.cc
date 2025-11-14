@@ -5,7 +5,6 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
@@ -143,16 +142,11 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
 
   auto make_multiplexed_context = [&]() -> std::unique_ptr<MultiplexedContext> {
     auto wasm_context = make_context();
-    auto *wasm_context_ptr = wasm_context.get();
-    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts;
-    owned_contexts.reserve(1);
-    owned_contexts.emplace_back(std::move(wasm_context));
 
     return std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, RuntimeContext *>{
-            {ContractType::kNative, native_runtime_context.get()},
-            {ContractType::kWasmi, wasm_context_ptr}},
-        std::move(owned_contexts));
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.get(), false}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
   };
 
   fib_client_t client(kFibContractAddr);

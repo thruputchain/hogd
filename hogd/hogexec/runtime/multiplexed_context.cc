@@ -4,7 +4,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -14,9 +13,8 @@
 namespace hogd {
 
 MultiplexedContext::MultiplexedContext(
-    std::unordered_map<ContractType, RuntimeContext *> contexts,
-    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts)
-  : contexts_(std::move(contexts)), owned_contexts_(std::move(owned_contexts))
+    std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts)
+  : contexts_(std::move(contexts))
 {}
 
 std::unique_ptr<Runtime>
@@ -29,7 +27,7 @@ MultiplexedContext::make_new_runtime(Contract const &contract,
   if (it == contexts_.end()) {
     return nullptr;
   }
-  return it->second->make_new_runtime(contract, hash, syscall_handler,
+  return it->second.first->make_new_runtime(contract, hash, syscall_handler,
                                       do_contract_verify);
 }
 
@@ -40,7 +38,7 @@ MultiplexedContext::verify_contract(Contract const &contract) const
   if (it == contexts_.end()) {
     return false;
   }
-  return it->second->verify_contract(contract);
+  return it->second.first->verify_contract(contract);
 }
 
 bool
@@ -52,6 +50,6 @@ MultiplexedContext::link_fn_nargs(std::string_view module_name,
   if (it == contexts_.end()) {
     return false;
   }
-  return it->second->link_fn_nargs(module_name, fn_name, fn_ptr, nargs);
+  return it->second.first->link_fn_nargs(module_name, fn_name, fn_ptr, nargs);
 }
 } // namespace hogd
