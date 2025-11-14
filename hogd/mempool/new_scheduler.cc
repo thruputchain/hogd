@@ -74,6 +74,9 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
   }
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
+
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
     {
@@ -87,6 +90,7 @@ NewScheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
   if (!accounts_vec.empty()) {
     co_await read_average_hog_ages(accounts_vec);
   }
+  cg.reset();
   co_return accounts;
 }
 
@@ -97,9 +101,13 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
   for (const Delta &delta : transfers.deltas) {
     accounts.insert(delta.address);
   }
+
   // TODO(jhumphri): This is the same as the code above.
   x23::Vec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
+
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
     {
@@ -113,6 +121,7 @@ NewScheduler::read_average_hog_ages(const HogsTransferred &transfers)
   if (!accounts_vec.empty()) {
     co_await read_average_hog_ages(accounts_vec);
   }
+  cg.reset();
   co_return accounts;
 }
 
@@ -156,17 +165,12 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   // its overhead by removing the [co_await] below, doing other work, and then
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  info("cg acquire start");
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
   auto timer = std::make_unique<ElapsedTimer>();
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
 
   double read_average_hog_ages_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
-  cg.reset();
-  info("cg acquire end");
 
   constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
@@ -219,6 +223,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   }
 
   info("cg acquire start");
+  x23::CoroGuard cg;
   co_await cg(global_lock_);
 
   double get_lock_duration = timer->elapsed();
@@ -440,8 +445,6 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
   // its overhead by removing the [co_await] below, doing other work, and then
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
   co_await read_average_hog_ages(transfers);
 
   constexpr size_t kNumThreads = 100;
@@ -460,6 +463,8 @@ NewScheduler::process_transfers(const HogsTransferred &transfers)
     deltas_per_thread++;
   }
 
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
   std::array<x23::Awaitable<void>, kNumThreads> awaitables;
   for (size_t i = 0; i < kNumThreads; i++) {
     [](size_t coro_idx, auto cb, const HogsTransferred &transfers,
