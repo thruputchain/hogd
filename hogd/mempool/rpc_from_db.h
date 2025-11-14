@@ -63,8 +63,8 @@ public:
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
-    x23::CoroGuard cg;
-    co_await cg(scheduler_->global_lock_);
+    // x23::CoroGuard cg;
+    // co_await cg(scheduler_->global_lock_);
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 

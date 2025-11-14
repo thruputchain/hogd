@@ -151,8 +151,8 @@ public:
     constexpr ValidatorID kValidatorId{};
     x23::Vec<x23::Async<void>> handles;
     for (size_t i = 0; i < kNumSchedClients; i++) {
-      x23::span tx_chunk(txs.begin() + (i * kLoadgenTxBatchSize),
-                         txs.begin() + ((i + 1) * kLoadgenTxBatchSize));
+      x23::span tx_chunk(txs.begin() + (i * kSchedTxBatchSize),
+                         txs.begin() + ((i + 1) * kSchedTxBatchSize));
       handles.push_back(
           sched_coord_clients_[i].schedulercoord_submit_vetted(kValidatorId,
                                                                tx_chunk));
