@@ -109,6 +109,8 @@ namespace {
 ForeignInvokeResult
 mock_contract_create_event(void * /*unused*/, uint64_t method_number)
 {
+  info("mock_contract_create_event called with method number {}",
+       method_number);
   if (method_number != 0x1234) {
     return ForeignInvokeResult{
         .panic = std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)};
