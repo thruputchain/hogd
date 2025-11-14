@@ -13,7 +13,8 @@
 namespace hogd {
 
 MultiplexedContext::MultiplexedContext(
-    std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts)
+    std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
+        contexts)
   : contexts_(std::move(contexts))
 {}
 
@@ -28,7 +29,7 @@ MultiplexedContext::make_new_runtime(Contract const &contract,
     return nullptr;
   }
   return it->second.first->make_new_runtime(contract, hash, syscall_handler,
-                                      do_contract_verify);
+                                            do_contract_verify);
 }
 
 bool
