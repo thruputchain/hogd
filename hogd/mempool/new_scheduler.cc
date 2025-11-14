@@ -212,17 +212,17 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   double tx_hash_and_enqueue_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
-  info("cg acquire start");
-  co_await cg(global_lock_);
-
-  double get_lock_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   std::vector<AccountKey> account_keys;
   account_keys.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
     account_keys.push_back(get_account_key(account));
   }
+
+  info("cg acquire start");
+  co_await cg(global_lock_);
+
+  double get_lock_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
 
   double get_account_keys_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
@@ -233,6 +233,8 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   double ready_accounts_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
+  size_t ready_accounts_size = ready_accounts_.size();
+
   cg.reset_no_yield();
   double cg_reset_duration = timer->elapsed();
 
@@ -242,10 +244,10 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
        "tx_hash_and_enqueue_duration {}, "
        "get_lock_duration {}, get_account_keys_duration {}, "
        "ready_accounts_duration {}, cg_reset_duration {}, ready accounts "
-       "inserted {}",
+       "inserted {}, ready accounts size {}",
        read_average_hog_ages_duration, tx_hash_and_enqueue_duration,
        get_lock_duration, get_account_keys_duration, ready_accounts_duration,
-       cg_reset_duration, accounts.size());
+       cg_reset_duration, accounts.size(), ready_accounts_size);
 }
 
 void
