@@ -74,7 +74,7 @@ TEST_P(RevertTest, RootFrameReverts)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -91,7 +91,7 @@ TEST_P(RevertTest, RootFrameReverts)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   // Execute the transaction - it should succeed
   auto res = handler.root_invoke();
@@ -247,7 +247,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -264,7 +264,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   // Execute the transaction - it should succeed
   auto res = handler.root_invoke();

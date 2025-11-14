@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -45,35 +46,36 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   NativeContractBuilder builder;
 
   constexpr static StorageKeyContractData kKey = make_storage_key("test");
+  constexpr static int32_t kTestContractId = 0;
 
-  // perform a set_add_nnint
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0,
-      [](SystemCallHandler &handler, int64_t set_amount,
-         int64_t add_amount) -> InvokeStatus<void> {
-        auto r = handler.set_nnint(kKey, set_amount, add_amount);
-        if (!r.has_value() || !r.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
-  // reset contract state
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-        auto r = handler.set_nnint(kKey, 35, 0);
-        if (!r.has_value() || !r.value().has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    // perform a set_add_nnint
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        0,
+        [](SystemCallHandler &handler, int64_t set_amount,
+           int64_t add_amount) -> InvokeStatus<void> {
+          auto r = handler.set_nnint(kKey, set_amount, add_amount);
+          if (!r.has_value() || !r.value().has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
+    // reset contract state
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          auto r = handler.set_nnint(kKey, 35, 0);
+          if (!r.has_value() || !r.value().has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
 
-  auto native_contract = builder.build();
+    auto native_contract = builder.build();
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr int32_t kTestContractId = 0;
-  contract_map.emplace(kTestContractId, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(kTestContractId, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
@@ -98,7 +100,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                    .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        runtime_context);
+        make_context());
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       throw std::runtime_error("root invoke for reset transaction failed");
@@ -116,12 +118,12 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
     model::RunnableActionSet actions(work_queue);
 
-    auto add_set_add_action = [this, &runtime_context]<int64_t SetAmount,
-                                                       int64_t AddAmount>(
+    auto add_set_add_action = [this, &make_context]<int64_t SetAmount,
+                                                    int64_t AddAmount>(
                                   model::RunnableActionSet &actions,
                                   bool &action_result) {
       actions.add_action(
-          [](model::RunnableActionSet &set, auto self, auto &runtime_context,
+          [](model::RunnableActionSet &set, auto self, auto &make_context,
              bool &action_result) -> model::Async {
             // set_amount
             co_await set.bg();
@@ -143,7 +145,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = *calldata}}},
-                runtime_context);
+                make_context());
             auto res = handler.root_invoke();
             if (!res.is_root_success()) {
               throw std::runtime_error("root invoke failed");
@@ -158,7 +160,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
             }
             co_return;
           },
-          this, runtime_context, action_result);
+          this, make_context, action_result);
     };
 
     bool action_1 = true;

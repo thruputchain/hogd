@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -98,7 +99,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -115,7 +116,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -228,7 +229,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -245,7 +246,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -283,53 +284,55 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
   auto return_data = make_bytestring("manual_revert_data");
   auto key = make_storage_key("test_key");
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          // Method 0: Manual revert with return data
-          {0,
-           [test_data, return_data,
-            key](SystemCallHandler &handler,
-                 NativeRuntime &) -> InvokeStatus<void> {
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            // Method 0: Manual revert with return data
+            {0,
+             [test_data, return_data,
+              key](SystemCallHandler &handler,
+                   NativeRuntime &) -> InvokeStatus<void> {
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               ReturnBuffer buffer;
+               buffer.resize_uninitialized(return_data.size());
+               std::memcpy(buffer.data(), return_data.data(),
+                           return_data.size());
+               handler.set_return_buffer(std::move(buffer), true);
+               return {};
+             }},
+            // Method 1: Normal failure
+            {1,
+             [test_data, key](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<void> {
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 ADD_FAILURE() << "set_bytestring failed";
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 ADD_FAILURE() << "set_bytestring failed";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Normal failure - no return data
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+             }}});
 
-             ReturnBuffer buffer;
-             buffer.resize_uninitialized(return_data.size());
-             std::memcpy(buffer.data(), return_data.data(), return_data.size());
-             handler.set_return_buffer(std::move(buffer), true);
-             return {};
-           }},
-          // Method 1: Normal failure
-          {1,
-           [test_data, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               ADD_FAILURE() << "set_bytestring failed";
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               ADD_FAILURE() << "set_bytestring failed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             // Normal failure - no return data
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }}});
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -347,7 +350,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        runtime_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success()); // Manual revert should succeed
@@ -369,7 +372,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        runtime_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success()); // Normal failure should fail
@@ -437,7 +440,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -455,7 +458,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = gas_limit,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -594,7 +597,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -611,7 +614,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -649,99 +652,100 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
   auto test_data = make_bytestring("error_test_data");
   auto key = make_storage_key("error_type_test");
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [test_data, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
-             // Write state that should be reverted on error
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [test_data, key](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<void> {
+               // Write state that should be reverted on error
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Simulate syscall error - this should trigger manual revert
-             ReturnBuffer buffer;
-             auto error_msg = make_bytestring("Storage key not found");
-             buffer.resize_uninitialized(error_msg.size());
-             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-             handler.set_return_buffer(std::move(buffer), true);
-             return {};
-           }},
-          {1,
-           [test_data, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
-             // Write state that should be reverted on error
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               // Simulate syscall error - this should trigger manual revert
+               ReturnBuffer buffer;
+               auto error_msg = make_bytestring("Storage key not found");
+               buffer.resize_uninitialized(error_msg.size());
+               std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+               handler.set_return_buffer(std::move(buffer), true);
+               return {};
+             }},
+            {1,
+             [test_data, key](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<void> {
+               // Write state that should be reverted on error
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Simulate insufficient gas error - this should trigger manual
-             // revert
-             ReturnBuffer buffer;
-             auto error_msg =
-                 make_bytestring("Insufficient gas for invocation");
-             buffer.resize_uninitialized(error_msg.size());
-             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-             handler.set_return_buffer(std::move(buffer), true);
-             return {};
-           }},
-          {2,
-           [test_data, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
-             // Write state that should be reverted on error
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               // Simulate insufficient gas error - this should trigger manual
+               // revert
+               ReturnBuffer buffer;
+               auto error_msg =
+                   make_bytestring("Insufficient gas for invocation");
+               buffer.resize_uninitialized(error_msg.size());
+               std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+               handler.set_return_buffer(std::move(buffer), true);
+               return {};
+             }},
+            {2,
+             [test_data, key](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<void> {
+               // Write state that should be reverted on error
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Simulate custom contract error - this should trigger manual
-             // revert
-             ReturnBuffer buffer;
-             auto error_msg = make_bytestring("Test custom contract error");
-             buffer.resize_uninitialized(error_msg.size());
-             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
-             handler.set_return_buffer(std::move(buffer), true);
-             return {};
-           }},
-          {3,
-           [test_data, key](SystemCallHandler &handler,
-                            NativeRuntime &) -> InvokeStatus<void> {
-             // Write state that should NOT be reverted (no error)
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(test_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               // Simulate custom contract error - this should trigger manual
+               // revert
+               ReturnBuffer buffer;
+               auto error_msg = make_bytestring("Test custom contract error");
+               buffer.resize_uninitialized(error_msg.size());
+               std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+               handler.set_return_buffer(std::move(buffer), true);
+               return {};
+             }},
+            {3,
+             [test_data, key](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<void> {
+               // Write state that should NOT be reverted (no error)
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(test_data)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // No error - state should persist
-             return {};
-           }}});
+               // No error - state should persist
+               return {};
+             }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract
   auto contract = make_native_contract(0);
@@ -760,7 +764,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                                      error_type),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        runtime_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -791,7 +795,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                                  entrypoint_from_method_id(3),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        runtime_context);
+        make_context());
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())

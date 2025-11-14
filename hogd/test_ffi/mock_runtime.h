@@ -30,6 +30,12 @@ public:
     : base_context_(std::move(base_context))
   {}
 
+  MockRuntimeContext(std::shared_ptr<RuntimeContext> base_context,
+                     std::map<int32_t, MockContract> mocked_contracts)
+    : mocked_contracts_(std::move(mocked_contracts)),
+      base_context_(std::move(base_context))
+  {}
+
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
@@ -50,6 +56,12 @@ public:
   bool has_mock_contract(int32_t id) const
   {
     return mocked_contracts_.contains(id);
+  }
+
+  std::unique_ptr<MockRuntimeContext> clone() const
+  {
+    return std::make_unique<MockRuntimeContext>(base_context_,
+                                                mocked_contracts_);
   }
 
 private:

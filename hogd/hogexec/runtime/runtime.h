@@ -16,7 +16,6 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "syscall.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -156,10 +155,10 @@ private:
 };
 
 // create RuntimeContext with no imported functions
-std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
+std::unique_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // create RuntimeContext for running wasm contracts, and initialize with
 // hogexec's imported function(s)
-std::shared_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
+std::unique_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
 
 namespace test {
 void reset_module_cache();

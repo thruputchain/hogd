@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -176,34 +177,37 @@ public:
 protected:
   void SetUp() override { initialize(); }
 
+  static std::unique_ptr<RuntimeContext> make_context()
+  {
+    auto test_contract = make_test_contract();
+    auto caller_contract = make_caller_contract();
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(test_contract));
+    contract_map.emplace(1, std::move(caller_contract));
+
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  }
+
   void initialize()
   {
     // Set up contract addresses
 
     // Create and deploy the test contract (the one with the result methods)
-    auto test_contract = make_test_contract();
     auto test_contract_xdr = make_native_contract(0);
     write_contract(test_contract_xdr);
     write_deployment(kTestContractAddr, test_contract_xdr);
 
     // Create and deploy the caller contract (calls methods from test contract)
-    auto caller_contract = make_caller_contract();
     auto caller_contract_xdr = make_native_contract(1);
     write_contract(caller_contract_xdr);
     write_deployment(kCallerContractAddr, caller_contract_xdr);
-
-    // Set up the native contract map and runtime context
-    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(test_contract));
-    contract_map.emplace(1, std::move(caller_contract));
-    runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
 
     // Grant storage tokens to both contracts
     setup_grant_storage_token(kTestContractAddr, 1'000'000'000);
     setup_grant_storage_token(kCallerContractAddr, 1'000'000'000);
   }
 
-  std::shared_ptr<NativeContext> runtime_context_;
   caller_contract_client_t caller_contract_client_ =
       caller_contract_client_t(kCallerContractAddr);
 };
@@ -219,7 +223,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_ok_void">(0)}},
-      runtime_context_);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -239,7 +243,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_ok_int">(0)}},
-      runtime_context_);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -258,7 +262,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetErrVoid)
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
                                   "call_return_err_void">(0)}},
-      runtime_context_);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -278,7 +282,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetErrInt)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_err_int">(0)}},
-      runtime_context_);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
