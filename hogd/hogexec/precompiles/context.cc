@@ -28,7 +28,7 @@ make_hogexec_precompiles_context()
 std::unique_ptr<RuntimeContext>
 make_hogexec_context()
 {
-  static std::unique_ptr<RuntimeContext> hogexec_native_context =
+  static thread_local std::unique_ptr<RuntimeContext> hogexec_native_context =
       make_hogexec_precompiles_context();
 
   auto hogexec_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
