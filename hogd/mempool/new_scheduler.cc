@@ -562,19 +562,22 @@ NewScheduler::schedule(size_t num_txs,
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
+  auto account_it = ready_accounts_.begin();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-    if (ready_accounts_.empty()) {
+    if (account_it == ready_accounts_.end()) {
+      ready_accounts_.clear();
       cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
       removed_accounts.clear();
       if (ready_accounts_.empty()) {
         // If there are still no ready accounts, then break.
         break;
       }
+      account_it = ready_accounts_.begin();
     }
 
     // TODO(jhumphri): This is a good place to parallelize. Each thread can
     // handle its own chunk of accounts from [ready_accounts_].
-    const AccountKey account_key = *ready_accounts_.begin();
+    const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
     auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
     auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
@@ -589,7 +592,8 @@ NewScheduler::schedule(size_t num_txs,
         it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
       }
       if (it == txs_to_schedule.end()) {
-        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        account_it++;
         break;
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
@@ -642,7 +646,8 @@ NewScheduler::schedule(size_t num_txs,
           // just skip over this account and revisit it once it has been
           // cycled.
         }
-        CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
+        account_it++;
         CHECK(removed_accounts.insert(account).second);
         break;
       }
@@ -656,6 +661,7 @@ NewScheduler::schedule(size_t num_txs,
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
+  ready_accounts_.erase(ready_accounts_.begin(), account_it);
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   for (const ContractAddress &account : accounts_excluded_from_block) {
