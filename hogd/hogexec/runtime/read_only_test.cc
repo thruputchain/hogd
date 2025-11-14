@@ -5,7 +5,6 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/read_only_test.h"
