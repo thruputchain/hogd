@@ -6,7 +6,6 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/cxs_roundtrip.h"
@@ -423,17 +422,10 @@ protected:
     write_deployment(native_contract_addr_, native_contract_xdr);
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-    auto *wasm_context_ptr = wasm_context.get();
-    std::vector<std::unique_ptr<RuntimeContext>> owned_contexts;
-    owned_contexts.reserve(2);
-    owned_contexts.emplace_back(std::move(wasm_context));
-    auto *native_runtime_context_ptr = native_runtime_context.get();
-    owned_contexts.emplace_back(std::move(native_runtime_context));
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, RuntimeContext *>{
-            {ContractType::kNative, native_runtime_context_ptr},
-            {ContractType::kWasmi, wasm_context_ptr}},
-        std::move(owned_contexts));
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.release(), true}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
   }
 
   using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;

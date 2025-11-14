@@ -154,10 +154,9 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, RuntimeContext *>{
-          {ContractType::kNative, native_runtime_context.get()},
-          {ContractType::kWasmi, wasm_context.get()}},
-      std::vector<std::unique_ptr<RuntimeContext>>{});
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {native_runtime_context.get(), false}},
+          {ContractType::kWasmi, {wasm_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -239,10 +238,9 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   write_deployment(native_contract_addr, native_contract_xdr);
   auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, RuntimeContext *>{
-          {ContractType::kNative, native_runtime_context.get()},
-          {ContractType::kWasmi, wasm_context.get()}},
-      std::vector<std::unique_ptr<RuntimeContext>>{});
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {native_runtime_context.get(), false}},
+          {ContractType::kWasmi, {wasm_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -311,10 +309,9 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
 
   auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, RuntimeContext *>{
-          {ContractType::kNative, native_runtime_context.get()},
-          {ContractType::kWasmi, wasm_context.get()}},
-      std::vector<std::unique_ptr<RuntimeContext>>{});
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {native_runtime_context.get(), false}},
+          {ContractType::kWasmi, {wasm_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -387,10 +384,9 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, RuntimeContext *>{
-            {ContractType::kNative, native_runtime_context.get()},
-            {ContractType::kWasmi, wasm_context.get()}},
-        std::vector<std::unique_ptr<RuntimeContext>>{});
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.get(), false}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -461,10 +457,9 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 
   auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, RuntimeContext *>{
-          {ContractType::kNative, native_runtime_context.get()},
-          {ContractType::kWasmi, wasm_context.get()}},
-      std::vector<std::unique_ptr<RuntimeContext>>{});
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {native_runtime_context.get(), false}},
+          {ContractType::kWasmi, {wasm_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -536,10 +531,9 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, RuntimeContext *>{
-            {ContractType::kNative, native_runtime_context.get()},
-            {ContractType::kWasmi, wasm_context.get()}},
-        std::vector<std::unique_ptr<RuntimeContext>>{});
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.get(), false}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -597,10 +591,9 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
 
     auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, RuntimeContext *>{
-            {ContractType::kNative, native_runtime_context.get()},
-            {ContractType::kWasmi, wasm_context.get()}},
-        std::vector<std::unique_ptr<RuntimeContext>>{});
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.get(), false}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
