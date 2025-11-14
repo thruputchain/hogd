@@ -28,6 +28,7 @@ make_hogexec_precompiles_context()
 std::unique_ptr<RuntimeContext>
 make_hogexec_context()
 {
+  // This thread_local declaration has a meaningful performance impact
   static thread_local std::unique_ptr<RuntimeContext> hogexec_native_context =
       make_hogexec_precompiles_context();
 
