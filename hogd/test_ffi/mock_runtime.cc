@@ -41,19 +41,12 @@ MockRuntimeContext::make_new_runtime(Contract const &contract,
                                      SystemCallHandler *syscall_handler,
                                      bool do_contract_verify)
 {
-  info("MockRuntimeContext::make_new_runtime called with contract type {}",
-       contract.contract_type());
   if (contract.contract_type() == ContractType::kMockTest) {
     int32_t mock_contract = contract.mock_contract_id();
-    info("MockRuntimeContext::make_new_runtime called with mock contract id {}",
-         mock_contract);
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
       return std::make_unique<MockRuntime>(it->second);
     }
-    info("MockRuntimeContext::make_new_runtime called with mock contract id {} "
-         "not found",
-         mock_contract);
     return nullptr;
   }
   // otherwise some other contract type; returns whatever the base context
