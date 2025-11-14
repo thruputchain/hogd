@@ -168,7 +168,7 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   cg.reset();
   info("cg acquire end");
 
-  constexpr size_t kNumThreads = 127;
+  constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
   if (txs.size() % kNumThreads) {
     // Have each thread handle an extra tx so that there are no txs leftover.
@@ -205,19 +205,6 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
                                                        *this);
   }
-
-  info("cg acquire start");
-  co_await cg(global_lock_);
-
-  double get_lock_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  for (const ContractAddress &account : accounts) {
-    ready_accounts_.insert(get_account_key(account));
-  }
-  cg.reset();
-  info("cg acquire end");
-
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
   }
@@ -225,13 +212,40 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   double tx_hash_and_enqueue_duration = timer->elapsed();
   timer = std::make_unique<ElapsedTimer>();
 
+  info("cg acquire start");
+  co_await cg(global_lock_);
+
+  double get_lock_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  std::vector<AccountKey> account_keys;
+  account_keys.reserve(accounts.size());
+  for (const ContractAddress &account : accounts) {
+    account_keys.push_back(get_account_key(account));
+  }
+
+  double get_account_keys_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  for (const AccountKey &account_key : account_keys) {
+    ready_accounts_.insert(account_key);
+  }
   double ready_accounts_duration = timer->elapsed();
+  timer = std::make_unique<ElapsedTimer>();
+
+  cg.reset();
+  double cg_reset_duration = timer->elapsed();
+
+  info("cg acquire end");
+
   info("NewScheduler::add_txs read_average_hog_ages_duration {}, "
        "tx_hash_and_enqueue_duration {}, "
-       "get_lock_duration {}, ready_accounts_duration {}, ready accounts "
+       "get_lock_duration {}, get_account_keys_duration {}, "
+       "ready_accounts_duration {}, cg_reset_duration {}, ready accounts "
        "inserted {}",
        read_average_hog_ages_duration, tx_hash_and_enqueue_duration,
-       get_lock_duration, ready_accounts_duration, accounts.size());
+       get_lock_duration, get_account_keys_duration, ready_accounts_duration,
+       cg_reset_duration, accounts.size());
 }
 
 void
