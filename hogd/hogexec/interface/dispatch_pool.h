@@ -37,7 +37,6 @@ public:
     for (int i = 0; i < kBucketCount; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
       job_counts_[i].store(0, std::memory_order_relaxed);
-      pending_job_counts_[i].store(0, std::memory_order_relaxed);
     }
   }
 
@@ -89,30 +88,14 @@ public:
     r2 = r1 + (r2 >= r1 ? 1 : 0);
     
     // Compare pending counts and pick the pool with fewer pending jobs
-    size_t pending_1 = pending_job_counts_[r1].load(std::memory_order_relaxed);
-    size_t pending_2 = pending_job_counts_[r2].load(std::memory_order_relaxed);
+    size_t pending_1 = pools_[r1]->pending_jobs();
+    size_t pending_2 = pools_[r2]->pending_jobs();
     int pool_idx = (pending_2 < pending_1) ? r2 : r1;
     
     // Increment counters
     job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
-    pending_job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
     
-    // Wrap the function to decrement pending count when it completes
-    auto wrapped_func = [this, pool_idx, func = std::forward<Func>(func)]() mutable -> Ret {
-      // Use RAII to ensure pending count is decremented even on exception
-      struct DecrementGuard {
-        std::atomic<size_t> *counter;
-        ~DecrementGuard() { counter->fetch_sub(1, std::memory_order_relaxed); }
-      } guard{&pending_job_counts_[pool_idx]};
-      
-      if constexpr (std::is_void_v<Ret>) {
-        func();
-      } else {
-        return func();
-      }
-    };
-    
-    return pools_[pool_idx]->submit(std::move(wrapped_func));
+    return pools_[pool_idx]->submit(std::forward<Func>(func));
   }
 
   // print_stats prints per-pool job counts and resets them.
@@ -124,7 +107,7 @@ public:
     size_t total_pending = 0;
     for (int i = 0; i < kBucketCount; ++i) {
       counts[i] = job_counts_[i].load(std::memory_order_relaxed);
-      pending[i] = pending_job_counts_[i].load(std::memory_order_relaxed);
+      pending[i] = pools_[i]->pending_jobs();
       total += counts[i];
       total_pending += pending[i];
     }
@@ -146,7 +129,6 @@ public:
 private:
   std::array<std::unique_ptr<WorkerPool>, kBucketCount> pools_;
   std::array<std::atomic<size_t>, kBucketCount> job_counts_;
-  std::array<std::atomic<size_t>, kBucketCount> pending_job_counts_;
 };
 
 } // namespace hogd
