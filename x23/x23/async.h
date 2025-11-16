@@ -464,6 +464,10 @@ template<typename R> struct callback_traits<CoroCB<R>> {
 
 namespace detail {
 struct OneShotCoroPromise : PromiseBase {
+  template<typename... Args> requires has_location<Args...>
+  OneShotCoroPromise(Args &&...args) : PromiseBase(extract_location(args...))
+  {}
+  OneShotCoroPromise(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
   std::coroutine_handle<OneShotCoroPromise> get_return_object()
   {
     return std::coroutine_handle<OneShotCoroPromise>::from_promise(*this);
@@ -477,7 +481,8 @@ struct OneShotCoroPromise : PromiseBase {
 
 // A function returning a OneShotCoro is an initially suspended
 // coroutine that just returns its own handle.  This is a light-weight
-// means of turning a lambda into a coroutine_handle.
+// means of turning a lambda into a coroutine_handle for a suspended
+// coroutine.
 using OneShotCoro = std::coroutine_handle<detail::OneShotCoroPromise>;
 
 } // namespace x23
@@ -753,9 +758,7 @@ struct Detached {
     template<typename... Args> requires has_location<Args...>
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
     {}
-    promise_type(source_location sloc = source_location::current())
-      : PromiseBase(sloc)
-    {}
+    promise_type(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}
