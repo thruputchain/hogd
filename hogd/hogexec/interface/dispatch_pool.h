@@ -9,6 +9,7 @@
 #include <thread>
 #include <type_traits>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -20,19 +21,20 @@ namespace hogd {
 // DispatchPool routes job submissions across multiple WorkerPools based on
 // CPU LLC (Last-Level Cache) affinity. This reduces contention on the
 // single mutex-protected queue in WorkerPool by distributing submissions
-// across 8 separate pools.
+// across kBucketCount separate pools.
 //
-// Each WorkerPool has nthreads/8 threads, where nthreads is the total
+// Each WorkerPool has nthreads/kBucketCount threads, where nthreads is the total
 // number of worker threads requested.
 class DispatchPool {
 public:
+  static constexpr int kBucketCount = 16;
   // Create a DispatchPool with nthreads total worker threads distributed
-  // across 8 WorkerPools.
+  // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
   {
     x23::init_cpumaps();
-    int threads_per_pool = (nthreads + 7) / 8; // round up
-    for (int i = 0; i < 8; ++i) {
+    int threads_per_pool = divide_up(nthreads, kBucketCount); // round up
+    for (int i = 0; i < kBucketCount; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
       job_counts_[i].store(0, std::memory_order_relaxed);
       pending_job_counts_[i].store(0, std::memory_order_relaxed);
@@ -63,8 +65,8 @@ public:
   std::future<Ret> submit(Func &&func)
   {
     // Get current CPU's LLC bucket
-    int bucket = x23::llc_map->bucket();
-    int affinity_pool = bucket % 8;
+    int bucket = x23::core_map->bucket();
+    int affinity_pool = bucket % kBucketCount;
     
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
@@ -81,7 +83,7 @@ public:
     };
     
     // Pick random pool excluding affinity_pool
-    int r = rnd(rnd_seed) % 7; // 0-6
+    int r = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
     int other_pool = r + (r >= affinity_pool ? 1 : 0);
     
     // Compare pending counts and pick the pool with fewer pending jobs
@@ -114,11 +116,11 @@ public:
   // print_stats prints per-pool job counts and resets them.
   void print_stats()
   {
-    std::array<size_t, 8> counts;
-    std::array<size_t, 8> pending;
+    std::array<size_t, kBucketCount> counts;
+    std::array<size_t, kBucketCount> pending;
     size_t total = 0;
     size_t total_pending = 0;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < kBucketCount; ++i) {
       counts[i] = job_counts_[i].load(std::memory_order_relaxed);
       pending[i] = pending_job_counts_[i].load(std::memory_order_relaxed);
       total += counts[i];
@@ -128,21 +130,21 @@ public:
       return;
     }
     info("DispatchPool stats: total={}, pending={}", total, total_pending);
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < kBucketCount; ++i) {
       double pct = total > 0 ? (100.0 * counts[i] / total) : 0.0;
       info("  pool[{}]: {} jobs ({:.1f}%), {} pending", i, counts[i], pct,
            pending[i]);
     }
     // Reset counters after printing
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < kBucketCount; ++i) {
       job_counts_[i].store(0, std::memory_order_relaxed);
     }
   }
 
 private:
-  std::array<std::unique_ptr<WorkerPool>, 8> pools_;
-  std::array<std::atomic<size_t>, 8> job_counts_;
-  std::array<std::atomic<size_t>, 8> pending_job_counts_;
+  std::array<std::unique_ptr<WorkerPool>, kBucketCount> pools_;
+  std::array<std::atomic<size_t>, kBucketCount> job_counts_;
+  std::array<std::atomic<size_t>, kBucketCount> pending_job_counts_;
 };
 
 } // namespace hogd

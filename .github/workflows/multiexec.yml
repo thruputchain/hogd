@@ -77,7 +77,7 @@ jobs:
     - name: configure
       run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
     - name: build
-      run: make -C release -j$(nproc) multiexec_runner
+      run: make -C release -j$(nproc) multiexec_runner control_cli
     - name: wait for bench servers
       run: |
         ./scripts/wait-port.sh hog7 11111
