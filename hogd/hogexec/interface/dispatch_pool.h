@@ -65,8 +65,8 @@ public:
   std::future<Ret> submit(Func &&func)
   {
     // Get current CPU's LLC bucket
-    int bucket = x23::core_map->bucket();
-    int affinity_pool = bucket % kBucketCount;
+   // int bucket = x23::core_map->bucket();
+   // int affinity_pool = bucket % kBucketCount;
     
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
@@ -81,15 +81,17 @@ public:
       x ^= x << 17;
       return seed = x;
     };
+
+    int r1 = rnd(rnd_seed) % kBucketCount;
     
     // Pick random pool excluding affinity_pool
-    int r = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
-    int other_pool = r + (r >= affinity_pool ? 1 : 0);
+    int r2 = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
+    r2 = r1 + (r2 >= r1 ? 1 : 0);
     
     // Compare pending counts and pick the pool with fewer pending jobs
-    size_t affinity_pending = pending_job_counts_[affinity_pool].load(std::memory_order_relaxed);
-    size_t other_pending = pending_job_counts_[other_pool].load(std::memory_order_relaxed);
-    int pool_idx = (other_pending < affinity_pending) ? other_pool : affinity_pool;
+    size_t pending_1 = pending_job_counts_[r1].load(std::memory_order_relaxed);
+    size_t pending_2 = pending_job_counts_[r2].load(std::memory_order_relaxed);
+    int pool_idx = (pending_2 < pending_1) ? r2 : r1;
     
     // Increment counters
     job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
