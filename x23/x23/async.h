@@ -462,6 +462,33 @@ template<typename R> struct callback_traits<CoroCB<R>> {
   using argument_type = R;
 };
 
+namespace detail {
+struct OneShotCoroPromise : PromiseBase {
+  std::coroutine_handle<OneShotCoroPromise> get_return_object()
+  {
+    return std::coroutine_handle<OneShotCoroPromise>::from_promise(*this);
+  }
+  static std::suspend_always initial_suspend() noexcept { return {}; }
+  void return_void() const noexcept {}
+  void unhandled_exception() noexcept { trace_unhandled_exception(this); }
+  static std::suspend_never final_suspend() noexcept { return {}; }
+};
+} // namespace detail
+
+// A function returning a OneShotCoro is an initially suspended
+// coroutine that just returns its own handle.  This is a light-weight
+// means of turning a lambda into a coroutine_handle.
+using OneShotCoro = std::coroutine_handle<detail::OneShotCoroPromise>;
+
+} // namespace x23
+
+template<typename... Args>
+struct std::coroutine_traits<x23::OneShotCoro, Args...> {
+  using promise_type = x23::detail::OneShotCoroPromise;
+};
+
+namespace x23 {
+
 // An asynchronous result.  A function returning Async<R> can be
 // implemented as a coroutine.  A coroutine with an Async<R> a can
 // "co_await a" to get the result.  A non-coroutine can invoke an
@@ -531,20 +558,17 @@ template<typename R> struct [[nodiscard]] Async {
   {
     extern bool in_thread_pool();
     x23assert(!in_thread_pool());
-    std::binary_semaphore wait(0);
-    if constexpr (std::is_void_v<R>) {
-      (*this)([&wait] { wait.release(); } SLOC_COMMA_VAR);
-      wait.acquire();
+
+    promise_type &p = callee_.promise();
+    if (!p.await_ready()) {
+      std::binary_semaphore wait(0);
+      if (p.await_suspend([&wait] -> OneShotCoro {
+            wait.release();
+            co_return;
+          }()))
+        wait.acquire();
     }
-    else {
-      std::optional<R> res;
-      (*this)([&res, &wait](R r) {
-        res.emplace(std::move(r));
-        wait.release();
-      });
-      wait.acquire();
-      return std::move(*res);
-    }
+    return p.await_resume();
   }
 
 private:
