@@ -463,14 +463,14 @@ template<typename R> struct callback_traits<CoroCB<R>> {
 };
 
 namespace detail {
-struct OneShotCoroPromise : PromiseBase {
+struct SuspendedCoroPromise : PromiseBase {
   template<typename... Args> requires has_location<Args...>
-  OneShotCoroPromise(Args &&...args) : PromiseBase(extract_location(args...))
+  SuspendedCoroPromise(Args &&...args) : PromiseBase(extract_location(args...))
   {}
-  OneShotCoroPromise(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
-  std::coroutine_handle<OneShotCoroPromise> get_return_object()
+  SuspendedCoroPromise(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
+  std::coroutine_handle<SuspendedCoroPromise> get_return_object()
   {
-    return std::coroutine_handle<OneShotCoroPromise>::from_promise(*this);
+    return std::coroutine_handle<SuspendedCoroPromise>::from_promise(*this);
   }
   static std::suspend_always initial_suspend() noexcept { return {}; }
   void return_void() const noexcept {}
@@ -479,17 +479,16 @@ struct OneShotCoroPromise : PromiseBase {
 };
 } // namespace detail
 
-// A function returning a OneShotCoro is an initially suspended
-// coroutine that just returns its own handle.  This is a light-weight
-// means of turning a lambda into a coroutine_handle for a suspended
-// coroutine.
-using OneShotCoro = std::coroutine_handle<detail::OneShotCoroPromise>;
+// A function returning an SCH (suspended coroutine handle) is an
+// initially suspended coroutine that just returns its own handle.
+// This is a light-weight means of turning a lambda into a
+// coroutine_handle for a suspended coroutine.
+using SCH = std::coroutine_handle<detail::SuspendedCoroPromise>;
 
 } // namespace x23
 
-template<typename... Args>
-struct std::coroutine_traits<x23::OneShotCoro, Args...> {
-  using promise_type = x23::detail::OneShotCoroPromise;
+template<typename... Args> struct std::coroutine_traits<x23::SCH, Args...> {
+  using promise_type = x23::detail::SuspendedCoroPromise;
 };
 
 namespace x23 {
@@ -567,7 +566,7 @@ template<typename R> struct [[nodiscard]] Async {
     promise_type &p = callee_.promise();
     if (!p.await_ready()) {
       std::binary_semaphore wait(0);
-      if (p.await_suspend([&wait] -> OneShotCoro {
+      if (p.await_suspend([&wait] -> SCH {
             wait.release();
             co_return;
           }()))
