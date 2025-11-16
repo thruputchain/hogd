@@ -17,7 +17,8 @@ namespace hogd {
 class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
-                  EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
+                  EventServerProxy &event_server_proxy,
+                  DispatchPool &worker_pool)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
       event_server_proxy_(event_server_proxy), snapshot_cache_(id, db_proxy),
       worker_pool_(worker_pool)

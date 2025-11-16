@@ -23,8 +23,8 @@ namespace hogd {
 // single mutex-protected queue in WorkerPool by distributing submissions
 // across kBucketCount separate pools.
 //
-// Each WorkerPool has nthreads/kBucketCount threads, where nthreads is the total
-// number of worker threads requested.
+// Each WorkerPool has nthreads/kBucketCount threads, where nthreads is the
+// total number of worker threads requested.
 class DispatchPool {
 public:
   static constexpr int kBucketCount = 16;
@@ -46,7 +46,8 @@ public:
   DispatchPool(DispatchPool &&) = delete;
   DispatchPool &operator=(DispatchPool &&) = delete;
 
-  // worker_count returns the total number of available workers across all pools.
+  // worker_count returns the total number of available workers across all
+  // pools.
   size_t worker_count() const
   {
     size_t total = 0;
@@ -64,14 +65,15 @@ public:
   std::future<Ret> submit(Func &&func)
   {
     // Get current CPU's LLC bucket
-   // int bucket = x23::core_map->bucket();
-   // int affinity_pool = bucket % kBucketCount;
-    
+    // int bucket = x23::core_map->bucket();
+    // int affinity_pool = bucket % kBucketCount;
+
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
-        (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xffffffff) |
+        (std::hash<std::thread::id>{}(std::this_thread::get_id()) &
+         0xffffffff) |
         1UL << 20 | x23::fastclock::get_ns() << 32};
-    
+
     // Simple xorshift RNG
     auto rnd = [](uint64_t &seed) noexcept -> uint64_t {
       uint64_t x = seed;
@@ -82,23 +84,24 @@ public:
     };
 
     int r1 = rnd(rnd_seed) % kBucketCount;
-    
+
     // Pick random pool excluding r1
-    // Generate r2 in range [0, kBucketCount-2], then map to [0, kBucketCount-1] excluding r1
+    // Generate r2 in range [0, kBucketCount-2], then map to [0, kBucketCount-1]
+    // excluding r1
     int r2 = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
     if (r2 >= r1) {
       r2 = r2 + 1; // Skip r1 by adding 1
     }
     // Now r2 is guaranteed to be != r1 and in [0, kBucketCount-1]
-    
+
     // Compare pending counts and pick the pool with fewer pending jobs
     size_t pending_1 = pools_[r1]->pending_jobs();
     size_t pending_2 = pools_[r2]->pending_jobs();
     int pool_idx = (pending_2 < pending_1) ? r2 : r1;
-    
+
     // Increment counters
     job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
-    
+
     return pools_[pool_idx]->submit(std::forward<Func>(func));
   }
 
@@ -136,4 +139,3 @@ private:
 };
 
 } // namespace hogd
-

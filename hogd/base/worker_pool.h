@@ -177,7 +177,10 @@ public:
       cv_.notify_all();
   }
 
-  size_t pending_jobs() const { return pending_jobs_.load(std::memory_order_relaxed); }
+  size_t pending_jobs() const
+  {
+    return pending_jobs_.load(std::memory_order_relaxed);
+  }
 
 private:
   std::mutex lock_;
