@@ -81,6 +81,7 @@ public:
     std::future<Ret> future = promise.get_future();
 
     std::scoped_lock g(lock_);
+    pending_jobs_.fetch_add(1, std::memory_order_relaxed);
     jobs_.emplace(
         [p = std::move(promise), fn = std::forward<Func>(func)] mutable {
           // handle void return values
@@ -176,6 +177,11 @@ public:
       cv_.notify_all();
   }
 
+  size_t pending_jobs() const
+  {
+    return pending_jobs_.load(std::memory_order_relaxed);
+  }
+
 private:
   std::mutex lock_;
   std::condition_variable_any cv_;
@@ -183,6 +189,7 @@ private:
   int target_workers_;
   int active_workers_;
   std::vector<std::jthread> workers_;
+  std::atomic<size_t> pending_jobs_{0};
 
   // worker_loop is the main loop run by each worker thread.
   void worker_loop(const std::stop_token &stoken)
@@ -204,6 +211,7 @@ private:
       }
 
       fn();
+      pending_jobs_.fetch_sub(1, std::memory_order_relaxed);
     }
   }
 };

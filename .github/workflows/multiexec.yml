@@ -34,20 +34,9 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: gcc version check
-      run: gcc --version
-    - name: clang version check
-      run: clang --version
-    - name: Add Cargo to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    - name: path check
-      run: echo $PATH
-    - name: cargo version check
-      run: cargo --version
-    - name: cargo fetch
-      run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-    - name: configure
-      run: ./scripts/build.sh -d release -t Release -c gcc -n -x -DX23_CORO_TRACE=1
+    - uses: ./.github/actions/prepare_env 
+    - name: build
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
     - name: build
       run: make -C release -j$(nproc) control_server hogdb_exec hogexec
     - name: clear hogdb file directory
@@ -85,11 +74,13 @@ jobs:
         submodules: recursive
     - name: prepare env
       uses: ./.github/actions/prepare_env
+    - name: configure
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+      run: make -C release -j$(nproc) multiexec_runner control_cli
     - name: wait for bench servers
       run: |
-        ./scripts/wait-port.sh hog7 11111  
+        ./scripts/wait-port.sh hog7 11111
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
         ./scripts/wait-port.sh hog6 11111

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "exec_sched.hh"
-#include "hogd/base/worker_pool.h"
+#include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -17,7 +17,8 @@ namespace hogd {
 class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
-                  EventServerProxy &event_server_proxy, WorkerPool &worker_pool)
+                  EventServerProxy &event_server_proxy,
+                  DispatchPool &worker_pool)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
       event_server_proxy_(event_server_proxy), snapshot_cache_(id, db_proxy),
       worker_pool_(worker_pool)
@@ -54,7 +55,7 @@ private:
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
   StorageSnapshotCache snapshot_cache_;
-  WorkerPool &worker_pool_;
+  DispatchPool &worker_pool_;
 
   ExecProposeResult run_propose_transaction(SignedTransaction const &tx,
                                             TransactionID tx_id);
