@@ -74,11 +74,13 @@ jobs:
         submodules: recursive
     - name: prepare env
       uses: ./.github/actions/prepare_env
+    - name: configure
+      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
     - name: build
-      run: ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+      run: make -C release -j$(nproc) multiexec_runner
     - name: wait for bench servers
       run: |
-        ./scripts/wait-port.sh hog7 11111  
+        ./scripts/wait-port.sh hog7 11111
         ./scripts/wait-port.sh hog8 11111
         ./scripts/wait-port.sh hog11 11111
         ./scripts/wait-port.sh hog6 11111
