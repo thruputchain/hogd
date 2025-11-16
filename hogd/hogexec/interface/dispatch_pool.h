@@ -1,10 +1,12 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <future>
 #include <type_traits>
 
+#include "hogd/base/log.h"
 #include "hogd/base/worker_pool.h"
 #include "x23/cpumap.h"
 
@@ -27,6 +29,7 @@ public:
     int threads_per_pool = (nthreads + 7) / 8; // round up
     for (int i = 0; i < 8; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
+      job_counts_[i].store(0, std::memory_order_relaxed);
     }
   }
 
@@ -56,11 +59,36 @@ public:
     // Route to pool based on current CPU's LLC bucket
     int bucket = x23::llc_map->bucket();
     int pool_idx = bucket % 8;
+    job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
     return pools_[pool_idx]->submit(std::forward<Func>(func));
+  }
+
+  // print_stats prints per-pool job counts and resets them.
+  void print_stats()
+  {
+    std::array<size_t, 8> counts;
+    size_t total = 0;
+    for (int i = 0; i < 8; ++i) {
+      counts[i] = job_counts_[i].load(std::memory_order_relaxed);
+      total += counts[i];
+    }
+    if (total == 0) {
+      return;
+    }
+    info("DispatchPool stats: total={}", total);
+    for (int i = 0; i < 8; ++i) {
+      double pct = total > 0 ? (100.0 * counts[i] / total) : 0.0;
+      info("  pool[{}]: {} jobs ({:.1f}%)", i, counts[i], pct);
+    }
+    // Reset counters after printing
+    for (int i = 0; i < 8; ++i) {
+      job_counts_[i].store(0, std::memory_order_relaxed);
+    }
   }
 
 private:
   std::array<std::unique_ptr<WorkerPool>, 8> pools_;
+  std::array<std::atomic<size_t>, 8> job_counts_;
 };
 
 } // namespace hogd
