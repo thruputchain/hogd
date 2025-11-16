@@ -13,7 +13,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "x23/cpumap.h"
 #include "x23/fastclock.h"
 
 namespace hogd {
@@ -27,12 +26,11 @@ namespace hogd {
 // total number of worker threads requested.
 class DispatchPool {
 public:
-  static constexpr int kBucketCount = 16;
+  static constexpr int kBucketCount = 128;
   // Create a DispatchPool with nthreads total worker threads distributed
   // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
   {
-    x23::init_cpumaps();
     int threads_per_pool = divide_up(nthreads, kBucketCount); // round up
     for (int i = 0; i < kBucketCount; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
@@ -64,10 +62,6 @@ public:
   requires std::is_invocable_r_v<Ret, Func>
   std::future<Ret> submit(Func &&func)
   {
-    // Get current CPU's LLC bucket
-    // int bucket = x23::core_map->bucket();
-    // int affinity_pool = bucket % kBucketCount;
-
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
         (std::hash<std::thread::id>{}(std::this_thread::get_id()) &
