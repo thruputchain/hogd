@@ -9,7 +9,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
+#include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -24,7 +24,8 @@ public:
                        std::unique_ptr<EventServerProxy> event_server_proxy,
                        size_t nthreads)
     : db_proxy_(std::move(db_proxy)),
-      event_server_proxy_(std::move(event_server_proxy)), worker_pool_(nthreads)
+      event_server_proxy_(std::move(event_server_proxy)),
+      worker_pool_(static_cast<int>(nthreads))
   {}
 
   // This acquires a reference to the executor context, if the returned value is
@@ -52,7 +53,7 @@ private:
   std::mutex active_blocks_lock_;
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
-                EventServerProxy &event_server_proxy, WorkerPool &worker_pool)
+                EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
       : context(mode, block_id, db_proxy, event_server_proxy, worker_pool)
     {}
     PerThreadARC<ExecutorContext> context;
@@ -74,7 +75,7 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  WorkerPool worker_pool_;
+  DispatchPool worker_pool_;
 };
 
 inline PerThreadARC<ExecutorContext> *
