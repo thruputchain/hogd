@@ -27,7 +27,7 @@ namespace hogd {
 // total number of worker threads requested.
 class DispatchPool {
 public:
-  static constexpr int kBucketCount = 16;
+  static constexpr int kBucketCount = 128;
   // Create a DispatchPool with nthreads total worker threads distributed
   // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
