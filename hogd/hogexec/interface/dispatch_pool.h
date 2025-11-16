@@ -3,11 +3,14 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <functional>
 #include <future>
+#include <memory>
 #include <thread>
 #include <type_traits>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "x23/cpumap.h"
 #include "x23/fastclock.h"
@@ -78,8 +81,8 @@ public:
     };
     
     // Pick random pool excluding affinity_pool
-    uint64_t r = rnd(rnd_seed) % 7; // 0-6
-    int other_pool = static_cast<int>(r + (r >= affinity_pool));
+    int r = rnd(rnd_seed) % 7; // 0-6
+    int other_pool = r + (r >= affinity_pool ? 1 : 0);
     
     // Compare pending counts and pick the pool with fewer pending jobs
     size_t affinity_pending = pending_job_counts_[affinity_pool].load(std::memory_order_relaxed);
