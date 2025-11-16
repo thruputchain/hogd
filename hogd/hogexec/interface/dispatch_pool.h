@@ -83,9 +83,13 @@ public:
 
     int r1 = rnd(rnd_seed) % kBucketCount;
     
-    // Pick random pool excluding affinity_pool
+    // Pick random pool excluding r1
+    // Generate r2 in range [0, kBucketCount-2], then map to [0, kBucketCount-1] excluding r1
     int r2 = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
-    r2 = r1 + (r2 >= r1 ? 1 : 0);
+    if (r2 >= r1) {
+      r2 = r2 + 1; // Skip r1 by adding 1
+    }
+    // Now r2 is guaranteed to be != r1 and in [0, kBucketCount-1]
     
     // Compare pending counts and pick the pool with fewer pending jobs
     size_t pending_1 = pools_[r1]->pending_jobs();
