@@ -65,7 +65,7 @@ public:
   std::future<Ret> submit(Func &&func)
   {
     // Get current CPU's LLC bucket
-    // int bucket = x23::core_map->bucket();
+    int r1 = x23::core_map->bucket();
     // int affinity_pool = bucket % kBucketCount;
 
     // Pick a random other pool to compare (excluding affinity_pool)
@@ -83,7 +83,7 @@ public:
       return seed = x;
     };
 
-    int r1 = rnd(rnd_seed) % kBucketCount;
+    //int r1 = rnd(rnd_seed) % kBucketCount;
 
     // Pick random pool excluding r1
     // Generate r2 in range [0, kBucketCount-2], then map to [0, kBucketCount-1]
