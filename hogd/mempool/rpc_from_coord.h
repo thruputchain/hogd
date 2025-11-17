@@ -181,9 +181,12 @@ private:
     ready_.store(true, std::memory_order_release);
   }
 
-  x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
-                                   BlockExecutionMode /*mode*/);
-  x23::Async<void> abandon_snapshot(BlockID block_id);
+  x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
+                                            BlockID block_id,
+                                            BlockExecutionMode mode);
+  x23::Async<RPCError> eventsched_open_block(BlockID block_id);
+  x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
+  x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
