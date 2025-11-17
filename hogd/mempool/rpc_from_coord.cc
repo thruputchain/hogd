@@ -14,6 +14,7 @@
 #include "coord_sched.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
+#include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
