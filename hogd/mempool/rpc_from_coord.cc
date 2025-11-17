@@ -64,31 +64,30 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   co_await scheduler_->add_txs(batch);
 }
 
-x23::Async<bool>
+x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
-  DbSchedResult res =
-      co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
-                                                         block_id, mode);
-  if (res != DbSchedResult::DbSchedResultOK) {
-    co_return false;
-  }
-  co_await event_sched_client_->eventsched_open_block(block_id);
-  co_return true;
+  return db_sched_client_->dbsched_create_snapshot(prev_block_id, block_id,
+                                                   mode);
 }
 
-x23::Async<void>
+x23::Async<RPCError>
+MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
+{
+  return event_sched_client_->eventsched_open_block(block_id);
+}
+
+x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
-  DbSchedResult res =
-      co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
-  // TODO(jhumphri): Geoff currently always returns [DbSchedResultOK], but this
-  // could change in the future. In the case of a failure, we need to clean up
-  // db state.
-  CHECK_EQ(res, DbSchedResult::DbSchedResultOK);
-  co_await event_sched_client_->eventsched_abandon_block(block_id);
-  co_return;
+  return db_sched_client_->dbsched_abandon_snapshot(block_id);
+}
+
+x23::Async<RPCError>
+MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
+{
+  return event_sched_client_->eventsched_abandon_block(block_id);
 }
 
 x23::Async<void>
@@ -296,9 +295,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   BlockID block_id = get_ns_since_epoch();
 
-  x23::Async<bool> create_snapshot_handler =
+  x23::Async<DbSchedResult> create_snapshot_handler =
       create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
+  x23::Async<RPCError> open_block_handler = eventsched_open_block(block_id);
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     open_proposal_block_handlers.push_back(
@@ -314,7 +314,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes, txs);
   cg.reset();
 
-  bool create_snapshot_handler_ret = co_await create_snapshot_handler;
+  DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
+  CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
   bool open_proposal_block_success = true;
   for (x23::Async<ExecResult> &handler : open_proposal_block_handlers) {
@@ -323,10 +324,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       open_proposal_block_success = false;
     }
   }
-  if (!create_snapshot_handler_ret || !open_proposal_block_success) {
-    if (create_snapshot_handler_ret) {
-      co_await abandon_snapshot(block_id);
+  if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
+      !open_proposal_block_success) {
+    if (create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK) {
+      CHECK_EQ(co_await abandon_snapshot(block_id),
+               DbSchedResult::DbSchedResultOK);
     }
+    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
     for (size_t i = 0; i < open_proposal_block_handler_ret.size(); i++) {
       if (open_proposal_block_handler_ret[i] == ExecResult::ExecResultOK) {
         co_await finish_block(block_id, /*executor_idx=*/i);
@@ -420,7 +424,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       co_await finish_block(block_id, /*executor_idx=*/i);
     }
-    co_await abandon_snapshot(block_id);
+    CHECK_EQ(co_await abandon_snapshot(block_id),
+             DbSchedResult::DbSchedResultOK);
+    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
   // Scheduler ---
@@ -458,7 +464,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       co_await finish_block(block_id, /*executor_idx=*/i);
     }
-    co_await abandon_snapshot(block_id);
+    CHECK_EQ(co_await abandon_snapshot(block_id),
+             DbSchedResult::DbSchedResultOK);
+    co_await eventsched_abandon_block(block_id);
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
@@ -559,12 +567,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_await scheduler_->transfer_finished_.acquire();
 
   BlockID block_id = get_ns_since_epoch();
-  if (!co_await create_snapshot(
+  if (co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
-          BlockExecutionMode::kBlockExecutionModeValidation)) {
+          BlockExecutionMode::kBlockExecutionModeValidation) !=
+      DbSchedResult::DbSchedResultOK) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
+  CHECK_EQ(co_await eventsched_open_block(block_id), RPCError::kRPCNone);
 
   x23::Vec<x23::Async<ExecResult>> open_validation_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -585,7 +595,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_await finish_block(block_id, /*executor_idx=*/i);
       }
     }
-    co_await abandon_snapshot(block_id);
+    CHECK_EQ(co_await abandon_snapshot(block_id),
+             DbSchedResult::DbSchedResultOK);
+    co_await eventsched_abandon_block(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -603,7 +615,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       for (size_t i = 0; i < exec_clients_.size(); i++) {
         co_await finish_block(block_id, /*executor_idx=*/i);
       }
-      co_await abandon_snapshot(block_id);
+      CHECK_EQ(co_await abandon_snapshot(block_id),
+               DbSchedResult::DbSchedResultOK);
+      co_await eventsched_abandon_block(block_id);
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationMissingTxs);
     }
@@ -633,7 +647,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       co_await finish_block(block_id, /*executor_idx=*/i);
     }
-    co_await abandon_snapshot(block_id);
+    CHECK_EQ(co_await abandon_snapshot(block_id),
+             DbSchedResult::DbSchedResultOK);
+    co_await eventsched_abandon_block(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
