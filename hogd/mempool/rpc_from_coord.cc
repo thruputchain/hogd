@@ -38,6 +38,51 @@
 
 namespace hogd {
 
+namespace {
+
+struct ChunkRange {
+  size_t start;
+  size_t end; // [start, end)
+};
+
+std::vector<ChunkRange>
+make_chunks(size_t total_size, size_t chunk_count)
+{
+  std::vector<ChunkRange> chunks;
+  if (!total_size || !chunk_count) {
+    return chunks;
+  }
+  chunk_count = std::min(chunk_count, total_size);
+
+  const size_t base_size = total_size / chunk_count;
+  const size_t remainder = total_size % chunk_count;
+
+  size_t offset = 0;
+  chunks.reserve(chunk_count);
+  for (size_t i = 0; i < chunk_count; ++i) {
+    const size_t chunk_size = base_size + (i < remainder ? 1 : 0);
+    const size_t start = offset;
+    const size_t end = start + chunk_size;
+    chunks.push_back({start, end});
+    offset = end;
+  }
+  CHECK_EQ(offset, total_size);
+
+  return chunks;
+}
+
+std::vector<ChunkRange>
+make_chunks_for_max_size(size_t total_size, size_t max_chunk_size)
+{
+  if (!max_chunk_size) {
+    return {};
+  }
+  const size_t chunk_count = (total_size + max_chunk_size - 1) / max_chunk_size;
+  return make_chunks(total_size, chunk_count);
+}
+
+} // namespace
+
 // TODO(jhumphri): When should we remove txs from [vetted_txs_]?
 
 x23::Async<void>
@@ -136,22 +181,13 @@ MempoolCoordinatorRpc::get_block_hash(
   // to lock contention.
   size_t num_threads = 108; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
-  futures.reserve(num_threads);
+  const std::vector<ChunkRange> chunks =
+      make_chunks(hashes.size(), num_threads);
+  futures.reserve(chunks.size());
 
-  size_t base = 0;
-  size_t chunk_size = hashes.size() / num_threads;
-  size_t remainder = hashes.size() % num_threads;
-  for (size_t i = 0; i < num_threads; i++) {
-    size_t start = base;
-    size_t end = base + chunk_size + (i < remainder ? 1 : 0);
-    base = end;
-    CHECK_GE(start, 0UL);
-    if (i == num_threads - 1) {
-      CHECK_EQ(end, hashes.size());
-    }
-
-    futures.push_back(worker_pool.submit([start, end, &trie, &hashes] {
-      for (size_t j = start; j < end; j++) {
+  for (const ChunkRange &chunk : chunks) {
+    futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
+      for (size_t j = chunk.start; j < chunk.end; j++) {
         CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
       }
     }));
@@ -200,29 +236,27 @@ MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
 {
   co_await default_coropoll().pool_.bg();
 
-  size_t small_chunk_size = kChunkSize;
-  size_t num_chunks = (txs.size() / small_chunk_size) +
-                      ((txs.size() % small_chunk_size) ? 1 : 0);
+  const std::vector<ChunkRange> chunks =
+      make_chunks_for_max_size(txs.size(), kChunkSize);
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
-  awaitables.reserve(num_chunks);
-  nomination_chunks.resize(num_chunks, {});
+  awaitables.reserve(chunks.size());
+  nomination_chunks.resize(chunks.size(), {});
   CHECK_EQ(ret.size(), txs.size());
-  for (size_t i = 0; i < num_chunks; i++) {
+  for (size_t i = 0; i < chunks.size(); i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
-    size_t start_idx = i * small_chunk_size;
-    size_t end_idx =
-        (i < num_chunks - 1) ? start_idx + small_chunk_size : txs.size();
-    x23::span<const SignedTransaction> chunk(txs.begin() + start_idx,
-                                             txs.begin() + end_idx);
-    x23::span<bool> ret_chunk(ret.begin() + start_idx, ret.begin() + end_idx);
+    const ChunkRange &chunk = chunks[i];
+    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                txs.begin() + chunk.end);
+    x23::span<bool> ret_chunk(ret.begin() + chunk.start,
+                              ret.begin() + chunk.end);
 
-    propose_batch(block_id, chunk, nomination_chunks[i], ret_chunk,
+    propose_batch(block_id, tx_chunk, nomination_chunks[i], ret_chunk,
                   /*executor_idx=*/i % exec_clients_.size(),
                   x23::CoroCB<void>(*awaitables[i]));
   }
 
-  for (size_t i = 0; i < num_chunks; i++) {
+  for (size_t i = 0; i < chunks.size(); i++) {
     co_await *awaitables[i];
   }
   cb();
@@ -236,30 +270,30 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 {
   // Send the RPCs.
   constexpr size_t kNumBigChunks = 120;
-  size_t large_chunk_size = txs.size() / kNumBigChunks;
+  const std::vector<ChunkRange> large_chunks =
+      make_chunks(txs.size(), kNumBigChunks);
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
-  awaitables.reserve(kNumBigChunks);
+  awaitables.reserve(large_chunks.size());
   x23::Vec<x23::Vec<x23::XdrVec<NominatedTransaction>>> nomination_chunks(
-      kNumBigChunks, {});
+      large_chunks.size(), {});
   CHECK_EQ(ret.size(), txs.size());
-  for (size_t i = 0; i < kNumBigChunks; i++) {
+  for (size_t i = 0; i < large_chunks.size(); i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
-    size_t start_idx = i * large_chunk_size;
-    size_t end_idx =
-        (i < kNumBigChunks - 1) ? start_idx + large_chunk_size : txs.size();
-    x23::span<const SignedTransaction> chunk(txs.begin() + start_idx,
-                                             txs.begin() + end_idx);
-    x23::span<bool> ret_chunk(ret.begin() + start_idx, ret.begin() + end_idx);
+    const ChunkRange &chunk = large_chunks[i];
+    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
+                                                txs.begin() + chunk.end);
+    x23::span<bool> ret_chunk(ret.begin() + chunk.start,
+                              ret.begin() + chunk.end);
 
-    propose_small_chunks_from_large_chunk(block_id, chunk, nomination_chunks[i],
-                                          ret_chunk,
+    propose_small_chunks_from_large_chunk(block_id, tx_chunk,
+                                          nomination_chunks[i], ret_chunk,
                                           x23::CoroCB<void>(*awaitables[i]));
   }
 
   // Wait for the RPC responses.
   transaction_nominations.reserve(txs.size());
-  for (size_t i = 0; i < kNumBigChunks; i++) {
+  for (size_t i = 0; i < large_chunks.size(); i++) {
     co_await *awaitables[i];
 
     for (const x23::XdrVec<NominatedTransaction> &nominated_txs :
