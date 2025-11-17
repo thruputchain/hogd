@@ -243,6 +243,7 @@ open_block(db_sched_client_t &db_sched_client,
            uint64_t parent_block_number, uint64_t block_number)
 {
   info("opening block {}", block_number);
+  auto start_time = x23::fastclock::get_ns();
 
   auto [async, cb] = x23::make_async<void>();
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
@@ -258,15 +259,18 @@ open_block(db_sched_client_t &db_sched_client,
   }
 
   auto event_async = event_sched_client.eventsched_open_block(block_number);
+  auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_create_snapshot(
       parent_block_number, block_number,
       BlockExecutionMode::kBlockExecutionModeProposal);
   if (res != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
-
+  auto create_time = x23::fastclock::get_ns();
   async();
   event_async();
+  auto done_time = x23::fastclock::get_ns();
+  std::println("opening: issue_time {} create_time {} done_time {}", issue_time - start_time, create_time - issue_time, done_time - create_time);
 };
 
 void
@@ -305,7 +309,7 @@ close_block(db_sched_client_t &db_sched_client,
   async();
   event_async();
   auto done_time = x23::fastclock::get_ns();
-  std::println("issue_time {} close_time {} commit_time {} done_time {}", issue_time - start_time, close_time - issue_time, commit_time - close_time, done_time - commit_time);
+  std::println("closing: issue_time {} close_time {} commit_time {} done_time {}", issue_time - start_time, close_time - issue_time, commit_time - close_time, done_time - commit_time);
 };
 
 x23::Detached
