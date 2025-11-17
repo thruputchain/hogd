@@ -138,7 +138,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx, snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, make_hogexec_context());
   auto invoke_res = syscall_handler.root_invoke();
@@ -182,7 +182,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
 {
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
-  SystemCallHandler syscall_handler(tx.signed_tx, snapshot_cache_, proxy,
+  SystemCallHandler syscall_handler(tx.signed_tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},
