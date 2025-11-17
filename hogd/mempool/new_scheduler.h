@@ -100,8 +100,7 @@ public:
   // Debug.
   void dump_runqueue();
 
-  // TODO(jhumphri): Replace with [CoroSem].
-  std::atomic<bool> transfer_finished_;
+  x23::CoroSem transfer_finished_;
   x23::CoroLock global_lock_;
 
 private:
