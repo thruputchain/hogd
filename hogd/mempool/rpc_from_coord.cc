@@ -82,6 +82,15 @@ x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
   return db_sched_client_->dbsched_abandon_snapshot(block_id);
+<<<<<<< HEAD
+=======
+}
+
+x23::Async<RPCError>
+MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
+{
+  return event_sched_client_->eventsched_abandon_block(block_id);
+>>>>>>> 89ca3b2ce3d22be8e1312e295f8ae5e8f38f1cbe
 }
 
 x23::Async<RPCError>
