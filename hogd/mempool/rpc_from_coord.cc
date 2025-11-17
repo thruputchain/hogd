@@ -90,31 +90,25 @@ MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
   return event_sched_client_->eventsched_abandon_block(block_id);
 }
 
-x23::Async<void>
+x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
-  DbBlockResult res =
-      co_await db_sched_client_->dbsched_close_snapshot(block_id);
-  // [dbsched_close_snapshot] will always succeed as long as we provide a valid
-  // block ID.
-  CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  auto r = co_await event_sched_client_->eventsched_close_block(block_id);
-  CHECK_EQ(r.error(), RPCError::kRPCNone);
+  return db_sched_client_->dbsched_close_snapshot(block_id);
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
-  co_return;
 }
 
-x23::Async<void>
+x23::Async<EventBlockResult>
+MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id)
+{
+  return event_sched_client_->eventsched_close_block(block_id);
+}
+
+x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 {
-  DbBlockResult res =
-      co_await db_sched_client_->dbsched_commit_snapshot(block_id);
-  // [dbsched_commit_snapshot] will always succeed as long as we provide a valid
-  // block ID.
-  CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
-  co_return;
+  return db_sched_client_->dbsched_commit_snapshot(block_id);
 }
 
 x23::Async<void>
@@ -474,8 +468,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     finish_block_handles.push_back(finish_block(block_id, /*executor_idx=*/i));
   }
-  x23::Async<void> close_snapshot_handle = close_snapshot(block_id);
-  x23::Async<void> commit_snapshot_handle = commit_snapshot(block_id);
+  x23::Async<DbBlockResult> close_snapshot_handle = close_snapshot(block_id);
+  x23::Async<EventBlockResult> close_block_handle =
+      eventsched_close_block(block_id);
+  x23::Async<DbBlockResult> commit_snapshot_handle = commit_snapshot(block_id);
   x23::Async<void> mark_block_committed_handle = mark_block_committed(block_id);
 
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> finish_nomination_handles;
@@ -509,8 +505,18 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
   }
-  co_await close_snapshot_handle;
-  co_await commit_snapshot_handle;
+  {
+    DbBlockResult result = co_await close_snapshot_handle;
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
+  {
+    EventBlockResult result = co_await close_block_handle;
+    CHECK_EQ(result.error(), RPCError::kRPCNone);
+  }
+  {
+    DbBlockResult result = co_await commit_snapshot_handle;
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
   co_await mark_block_committed_handle;
 
   for (std::unique_ptr<x23::Awaitable<void>> &handle :
@@ -520,7 +526,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await last_chunk_handle;
 
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
-}
+} // namespace hogd
 
 x23::Async<bool>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
@@ -657,8 +663,18 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     co_await finish_block(block_id, /*executor_idx=*/i);
   }
-  co_await close_snapshot(block_id);
-  co_await commit_snapshot(block_id);
+  {
+    DbBlockResult result = co_await close_snapshot(block_id);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
+  {
+    EventBlockResult result = co_await eventsched_close_block(block_id);
+    CHECK_EQ(result.error(), RPCError::kRPCNone);
+  }
+  {
+    DbBlockResult result = co_await commit_snapshot(block_id);
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
   co_await mark_block_committed(block_id);
 
   SchedulerValidationResult result(
