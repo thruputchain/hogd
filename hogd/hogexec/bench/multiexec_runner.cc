@@ -270,7 +270,9 @@ open_block(db_sched_client_t &db_sched_client,
   async();
   event_async();
   auto done_time = x23::fastclock::get_ns();
-  std::println("opening: issue_time {} create_time {} done_time {}", issue_time - start_time, create_time - issue_time, done_time - create_time);
+  std::println("opening: issue_time {} create_time {} done_time {}",
+               issue_time - start_time, create_time - issue_time,
+               done_time - create_time);
 };
 
 void
@@ -309,7 +311,10 @@ close_block(db_sched_client_t &db_sched_client,
   async();
   event_async();
   auto done_time = x23::fastclock::get_ns();
-  std::println("closing: issue_time {} close_time {} commit_time {} done_time {}", issue_time - start_time, close_time - issue_time, commit_time - close_time, done_time - commit_time);
+  std::println(
+      "closing: issue_time {} close_time {} commit_time {} done_time {}",
+      issue_time - start_time, close_time - issue_time,
+      commit_time - close_time, done_time - commit_time);
 };
 
 x23::Detached

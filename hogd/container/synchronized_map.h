@@ -225,7 +225,8 @@ public:
   }
 
   // unsafe_clear clears the map without locking the buckets.
-  void unsafe_clear() {
+  void unsafe_clear()
+  {
     for (size_t i = 0; i < locks_.size(); ++i) {
       buckets_[i].clear();
     }

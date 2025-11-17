@@ -53,16 +53,15 @@ public:
 
   ~StorageSnapshotCache();
 
-  void reset() {
+  void reset()
+  {
     contract_cache_.unsafe_clear();
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
   }
 
-  void set_block_id(BlockID block_id) {
-    block_id_ = block_id;
-  }
+  void set_block_id(BlockID block_id) { block_id_ = block_id; }
 
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not

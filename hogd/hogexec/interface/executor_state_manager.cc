@@ -73,14 +73,17 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
     snapshot_cache = std::move(free_snapshot_caches_.back());
     snapshot_cache->set_block_id(new_block_id);
     free_snapshot_caches_.pop_back();
-  } else {
-    snapshot_cache = std::make_unique<StorageSnapshotCache>(new_block_id, *db_proxy_);
+  }
+  else {
+    snapshot_cache =
+        std::make_unique<StorageSnapshotCache>(new_block_id, *db_proxy_);
   }
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
-                            std::move(snapshot_cache), *event_server_proxy_, worker_pool_));
+                            std::move(snapshot_cache), *event_server_proxy_,
+                            worker_pool_));
   assert(inserted);
   trace("Opened new block {} in mode {}", new_block_id, mode);
   return ExecResult::ExecResultOK;
@@ -139,7 +142,8 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
     cache.contexts_.erase(block_id);
   });
 
-  free_snapshot_caches_.emplace_back(it->second.context.get().extract_snapshot_cache());
+  free_snapshot_caches_.emplace_back(
+      it->second.context.get().extract_snapshot_cache());
 
   active_blocks_.erase(it);
 }

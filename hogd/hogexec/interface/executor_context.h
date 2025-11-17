@@ -18,12 +18,13 @@ namespace hogd {
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
-  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy, std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
+                  std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                   EventServerProxy &event_server_proxy,
                   DispatchPool &worker_pool)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
-      event_server_proxy_(event_server_proxy), snapshot_cache_(std::move(snapshot_cache)),
-      worker_pool_(worker_pool)
+      event_server_proxy_(event_server_proxy),
+      snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
   {}
 
   // Disable copy and move
@@ -46,7 +47,8 @@ public:
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
-  std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache() {
+  std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
+  {
     snapshot_cache_->reset();
     return std::move(snapshot_cache_);
   }

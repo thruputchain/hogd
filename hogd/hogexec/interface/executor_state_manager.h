@@ -54,9 +54,11 @@ private:
 
   std::mutex active_blocks_lock_;
   struct ActiveBlock {
-    ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy, std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+    ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
+                std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                 EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
-      : context(mode, block_id, db_proxy, std::move(snapshot_cache), event_server_proxy, worker_pool)
+      : context(mode, block_id, db_proxy, std::move(snapshot_cache),
+                event_server_proxy, worker_pool)
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
