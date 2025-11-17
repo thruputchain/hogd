@@ -270,6 +270,7 @@ open_block(db_sched_client_t &db_sched_client,
   async();
   event_async();
   auto done_time = x23::fastclock::get_ns();
+  
   std::println("opening: issue_time {} create_time {} done_time {}",
                issue_time - start_time, create_time - issue_time,
                done_time - create_time);
