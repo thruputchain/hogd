@@ -287,11 +287,7 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
-  while (!scheduler_->transfer_finished_) {
-    co_await default_coropoll().pool_.bg();
-  }
-  scheduler_->transfer_finished_ = false;
+  co_await scheduler_->transfer_finished_.acquire();
 
   static x23::Vec<SignedTransaction> txs;
   static x23::Vec<SignedTransactionHash> tx_hashes;
@@ -560,10 +556,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  while (!scheduler_->transfer_finished_) {
-    co_await default_coropoll().pool_.bg();
-  }
-  scheduler_->transfer_finished_ = false;
+  co_await scheduler_->transfer_finished_.acquire();
 
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
