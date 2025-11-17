@@ -60,7 +60,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  return scheduler_->add_txs(batch);
+  // We [co_await] rather than [return] because [add_txs] takes the txs as a
+  // const reference, so we need [batch] to stay in scope.
+  co_await scheduler_->add_txs(batch);
 }
 
 x23::Async<bool>
