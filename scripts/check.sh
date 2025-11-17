@@ -137,7 +137,7 @@ if [ $BUILD_PARALLEL = "yes" ]; then
     cat "$TIDY_LOG"
     printf "===== end tidy log =====\n\n"
     printf "\n===== filtered tidy log =====\n"
-    cat "$TIDY_LOG" | grep -v "^[0-9]\+ warnings generated\.$" | grep -v "^\[[0-9]\+/[0-9]\+\]\[[0-9.]\+s\]"
+    cat "$TIDY_LOG" | grep -v "^[0-9]\+ warnings generated\.$" | grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" | grep -v "^$"
     printf "\n===== end filtered tidy log =====\n\n"
     exit 1
   fi

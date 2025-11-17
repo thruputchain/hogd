@@ -224,6 +224,14 @@ public:
         width);
   }
 
+  // unsafe_clear clears the map without locking the buckets.
+  void unsafe_clear()
+  {
+    for (size_t i = 0; i < locks_.size(); ++i) {
+      buckets_[i].clear();
+    }
+  }
+
 private:
   // Note: Per the c++ standard,
   // [containers.requirements.unord.req.general],
