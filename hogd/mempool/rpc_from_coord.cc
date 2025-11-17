@@ -60,15 +60,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  auto timer = std::make_unique<ElapsedTimer>();
-
-  co_await scheduler_->add_txs(batch);
-
-  double add_txs_duration = timer->elapsed();
-  info("mempool schedulercoord_submit_vetted add_txs_duration {}",
-       add_txs_duration);
-
-  co_return;
+  return scheduler_->add_txs(batch);
 }
 
 x23::Async<bool>
@@ -151,7 +143,6 @@ MempoolCoordinatorRpc::get_block_hash(
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
-  ElapsedTimer insert_timer;
   size_t base = 0;
   size_t chunk_size = hashes.size() / num_threads;
   size_t remainder = hashes.size() % num_threads;
@@ -173,28 +164,11 @@ MempoolCoordinatorRpc::get_block_hash(
   for (std::future<void> &future : futures) {
     future.get();
   }
-  double insert_duration = insert_timer.elapsed();
-
-  ElapsedTimer timer;
   trie.generate_top_level_hashes();
-  double generate_top_level_hashes_duration = timer.elapsed();
-
-  ElapsedTimer root_hash_timer;
   SHA256Hash root_hash = trie.get_root_hash();
-  double root_hash_duration = root_hash_timer.elapsed();
-
-  ElapsedTimer preimage_timer;
   BlockHashPreimage preimage{.txs_merkle_trie_root_hash = root_hash,
                              .prev_block_hash = prev_block_hash};
-  auto ret = sha256(preimage);
-  double preimage_duration = preimage_timer.elapsed();
-
-  info("insert_duration {}, generate_top_level_hashes_duration {}, "
-       "root_hash_duration {}, preimage_duration {}",
-       insert_duration, generate_top_level_hashes_duration, root_hash_duration,
-       preimage_duration);
-
-  return ret;
+  return sha256(preimage);
 }
 
 x23::Detached
@@ -309,39 +283,14 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
-namespace {
-
-std::unique_ptr<ElapsedTimer> nominate_return_timer =
-    std::make_unique<ElapsedTimer>();
-
-} // namespace
-
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  auto ret = schedulercoord_nominate_helper(db_tip);
-  info("nominate return from function took {} s",
-       nominate_return_timer->elapsed());
-  return ret;
-}
-
-x23::Async<SchedulerNominationOutcome>
-MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
-{
-  static std::unique_ptr<ElapsedTimer> nominate_timer =
-      std::make_unique<ElapsedTimer>();
-  info("nominate: {} seconds between calls", nominate_timer->elapsed());
-  // std::this_thread::sleep_for(std::chrono::milliseconds(20'000));
-
   // TODO(jhumphri): Replace with [CoroSem] when that is merged into main.
-  auto timer = std::make_unique<ElapsedTimer>();
   while (!scheduler_->transfer_finished_) {
     co_await default_coropoll().pool_.bg();
   }
   scheduler_->transfer_finished_ = false;
-
-  double wait_for_transfer_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   static x23::Vec<SignedTransaction> txs;
   static x23::Vec<SignedTransactionHash> tx_hashes;
@@ -360,9 +309,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   }
 
   x23::CoroGuard cg;
-  auto timer2 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_duration = timer2->elapsed();
 
   // This is the first call to [schedule()]. We do it up here rather than with
   // the remaining calls in the loop below because we want to overlap the first
@@ -401,19 +348,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
-  double wait_for_create_snapshot_and_open_block_handlers_duration =
-      timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   // Scheduler ---
 
   static x23::Vec<SchedulerNominationChunk> sched_nominations(
       kNumSchedulerIterations, {});
-
-  timer2 = std::make_unique<ElapsedTimer>();
   co_await cg(scheduler_->global_lock_);
-  double wait_for_lock_duration_again = timer2->elapsed();
-
   for (size_t i = 0; i < sched_nominations.size(); i++) {
     SchedulerNominationChunk &sched_nomination = sched_nominations[i];
     sched_nomination.chunk_idx = i;
@@ -455,10 +394,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     if (i > 0) {
       // The first call to [schedule()] is done above since we want to overlap
       // it with opening the snapshot and the block.
-      ElapsedTimer sched_timer;
       scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
                            txs);
-      info("sched took {}", sched_timer.elapsed());
     }
     size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
@@ -479,11 +416,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
                             x23::CoroCB<void>(
                                 *propose_batch_in_chunks_handles.back()));
   }
-
   cg.reset();
 
-  double schedule_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
   if (tx_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -494,8 +428,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   }
   // Scheduler ---
 
-  timer2 = std::make_unique<ElapsedTimer>();
-
   for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
     co_await *propose_batch_in_chunks_handles[i];
 
@@ -505,10 +437,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     nomination.chunk.nomination.transaction_nominations +=
         transaction_nomination_chunks[i];
   }
-
-  double just_wait_for_executor_duration = timer2->elapsed();
-  double run_on_executor_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   static x23::Vec<SignedTransaction> failed_txs;
   failed_txs.clear();
@@ -526,8 +454,6 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
     co_await cg(scheduler_->global_lock_);
     co_await scheduler_->add_txs(failed_txs);
   }
-  double mark_failed_txs_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   if (tx_hashes.empty()) {
     // It is possible that all txs failed to execute, in which case the block
@@ -566,14 +492,9 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
                                  *finish_nomination_handles.back()));
   }
 
-  double create_handles_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   const SHA256Hash nomination_block_hash =
       get_block_hash(tx_hashes,
                      /*prev_block_hash=*/db_tip.hash);
-  double get_block_hash_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   last_chunk.chunk_idx = sched_nominations.size();
   last_chunk.chunk.nomination.block_hash = nomination_block_hash;
@@ -587,44 +508,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate_helper(DbTip db_tip)
   co_await commit_snapshot_handle;
   co_await mark_block_committed_handle;
 
-  double wait_for_handles_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   for (std::unique_ptr<x23::Awaitable<void>> &handle :
        finish_nomination_handles) {
     co_await *handle;
   }
   co_await last_chunk_handle;
-  double wait_for_finish_nomination_handles = timer->elapsed();
 
-  info("wait_for_transfer_duration {}, "
-       "wait_for_create_snapshot_and_open_block_handlers_duration {}, "
-       "schedule_duration {}, run_on_executor_duration {}, "
-       "just_wait_for_executor_duration {}, "
-       "mark_failed_txs_duration {}, create_handles_duration {}, "
-       "get_block_hash_duration {}, wait_for_handles_duration {}, "
-       "wait_for_finish_nomination_handles {}, wait_for_lock_duration {}, "
-       "wait_for_lock_duration_again {}",
-       wait_for_transfer_duration,
-       wait_for_create_snapshot_and_open_block_handlers_duration,
-       schedule_duration, run_on_executor_duration,
-       just_wait_for_executor_duration, mark_failed_txs_duration,
-       create_handles_duration, get_block_hash_duration,
-       wait_for_handles_duration, wait_for_finish_nomination_handles,
-       wait_for_lock_duration, wait_for_lock_duration_again);
-
-  nominate_timer = std::make_unique<ElapsedTimer>();
-
-  {
-    struct timespec ts;
-    // NOLINTBEGIN(misc-include-cleaner)
-    clock_gettime(CLOCK_REALTIME, &ts);
-    // NOLINTEND(misc-include-cleaner)
-    int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
-    info("will send nominate result: {}", ms);
-  }
-
-  nominate_return_timer = std::make_unique<ElapsedTimer>();
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 

@@ -192,59 +192,27 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
-      auto timer = std::make_unique<ElapsedTimer>();
-
       x23::Async<SchedulerNominationOutcome> nominate_handle =
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
       x23::Awaitable<void> get_transactions_handle;
       get_transactions(txs, x23::CoroCB<void>(get_transactions_handle));
-
-      double create_handles_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       co_await get_transactions_handle;
 
       x23::Awaitable<void> submit_vetted_handle;
       submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
 
-      double wait_transactions_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       SchedulerNominationOutcome res_nominate = co_await nominate_handle;
-
-      {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
-        info("got nominate result: {}", ms);
-      }
-
-      double wait_nomination_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       co_await submit_vetted_handle;
-
-      double wait_submit_vetted_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
 
       CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
       const auto &[nomination, num_txs] =
           coord_sched_rpc_.get_nomination_no_txs();
-      double get_nomination_from_local_cache_duration = timer->elapsed();
 
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
-
-      info("create_handles_duration {}, "
-           "wait_nomination_duration {}, wait_transactions_duration {}, "
-           "wait_submit_vetted_duration {}, "
-           "get_nomination_from_local_cache_duration {}",
-           create_handles_duration, wait_nomination_duration,
-           wait_transactions_duration, wait_submit_vetted_duration,
-           get_nomination_from_local_cache_duration);
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.

@@ -165,12 +165,8 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
   // its overhead by removing the [co_await] below, doing other work, and then
   // calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  auto timer = std::make_unique<ElapsedTimer>();
   std::unordered_set<ContractAddress> accounts =
       co_await read_average_hog_ages(txs);
-
-  double read_average_hog_ages_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
 
   constexpr size_t kNumThreads = 128;
   size_t txs_per_thread = txs.size() / kNumThreads;
@@ -213,46 +209,18 @@ NewScheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
     co_await awaitable;
   }
 
-  double tx_hash_and_enqueue_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   std::vector<AccountKey> account_keys;
   account_keys.reserve(accounts.size());
   for (const ContractAddress &account : accounts) {
     account_keys.push_back(get_account_key(account));
   }
 
-  info("cg acquire start");
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-
-  double get_lock_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  double get_account_keys_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
   for (const AccountKey &account_key : account_keys) {
     ready_accounts_.insert(account_key);
   }
-  double ready_accounts_duration = timer->elapsed();
-  timer = std::make_unique<ElapsedTimer>();
-
-  size_t ready_accounts_size = ready_accounts_.size();
-
   cg.reset();
-  double cg_reset_duration = timer->elapsed();
-
-  info("cg acquire end");
-
-  info("NewScheduler::add_txs read_average_hog_ages_duration {}, "
-       "tx_hash_and_enqueue_duration {}, "
-       "get_lock_duration {}, get_account_keys_duration {}, "
-       "ready_accounts_duration {}, cg_reset_duration {}, ready accounts "
-       "inserted {}, ready accounts size {}",
-       read_average_hog_ages_duration, tx_hash_and_enqueue_duration,
-       get_lock_duration, get_account_keys_duration, ready_accounts_duration,
-       cg_reset_duration, accounts.size(), ready_accounts_size);
 }
 
 void
