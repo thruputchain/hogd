@@ -45,7 +45,8 @@ struct ChunkRange {
   size_t end; // [start, end)
 };
 
-std::vector<ChunkRange> make_chunks(size_t total_size, size_t chunk_count)
+std::vector<ChunkRange>
+make_chunks(size_t total_size, size_t chunk_count)
 {
   std::vector<ChunkRange> chunks;
   if (!total_size || !chunk_count) {
@@ -70,14 +71,13 @@ std::vector<ChunkRange> make_chunks(size_t total_size, size_t chunk_count)
   return chunks;
 }
 
-std::vector<ChunkRange> make_chunks_for_max_size(size_t total_size,
-                                                 size_t max_chunk_size)
+std::vector<ChunkRange>
+make_chunks_for_max_size(size_t total_size, size_t max_chunk_size)
 {
   if (!max_chunk_size) {
     return {};
   }
-  const size_t chunk_count =
-      (total_size + max_chunk_size - 1) / max_chunk_size;
+  const size_t chunk_count = (total_size + max_chunk_size - 1) / max_chunk_size;
   return make_chunks(total_size, chunk_count);
 }
 
@@ -181,17 +181,16 @@ MempoolCoordinatorRpc::get_block_hash(
   // to lock contention.
   size_t num_threads = 108; // worker_pool.worker_count();
   std::vector<std::future<void>> futures;
-  const std::vector<ChunkRange> chunks = make_chunks(hashes.size(), num_threads);
+  const std::vector<ChunkRange> chunks =
+      make_chunks(hashes.size(), num_threads);
   futures.reserve(chunks.size());
 
   for (const ChunkRange &chunk : chunks) {
-    futures.push_back(worker_pool.submit(
-        [chunk, &trie, &hashes] {
-          for (size_t j = chunk.start; j < chunk.end; j++) {
-            CHECK(
-                trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
-          }
-        }));
+    futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
+      for (size_t j = chunk.start; j < chunk.end; j++) {
+        CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
+      }
+    }));
   }
   for (std::future<void> &future : futures) {
     future.get();
