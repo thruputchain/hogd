@@ -274,6 +274,7 @@ close_block(db_sched_client_t &db_sched_client,
             event_sched_client_t &event_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number)
 {
+  auto start_time = x23::fastclock::get_ns();
   info("closing block {}", block_number);
   auto [async, cb] = x23::make_async<void>();
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
@@ -288,18 +289,23 @@ close_block(db_sched_client_t &db_sched_client,
     }(exec_client, block_number, n_remaining_execs, cb);
   }
   auto event_async = event_sched_client.eventsched_close_block(block_number);
+  auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to close snapshot");
   }
+  auto close_time = x23::fastclock::get_ns();
   auto commit_res = db_sched_client.dbsched_commit_snapshot(block_number);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
     throw std::runtime_error("Failed to commit snapshot");
   }
+  auto commit_time = x23::fastclock::get_ns();
   // It's ok for finish_block to overlap with db.close_block, because we already
   // synchronized waiting for all pending txs on the block to finish.
   async();
   event_async();
+  auto done_time = x23::fastclock::get_ns();
+  std::println("issue_time {} close_time {} commit_time {} done_time {}", issue_time - start_time, close_time - issue_time, commit_time - close_time, done_time - commit_time);
 };
 
 x23::Detached
