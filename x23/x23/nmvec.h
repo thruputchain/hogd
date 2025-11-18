@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "x23/utility.h"
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -152,10 +153,17 @@ public:
   size_t size() const noexcept
   {
     for (;;) {
-      size_t sz = size_.load(std::memory_order_acquire);
-      if (sz != kLocked)
-        return sz;
-      size_.wait(sz);
+      size_t size = size_.load(std::memory_order_acquire);
+    recheck:
+      if (size == kLocked) {
+        if (!size_.compare_exchange_weak(size, kLockedWantNotify,
+                                         std::memory_order_relaxed,
+                                         std::memory_order_relaxed))
+          goto recheck;
+      }
+      else if (size != kLockedWantNotify)
+        return size;
+      size_.wait(kLockedWantNotify);
     }
   }
 
@@ -274,8 +282,8 @@ private:
   static constexpr size_t kLocked = size_t(-1);
   static constexpr size_t kLockedWantNotify = kLocked - 1;
 
-  // number of valid items, or kLocked while resizing
-  std::atomic_size_t size_{0};
+  // number of valid items, or kLocked/kLockedWantNotify while resizing
+  mutable std::atomic_size_t size_{0};
 
   // chunks_[i] is nullptr or an array of (kMinChunk << i) allocations
   std::array<std::atomic<T *>, kNumChunks> chunks_{};
