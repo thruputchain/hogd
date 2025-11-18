@@ -39,26 +39,11 @@ public:
 
   // access methods
 
-  void wait_for_height(BlockHeight height)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock, [this, height] {
-      return hogs_transferred_.contains(height) &&
-             changed_accounts_.contains(height);
-    });
-  }
+  void wait_for_hog_transferred_height(BlockHeight height);
+  void wait_for_changed_accounts_height(BlockHeight height);
 
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    return hogs_transferred_.at(height);
-  }
-
-  ContractAddressBatch get_changed_accounts(BlockHeight height)
-  {
-    std::unique_lock<std::mutex> lock(mtx_);
-    return changed_accounts_.at(height);
-  }
+  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height);
+  ContractAddressBatch get_changed_accounts(BlockHeight height);
 
 private:
   std::mutex mtx_;
