@@ -124,7 +124,8 @@ public:
   }
 
   static x23::Async<OptSignedTransactionBatch>
-  schedcoord_lookup_transactions(const SignedTransactionHashBatch &/*unused*/) {
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  {
     panic("unimplemented");
   }
 
