@@ -2,6 +2,7 @@
 
 #include "account.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "types.hh"
@@ -41,7 +42,7 @@ HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
 
   BlockHeight current_height = ctx_.get_height_threadsafe();
   if (height != current_height) {
-    for (auto i = 0; i < addresses.size(); i++) {
+    for (size_t i = 0; i < addresses.size(); i++) {
       result.emplace_back(DBAuthError::kDBAuthStaleBlockHeight);
     }
     co_return result;
