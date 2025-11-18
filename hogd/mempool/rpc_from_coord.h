@@ -121,6 +121,12 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
+  static x23::Async<OptSignedTransactionBatch>
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  {
+    panic("unimplemented");
+  }
+
   static SHA256Hash
   get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
                  const BlockHash &prev_block_hash);

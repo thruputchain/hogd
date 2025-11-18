@@ -17,6 +17,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "port.hh"
 #include "sched_db.hh"
 
@@ -139,6 +140,12 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   HogDBSchedServer mempool_server(ctx);
   CHECK_EQ(mempool_server.start_server(kDbMempoolServerPort),
            uint16_t{kDbMempoolServerPort});
+
+  // start the auth server.
+  info("starting auth server.");
+  HogDBAuthServer auth_server(ctx);
+  CHECK_EQ(auth_server.start_server(kDbAuthServerPort),
+           uint16_t{kDbAuthServerPort});
 
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();

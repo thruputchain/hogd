@@ -5,7 +5,6 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
-#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

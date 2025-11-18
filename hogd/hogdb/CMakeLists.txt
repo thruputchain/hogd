@@ -16,6 +16,7 @@ add_library(hogdb_objects OBJECT
   item_change.cc
   hogdb_dao.cc
   rpc_context.cc
+  rpc_from_auth.cc
   rpc_from_exec.cc
   rpc_from_sched.cc
   status.cc
