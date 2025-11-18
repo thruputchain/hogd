@@ -297,9 +297,15 @@ IndexDB::consume_events(BlockHeight block_height,
 
   // Create worker pool and submit jobs
   auto &pool = WorkerPool::get_default_pool();
-  std::vector<std::future<rocksdb::WriteBatch>> futures;
+  std::vector<std::future<IndexerStatus<void>>> futures;
 
   auto start_ts = x23::fastclock::get_ns();
+
+  // When writing events into this indexer, we already have the data written to disk in the upstream
+  // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
+  // in that we can tolerate 
+  rocksdb::WriteOptions write_options;
+  write_options.sync = false;
 
   for (size_t i = 0; i < kNumThreads; i++) {
     const size_t start_idx = i * chunk_size;
@@ -309,7 +315,7 @@ IndexDB::consume_events(BlockHeight block_height,
     const size_t end_idx = std::min(start_idx + chunk_size, events.size());
     const auto chunk = events.subspan(start_idx, end_idx - start_idx);
 
-    auto future = pool.submit([this, block_height, chunk]() {
+    auto future = pool.submit([this, block_height, chunk, write_options]() -> IndexerStatus<void> {
       rocksdb::WriteBatch batch;
       std::string key_buffer; // Reusable buffer for key construction
 
@@ -342,39 +348,29 @@ IndexDB::consume_events(BlockHeight block_height,
         }
       }
 
-      return batch;
+      // Write the batch directly from this thread
+      rocksdb::Status status = db_->Write(write_options, &batch);
+      if (!status.ok()) {
+        error("Failed to write events to indexer: {}", status.ToString());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+
+      return {};
     });
 
     futures.push_back(std::move(future));
   }
 
-  // Wait for all jobs to complete and collect batches
-  std::vector<rocksdb::WriteBatch> batches;
-  batches.reserve(futures.size());
+  // Wait for all jobs to complete and check for errors
   for (auto &future : futures) {
-    batches.push_back(future.get());
-  }
-
-  auto make_batch_ts = x23::fastclock::get_ns();
-  info("Make batch time: {} ns", make_batch_ts - start_ts);
-
-  // When writing events into this indexer, we already have the data written to disk in the upstream
-  // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
-  // in that we can tolerate 
-  rocksdb::WriteOptions write_options;
-  write_options.sync = false;
-
-  // Write all batches sequentially
-  for (auto &batch : batches) {
-    rocksdb::Status status = db_->Write(write_options, &batch);
-    if (!status.ok()) {
-      error("Failed to write events to indexer: {}", status.ToString());
-      return IndexerError(IndexerErrorCode::kInternal);
+    auto result = future.get();
+    if (!result.has_value()) {
+      return result.error();
     }
   }
-  
+
   auto write_ts = x23::fastclock::get_ns();
-  info("Write time: {} ns", write_ts - make_batch_ts);
+  info("Total time: {} ns", write_ts - start_ts);
   return {};
 }
 
