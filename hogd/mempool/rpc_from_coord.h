@@ -92,6 +92,8 @@ public:
   x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
                                                 SignedTransactionBatch batch);
 
+  x23::Async<bool> initialize_block(const DbTip &db_tip, BlockID block_id);
+
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
   x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);

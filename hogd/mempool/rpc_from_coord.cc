@@ -290,6 +290,10 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   // send the smaller chunks across multiple TCP streams and (2) so that the
   // executor can begin executing txs without having to wait for *all* of the
   // txs to arrive first.
+  //
+  // Each coroutine will likely be scheduled on its own thread, so I choose to
+  // create 120 chunks (one per coroutine) since the machine has 128 logical
+  // cores and I want to leave some cores leftover for other work.
   constexpr size_t kNumBigChunks = 120;
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
@@ -299,8 +303,11 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(large_chunks.size());
 
+  // The nomination data is placed into this vector, with one entry reserved for
+  // each coroutine.
   x23::Vec<x23::Vec<x23::XdrVec<NominatedTransaction>>> nomination_chunks(
       large_chunks.size(), {});
+  // The tx outcomes are written to [ret].
   CHECK_EQ(ret.size(), txs.size());
   for (size_t i = 0; i < large_chunks.size(); i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
@@ -342,6 +349,55 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
       block_id);
 }
 
+x23::Async<bool>
+MempoolCoordinatorRpc::initialize_block(const DbTip &db_tip, BlockID block_id)
+{
+  // Create snapshot.
+  x23::Async<DbSchedResult> create_snapshot_handler =
+      create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
+                      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  // Open block (on event server).
+  x23::Async<RPCError> open_block_handler = eventsched_open_block(block_id);
+
+  // Open proposal blocks.
+  x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    open_proposal_block_handlers.push_back(
+        open_proposal_block(block_id, /*executor_idx=*/i));
+  }
+
+  // [co_await] the block initialization RPCs.
+  DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
+  CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
+
+  x23::Vec<ExecResult> open_proposal_block_handler_ret;
+  bool open_proposal_block_success = true;
+  for (x23::Async<ExecResult> &handler : open_proposal_block_handlers) {
+    open_proposal_block_handler_ret.push_back(co_await handler);
+    if (open_proposal_block_handler_ret.back() != ExecResult::ExecResultOK) {
+      open_proposal_block_success = false;
+    }
+  }
+
+  if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
+      !open_proposal_block_success) {
+    if (create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK) {
+      CHECK_EQ(co_await abandon_snapshot(block_id),
+               DbSchedResult::DbSchedResultOK);
+    }
+    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
+    for (size_t i = 0; i < open_proposal_block_handler_ret.size(); i++) {
+      if (open_proposal_block_handler_ret[i] == ExecResult::ExecResultOK) {
+        co_await finish_block(block_id, /*executor_idx=*/i);
+      }
+    }
+
+    co_return false;
+  }
+  co_return true;
+}
+
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
@@ -364,54 +420,26 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // them below. This block initialization work takes ~10ms, so we schedule the
   // first batch of txs below while these RPCs are outstanding and before we
   // [co_await] them.
-  x23::Async<DbSchedResult> create_snapshot_handler =
-      create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
-                      BlockExecutionMode::kBlockExecutionModeProposal);
-  x23::Async<RPCError> open_block_handler = eventsched_open_block(block_id);
-  x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
-  for (size_t i = 0; i < exec_clients_.size(); i++) {
-    open_proposal_block_handlers.push_back(
-        open_proposal_block(block_id, /*executor_idx=*/i));
+  x23::Async<bool> initialize_block_handle = initialize_block(db_tip, block_id);
+
+  {
+    // This is the first call to [schedule()]. We do it up here rather than with
+    // the other calls in the loop below because we want to overlap the first
+    // call with the block initialization work.
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
+    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
+                         txs);
   }
 
-  // This is the first call to [schedule()]. We do it up here rather than with
-  // the remaining calls in the loop below because we want to overlap the first
-  // call with the block initialization work.
-  x23::CoroGuard cg;
-  co_await cg(scheduler_->global_lock_);
-  scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes, txs);
-  cg.reset();
-
-  // [co_await] the block initialization RPCs.
-  DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
-  CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
-  x23::Vec<ExecResult> open_proposal_block_handler_ret;
-  bool open_proposal_block_success = true;
-  for (x23::Async<ExecResult> &handler : open_proposal_block_handlers) {
-    open_proposal_block_handler_ret.push_back(co_await handler);
-    if (open_proposal_block_handler_ret.back() != ExecResult::ExecResultOK) {
-      open_proposal_block_success = false;
-    }
-  }
-  if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
-      !open_proposal_block_success) {
-    if (create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK) {
-      CHECK_EQ(co_await abandon_snapshot(block_id),
-               DbSchedResult::DbSchedResultOK);
-    }
-    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
-    for (size_t i = 0; i < open_proposal_block_handler_ret.size(); i++) {
-      if (open_proposal_block_handler_ret[i] == ExecResult::ExecResultOK) {
-        co_await finish_block(block_id, /*executor_idx=*/i);
-      }
-    }
-
+  if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
     // scheduler.
     // We do not reset the hog ages since failure is rare and one failure will
     // not impact long term fairness. We also do not recover expired txs. A
     // failure is pretty bad and unexpected, and I do not think it is worth
-    // adding complexity and overhead for recovery here for a rare event.
+    // adding complexity and overhead in the common case to for full recovery
+    // from a rare event.
     co_await scheduler_->add_txs(txs);
     scheduler_->decrement_current_block();
 
@@ -422,6 +450,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   static x23::Vec<SchedulerNominationChunk> sched_nominations(
       kNumSchedulerIterations, {});
+  x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
   for (size_t i = 0; i < sched_nominations.size(); i++) {
     SchedulerNominationChunk &sched_nomination = sched_nominations[i];

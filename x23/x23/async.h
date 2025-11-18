@@ -750,7 +750,7 @@ make_async(source_location sloc = source_location::current())
   return std::pair{std::move(async), cb};
 }
 
-// A funciton that returns Detached is a detached coroutine that
+// A function that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
   struct promise_type : PromiseBase {
