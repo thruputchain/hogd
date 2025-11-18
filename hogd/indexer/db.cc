@@ -318,6 +318,8 @@ IndexDB::consume_events(BlockHeight block_height,
 
   // Thread 1: Create SST file for tx_index column family
   auto tx_future = pool.submit([this, block_height, events, tx_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+    auto collect_start = x23::fastclock::get_ns();
+    
     // Collect all entries first
     std::vector<std::pair<std::string, std::string>> entries;
     entries.reserve(events.size());
@@ -335,12 +337,19 @@ IndexDB::consume_events(BlockHeight block_height,
       entries.emplace_back(key_buffer, value);
     }
 
+    auto collect_end = x23::fastclock::get_ns();
+    info("Tx index: collect time: {} ns", collect_end - collect_start);
+
     // Sort entries by key (lexicographic order)
+    auto sort_start = x23::fastclock::get_ns();
     std::ranges::sort(entries, [](const auto &a, const auto &b) {
       return a.first < b.first;
     });
+    auto sort_end = x23::fastclock::get_ns();
+    info("Tx index: sort time: {} ns", sort_end - sort_start);
 
     // Now write sorted entries to SST file
+    auto write_start = x23::fastclock::get_ns();
     rocksdb::SstFileWriter sst_writer(env_options, sst_options, tx_cf_handle_);
     rocksdb::Status status = sst_writer.Open(tx_sst_path);
     if (!status.ok()) {
@@ -361,12 +370,16 @@ IndexDB::consume_events(BlockHeight block_height,
       error("Failed to finish tx_index SST file: {}", status.ToString());
       return IndexerError(IndexerErrorCode::kInternal);
     }
+    auto write_end = x23::fastclock::get_ns();
+    info("Tx index: write time: {} ns", write_end - write_start);
 
     return tx_sst_path;
   });
 
   // Thread 2: Create SST file for contract_index column family
   auto contract_future = pool.submit([this, block_height, events, contract_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+    auto collect_start = x23::fastclock::get_ns();
+    
     // Collect all entries first
     std::vector<std::pair<std::string, std::string>> entries;
     std::string key_buffer; // Reusable buffer for key construction
@@ -397,12 +410,19 @@ IndexDB::consume_events(BlockHeight block_height,
       }
     }
 
+    auto collect_end = x23::fastclock::get_ns();
+    info("Contract index: collect time: {} ns", collect_end - collect_start);
+
     // Sort entries by key (lexicographic order)
+    auto sort_start = x23::fastclock::get_ns();
     std::ranges::sort(entries, [](const auto &a, const auto &b) {
       return a.first < b.first;
     });
+    auto sort_end = x23::fastclock::get_ns();
+    info("Contract index: sort time: {} ns", sort_end - sort_start);
 
     // Now write sorted entries to SST file
+    auto write_start = x23::fastclock::get_ns();
     rocksdb::SstFileWriter sst_writer(env_options, sst_options, contract_cf_handle_);
     rocksdb::Status status = sst_writer.Open(contract_sst_path);
     if (!status.ok()) {
@@ -423,6 +443,8 @@ IndexDB::consume_events(BlockHeight block_height,
       error("Failed to finish contract_index SST file: {}", status.ToString());
       return IndexerError(IndexerErrorCode::kInternal);
     }
+    auto write_end = x23::fastclock::get_ns();
+    info("Contract index: write time: {} ns", write_end - write_start);
 
     return contract_sst_path;
   });
@@ -448,7 +470,10 @@ IndexDB::consume_events(BlockHeight block_height,
   // Ingest the SST files into RocksDB
   rocksdb::IngestExternalFileOptions ingest_options;
   ingest_options.move_files = true; // Move files instead of copying
+  ingest_options.snapshot_consistency = false; // We don't need snapshot consistency for indexer
+  ingest_options.allow_global_seqno = true; // Allow global seqno assignment (default, but explicit)
 
+  auto ingest_start = x23::fastclock::get_ns();
   rocksdb::Status status = db_->IngestExternalFile(tx_cf_handle_, {tx_sst_file}, ingest_options);
   if (!status.ok()) {
     error("Failed to ingest tx_index SST file: {}", status.ToString());
@@ -456,6 +481,8 @@ IndexDB::consume_events(BlockHeight block_height,
     std::filesystem::remove(contract_sst_file);
     return IndexerError(IndexerErrorCode::kInternal);
   }
+  auto ingest_tx_end = x23::fastclock::get_ns();
+  info("Ingest tx_index time: {} ns", ingest_tx_end - ingest_start);
 
   status = db_->IngestExternalFile(contract_cf_handle_, {contract_sst_file}, ingest_options);
   if (!status.ok()) {
@@ -464,9 +491,9 @@ IndexDB::consume_events(BlockHeight block_height,
     std::filesystem::remove(contract_sst_file);
     return IndexerError(IndexerErrorCode::kInternal);
   }
-
   auto ingest_ts = x23::fastclock::get_ns();
-  info("Ingest time: {} ns", ingest_ts - make_sst_ts);
+  info("Ingest contract_index time: {} ns", ingest_ts - ingest_tx_end);
+  info("Total ingest time: {} ns", ingest_ts - ingest_start);
   return {};
 }
 
