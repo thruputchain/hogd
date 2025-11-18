@@ -79,15 +79,21 @@ IndexerKeyFormat::parse_contract_key(std::string_view key,
 
   uint64_t height_be;
   std::memcpy(&height_be, key.data() + offset, kHeightLen);
-  *block_height = std::byteswap(height_be);
+  if (block_height != nullptr) {
+    *block_height = std::byteswap(height_be);
+  }
   offset += kHeightLen;
 
-  std::memcpy(tx_hash->data(), key.data() + offset, kHashLen);
+  if (tx_hash != nullptr) {
+    std::memcpy(tx_hash->data(), key.data() + offset, kHashLen);
+  }
   offset += kHashLen;
 
   uint32_t seq_be;
   std::memcpy(&seq_be, key.data() + offset, kSeqLen);
-  *sequence_number = std::byteswap(seq_be);
+  if (sequence_number != nullptr) {
+    *sequence_number = std::byteswap(seq_be);
+  }
 
   return true;
 }
