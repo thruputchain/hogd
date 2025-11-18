@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <rocksdb/version.h>
 #include <span>
@@ -23,6 +24,7 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/config.h"
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
@@ -287,45 +289,80 @@ IndexDB::consume_events(BlockHeight block_height,
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  rocksdb::WriteBatch batch;
-  std::string key_buffer; // Reusable buffer for key construction
+  constexpr size_t kNumThreads = 16;
+  const size_t chunk_size = (events.size() + kNumThreads - 1) / kNumThreads;
 
-  for (const auto &event_log : events) {
-    // Serialize the TxEventLog for storage
-    auto serialized = x23::serialize(event_log);
-    std::string value(reinterpret_cast<const char *>(serialized.data()),
-                      serialized.size());
+  // Create worker pool and submit jobs
+  auto &pool = WorkerPool::get_default_pool();
+  std::vector<std::future<rocksdb::WriteBatch>> futures;
 
-    // Index by transaction (in tx_index column family)
-    IndexerKeyFormat::make_tx_key(key_buffer, block_height,
-                                  event_log.proposed_tx_hash);
-    batch.Put(tx_cf_handle_, key_buffer, value);
-
-    // Index by contract address (in contract_index column family)
-    uint32_t sequence_number = 0;
-    for (const auto &emitted_event : event_log.events) {
-      IndexerKeyFormat::make_contract_key(key_buffer,
-                                          emitted_event.contract_address,
-                                          block_height,
-                                          event_log.proposed_tx_hash,
-                                          sequence_number);
-      // Serialize the individual event
-      auto event_serialized = x23::serialize(emitted_event);
-      std::string event_value(reinterpret_cast<const char *>(
-                                  event_serialized.data()),
-                              event_serialized.size());
-      batch.Put(contract_cf_handle_, key_buffer, event_value);
-      sequence_number++;
+  for (size_t i = 0; i < kNumThreads; i++) {
+    const size_t start_idx = i * chunk_size;
+    if (start_idx >= events.size()) {
+      break;
     }
+    const size_t end_idx = std::min(start_idx + chunk_size, events.size());
+    const auto chunk = events.subspan(start_idx, end_idx - start_idx);
+
+    auto future = pool.submit([this, block_height, chunk]() {
+      rocksdb::WriteBatch batch;
+      std::string key_buffer; // Reusable buffer for key construction
+
+      for (const auto &event_log : chunk) {
+        // Serialize the TxEventLog for storage
+        auto serialized = x23::serialize(event_log);
+        std::string value(reinterpret_cast<const char *>(serialized.data()),
+                          serialized.size());
+
+        // Index by transaction (in tx_index column family)
+        IndexerKeyFormat::make_tx_key(key_buffer, block_height,
+                                      event_log.proposed_tx_hash);
+        batch.Put(tx_cf_handle_, key_buffer, value);
+
+        // Index by contract address (in contract_index column family)
+        uint32_t sequence_number = 0;
+        for (const auto &emitted_event : event_log.events) {
+          IndexerKeyFormat::make_contract_key(key_buffer,
+                                              emitted_event.contract_address,
+                                              block_height,
+                                              event_log.proposed_tx_hash,
+                                              sequence_number);
+          // Serialize the individual event
+          auto event_serialized = x23::serialize(emitted_event);
+          std::string event_value(reinterpret_cast<const char *>(
+                                      event_serialized.data()),
+                                  event_serialized.size());
+          batch.Put(contract_cf_handle_, key_buffer, event_value);
+          sequence_number++;
+        }
+      }
+
+      return batch;
+    });
+
+    futures.push_back(std::move(future));
   }
 
-  rocksdb::WriteOptions write_options;
-  write_options.sync = true;
-  rocksdb::Status status = db_->Write(write_options, &batch);
+  // Wait for all jobs to complete and collect batches
+  std::vector<rocksdb::WriteBatch> batches;
+  batches.reserve(futures.size());
+  for (auto &future : futures) {
+    batches.push_back(future.get());
+  }
 
-  if (!status.ok()) {
-    error("Failed to write events to indexer: {}", status.ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
+  // When writing events into this indexer, we already have the data written to disk in the upstream
+  // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
+  // in that we can tolerate 
+  rocksdb::WriteOptions write_options;
+  write_options.sync = false;
+
+  // Write all batches sequentially
+  for (auto &batch : batches) {
+    rocksdb::Status status = db_->Write(write_options, &batch);
+    if (!status.ok()) {
+      error("Failed to write events to indexer: {}", status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
   }
 
   return {};
