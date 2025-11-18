@@ -68,8 +68,7 @@ public:
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 
-    CHECK(!scheduler_->transfer_finished_);
-    scheduler_->transfer_finished_ = true;
+    scheduler_->transfer_finished_.release();
   }
 
   void register_scheduler(std::shared_ptr<NewScheduler> scheduler)

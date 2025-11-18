@@ -1,7 +1,7 @@
 #pragma once
 
 #include "exec_sched.hh"
-#include "hogd/base/worker_pool.h"
+#include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -9,6 +9,8 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include <memory>
+#include <utility>
 
 namespace hogd {
 
@@ -17,10 +19,12 @@ namespace hogd {
 class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
-                  EventServerProxy &event_server_proxy, WorkerPool &worker_pool)
+                  std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+                  EventServerProxy &event_server_proxy,
+                  DispatchPool &worker_pool)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
-      event_server_proxy_(event_server_proxy), snapshot_cache_(id, db_proxy),
-      worker_pool_(worker_pool)
+      event_server_proxy_(event_server_proxy),
+      snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
   {}
 
   // Disable copy and move
@@ -43,6 +47,11 @@ public:
   x23::Async<ExecResult>
   validate_transaction(ProposedTransaction const &proposed_tx,
                        TransactionID tx_id);
+  std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
+  {
+    snapshot_cache_->reset();
+    return std::move(snapshot_cache_);
+  }
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);
@@ -53,8 +62,8 @@ private:
   const BlockID block_id_;
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
-  StorageSnapshotCache snapshot_cache_;
-  WorkerPool &worker_pool_;
+  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
+  DispatchPool &worker_pool_;
 
   ExecProposeResult run_propose_transaction(SignedTransaction const &tx,
                                             TransactionID tx_id);

@@ -1,20 +1,21 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 
+#include "contract.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
 
-struct Contract;
 class DatabaseProxy;
-class SnapshotStorageItem;
 
 // Root cache for objects read from the ledger.
 // Can be shared between concurrent transactions,
@@ -52,6 +53,16 @@ public:
 
   ~StorageSnapshotCache();
 
+  void reset()
+  {
+    contract_cache_.unsafe_clear();
+    deployment_cache_.unsafe_clear();
+    snapshot_item_cache_.unsafe_clear();
+    block_id_ = UINT64_MAX;
+  }
+
+  void set_block_id(BlockID block_id) { block_id_ = block_id; }
+
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
@@ -62,7 +73,7 @@ private:
   SynchronizedMap<AddressAndKey, std::unique_ptr<SnapshotStorageItem>>
       snapshot_item_cache_;
 
-  const BlockID block_id_;
+  BlockID block_id_;
   DatabaseProxy &db_proxy_;
 };
 

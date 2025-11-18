@@ -92,11 +92,11 @@ public:
   x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
                                                 SignedTransactionBatch batch);
 
+  x23::Async<bool> initialize_block(const DbTip &db_tip, BlockID block_id);
+
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
   x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
-  x23::Async<SchedulerNominationOutcome>
-  schedulercoord_nominate_helper(DbTip db_tip);
 
   // Have the mempool validate a block. [nomination] holds the block to
   // validate. [db_tip] specifies the last committed block.
@@ -188,11 +188,15 @@ private:
     ready_.store(true, std::memory_order_release);
   }
 
-  x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
-                                   BlockExecutionMode /*mode*/);
-  x23::Async<void> abandon_snapshot(BlockID block_id);
-  x23::Async<void> close_snapshot(BlockID block_id);
-  x23::Async<void> commit_snapshot(BlockID block_id);
+  x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
+                                            BlockID block_id,
+                                            BlockExecutionMode mode);
+  x23::Async<RPCError> eventsched_open_block(BlockID block_id);
+  x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
+  x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
+  x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
+  x23::Async<DbBlockResult> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
 
   x23::Detached

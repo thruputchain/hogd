@@ -4,16 +4,18 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "exec_sched.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
+#include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 
 namespace hogd {
@@ -24,7 +26,8 @@ public:
                        std::unique_ptr<EventServerProxy> event_server_proxy,
                        size_t nthreads)
     : db_proxy_(std::move(db_proxy)),
-      event_server_proxy_(std::move(event_server_proxy)), worker_pool_(nthreads)
+      event_server_proxy_(std::move(event_server_proxy)),
+      worker_pool_(static_cast<int>(nthreads))
   {}
 
   // This acquires a reference to the executor context, if the returned value is
@@ -52,13 +55,16 @@ private:
   std::mutex active_blocks_lock_;
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
-                EventServerProxy &event_server_proxy, WorkerPool &worker_pool)
-      : context(mode, block_id, db_proxy, event_server_proxy, worker_pool)
+                std::unique_ptr<StorageSnapshotCache> snapshot_cache,
+                EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
+      : context(mode, block_id, db_proxy, std::move(snapshot_cache),
+                event_server_proxy, worker_pool)
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
   };
   std::unordered_map<BlockID, ActiveBlock> active_blocks_;
+  std::vector<std::unique_ptr<StorageSnapshotCache>> free_snapshot_caches_;
 
   struct ContextCache {
     std::mutex lock_;
@@ -74,7 +80,7 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  WorkerPool worker_pool_;
+  DispatchPool worker_pool_;
 };
 
 inline PerThreadARC<ExecutorContext> *

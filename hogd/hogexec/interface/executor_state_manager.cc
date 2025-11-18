@@ -11,6 +11,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 
 namespace hogd {
@@ -66,10 +67,23 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   // and clang21 lack.
   assert(db_proxy_);
   assert(event_server_proxy_);
+
+  std::unique_ptr<StorageSnapshotCache> snapshot_cache;
+  if (!free_snapshot_caches_.empty()) {
+    snapshot_cache = std::move(free_snapshot_caches_.back());
+    snapshot_cache->set_block_id(new_block_id);
+    free_snapshot_caches_.pop_back();
+  }
+  else {
+    snapshot_cache =
+        std::make_unique<StorageSnapshotCache>(new_block_id, *db_proxy_);
+  }
+
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
-                            *event_server_proxy_, worker_pool_));
+                            std::move(snapshot_cache), *event_server_proxy_,
+                            worker_pool_));
   assert(inserted);
   trace("Opened new block {} in mode {}", new_block_id, mode);
   return ExecResult::ExecResultOK;
@@ -107,6 +121,8 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
   }
   if (do_gc) {
+    // Print DispatchPool stats before GC
+    worker_pool_.print_stats();
     gc_executor_context(block_id);
   }
 }
@@ -125,6 +141,9 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
     std::scoped_lock g(cache.lock_);
     cache.contexts_.erase(block_id);
   });
+
+  free_snapshot_caches_.emplace_back(
+      it->second.context.get().extract_snapshot_cache());
 
   active_blocks_.erase(it);
 }

@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "account.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
