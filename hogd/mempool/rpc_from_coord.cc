@@ -416,17 +416,6 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transaction_hashes.clear();
     nomination.transaction_nominations.clear();
-  }
-  {
-    cache.last_chunk.chunk_idx = kNumSchedulerIterations;
-    cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
-    cache.last_chunk.chunk.block_id = cache.block_id;
-
-    Nomination &nomination = cache.last_chunk.chunk.nomination;
-    nomination.block_height = cache.db_tip.height + 1;
-    nomination.prev_block_hash = cache.db_tip.hash;
-    nomination.transaction_hashes.clear();
-    nomination.transaction_nominations.clear();
     // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
     // [nomination.transaction_hashes] and [nomination.transaction_nominations]
     // are filled in below.
@@ -479,6 +468,101 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
   co_return;
 }
 
+void
+MempoolCoordinatorRpc::process_tx_outcomes(NominationData &cache)
+{
+  cache.failed_txs.clear();
+
+  for (size_t i = 0; i < cache.txs.size(); i++) {
+    if (cache.statuses[i]) {
+      SchedulerNominationChunk &nomination =
+          cache.sched_nominations[i / kNumTxsPerNominationChunk];
+      nomination.chunk.nomination.transaction_hashes.push_back(
+          cache.tx_hashes[i]);
+    }
+    else {
+      cache.failed_txs.push_back(cache.txs[i]);
+    }
+  }
+}
+
+x23::Async<void>
+MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
+{
+  x23::Vec<x23::Async<void>> finish_block_handles;
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    finish_block_handles.push_back(
+        finish_block(cache.block_id, /*executor_idx=*/i));
+  }
+  x23::Async<DbBlockResult> close_snapshot_handle =
+      close_snapshot(cache.block_id);
+  x23::Async<EventBlockResult> close_block_handle =
+      eventsched_close_block(cache.block_id);
+  x23::Async<DbBlockResult> commit_snapshot_handle =
+      commit_snapshot(cache.block_id);
+  x23::Async<void> mark_block_committed_handle =
+      mark_block_committed(cache.block_id);
+
+  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> finish_nomination_handles;
+  finish_nomination_handles.reserve(cache.sched_nominations.size());
+  for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
+    cache.sched_nominations[i].chunk_idx = i;
+    finish_nomination_handles.push_back(
+        std::make_unique<x23::Awaitable<void>>());
+
+    [](std::unique_ptr<coord_sched_client_t> &coord_client,
+       SchedulerNominationChunk &chunk,
+       x23::CoroCB<void> cb) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+
+      co_await coord_client->coordscheduler_finish_nomination(chunk);
+      cb();
+    }(coord_client_, cache.sched_nominations[i],
+                             x23::CoroCB<void>(
+                                 *finish_nomination_handles.back()));
+  }
+
+  {
+    cache.last_chunk.chunk_idx = kNumSchedulerIterations;
+    cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
+    cache.last_chunk.chunk.block_id = cache.block_id;
+    cache.last_chunk.chunk.nomination.block_hash =
+        get_block_hash(cache.tx_hashes,
+                       /*prev_block_hash=*/cache.db_tip.hash);
+
+    Nomination &nomination = cache.last_chunk.chunk.nomination;
+    nomination.block_height = cache.db_tip.height + 1;
+    nomination.prev_block_hash = cache.db_tip.hash;
+    nomination.transaction_hashes.clear();
+    nomination.transaction_nominations.clear();
+  }
+  x23::Async<void> last_chunk_handle =
+      coord_client_->coordscheduler_finish_nomination(cache.last_chunk);
+
+  for (x23::Async<void> &handle : finish_block_handles) {
+    co_await handle;
+  }
+  {
+    DbBlockResult result = co_await close_snapshot_handle;
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
+  {
+    EventBlockResult result = co_await close_block_handle;
+    CHECK_EQ(result.error(), RPCError::kRPCNone);
+  }
+  {
+    DbBlockResult result = co_await commit_snapshot_handle;
+    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
+  }
+  co_await mark_block_committed_handle;
+
+  for (std::unique_ptr<x23::Awaitable<void>> &handle :
+       finish_nomination_handles) {
+    co_await *handle;
+  }
+  co_await last_chunk_handle;
+}
+
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
@@ -529,8 +613,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // Schedule the block and send the txs to the executors.
   co_await schedule(cache);
 
-  if (cache.tx_hashes.empty()) {
-    // There are no vetted txs, so we cannot propose a block.
+  // Process the transaction outcomes.
+  process_tx_outcomes(cache);
+  if (!cache.failed_txs.empty()) {
+    co_await scheduler_->add_txs(cache.failed_txs);
+  }
+  if (cache.tx_hashes.empty() ||
+      cache.failed_txs.size() == cache.tx_hashes.size()) {
+    // There are no txs for the block, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
       co_await finish_block(cache.block_id, /*executor_idx=*/i);
     }
@@ -539,107 +629,13 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
              RPCError::kRPCNone);
 
-    scheduler_->decrement_current_block();
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
-  }
-  // Finished scheduling the block.
-
-  static x23::Vec<SignedTransaction> failed_txs;
-  failed_txs.clear();
-  for (size_t i = 0; i < cache.txs.size(); i++) {
-    if (cache.statuses[i]) {
-      SchedulerNominationChunk &nomination =
-          cache.sched_nominations[i / kNumTxsPerNominationChunk];
-      nomination.chunk.nomination.transaction_hashes.push_back(
-          cache.tx_hashes[i]);
-    }
-    else {
-      failed_txs.push_back(cache.txs[i]);
-    }
-  }
-  if (!failed_txs.empty()) {
-    co_await scheduler_->add_txs(failed_txs);
-  }
-
-  if (failed_txs.size() == cache.tx_hashes.size()) {
-    // It is possible that all txs failed to execute, in which case the block
-    // is empty. Thus, we fail the nomination.
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(cache.block_id, /*executor_idx=*/i);
-    }
-    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-             DbSchedResult::DbSchedResultOK);
-    co_await eventsched_abandon_block(cache.block_id);
-
+    // [scheduler_->scheduler()] increments the block number, so we need to
+    // decrement it since we did not nominate a block.
     scheduler_->decrement_current_block();
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
-  x23::Vec<x23::Async<void>> finish_block_handles;
-  for (size_t i = 0; i < exec_clients_.size(); i++) {
-    finish_block_handles.push_back(
-        finish_block(cache.block_id, /*executor_idx=*/i));
-  }
-  x23::Async<DbBlockResult> close_snapshot_handle =
-      close_snapshot(cache.block_id);
-  x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(cache.block_id);
-  x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id);
-  x23::Async<void> mark_block_committed_handle =
-      mark_block_committed(cache.block_id);
-
-  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> finish_nomination_handles;
-  finish_nomination_handles.reserve(cache.sched_nominations.size());
-  for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
-    cache.sched_nominations[i].chunk_idx = i;
-    finish_nomination_handles.push_back(
-        std::make_unique<x23::Awaitable<void>>());
-
-    [](std::unique_ptr<coord_sched_client_t> &coord_client,
-       SchedulerNominationChunk &chunk,
-       x23::CoroCB<void> cb) -> x23::Detached {
-      co_await default_coropoll().pool_.bg();
-
-      co_await coord_client->coordscheduler_finish_nomination(chunk);
-      cb();
-    }(coord_client_, cache.sched_nominations[i],
-                             x23::CoroCB<void>(
-                                 *finish_nomination_handles.back()));
-  }
-
-  const SHA256Hash nomination_block_hash =
-      get_block_hash(cache.tx_hashes,
-                     /*prev_block_hash=*/cache.db_tip.hash);
-
-  cache.last_chunk.chunk_idx = cache.sched_nominations.size();
-  cache.last_chunk.chunk.nomination.block_hash = nomination_block_hash;
-  x23::Async<void> last_chunk_handle =
-      coord_client_->coordscheduler_finish_nomination(cache.last_chunk);
-
-  for (x23::Async<void> &handle : finish_block_handles) {
-    co_await handle;
-  }
-  {
-    DbBlockResult result = co_await close_snapshot_handle;
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
-  {
-    EventBlockResult result = co_await close_block_handle;
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-  }
-  {
-    DbBlockResult result = co_await commit_snapshot_handle;
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
-  co_await mark_block_committed_handle;
-
-  for (std::unique_ptr<x23::Awaitable<void>> &handle :
-       finish_nomination_handles) {
-    co_await *handle;
-  }
-  co_await last_chunk_handle;
-
+  co_await finish_nominating_block(cache);
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 

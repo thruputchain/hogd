@@ -156,6 +156,7 @@ private:
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
+    x23::Vec<SignedTransaction> failed_txs;
   };
 
   const std::function<x23::Async<bool>(const SignedTransaction &tx)>
@@ -233,6 +234,8 @@ private:
 
   x23::Async<bool> initialize_block(const NominationData &cache);
   x23::Async<void> schedule(NominationData &cache);
+  static void process_tx_outcomes(NominationData &cache);
+  x23::Async<void> finish_nominating_block(NominationData &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
