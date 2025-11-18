@@ -163,9 +163,6 @@ MempoolCoordinatorRpc::finish_block(BlockID block_id, size_t executor_idx)
   return exec_clients_[executor_idx].executorsched_finish_block(block_id);
 }
 
-// We add each tx hash to the Merkle trie as a key with an empty value. So in
-// essence, we are using the Merkle trie as a set. We then compute the root hash
-// of the trie and return it.
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
     const x23::Vec<SignedTransactionHash> &hashes,
@@ -176,18 +173,20 @@ MempoolCoordinatorRpc::get_block_hash(
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   // The optimal number of threads to use varies with the number of hashes we
-  // are adding to the trie. For example, if we are adding 128 hashes to the
+  // are adding to the trie. For example, if we are adding 50 hashes to the
   // trie, it is probably slower to use 128 threads rather than 1-2 threads due
   // to lock contention.
-  size_t num_threads = 108; // worker_pool.worker_count();
+  constexpr size_t kNumThreads = 108;
   std::vector<std::future<void>> futures;
   const std::vector<ChunkRange> chunks =
-      make_chunks(hashes.size(), num_threads);
+      make_chunks(hashes.size(), kNumThreads);
   futures.reserve(chunks.size());
 
   for (const ChunkRange &chunk : chunks) {
     futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
       for (size_t j = chunk.start; j < chunk.end; j++) {
+        // We add each tx hash to the Merkle trie as a key with an empty value.
+        // So in essence, we are using the Merkle trie as a set.
         CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
       }
     }));
@@ -213,6 +212,7 @@ MempoolCoordinatorRpc::propose_batch(
                                                                        txs);
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
+
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
     case ExecResult::ExecResultOK:
@@ -225,9 +225,14 @@ MempoolCoordinatorRpc::propose_batch(
       break;
     }
   }
+
   cb();
 }
 
+// This function spawns a coroutine and sends [txs] to the executors. The
+// coroutine splits [txs] into smaller chunks so that (1) the smaller chunks can
+// be multiplexed across multiple TCP connections and (2) the executor can begin
+// executing txs without having to wait for *all* txs to arrive first.
 x23::Detached
 MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
     BlockID block_id, x23::span<const SignedTransaction> txs,
@@ -238,10 +243,15 @@ MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
 
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
+
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(chunks.size());
+
   nomination_chunks.resize(chunks.size(), {});
   CHECK_EQ(ret.size(), txs.size());
+
+  // Each iteration in this loop creates a small chunk and sends it to the
+  // executor via [propose_batch()].
   for (size_t i = 0; i < chunks.size(); i++) {
     awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
 
@@ -251,14 +261,20 @@ MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
     x23::span<bool> ret_chunk(ret.begin() + chunk.start,
                               ret.begin() + chunk.end);
 
+    // We multiplex the small chunks across multiple TCP connections and
+    // multiple executors by setting the [executor_idx] to [i %
+    // exec_clients_.size()].
     propose_batch(block_id, tx_chunk, nomination_chunks[i], ret_chunk,
                   /*executor_idx=*/i % exec_clients_.size(),
                   x23::CoroCB<void>(*awaitables[i]));
   }
 
+  // Wait for the executor to finish executing the txs.
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await *awaitables[i];
   }
+
+  // Notify the calling coroutine that we are finished.
   cb();
 }
 
@@ -268,12 +284,21 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
     x23::span<bool> ret, x23::CoroCB<void> cb)
 {
-  // Send the RPCs.
+  // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
+  // from a different coroutine. Each coroutine then further splits the chunk
+  // into even smaller chunks. This latter split is useful so that (1) we can
+  // send the smaller chunks across multiple TCP streams and (2) so that the
+  // executor can begin executing txs without having to wait for *all* of the
+  // txs to arrive first.
   constexpr size_t kNumBigChunks = 120;
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
+
+  // The coroutines notify us when they are done via these [awaitables]. There
+  // is one awaitable per coroutine.
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
   awaitables.reserve(large_chunks.size());
+
   x23::Vec<x23::Vec<x23::XdrVec<NominatedTransaction>>> nomination_chunks(
       large_chunks.size(), {});
   CHECK_EQ(ret.size(), txs.size());
@@ -283,11 +308,13 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     const ChunkRange &chunk = large_chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
-    x23::span<bool> ret_chunk(ret.begin() + chunk.start,
-                              ret.begin() + chunk.end);
+    // The outcome of each tx ([true] for success and [false] for failure) is
+    // written into this span.
+    x23::span<bool> status_chunk(ret.begin() + chunk.start,
+                                 ret.begin() + chunk.end);
 
     propose_small_chunks_from_large_chunk(block_id, tx_chunk,
-                                          nomination_chunks[i], ret_chunk,
+                                          nomination_chunks[i], status_chunk,
                                           x23::CoroCB<void>(*awaitables[i]));
   }
 
@@ -296,11 +323,14 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   for (size_t i = 0; i < large_chunks.size(); i++) {
     co_await *awaitables[i];
 
+    // Collect the nomination data into the [transaction_nominations] vector.
     for (const x23::XdrVec<NominatedTransaction> &nominated_txs :
          nomination_chunks[i]) {
       transaction_nominations += nominated_txs;
     }
   }
+
+  // Notify the calling coroutine that we are finished.
   cb();
 }
 
@@ -315,15 +345,25 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 x23::Async<SchedulerNominationOutcome>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  // Wait for hogdb to notify us of all HOG transfers that occurred in the
+  // previous block. These transfer affect account balances, which in turn
+  // affects scheduling priorities for accounts, so we need to wait for this
+  // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
 
+  BlockID block_id = get_ns_since_epoch();
+  // We place the block txs and tx hashes into these vectors. We mark these
+  // vectors static and clear them on each call to [nominate()] so to avoid
+  // memory allocation/free overhead.
   static x23::Vec<SignedTransaction> txs;
   static x23::Vec<SignedTransactionHash> tx_hashes;
   txs.clear();
   tx_hashes.clear();
 
-  BlockID block_id = get_ns_since_epoch();
-
+  // Block initialization work. We sent these RPCs concurrently and [co_await]
+  // them below. This block initialization work takes ~10ms, so we schedule the
+  // first batch of txs below while these RPCs are outstanding and before we
+  // [co_await] them.
   x23::Async<DbSchedResult> create_snapshot_handler =
       create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -334,15 +374,15 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         open_proposal_block(block_id, /*executor_idx=*/i));
   }
 
-  x23::CoroGuard cg;
-  co_await cg(scheduler_->global_lock_);
-
   // This is the first call to [schedule()]. We do it up here rather than with
   // the remaining calls in the loop below because we want to overlap the first
-  // call with opening the snapshot and the block.
+  // call with the block initialization work.
+  x23::CoroGuard cg;
+  co_await cg(scheduler_->global_lock_);
   scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes, txs);
   cg.reset();
 
+  // [co_await] the block initialization RPCs.
   DbSchedResult create_snapshot_handler_ret = co_await create_snapshot_handler;
   CHECK_EQ(co_await open_block_handler, RPCError::kRPCNone);
   x23::Vec<ExecResult> open_proposal_block_handler_ret;
@@ -378,7 +418,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
-  // Scheduler ---
+  // Schedule the block.
 
   static x23::Vec<SchedulerNominationChunk> sched_nominations(
       kNumSchedulerIterations, {});
@@ -458,7 +498,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
-  // Scheduler ---
+  // Finished scheduling the block.
 
   for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
     co_await *propose_batch_in_chunks_handles[i];
