@@ -164,7 +164,9 @@ public:
   }
 
   static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
-  static void scheddb_changed_accounts(BlockHeight height, ContractAddressBatch const& addresses) {}
+  static void scheddb_changed_accounts(BlockHeight height,
+                                       ContractAddressBatch const &addresses)
+  {}
 
   x23::Vec<ShardCard> await_shard_cards(unsigned int num_cards)
   {
