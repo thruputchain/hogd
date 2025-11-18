@@ -2,9 +2,11 @@
 
 #pragma once
 
-#include <algorithm> // for ranges algorithms
+#include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cstddef>
+#include <cstdint>
 #include <ranges>
 #include <semaphore>
 #include <type_traits>
@@ -82,7 +84,7 @@ public:
     return ::operator new(n);
   }
 
-  void free(void *ptr, std::size_t n) noexcept
+  void deallocate(void *ptr, std::size_t n) noexcept
   {
     if (!ptr)
       return;
@@ -127,37 +129,255 @@ private:
 
 extern PerCpuSet<MVar<AllocCache>> memcaches;
 
-template<typename T> requires std::is_trivially_copyable_v<T>
-class AppendOnlyVec {
+// A "non-movable vector", can contain up to about 30 GiB of items T
+// indexed by an integer.  Items are never moved, so pointers and
+// references to items remain valid until the NMVec is resized below
+// their index or destroyed.
+template<typename T> class NMVec {
 public:
-  using value_type = T;
-  using pointer_type = value_type *;
-  using atomic_pointer_type = std::atomic<pointer_type *>;
+  NMVec() noexcept = default;
+  ~NMVec() { resize(0); }
 
-#ifdef __cpp_lib_is_layout_compatible
-  static_assert(std::is_layout_compatible_v<pointer_type, atomic_pointer_type>);
-#endif // __cpp_lib_is_layout_compatible
-
-  value_type operator[](size_t i) const noexcept
+  T &operator[](size_t index) noexcept
   {
-    return readat(i);
+    x23assert(index < size());
+    return get_index(index);
+  }
+  const T &operator[](size_t index) const noexcept
+  {
+    x23assert(index < size());
+    return get_index(index);
+  }
+
+  size_t size() const noexcept
+  {
+    for (;;) {
+      size_t sz = size_.load(std::memory_order_relaxed);
+      if (sz != kLocked)
+        return sz;
+      size_.wait(sz);
+    }
+  }
+
+  size_t emplace_back(auto &&...args)
+  {
+    size_t size = take_size();
+    Defer _unlock([this, &size] { put_size(size); });
+
+    auto l = Location::from_index(size);
+    T *c = get_or_allocate_chunk(l.chunk());
+    std::construct_at(c + l.index(), std::forward<decltype(args)>(args)...);
+    return size++;
+  }
+
+  void resize(size_t n)
+  {
+    size_t size = take_size();
+    Defer _unlock([this, &size] { put_size(size); });
+    if (size == n)
+      return;
+
+    Location cur = Location::from_index(size);
+    Location target = Location::from_index(n);
+    if (cur < target)
+      for (;;) {
+        size = cur.to_index();
+        auto s = nextspan(cur, target);
+        if (s.empty())
+          break;
+        std::ranges::uninitialized_value_construct(s);
+      }
+    else {
+      for (;;) {
+        auto s = prevspan(cur, target);
+        if (s.empty())
+          break;
+        std::ranges::destroy(s | std::views::reverse);
+        size = cur.to_index();
+        if (cur.item() == 0)
+          a.deallocate(s.data(), chunk_size(target.chunk()));
+      }
+    }
   }
 
 private:
-  static inline constexpr std::allocator<value_type> a{};
-  std::mutex resize_lock_;
-  detail::VecBuf<atomic_pointer_type> b_{};
+  static constexpr size_t kLogMinChunk =
+      std::max(4, std::bit_width(4096 / sizeof(T)) - 1);
+  static constexpr size_t kMinChunk = 1UZ << kLogMinChunk;
 
-  value_type readat(size_t i) const noexcept
+  static constexpr size_t kNumChunks =
+      std::min<size_t>(23, std::bit_width((1UZ << (8 * sizeof(size_t) - 1)) /
+                                          (kMinChunk * sizeof(T))));
+
+  static constexpr size_t kLogMaxChunk = kLogMinChunk + kNumChunks - 1;
+  static constexpr size_t kMaxChunk = 1UZ << kLogMaxChunk;
+
+  struct Location {
+    // Leave room to store chunks [0,kNumChunks] where kNumChunks can
+    // be used for a sentinel value.
+    static constexpr unsigned kChunkShift = 64 - std::bit_width(kNumChunks);
+
+    // chunk << kChunkShift | item
+    uint64_t bits_;
+
+    constexpr Location(size_t chunkno, size_t itemno) noexcept
+      : bits_(chunkno << kChunkShift | itemno)
+    {}
+    static Location from_index(size_t index)
+    {
+      // Let k = index/kMinChunk.  Chunk n contains 2^n values of k.
+      // Specifically:
+      //
+      // Chunk 0: k in [0, 1)
+      // Chunk 1: k in [1, 3)
+      // Chunk 2: k in [3, 7)
+      // Chunk n: k in [2^n - 1, 2^n - 1 + 2^n)
+      //             = [2^n - 1, 2^(n+1) - 1)
+      //
+      // Inverting the above, k resides in chunk bit_width(k+1)-1.
+      size_t chunkno = std::bit_width((index / kMinChunk) + 1) - 1;
+      return Location(chunkno, index - chunk_start(chunkno));
+    }
+
+    size_t chunk() const noexcept { return bits_ >> kChunkShift; }
+    size_t item() const noexcept
+    {
+      return bits_ & ((uint64_t(1) << kChunkShift) - 1);
+    }
+    size_t to_index() const noexcept { return chunk_start(chunk()) + item(); }
+
+    Location operator++(int) noexcept
+    {
+      Location ret = *this;
+      ++*this;
+      return ret;
+    }
+    Location &operator++() noexcept
+    {
+      *this = *this + 1;
+      return *this;
+    }
+    Location operator+(ptrdiff_t d) const noexcept
+    {
+      return from_index(to_index() + d);
+    }
+
+    friend auto operator<=>(const Location &a, const Location &b) noexcept
+    {
+      return a.bits_ <=> b.bits_;
+    }
+  };
+
+  static constexpr size_t kLocked = size_t(-1);
+  static constexpr size_t kLockedWantNotify = kLocked - 1;
+
+  // number of valid items, or kLocked while resizing
+  std::atomic_size_t size_{0};
+
+  // chunks_[i] is nullptr or an array of (kMinChunk << i) allocations
+  std::array<std::atomic<T *>, kNumChunks> chunks_{};
+
+  static inline std::allocator<T> a{};
+
+  // The chunks start at kMinChunk and keep doubling.
+  static constexpr size_t chunk_size(unsigned chunkno) noexcept
   {
-    value_type ret, *p;
-    do {
-      p = b_.begin.load(std::memory_order_relaxed);
-      memcpy(&ret, p + i, sizeof(ret));
-    } while (p == b_.begin.load());
-    return ret;
+    return (1UZ << chunkno) * kMinChunk;
+  }
+  // The index of the first item in the chunk.  Since the chunks
+  // start at size kMinChunk and keep doubling, the size of chunk k
+  // is 2^k * kMinChunk, the sum of sizes of all previous chunks
+  // will be (2^k - 1) * kMinChunk.
+  static constexpr size_t chunk_start(unsigned chunkno) noexcept
+  {
+    return chunk_size(chunkno) - kMinChunk;
   }
 
+  size_t take_size() noexcept
+  {
+    for (;;) {
+      auto ret = size_.exchange(kLocked, std::memory_order_acquire);
+      if (ret == kLocked)
+        ret = size_.exchange(kLockedWantNotify, std::memory_order_acquire);
+      if (ret != kLocked && ret != kLockedWantNotify)
+        return ret;
+      size_.wait(kLockedWantNotify);
+    }
+  }
+
+  void put_size(size_t newsize) noexcept
+  {
+    auto sz = size_.exchange(newsize, std::memory_order_release);
+    if (sz == kLockedWantNotify)
+      size_.notify_all();
+    else
+      x23assert(sz == kLocked);
+  }
+
+  // Returns the largest contiguous span [start, end) where end <=
+  // stop.  Advances start so that on the next call it returns the
+  // next span.  Returns an empty span when start >= stop.
+  std::span<T> nextspan(Location &start, Location stop)
+  {
+    if (start >= stop)
+      return {};
+    auto cn = start.chunk();
+    T *c = get_or_allocate_chunk(cn);
+    T *b = c + start.item();
+    if (cn == stop.chunk()) {
+      start = stop;
+      return {b, c + stop.item()};
+    }
+    start = Location{cn + 1, 0};
+    return {b, c + chunk_size(cn)};
+  }
+
+  // Returns the largest contiguous span [begin, start) where begin >=
+  // stop.  Decreases start so that on the next call it returns the
+  // next span.  Returns an empty span when start <= stop.
+  std::span<T> prevspan(Location &start, Location stop)
+  {
+    for (;;) {
+      if (start <= stop)
+        return {};
+
+      size_t cn = start.chunk();
+      size_t in = start.item();
+      if (in == 0) {
+        --cn;
+        in = chunk_size(cn);
+      }
+
+      if (T *c = chunks_[cn].load()) {
+        if (cn == stop.chunk()) {
+          start = stop;
+          return {c + stop.item(), c + in};
+        }
+        start = Location{cn, 0};
+        return {c, c + in};
+      }
+      start = Location{cn, 0};
+    }
+  }
+
+  T *get_or_allocate_chunk(unsigned chunkno)
+  {
+    T *c = chunks_[chunkno].load();
+    if (!c) {
+      T *newc = a.allocate(chunk_size(chunkno));
+      if (chunks_[chunkno].compare_exchange_strong(c, newc))
+        c = newc;
+      else
+        a.deallocate(newc, chunk_size(chunkno));
+    }
+    return c;
+  }
+
+  T &get_index(size_t i) const noexcept
+  {
+    auto l = Location::from_index(i);
+    return chunks_[l.chunk()].load(std::memory_order_relaxed)[l.item()];
+  }
 };
 
 } // namespace x23
