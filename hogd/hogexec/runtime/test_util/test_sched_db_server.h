@@ -28,13 +28,24 @@ public:
     register_height(hogs.block, hogs_transferred);
   };
 
+  void scheddb_changed_accounts(BlockHeight height,
+                                ContractAddressBatch addresses)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    assert(!changed_accounts_.contains(height));
+    changed_accounts_[height] = std::move(addresses);
+    cv_.notify_all();
+  }
+
   // access methods
 
   void wait_for_height(BlockHeight height)
   {
     std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock,
-             [this, height] { return hogs_transferred_.contains(height); });
+    cv_.wait(lock, [this, height] {
+      return hogs_transferred_.contains(height) &&
+             changed_accounts_.contains(height);
+    });
   }
 
   std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
@@ -43,10 +54,17 @@ public:
     return hogs_transferred_.at(height);
   }
 
+  ContractAddressBatch get_changed_accounts(BlockHeight height)
+  {
+    std::unique_lock<std::mutex> lock(mtx_);
+    return changed_accounts_.at(height);
+  }
+
 private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::map<BlockHeight, std::map<ContractAddress, int128_t>> hogs_transferred_;
+  std::map<BlockHeight, ContractAddressBatch> changed_accounts_;
 
   void register_height(BlockHeight height,
                        std::map<ContractAddress, int128_t> hogs_transferred)
