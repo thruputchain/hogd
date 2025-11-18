@@ -18,6 +18,7 @@
 #include <rocksdb/iterator.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice.h>
+#include <rocksdb/sst_file_writer.h>
 #include <rocksdb/status.h>
 #include <rocksdb/write_batch.h>
 
@@ -293,12 +294,33 @@ IndexDB::consume_events(BlockHeight block_height,
 
   auto start_ts = x23::fastclock::get_ns();
 
+  // Get database path for temporary SST files
+  // We'll create them in the same directory as the database
+  std::string db_path = db_->GetName();
+  std::filesystem::path db_path_fs(db_path);
+  std::filesystem::path db_dir = db_path_fs.parent_path();
+  
+  // Create temporary SST file paths
+  std::string tx_sst_path = (db_dir / std::format("tx_index_{}.sst", block_height)).string();
+  std::string contract_sst_path = (db_dir / std::format("contract_index_{}.sst", block_height)).string();
+
+  // Get database options for SstFileWriter
+  rocksdb::Options db_options;
+  rocksdb::ColumnFamilyOptions cf_options;
+  // We need to get the actual options from the column family handles
+  // For now, use default options with compression matching what we set
+  rocksdb::Options sst_options;
+  sst_options.compression = rocksdb::CompressionType::kLZ4Compression;
+  rocksdb::EnvOptions env_options;
+
   // Create worker pool and submit jobs for each column family
   auto &pool = WorkerPool::get_default_pool();
 
-  // Thread 1: Build batch for tx_index column family
-  auto tx_future = pool.submit([this, block_height, events]() -> rocksdb::WriteBatch {
-    rocksdb::WriteBatch batch;
+  // Thread 1: Create SST file for tx_index column family
+  auto tx_future = pool.submit([this, block_height, events, tx_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+    // Collect all entries first
+    std::vector<std::pair<std::string, std::string>> entries;
+    entries.reserve(events.size());
     std::string key_buffer; // Reusable buffer for key construction
 
     for (const auto &event_log : events) {
@@ -310,16 +332,51 @@ IndexDB::consume_events(BlockHeight block_height,
       // Index by transaction (in tx_index column family)
       IndexerKeyFormat::make_tx_key(key_buffer, block_height,
                                     event_log.proposed_tx_hash);
-      batch.Put(tx_cf_handle_, key_buffer, value);
+      entries.emplace_back(key_buffer, value);
     }
 
-    return batch;
+    // Sort entries by key (lexicographic order)
+    std::ranges::sort(entries, [](const auto &a, const auto &b) {
+      return a.first < b.first;
+    });
+
+    // Now write sorted entries to SST file
+    rocksdb::SstFileWriter sst_writer(env_options, sst_options, tx_cf_handle_);
+    rocksdb::Status status = sst_writer.Open(tx_sst_path);
+    if (!status.ok()) {
+      error("Failed to open tx_index SST file: {}", status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    for (const auto &[key, value] : entries) {
+      status = sst_writer.Put(key, value);
+      if (!status.ok()) {
+        error("Failed to add key to tx_index SST file: {}", status.ToString());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+
+    status = sst_writer.Finish();
+    if (!status.ok()) {
+      error("Failed to finish tx_index SST file: {}", status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    return tx_sst_path;
   });
 
-  // Thread 2: Build batch for contract_index column family
-  auto contract_future = pool.submit([this, block_height, events]() -> rocksdb::WriteBatch {
-    rocksdb::WriteBatch batch;
+  // Thread 2: Create SST file for contract_index column family
+  auto contract_future = pool.submit([this, block_height, events, contract_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+    // Collect all entries first
+    std::vector<std::pair<std::string, std::string>> entries;
     std::string key_buffer; // Reusable buffer for key construction
+
+    // Count total events to reserve space
+    size_t total_events = 0;
+    for (const auto &event_log : events) {
+      total_events += event_log.events.size();
+    }
+    entries.reserve(total_events);
 
     for (const auto &event_log : events) {
       // Index by contract address (in contract_index column family)
@@ -335,42 +392,81 @@ IndexDB::consume_events(BlockHeight block_height,
         std::string event_value(reinterpret_cast<const char *>(
                                     event_serialized.data()),
                                 event_serialized.size());
-        batch.Put(contract_cf_handle_, key_buffer, event_value);
+        entries.emplace_back(key_buffer, event_value);
         sequence_number++;
       }
     }
 
-    return batch;
+    // Sort entries by key (lexicographic order)
+    std::ranges::sort(entries, [](const auto &a, const auto &b) {
+      return a.first < b.first;
+    });
+
+    // Now write sorted entries to SST file
+    rocksdb::SstFileWriter sst_writer(env_options, sst_options, contract_cf_handle_);
+    rocksdb::Status status = sst_writer.Open(contract_sst_path);
+    if (!status.ok()) {
+      error("Failed to open contract_index SST file: {}", status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    for (const auto &[key, value] : entries) {
+      status = sst_writer.Put(key, value);
+      if (!status.ok()) {
+        error("Failed to add key to contract_index SST file: {}", status.ToString());
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
+    }
+
+    status = sst_writer.Finish();
+    if (!status.ok()) {
+      error("Failed to finish contract_index SST file: {}", status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+
+    return contract_sst_path;
   });
 
-  // Wait for both batches to be built
-  rocksdb::WriteBatch tx_batch = tx_future.get();
-  rocksdb::WriteBatch contract_batch = contract_future.get();
+  // Wait for both SST files to be created
+  auto tx_result = tx_future.get();
+  if (!tx_result.has_value()) {
+    return tx_result.error();
+  }
+  std::string tx_sst_file = *tx_result;
 
-  auto make_batch_ts = x23::fastclock::get_ns();
-  info("Make batch time: {} ns", make_batch_ts - start_ts);
+  auto contract_result = contract_future.get();
+  if (!contract_result.has_value()) {
+    // Clean up tx SST file on error
+    std::filesystem::remove(tx_sst_file);
+    return contract_result.error();
+  }
+  std::string contract_sst_file = *contract_result;
 
-  // When writing events into this indexer, we already have the data written to disk in the upstream
-  // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
-  // in that we can tolerate 
-  rocksdb::WriteOptions write_options;
-  write_options.sync = false;
+  auto make_sst_ts = x23::fastclock::get_ns();
+  info("Make SST time: {} ns", make_sst_ts - start_ts);
 
-  // Write batches sequentially on main thread
-  rocksdb::Status status = db_->Write(write_options, &tx_batch);
+  // Ingest the SST files into RocksDB
+  rocksdb::IngestExternalFileOptions ingest_options;
+  ingest_options.move_files = true; // Move files instead of copying
+
+  rocksdb::Status status = db_->IngestExternalFile(tx_cf_handle_, {tx_sst_file}, ingest_options);
   if (!status.ok()) {
-    error("Failed to write tx_index events to indexer: {}", status.ToString());
+    error("Failed to ingest tx_index SST file: {}", status.ToString());
+    std::filesystem::remove(tx_sst_file);
+    std::filesystem::remove(contract_sst_file);
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  status = db_->Write(write_options, &contract_batch);
+  status = db_->IngestExternalFile(contract_cf_handle_, {contract_sst_file}, ingest_options);
   if (!status.ok()) {
-    error("Failed to write contract_index events to indexer: {}", status.ToString());
+    error("Failed to ingest contract_index SST file: {}", status.ToString());
+    // Note: tx_sst_file was already moved, so we only need to clean up contract_sst_file
+    std::filesystem::remove(contract_sst_file);
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  auto write_ts = x23::fastclock::get_ns();
-  info("Write time: {} ns", write_ts - make_batch_ts);
+  auto ingest_ts = x23::fastclock::get_ns();
+  info("Ingest time: {} ns", ingest_ts - make_sst_ts);
   return {};
 }
 
