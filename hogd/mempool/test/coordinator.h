@@ -67,6 +67,31 @@ public:
     return ret;
   }
 
+  std::pair<SchedulerNomination, size_t> get_nomination_no_txs()
+  {
+    CHECK(!nominations_.empty());
+    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+
+    // The block hash is in the last chunk.
+    size_t last_chunk = nominations_[0].total_chunks - 1;
+    const SchedulerNomination &last = nominations_[last_chunk].chunk;
+
+    SchedulerNomination ret{.block_id = last.block_id};
+    Nomination &nom = ret.nomination;
+    nom.proposer = last.nomination.proposer;
+    nom.block_height = last.nomination.block_height;
+    nom.block_hash = last.nomination.block_hash;
+    nom.prev_block_hash = last.nomination.prev_block_hash;
+
+    size_t num_txs = 0;
+    for (const auto &[_, chunk] : nominations_) {
+      num_txs += chunk.chunk.nomination.transaction_hashes.size();
+    }
+
+    nominations_.clear();
+    return {ret, num_txs};
+  }
+
   void shut_down()
   {
     // TODO(jhumphri): Implement.

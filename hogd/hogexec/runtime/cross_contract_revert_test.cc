@@ -148,7 +148,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
@@ -170,7 +170,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -357,7 +357,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
   contract_map.emplace(1, std::move(contract_b));
   contract_map.emplace(2, std::move(contract_c));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy all contracts
   auto contract_a_obj = make_native_contract(0);
@@ -382,7 +382,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -496,7 +496,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
   contract_map.emplace(0, std::move(contract_a));
   contract_map.emplace(1, std::move(contract_b));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
@@ -517,7 +517,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())

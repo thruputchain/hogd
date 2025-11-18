@@ -11,6 +11,7 @@
 #include <type_traits>
 
 #include <x23/config.h>
+#include <x23/debug.h>
 #include <x23/utility.h>
 
 #ifndef X23_CORO_TRACE
@@ -85,7 +86,7 @@ public:
     h_.store(ch, std::memory_order_release);
 #else  // !NDEBUG
     auto h = h_.exchange(ch, std::memory_order_release);
-    assert(!h);
+    x23assert(!h);
 #endif // !NDEBUG
   }
   CoroHandle take()

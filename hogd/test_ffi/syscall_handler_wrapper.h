@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <memory>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -35,7 +34,7 @@ namespace hogd {
 // that the test harness does not need to maintain that context externally).
 class SyscallHandlerContext {
 public:
-  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
+  SyscallHandlerContext(MockRuntimeContext *context,
                         SignedTransaction const &stx, DBContext &db);
 
   ~SyscallHandlerContext()

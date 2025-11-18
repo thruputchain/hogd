@@ -151,8 +151,8 @@ public:
     constexpr ValidatorID kValidatorId{};
     x23::Vec<x23::Async<void>> handles;
     for (size_t i = 0; i < kNumSchedClients; i++) {
-      x23::span tx_chunk(txs.begin() + (i * kLoadgenTxBatchSize),
-                         txs.begin() + ((i + 1) * kLoadgenTxBatchSize));
+      x23::span tx_chunk(txs.begin() + (i * kSchedTxBatchSize),
+                         txs.begin() + ((i + 1) * kSchedTxBatchSize));
       handles.push_back(
           sched_coord_clients_[i].schedulercoord_submit_vetted(kValidatorId,
                                                                tx_chunk));
@@ -192,60 +192,32 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
-      auto timer = std::make_unique<ElapsedTimer>();
-
       x23::Async<SchedulerNominationOutcome> nominate_handle =
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
       x23::Awaitable<void> get_transactions_handle;
       get_transactions(txs, x23::CoroCB<void>(get_transactions_handle));
-
-      double create_handles_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       co_await get_transactions_handle;
 
       x23::Awaitable<void> submit_vetted_handle;
       submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
 
-      double wait_transactions_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       SchedulerNominationOutcome res_nominate = co_await nominate_handle;
-
-      {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        int64_t ms = (ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000);
-        info("got nominate result: {}", ms);
-      }
-
-      double wait_nomination_duration = timer->elapsed();
-      timer = std::make_unique<ElapsedTimer>();
-
       co_await submit_vetted_handle;
 
-      double wait_submit_vetted_duration = timer->elapsed();
-
       CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
-      const SchedulerNomination nomination = coord_sched_rpc_.get_nomination();
+      const auto &[nomination, num_txs] =
+          coord_sched_rpc_.get_nomination_no_txs();
+
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
 
-      info("create_handles_duration {}, "
-           "wait_nomination_duration {}, wait_transactions_duration {}, "
-           "wait_submit_vetted_duration, {}",
-           create_handles_duration, wait_nomination_duration,
-           wait_transactions_duration, wait_submit_vetted_duration);
-
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.
 
-        total_transactions_nominated +=
-            nomination.nomination.transaction_hashes.size();
-
+        total_transactions_nominated += num_txs;
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
         int64_t block_duration_us =
@@ -264,16 +236,13 @@ public:
         CHECK_GT(overall_duration_us, 0L);
         CHECK_GT(overall_duration_sec, 0.0);
 
-        double block_throughput_sec =
-            nomination.nomination.transaction_hashes.size() /
-            block_duration_sec;
+        double block_throughput_sec = num_txs / block_duration_sec;
         double overall_throughput_sec =
             total_transactions_nominated / overall_duration_sec;
         info("Block duration (s), {:.2f}, Num txs in block, {}, Overall "
              "duration (s), {:.2f}, Overall number of txs, {}",
-             block_duration_sec,
-             nomination.nomination.transaction_hashes.size(),
-             overall_duration_sec, total_transactions_nominated);
+             block_duration_sec, num_txs, overall_duration_sec,
+             total_transactions_nominated);
         info("Block throughput (tx/s), {:.2f}, Overall throughput (tx/s), "
              "{:.2f}",
              block_throughput_sec, overall_throughput_sec);

@@ -61,10 +61,10 @@ public:
   NativeContract &operator=(NativeContract const &) = delete;
 
   InvokeStatus<void> invoke(MethodID method, SystemCallHandler &syscall_handler,
-                            NativeRuntime &runtime);
+                            NativeRuntime &runtime) const;
 
 private:
-  std::unordered_map<MethodID, function_t> functions_;
+  const std::unordered_map<MethodID, function_t> functions_;
 };
 
 // Context that can instantiate native contracts from a predefined set of
@@ -95,7 +95,7 @@ private:
     return true;
   }
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
+  const std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
 };
 
 // Wrapper around one instantiation of a native contract.

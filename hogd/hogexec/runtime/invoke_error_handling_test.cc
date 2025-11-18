@@ -159,7 +159,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
   // mark the contract as existing and deployed within the database
   write_contract(native_contract_xdr);
   write_deployment(native_contract_address, native_contract_xdr);
@@ -178,7 +178,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                             .calldata = {},
                         },
                 }},
-        runtime_context);
+        std::move(runtime_context));
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

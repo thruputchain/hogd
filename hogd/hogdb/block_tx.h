@@ -67,8 +67,12 @@ public:
 
   void release_balance(const Address &addr, int128_t delta);
 
+  HogDBStatus<int128_t> read_nnint128_base(const ItemKey &key);
+  HogDBStatus<int128_t> read_balance_base(const Address &addr);
+
 private:
-  HogDBStatus<int128_t> get_snapshot_cost(const ItemKey &key);
+  HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
+  get_snapshot_cost_and_cache_data(const ItemKey &key);
 
   struct SipHash24Hasher {
     size_t operator()(const Address &key) const

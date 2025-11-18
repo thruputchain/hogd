@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -96,7 +97,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -118,7 +119,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -174,7 +175,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -199,7 +200,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -230,40 +231,42 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   // Then advance the block,
   // and check that the storage item is (100).
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0, // First method: set_add on (0, 200)
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             int128_t set_value = 0;
-             auto [r, _gas] =
-                 syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
-                                                    200);
-             if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-          {1, // Second method: add on (-100)
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, key,
-                                                                 nullptr, -100);
-             if (!r.has_value() ||
-                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-      });
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0, // First method: set_add on (0, 200)
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               int128_t set_value = 0;
+               auto [r, _gas] =
+                   syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
+                                                      200);
+               if (!r.has_value() ||
+                   r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+            {1, // Second method: add on (-100)
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto [r, _gas] =
+                   syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                                      -100);
+               if (!r.has_value() ||
+                   r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+        });
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -286,7 +289,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      make_context());
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -305,7 +308,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      make_context());
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
@@ -335,7 +338,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      make_context());
 
   auto res3 = handler3.root_invoke();
   ASSERT_TRUE(res3.is_root_success());
@@ -354,7 +357,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      runtime_context);
+      make_context());
 
   auto res4 = handler4.root_invoke();
   ASSERT_TRUE(res4.is_root_success());

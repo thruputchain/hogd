@@ -34,8 +34,6 @@ public:
 protected:
   void SetUp() override
   {
-    wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-
     // Load and deploy the manual_revert_test contract (target)
     auto target_contract = hogd::load_contract("manual_revert_test.wasm");
     target_contract_addr_ = make_contract_address(0);
@@ -51,7 +49,6 @@ protected:
     setup_grant_storage_token(caller_contract_addr_, 1'000'000'000);
   }
 
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_;
   ContractAddress target_contract_addr_;
   ContractAddress caller_contract_addr_;
 };
@@ -74,7 +71,7 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<"initialize">(
                                     UINT64_MAX, target_contract_addr_)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto init_res = init_handler.root_invoke();
   ASSERT_TRUE(init_res.is_root_success())
@@ -91,7 +88,7 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
       SignedTransaction{
           .tx = Transaction{.invocation = caller_client.make_invocation<
                                 "call_basic_manual_revert">(UINT64_MAX, true)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto call_res = call_handler.root_invoke();
   ASSERT_TRUE(call_res.is_root_success())
@@ -139,7 +136,7 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<"initialize">(
                                     UINT64_MAX, target_contract_addr_)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto init_res = init_handler.root_invoke();
   ASSERT_TRUE(init_res.is_root_success())
@@ -157,7 +154,7 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
           .tx =
               Transaction{.invocation = caller_client.make_invocation<
                               "call_nested_manual_revert">(UINT64_MAX, true)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto call_res = call_handler.root_invoke();
   ASSERT_TRUE(call_res.is_root_success())
@@ -205,7 +202,7 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<"initialize">(
                                     UINT64_MAX, target_contract_addr_)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto init_res = init_handler.root_invoke();
   ASSERT_TRUE(init_res.is_root_success())
@@ -225,7 +222,7 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
                   .invocation =
                       caller_client.make_invocation<"call_error_type_revert">(
                           UINT64_MAX, uint32_t{1})}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto call_res = call_handler.root_invoke();
   ASSERT_TRUE(call_res.is_root_success())
@@ -273,7 +270,7 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<"initialize">(
                                     UINT64_MAX, target_contract_addr_)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto init_res = init_handler.root_invoke();
   ASSERT_TRUE(init_res.is_root_success())
@@ -291,7 +288,7 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
           .tx =
               Transaction{.invocation = caller_client.make_invocation<
                               "call_storage_manual_revert">(UINT64_MAX, true)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto call_res = call_handler.root_invoke();
   ASSERT_TRUE(call_res.is_root_success())
@@ -339,7 +336,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<"initialize">(
                                     UINT64_MAX, target_contract_addr_)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto init_res = init_handler.root_invoke();
   ASSERT_TRUE(init_res.is_root_success())
@@ -362,7 +359,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
               Transaction{.invocation =
                               caller_client.make_invocation<"write_own_state">(
                                   UINT64_MAX, test_data)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto write_res = write_handler.root_invoke();
   ASSERT_TRUE(write_res.is_root_success()) << "Failed to write own state";
@@ -382,7 +379,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
                   .invocation =
                       caller_client.make_invocation<"check_own_state_exists">(
                           UINT64_MAX)}},
-      wasm_runtime_context_);
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi));
 
   auto check_res = check_handler.root_invoke();
   ASSERT_TRUE(check_res.is_root_success())

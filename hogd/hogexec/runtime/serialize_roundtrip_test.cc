@@ -41,8 +41,6 @@ public:
 protected:
   void SetUp() override
   {
-    wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
-
     std::unique_ptr<NativeContract> native_contract = std::make_unique<
         NativeContract>(std::unordered_map<MethodID,
                                            NativeContract::function_t>{
@@ -416,17 +414,18 @@ protected:
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =
-        std::make_shared<NativeContext>(std::move(native_contract_map));
+        std::make_unique<NativeContext>(std::move(native_contract_map));
 
     // deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr_, native_contract_xdr);
 
-    multiplexed_context_ = std::make_shared<MultiplexedContext>(
-        std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-            {ContractType::kNative, native_runtime_context},
-            {ContractType::kWasmi, wasm_runtime_context_}});
+    auto wasm_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    multiplexed_context_ = std::make_unique<MultiplexedContext>(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kNative, {native_runtime_context.release(), true}},
+            {ContractType::kWasmi, {wasm_context.release(), true}}});
   }
 
   using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;
@@ -469,13 +468,12 @@ protected:
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_;
   const ContractAddress cxs_contract_addr_ = make_contract_address(0);
   const ContractAddress txs_contract_addr_ = make_contract_address(1);
   const ContractAddress native_contract_addr_ = make_contract_address(2);
   cxs_client_t cxs_client_ = cxs_client_t(cxs_contract_addr_);
   txs_client_t txs_client_ = txs_client_t(txs_contract_addr_);
-  std::shared_ptr<MultiplexedContext> multiplexed_context_;
+  std::unique_ptr<MultiplexedContext> multiplexed_context_;
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -490,7 +488,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -509,7 +507,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
                                  .entrypoint = entrypoint_from_method_id(1),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -528,7 +526,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
                                  .entrypoint = entrypoint_from_method_id(2),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -547,7 +545,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
                                  .entrypoint = entrypoint_from_method_id(3),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -566,7 +564,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
                                  .entrypoint = entrypoint_from_method_id(4),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -585,7 +583,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
                                  .entrypoint = entrypoint_from_method_id(5),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -604,7 +602,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
                                  .entrypoint = entrypoint_from_method_id(6),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -623,7 +621,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
                                  .entrypoint = entrypoint_from_method_id(7),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -642,7 +640,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripErrorXDR)
                                  .entrypoint = entrypoint_from_method_id(8),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -661,7 +659,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripContractErrorXDR)
                                  .entrypoint = entrypoint_from_method_id(9),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -680,7 +678,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripStorageErrXDR)
                                  .entrypoint = entrypoint_from_method_id(10),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -699,7 +697,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
                                  .entrypoint = entrypoint_from_method_id(11),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      multiplexed_context_);
+      std::move(multiplexed_context_));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();

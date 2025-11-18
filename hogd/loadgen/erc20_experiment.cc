@@ -64,7 +64,7 @@ ERC20ExperimentState::generate_experiment()
   initialize_wallets(sha256(*wallet_contract));
 
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   const ContractAddress owner_address = get_owner_address();
@@ -108,20 +108,22 @@ ERC20ExperimentState::generate_experiment()
         erc20_meta::make_calldata<"mint">(wallets_[i].address,
                                           to_xdr(uint128_t{1'000'000'000})));
 
+    auto calldata = wallet_meta::make_calldata<"do_action">(
+        ed25519_sign(wallets_[0].secret_key, internal_calldata),
+        internal_calldata);
+
     auto tx = SignedTransaction{
         .tx =
             Transaction{
                 .invocation =
-                    {
+                    Invocation{
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<"do_action">(),
                         .gas_limit = GasAmount{20'000},
-                        .calldata = wallet_meta::make_calldata<"do_action">(
-                            ed25519_sign(wallets_[0].secret_key,
-                                         internal_calldata),
-                            internal_calldata),
+                        .calldata = std::move(calldata),
                     },
-                .uniquifier = {.block_expiry_height =
+                .uniquifier =
+                    Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
             },
@@ -129,10 +131,15 @@ ERC20ExperimentState::generate_experiment()
     mint_txs.push_back(tx);
   }
 
-  return {LoadgenSuccessResult{
+  x23::Vec<InitializationBlock> initialization_txs;
+  initialization_txs.reserve(2);
+  initialization_txs.emplace_back(std::move(unfurl_txs));
+  initialization_txs.emplace_back(std::move(mint_txs));
+
+  return LoadgenSuccessResult{
       .genesis_block = builder.build(),
-      .initialization_txs = {std::move(unfurl_txs), std::move(mint_txs)},
-  }};
+      .initialization_txs = std::move(initialization_txs),
+  };
 }
 
 LoadgenStatus<LoadgenExtension>
@@ -140,7 +147,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                         BlockHeight expiry_height)
 {
   if (!check_config_valid()) {
-    return {LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig}};
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
 
   x23::Vec<SignedTransaction> work_txs;
@@ -172,7 +179,7 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
           uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
               0, std::numeric_limits<uint64_t>::max())(gen);
 
-          auto make_account_pair = [&]() {
+          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
             auto sender = dist(gen);
             auto receiver = sender;
             while (receiver == sender) {
@@ -196,23 +203,22 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                                erc20_meta::make_calldata<"transfer">(
                                    wallets_[receiver].address, to_xdr(amount)));
 
+            Invocation invocation = {
+                .invoked_address = wallets_[sender].address,
+                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .gas_limit = GasAmount{20'000},
+                .calldata = wallet_meta::make_calldata<"do_action">(
+                    ed25519_sign(wallets_[sender].secret_key,
+                                 internal_calldata),
+                    internal_calldata),
+            };
+
             work_txs[j] = SignedTransaction{
                 .tx =
                     Transaction{
-                        .invocation =
-                            {
-                                .invoked_address = wallets_[sender].address,
-                                .entrypoint =
-                                    wallet_meta::entrypoint<"do_action">(),
-                                .gas_limit = GasAmount{20'000},
-                                .calldata =
-                                    wallet_meta::make_calldata<"do_action">(
-                                        ed25519_sign(
-                                            wallets_[sender].secret_key,
-                                            internal_calldata),
-                                        internal_calldata),
-                            },
-                        .uniquifier = {.block_expiry_height = expiry_height,
+                        .invocation = std::move(invocation),
+                        .uniquifier =
+                            Uniquifier{.block_expiry_height = expiry_height,
                                        .nonce = base_nonce + j},
                     },
             };
@@ -224,9 +230,9 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     future.wait();
   }
 
-  return {LoadgenExtension{
+  return LoadgenExtension{
       .work_txs = std::move(work_txs),
-  }};
+  };
 }
 
 } // namespace hogd

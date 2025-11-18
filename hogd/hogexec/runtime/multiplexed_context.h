@@ -3,6 +3,7 @@
 #include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -17,7 +18,7 @@ namespace hogd {
 class MultiplexedContext : public RuntimeContext {
 public:
   MultiplexedContext(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
           contexts);
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
@@ -27,12 +28,19 @@ public:
 
   bool verify_contract(Contract const &contract) const override;
 
-  ~MultiplexedContext() override = default;
+  ~MultiplexedContext() override
+  {
+    for (auto [_, context] : contexts_) {
+      if (context.second) {
+        delete context.first;
+      }
+    }
+  }
 
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
-  std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>> contexts_;
+  std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts_;
 };
 
 } // namespace hogd

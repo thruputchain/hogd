@@ -14,7 +14,7 @@
 
 namespace hogd {
 
-std::shared_ptr<RuntimeContext>
+std::unique_ptr<RuntimeContext>
 make_hogexec_precompiles_context()
 {
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -22,17 +22,22 @@ make_hogexec_precompiles_context()
       std::to_underlying(
           HogexecPrecompiledNativeContracts::kNativeContractHogToken),
       make_native_token_contract());
-  return std::make_shared<NativeContext>(std::move(contract_map));
+  return std::make_unique<NativeContext>(std::move(contract_map));
 }
 
-std::shared_ptr<RuntimeContext>
+std::unique_ptr<RuntimeContext>
 make_hogexec_context()
 {
-  return std::make_shared<MultiplexedContext>(
-      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
-          {ContractType::kWasmi,
-           make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
-          {ContractType::kNative, make_hogexec_precompiles_context()},
+  // This thread_local declaration has a meaningful performance impact
+  static thread_local std::unique_ptr<RuntimeContext> hogexec_native_context =
+      make_hogexec_precompiles_context();
+
+  auto hogexec_context = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
+  return std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kWasmi, {hogexec_context.release(), true}},
+          {ContractType::kNative, {hogexec_native_context.get(), false}},
       });
 }
 

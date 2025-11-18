@@ -462,6 +462,37 @@ template<typename R> struct callback_traits<CoroCB<R>> {
   using argument_type = R;
 };
 
+namespace detail {
+struct SuspendedCoroPromise : PromiseBase {
+  template<typename... Args> requires has_location<Args...>
+  SuspendedCoroPromise(Args &&...args) : PromiseBase(extract_location(args...))
+  {}
+  SuspendedCoroPromise(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
+  std::coroutine_handle<SuspendedCoroPromise> get_return_object()
+  {
+    return std::coroutine_handle<SuspendedCoroPromise>::from_promise(*this);
+  }
+  static std::suspend_always initial_suspend() noexcept { return {}; }
+  void return_void() const noexcept {}
+  void unhandled_exception() noexcept { trace_unhandled_exception(this); }
+  static std::suspend_never final_suspend() noexcept { return {}; }
+};
+} // namespace detail
+
+// A function returning an SCH (suspended coroutine handle) is an
+// initially suspended coroutine that just returns its own handle.
+// This is a light-weight means of turning a lambda into a
+// coroutine_handle for a suspended coroutine.
+using SCH = std::coroutine_handle<detail::SuspendedCoroPromise>;
+
+} // namespace x23
+
+template<typename... Args> struct std::coroutine_traits<x23::SCH, Args...> {
+  using promise_type = x23::detail::SuspendedCoroPromise;
+};
+
+namespace x23 {
+
 // An asynchronous result.  A function returning Async<R> can be
 // implemented as a coroutine.  A coroutine with an Async<R> a can
 // "co_await a" to get the result.  A non-coroutine can invoke an
@@ -531,20 +562,17 @@ template<typename R> struct [[nodiscard]] Async {
   {
     extern bool in_thread_pool();
     x23assert(!in_thread_pool());
-    std::binary_semaphore wait(0);
-    if constexpr (std::is_void_v<R>) {
-      (*this)([&wait] { wait.release(); } SLOC_COMMA_VAR);
-      wait.acquire();
+
+    promise_type &p = callee_.promise();
+    if (!p.await_ready()) {
+      std::binary_semaphore wait(0);
+      if (p.await_suspend([&wait] -> SCH {
+            wait.release();
+            co_return;
+          }()))
+        wait.acquire();
     }
-    else {
-      std::optional<R> res;
-      (*this)([&res, &wait](R r) {
-        res.emplace(std::move(r));
-        wait.release();
-      });
-      wait.acquire();
-      return std::move(*res);
-    }
+    return p.await_resume();
   }
 
 private:
@@ -730,16 +758,14 @@ make_async(source_location sloc = source_location::current())
   return std::pair{std::move(async), cb};
 }
 
-// A funciton that returns Detached is a detached coroutine that
+// A function that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
   struct promise_type : PromiseBase {
     template<typename... Args> requires has_location<Args...>
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
     {}
-    promise_type(source_location sloc = source_location::current())
-      : PromiseBase(sloc)
-    {}
+    promise_type(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}

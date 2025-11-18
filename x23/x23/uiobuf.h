@@ -2,16 +2,23 @@
 
 #pragma once
 
-#include <bit>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <expected>
 
+#include <iterator>
+#include <span>
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include <utility>
 #include <x23/cleanup.h>
 #include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 namespace x23 {
@@ -153,7 +160,9 @@ struct BufVec {
       size_t offset = bytes_.size();
       bytes_.resize_uninitialized(offset + sz);
       uint8_t *ret = bytes_.data() + offset;
-      memcpy(ret, p, sz);
+      if (sz > 0) {
+        std::memcpy(ret, p, sz);
+      }
       return ret;
     }
   };

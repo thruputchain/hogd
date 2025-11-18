@@ -484,7 +484,9 @@ struct CxsSerializer<X> {
       throw CxsBadInput("length {} exceeds maximum deserializing {}", size,
                         xdr_type_name<X>());
     value.resize_uninitialized(size);
-    std::memcpy(value.data(), data.data(), size);
+    if (size > 0) {
+      std::memcpy(value.data(), data.data(), size);
+    }
     data = data.subspan(size);
   }
 };

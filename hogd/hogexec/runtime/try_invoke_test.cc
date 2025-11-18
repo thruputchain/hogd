@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -60,90 +61,96 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   // 1: Reads the bytestring from the hardcoded storage key and returns it.
   // 2: Invokes method 0 and then method 1, checking that the written value is
   // read correctly.
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(calldata)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(calldata)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {};
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             auto res = handler.get_bytestring(key);
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               return {};
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto res = handler.get_bytestring(key);
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             ReturnBuffer out;
-             out.resize(res.value().value().size());
-             std::memcpy(out.data(), res.value().value().data(),
-                         res.value().value().size());
+               ReturnBuffer out;
+               out.resize(res.value().value().size());
+               if (!out.empty()) {
+                 std::memcpy(out.data(), res.value().value().data(),
+                             res.value().value().size());
+               }
 
-             handler.set_return_buffer(std::move(out), false);
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             auto calldata = handler.get_calldata();
+               handler.set_return_buffer(std::move(out), false);
+               return {};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               auto calldata = handler.get_calldata();
 
-             auto [r0, _g0] = handler.invoke(handler.get_current_address(), 0,
-                                             runtime.get_available_gas(),
-                                             handler.get_calldata(),
-                                             std::to_underlying(
-                                                 InvokeFlag::kInvokeFlagNone));
+               auto [r0, _g0] = handler.invoke(
+                   handler.get_current_address(), 0,
+                   runtime.get_available_gas(), handler.get_calldata(),
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 Calldata{}, std::to_underlying(InvokeFlag::kInvokeFlagNone));
+               auto [r1, _g1] =
+                   handler.invoke(handler.get_current_address(), 1,
+                                  runtime.get_available_gas(), Calldata{},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
 
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             auto returned_buffer = handler.get_return_buffer();
-             if (!returned_buffer.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               auto returned_buffer = handler.get_return_buffer();
+               if (!returned_buffer.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             auto const &returned_buffer_data = returned_buffer.value();
+               auto const &returned_buffer_data = returned_buffer.value();
 
-             if (returned_buffer_data->size() != calldata.size()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (returned_buffer_data->size() != calldata.size()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
-                             calldata.size()) != 0) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!returned_buffer_data->empty()) {
+                 if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                                 calldata.size()) != 0) {
+                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 }
+               }
 
-             return {};
-           }}});
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+               return {};
+             }}});
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -166,7 +173,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      runtime_context);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -174,49 +181,71 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+
+  advance_block();
+
+  // Now runs the same transaction again, with an empty string for the
+  // bytestring/calldata.
+  auto handler2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = ContractAddress{},
+                                           .entrypoint =
+                                               entrypoint_from_method_id(2),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      make_context());
+  auto res2 = handler2.root_invoke();
+  ASSERT_TRUE(res2.is_root_success());
+
+  auto r2 = handler2.try_commit_transaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(*r2);
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
 { // A native contract with the following methods:
   // 0: Invokes method 1, in a try_invoke frame.
   // 1: Makes a bytestring write.
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 handler.get_calldata(),
-                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               auto [r0, _g0] = handler.invoke(
+                   handler.get_current_address(), 1,
+                   runtime.get_available_gas(), handler.get_calldata(),
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {};
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
+               return {};
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span{"hello"}));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
 
-             return {};
-           }},
-      });
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+               return {};
+             }},
+        });
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -236,7 +265,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -267,87 +296,99 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
   // 3: Invokes method 0, in a try_invoke frame.  Then returns an error.
   // 4: Invokes method 3, in a regular frame.  Then invokes method 1, in a
   // try_invoke frame.
-  auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             return {};
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span{"world"}));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value()) {
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span{"hello"}));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               return {};
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span{"world"}));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               return {};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), {},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               // Try invoke method 1
+               auto [r1, _g1] =
+                   handler.invoke(handler.get_current_address(), 1,
+                                  runtime.get_available_gas(), {},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+            {3,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), {},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               // Return an error
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Try invoke method 1
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-          {3,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Return an error
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }},
-          {4,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Regular invoke of method 3
-             auto [r0, _g0] = handler.invoke(handler.get_current_address(), 3,
-                                             runtime.get_available_gas(), {},
-                                             std::to_underlying(
-                                                 InvokeFlag::kInvokeFlagNone));
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Try invoke method 1
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-      });
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_0));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+             }},
+            {4,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Regular invoke of method 3
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 3,
+                                  runtime.get_available_gas(), {},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagNone));
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               // Try invoke method 1
+               auto [r1, _g1] =
+                   handler.invoke(handler.get_current_address(), 1,
+                                  runtime.get_available_gas(), {},
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+        });
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
@@ -369,7 +410,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(2),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        runtime_context);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -404,7 +445,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(3),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        runtime_context);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
     auto commit_res = handler.try_commit_transaction();
@@ -434,7 +475,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(4),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        runtime_context);
+        make_context());
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -474,67 +515,71 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   // 0: Loads calldata as two int8_t values [a, b] and performs nnint_set_add of
   // (a, b) 1: Invokes method 0 in try_invoke frame with [5, -10], checks
   // failure, then returns error
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             if (calldata.size() != 1) {
-               ADD_FAILURE() << "calldata should have size 1";
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               if (calldata.size() != 1) {
+                 ADD_FAILURE() << "calldata should have size 1";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               auto key = make_storage_key("test");
+               // Interpret calldata bytes as int8_t for set_value and add_value
+               auto add_value = static_cast<int8_t>(calldata[0]);
+
+               auto system_res =
+                   handler.set_nnint(key, std::nullopt, add_value);
+
+               if (!system_res.has_value()) {
+                 ADD_FAILURE() << "set_nnint should have succeeded";
+                 // System-level error during async operation
+                 return system_res.error().to_invoke_error();
+               }
+
+               auto const &syscall_res = system_res.value();
+               if (!syscall_res.has_value()) {
+                 ADD_FAILURE() << "set_nnint should have succeeded";
+                 // Syscall itself reported an error (e.g., invalid arguments
+                 // for set_nnint)
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               return {}; // Success
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Invoke method 0 in try_invoke frame with arguments [-5]
+               Calldata args = {static_cast<uint8_t>(-5)};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+
+               if (!r0.has_value()) {
+                 ADD_FAILURE() << "try_invoke should have failed";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Check that the try_invoke failed (should fail because 5+ -10
+               // is negative)
+               if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "try_invoke should have failed";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             auto key = make_storage_key("test");
-             // Interpret calldata bytes as int8_t for set_value and add_value
-             auto add_value = static_cast<int8_t>(calldata[0]);
+             }}});
 
-             auto system_res = handler.set_nnint(key, std::nullopt, add_value);
-
-             if (!system_res.has_value()) {
-               ADD_FAILURE() << "set_nnint should have succeeded";
-               // System-level error during async operation
-               return system_res.error().to_invoke_error();
-             }
-
-             auto const &syscall_res = system_res.value();
-             if (!syscall_res.has_value()) {
-               ADD_FAILURE() << "set_nnint should have succeeded";
-               // Syscall itself reported an error (e.g., invalid arguments for
-               // set_nnint)
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             return {}; // Success
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Invoke method 0 in try_invoke frame with arguments [-5]
-             Calldata args = {static_cast<uint8_t>(-5)};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-
-             if (!r0.has_value()) {
-               ADD_FAILURE() << "try_invoke should have failed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             // Check that the try_invoke failed (should fail because 5+ -10 is
-             // negative)
-             if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "try_invoke should have failed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             // Return a deterministic error to make the transaction fail
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }}});
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -551,7 +596,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res = handler.root_invoke();
   // The transaction should fail because method 1 returns a deterministic error
@@ -603,83 +648,84 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
   // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
   // return error
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(calldata)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(calldata)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0 with "hello"
+               Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_hello,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value() ||
+                   r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Try invoke method 0 with "world"
+               Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
+               auto [r1, _g1] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_world,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r1.has_value() ||
+                   r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               return {};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0 with "foo" (should fail due to exclusive
+               // lock)
+               Calldata args_foo = {'f', 'o', 'o'};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_foo,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value()) {
+                 ADD_FAILURE() << "shoudl not have system error";
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               // Check that the try_invoke failed (due to exclusive lock)
+               if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "try_invoke should have failed";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "hello"
-             Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_hello,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value() ||
-                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+             }}});
 
-             // Try invoke method 0 with "world"
-             Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-             auto [r1, _g1] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_world,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value() ||
-                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "foo" (should fail due to exclusive
-             // lock)
-             Calldata args_foo = {'f', 'o', 'o'};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_foo,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value()) {
-               ADD_FAILURE() << "shoudl not have system error";
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-             }
-
-             // Check that the try_invoke failed (due to exclusive lock)
-             if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "try_invoke should have failed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             // Return a deterministic error to make the transaction fail
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }}});
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -697,7 +743,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -712,7 +758,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -746,83 +792,84 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
   // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
   // return error
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(calldata)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               auto key = make_storage_key("test");
+               auto res =
+                   handler.set_bytestring(key,
+                                          std::as_bytes(std::span(calldata)));
+               if (!res.has_value()) {
+                 return res.error().to_invoke_error();
+               }
+               if (!res.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0 with "hello"
+               Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_hello,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value() ||
+                   r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Try invoke method 0 with "world"
+               Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
+               auto [r1, _g1] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_world,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r1.has_value() ||
+                   r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               return {};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Try invoke method 0 with "foo" (should fail due to exclusive
+               // lock)
+               Calldata args_foo = {'f', 'o', 'o'};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_foo,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
+               if (!r0.has_value()) {
+                 ADD_FAILURE() << "shoudl not have system error";
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               }
+
+               // Check that the try_invoke failed (due to exclusive lock)
+               if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "try_invoke should have failed";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               // Return a deterministic error to make the transaction fail
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "hello"
-             Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_hello,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value() ||
-                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+             }}});
 
-             // Try invoke method 0 with "world"
-             Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-             auto [r1, _g1] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_world,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value() ||
-                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "foo" (should fail due to exclusive
-             // lock)
-             Calldata args_foo = {'f', 'o', 'o'};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_foo,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value()) {
-               ADD_FAILURE() << "shoudl not have system error";
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-             }
-
-             // Check that the try_invoke failed (due to exclusive lock)
-             if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               ADD_FAILURE() << "try_invoke should have failed";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             // Return a deterministic error to make the transaction fail
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }}});
-
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -840,7 +887,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -855,7 +902,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -911,82 +958,88 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   // 0: Loads calldata as one int8_t value [a] and performs nnint_add of (a)
   // 1: Invokes method 0 in try_invoke frame with [-5], checks failure, then
   // returns error 2: Invokes method 0 with [1], checks success
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             if (calldata.size() != 1) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             auto key = make_storage_key("test");
-             // Interpret calldata bytes as int8_t for add_value
-             auto add_value = static_cast<int8_t>(calldata[0]);
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               if (calldata.size() != 1) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               auto key = make_storage_key("test");
+               // Interpret calldata bytes as int8_t for add_value
+               auto add_value = static_cast<int8_t>(calldata[0]);
 
-             auto system_res = handler.set_nnint(key, std::nullopt, add_value);
+               auto system_res =
+                   handler.set_nnint(key, std::nullopt, add_value);
 
-             if (!system_res.has_value()) {
-               // System-level error during async operation
-               return system_res.error().to_invoke_error();
-             }
+               if (!system_res.has_value()) {
+                 // System-level error during async operation
+                 return system_res.error().to_invoke_error();
+               }
 
-             auto const &syscall_res = system_res.value();
-             if (!syscall_res.has_value()) {
-               // Syscall itself reported an error (e.g., invalid arguments for
-               // set_nnint)
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               auto const &syscall_res = system_res.value();
+               if (!syscall_res.has_value()) {
+                 // Syscall itself reported an error (e.g., invalid arguments
+                 // for set_nnint)
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {}; // Success
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Invoke method 0 in try_invoke frame with arguments [-5]
-             Calldata args = {static_cast<uint8_t>(-5)};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+               return {}; // Success
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Invoke method 0 in try_invoke frame with arguments [-5]
+               Calldata args = {static_cast<uint8_t>(-5)};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Check that the try_invoke failed (should fail because -5 is
-             // negative)
-             if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               // Check that the try_invoke failed (should fail because -5 is
+               // negative)
+               if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Return a deterministic error to make the transaction fail
-             return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Invoke method 0 with arguments [1]
-             Calldata args = {1};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+               // Return a deterministic error to make the transaction fail
+               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               // Invoke method 0 with arguments [1]
+               Calldata args = {1};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             // Check that the invocation succeeds
-             if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               // Check that the invocation succeeds
+               if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {};
-           }}});
+               return {};
+             }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -1003,7 +1056,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -1018,7 +1071,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      make_context());
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1065,112 +1118,111 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   // Assert that the try_invoke frame returns successfully if and only if the
   // input boolean is true. Then return success.
 
-  auto native_contract_db_failure = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             if (calldata.size() != 2) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             auto key = make_storage_key("test");
-             // Interpret calldata bytes as int8_t for set_value and add_value
-             auto set_value = static_cast<int8_t>(calldata[0]);
-             auto add_value = static_cast<int8_t>(calldata[1]);
+  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_db_failure = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               if (calldata.size() != 2) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               auto key = make_storage_key("test");
+               // Interpret calldata bytes as int8_t for set_value and add_value
+               auto set_value = static_cast<int8_t>(calldata[0]);
+               auto add_value = static_cast<int8_t>(calldata[1]);
 
-             auto system_res = handler.set_nnint(key, set_value, add_value);
+               auto system_res = handler.set_nnint(key, set_value, add_value);
 
-             if (!system_res.has_value()) {
-               // System-level error during async operation
-               return system_res.error().to_invoke_error();
-             }
+               if (!system_res.has_value()) {
+                 // System-level error during async operation
+                 return system_res.error().to_invoke_error();
+               }
 
-             auto const &syscall_res = system_res.value();
-             if (!syscall_res.has_value()) {
-               // Syscall itself reported an error (e.g., invalid arguments for
-               // set_nnint)
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               auto const &syscall_res = system_res.value();
+               if (!syscall_res.has_value()) {
+                 // Syscall itself reported an error (e.g., invalid arguments
+                 // for set_nnint)
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {}; // Success
-           }},
-          {1,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             if (calldata.size() != 2) { // Expecting two booleans
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             bool expect_first_succeeds = static_cast<bool>(calldata[0]);
-             bool expect_second_succeeds = static_cast<bool>(calldata[1]);
+               return {}; // Success
+             }},
+            {1,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               if (calldata.size() != 2) { // Expecting two booleans
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               bool expect_first_succeeds = static_cast<bool>(calldata[0]);
+               bool expect_second_succeeds = static_cast<bool>(calldata[1]);
 
-             Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_first_invoke,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+               Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
+               auto [r0, _g0] = handler.invoke(
+                   handler.get_current_address(), 0,
+                   runtime.get_available_gas(), args_first_invoke,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             bool first_succeeded =
-                 (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-             if (first_succeeded != expect_first_succeeds) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               bool first_succeeded =
+                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (first_succeeded != expect_first_succeeds) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             Calldata args_second_invoke = {5, 10};
-             auto [r1, _g1] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_second_invoke,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+               Calldata args_second_invoke = {5, 10};
+               auto [r1, _g1] = handler.invoke(
+                   handler.get_current_address(), 0,
+                   runtime.get_available_gas(), args_second_invoke,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             bool second_succeeded =
-                 (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-             if (second_succeeded != expect_second_succeeds) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r1.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               bool second_succeeded =
+                   (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (second_succeeded != expect_second_succeeds) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             auto const &calldata = handler.get_calldata();
-             if (calldata.size() != 1) { // Expecting one boolean
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
+               return {};
+             }},
+            {2,
+             [](SystemCallHandler &handler,
+                NativeRuntime &runtime) -> InvokeStatus<void> {
+               auto const &calldata = handler.get_calldata();
+               if (calldata.size() != 1) { // Expecting one boolean
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
 
-             Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
-             auto [r0, _g0] =
-                 handler.invoke(handler.get_current_address(), 0,
-                                runtime.get_available_gas(), args_invoke,
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagTryInvoke));
+               Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
+               auto [r0, _g0] =
+                   handler.invoke(handler.get_current_address(), 0,
+                                  runtime.get_available_gas(), args_invoke,
+                                  std::to_underlying(
+                                      InvokeFlag::kInvokeFlagTryInvoke));
 
-             if (!r0.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+               if (!r0.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
-             bool invoke_succeeded =
-                 (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
-             if (invoke_succeeded != expect_invoke_succeeds) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }}});
+               bool invoke_succeeded =
+                   (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone);
+               if (invoke_succeeded != expect_invoke_succeeds) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }}});
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(0, std::move(native_contract_db_failure));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_db_failure));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   auto contract_template = make_native_contract(0); // native_id = 0
   write_contract(contract_template);
@@ -1195,7 +1247,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1, 1}},
               }},
-      runtime_context);
+      make_context());
   {
     auto res = tc1_handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1215,7 +1267,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0}},
               }},
-      runtime_context);
+      make_context());
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1244,7 +1296,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}},
               }},
-      runtime_context);
+      make_context());
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1278,7 +1330,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}}, // true
               }},
-      runtime_context);
+      make_context());
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1298,7 +1350,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1}}, // {false, true}
               }},
-      runtime_context);
+      make_context());
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1398,7 +1450,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant exactly enough storage tokens for one write
   auto contract = make_native_contract(0);
@@ -1415,7 +1467,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1550,7 +1602,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant exactly enough storage tokens for two and a half
   // writes
@@ -1568,7 +1620,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1718,7 +1770,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant exactly enough storage tokens for the first two
   // updates
@@ -1736,7 +1788,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1839,7 +1891,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
@@ -1856,7 +1908,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1985,7 +2037,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
@@ -2002,7 +2054,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -2128,7 +2180,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   contract_map.emplace(kReceiverNativeId, std::move(receiver_contract));
   contract_map.emplace(kTokenNativeId, std::move(token_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contracts
   auto sender_contract_xdr = make_native_contract(kSenderNativeId);
@@ -2155,7 +2207,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2203,99 +2255,100 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
 TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 {
-  NativeContractBuilder builder;
 
   constexpr static StorageKeyContractData kKey = make_storage_key("test");
+  constexpr static int32_t kTestContractId = 0;
 
-  // perform a set_add_nnint
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0,
-      [](SystemCallHandler &handler, int64_t set_amount,
-         int64_t add_amount) -> InvokeStatus<void> {
-        int128_t set_128 = set_amount;
-        auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_128,
-                                               add_amount);
+  static auto make_context = []() -> std::unique_ptr<RuntimeContext> {
+    NativeContractBuilder builder;
 
-        if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
+    // perform a set_add_nnint
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        0,
+        [](SystemCallHandler &handler, int64_t set_amount,
+           int64_t add_amount) -> InvokeStatus<void> {
+          int128_t set_128 = set_amount;
+          auto [r, _gas] =
+              syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_128,
+                                                 add_amount);
 
-  // perform a add_nnint
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      1,
-      [](SystemCallHandler &handler, int64_t add_amount) -> InvokeStatus<void> {
-        auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, kKey, nullptr,
-                                               add_amount);
-        if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
 
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      2,
-      [](SystemCallHandler &handler,
-         NativeRuntime &runtime) -> InvokeStatus<void> {
-        // perform an add_nnint, then perform a set_add_nnint with the
-        // same set value in a try_invoke frame
-        auto calldata0 =
-            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
-                serialize<int64_t>(100)
-                    .value();
+    // perform a add_nnint
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        1,
+        [](SystemCallHandler &handler,
+           int64_t add_amount) -> InvokeStatus<void> {
+          auto [r, _gas] =
+              syscall_NonnegativeIntSetAdd_inner(handler, kKey, nullptr,
+                                                 add_amount);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
 
-        auto [r0, _g0] = handler.invoke(handler.get_current_address(), 1,
-                                        runtime.get_available_gas(), calldata0,
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagTryInvoke));
-        if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        // tolerate try_invoke failure
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        2,
+        [](SystemCallHandler &handler,
+           NativeRuntime &runtime) -> InvokeStatus<void> {
+          // perform an add_nnint, then perform a set_add_nnint with the
+          // same set value in a try_invoke frame
+          auto calldata0 =
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<int64_t>(100)
+                      .value();
 
-        auto calldata1 =
-            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
-                serialize<int64_t, int64_t>(100, -100)
-                    .value();
+          auto [r0, _g0] = handler.invoke(
+              handler.get_current_address(), 1, runtime.get_available_gas(),
+              calldata0, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r0.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          // tolerate try_invoke failure
 
-        auto [r1, _g1] = handler.invoke(handler.get_current_address(), 0,
-                                        runtime.get_available_gas(), calldata1,
-                                        std::to_underlying(
-                                            InvokeFlag::kInvokeFlagTryInvoke));
-        if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        // tolerate try_invoke failure
+          auto calldata1 =
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<int64_t, int64_t>(100, -100)
+                      .value();
 
-        return {};
-      });
-  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      3, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-        // reset contract state
-        int128_t set_value = 35;
-        auto [r, _gas] =
-            syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_value, 0);
-        // auto r = handler.set_nnint(key, 35, 0);
-        // if (!r.has_value() || !r.value().has_value()) {
-        if (!r.has_value() ||
-            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-        }
-        return {};
-      });
+          auto [r1, _g1] = handler.invoke(
+              handler.get_current_address(), 0, runtime.get_available_gas(),
+              calldata1, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+          if (!r1.has_value()) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          // tolerate try_invoke failure
 
-  auto native_contract = builder.build();
+          return {};
+        });
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        3, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+          // reset contract state
+          int128_t set_value = 35;
+          auto [r, _gas] =
+              syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_value, 0);
+          // auto r = handler.set_nnint(key, 35, 0);
+          // if (!r.has_value() || !r.value().has_value()) {
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }
+          return {};
+        });
 
-  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr int32_t kTestContractId = 0;
-  contract_map.emplace(kTestContractId, std::move(native_contract));
-  auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+    auto native_contract = builder.build();
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(kTestContractId, std::move(native_contract));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
 
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
@@ -2316,8 +2369,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     model::RunnableActionSet actions(work_queue);
 
     actions.add_action(
-        [](model::RunnableActionSet &set, auto self,
-           auto &runtime_context) -> model::Async {
+        [](model::RunnableActionSet &set, auto self) -> model::Async {
           co_await set.bg();
 
           auto handler = self->make_new_system_call_handler(
@@ -2330,7 +2382,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                              entrypoint_from_method_id(2),
                                          .gas_limit = UINT64_MAX,
                                          .calldata = {}}}},
-              runtime_context);
+              make_context());
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
             throw std::runtime_error("root invoke 0 failed");
@@ -2342,11 +2394,10 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           }
           co_return;
         },
-        this, runtime_context);
+        this);
 
     actions.add_action(
-        [](model::RunnableActionSet &set, auto self,
-           auto &runtime_context) -> model::Async {
+        [](model::RunnableActionSet &set, auto self) -> model::Async {
           co_await set.bg();
 
           // If this one preceeds the set_add_nnint in method 2, then that will
@@ -2365,7 +2416,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                              entrypoint_from_method_id(0),
                                          .gas_limit = UINT64_MAX,
                                          .calldata = calldata}}},
-              runtime_context);
+              make_context());
           auto res = handler.root_invoke();
           co_await set.bg();
           if (!res.is_root_success()) {
@@ -2377,7 +2428,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           }
           co_return;
         },
-        this, runtime_context);
+        this);
 
     {
       auto handler = make_new_system_call_handler(
@@ -2389,7 +2440,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                      .entrypoint = entrypoint_from_method_id(3),
                                      .gas_limit = UINT64_MAX,
                                      .calldata = {}}}},
-          runtime_context);
+          make_context());
 
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
@@ -2566,7 +2617,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   contract_map.emplace(kErrorContractId, std::move(error_contract));
   contract_map.emplace(kCallerContractId, std::move(caller_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contracts
   auto error_contract_xdr = make_native_contract(kErrorContractId);
@@ -2591,7 +2642,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2697,7 +2748,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
-      std::make_shared<NativeContext>(std::move(contract_map));
+      std::make_unique<NativeContext>(std::move(contract_map));
 
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
@@ -2714,7 +2765,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      runtime_context);
+      std::move(runtime_context));
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();

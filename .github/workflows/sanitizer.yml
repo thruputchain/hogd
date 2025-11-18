@@ -35,35 +35,38 @@ jobs:
       with:
         submodules: recursive
     - uses: ./.github/actions/prepare_env
+
+    # Google benchmark seems to add Werror in release builds, which for some reason interacts badly with asan 
+    # (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
+    # We disable it overall just to save build time, but it's required for the gcc release build with asan.
     
     - name: build gcc asan
-      run: ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON"
+      run: ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run gcc tests
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
         ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
    
     - name: build clang asan
-      run: ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON"
+      run: ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run llvm tests
       run: |
         export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
         ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
-    
-    - name: build gcc ubsan
-      run: ./scripts/build.sh -d build/gcc_ubsan -c gcc -f "-fsanitize=undefined -fno-sanitize-recover=all" -t Debug -x "-DENABLE_TEST_FFI=ON"
-    - name: run gcc ubsan tests
+  
+    - name: build gcc asan release
+      run: ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DBUILD_BENCHMARKS=OFF"
+    - name: run gcc tests release
       run: |
-        ctest --test-dir build/gcc_ubsan --parallel --timeout 100 --output-on-failure
-    - name: save gcc ubsan core dumps
-      if: failure()
-      run: |
-        ./scripts/save_core_dumps.sh ../core_dumps
+        export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+        ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
 
+    # Gcc doesn't support ignorelist with ubsan
     - name: build clang ubsan
-      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all" -t Debug -x "-DENABLE_TEST_FFI=ON"
+      run: ./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
     - name: run llvm ubsan tests
       run: |
+        export UBSAN_OPTIONS=print_stacktrace=1
         ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
     - name: save llvm ubsan core dumps
       if: failure()

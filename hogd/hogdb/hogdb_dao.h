@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -142,6 +143,15 @@ enum {
   kBytes,
 };
 
+// ItemLockCacheData is the data we use to cache type-specific info,
+// like the nnint base value, so we don't have to load that on each
+// request_nnint128.
+using ItemLockCacheData = std::array<uint8_t, 23>;
+enum {
+  kItemLockCacheDataTypeNone = 0,
+  kItemLockCacheDataNNInt128BaseValue = 1,
+};
+
 // hogDBDAO provides a data access object (DAO) for hogdb's persistent state.
 class HogDBDAO {
 public:
@@ -237,9 +247,9 @@ public:
   HogDBStatus<void> write_bytes(const ItemKey &key,
                                 std::span<const std::byte> buf);
 
-  HogDBStatus<size_t>
-  get_charged_storage_cost(const ItemKey &key,
-                           StorageCostModel const *cost_model);
+  HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
+  get_charged_storage_cost_and_cache_data(const ItemKey &key,
+                                          StorageCostModel const *cost_model);
   HogDBStatus<int8_t> get_item_type(const ItemKey &key);
 
   HogDBStatus<void> remove_item(const ItemKey &key);
