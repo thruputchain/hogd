@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mempool/new_scheduler.h"
