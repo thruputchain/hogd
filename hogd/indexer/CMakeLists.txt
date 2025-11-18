@@ -29,6 +29,7 @@ add_executable(indexer_bench
 
 target_link_libraries(indexer_bench
     indexer
+    event
     hogd
 )
 
