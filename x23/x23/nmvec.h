@@ -8,6 +8,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <ranges>
 #include <semaphore>
 #include <type_traits>
@@ -135,9 +136,74 @@ extern PerCpuSet<MVar<AllocCache>> memcaches;
 // references to items remain valid until the NMVec is resized below
 // their index or destroyed.
 template<typename T> class NMVec {
+  struct Location;
+
 public:
+  using value_type = T;
+  using difference_type = ptrdiff_t;
+  class iterator_type : public Location {
+  public:
+    using iterator_concept = std::random_access_iterator_tag;
+    using value_type = T;
+    using difference_type = ptrdiff_t;
+
+    constexpr iterator_type() noexcept = default;
+    constexpr explicit iterator_type(NMVec *v, size_t index) noexcept
+      : Location(Location::from_index(index)), v_(v) {}
+    decltype(auto) operator*() const noexcept
+    {
+      return v_->get_location(this->loc());
+    }
+    decltype(auto) operator->() const noexcept
+    {
+      return std::addressof(v_->get_location(this->loc()));
+    }
+    decltype(auto) operator[](difference_type n) const noexcept
+    {
+      return *(*this + n);
+    }
+
+    friend bool operator==(const iterator_type &a, const iterator_type &b)
+    {
+      return a.v_ == b.v_ && a.loc() == b.loc();
+    }
+
+#ifndef NDEBUG
+    // It's UB to compare iterators from different NMVecs
+    void check_compat(const iterator_type &other) const
+    {
+      x23assert(v_ == other.v_);
+    }
+#endif // !NDEBUG
+  private:
+    NMVec *v_{};
+  };
+
   NMVec() noexcept = default;
+  NMVec(NMVec &&other) noexcept
+  {
+    for (unsigned i = 0; i < kNumChunks; ++i)
+      chunks_[i].store(other.chunks_[i].exchange(nullptr,
+                                                 std::memory_order_relaxed),
+                       std::memory_order_relaxed);
+    size_.store(other.size_.exchange(0, std::memory_order_relaxed),
+                std::memory_order_release);
+  }
   ~NMVec() { resize(0); }
+
+  // Not thread-safe
+  NMVec &operator=(NMVec &&other) noexcept
+  {
+    if (&other == this)
+      return *this;
+    for (unsigned i = 0; i < kNumChunks; ++i)
+      if (T *c = chunks_[i].exchange(
+              other.chunks_[i].exchange(nullptr, std::memory_order_relaxed),
+              std::memory_order_relaxed))
+        a.deallocate(c, chunk_size(i));
+    size_.store(other.size_.exchange(0, std::memory_order_relaxed),
+                std::memory_order_release);
+  }
 
   T &operator[](size_t index) noexcept
   {
@@ -211,6 +277,15 @@ public:
     }
   }
 
+  iterator_type begin()
+  {
+    return iterator_type{this, 0};
+  }
+  iterator_type end()
+  {
+    return iterator_type{this, size()};
+  }
+
 private:
   static constexpr size_t kLogMinChunk =
       std::max(4, std::bit_width(4096 / sizeof(T)) - 1);
@@ -231,6 +306,7 @@ private:
     // chunk << kChunkShift | item
     uint64_t bits_;
 
+    constexpr Location() noexcept = default;
     constexpr Location(size_t chunkno, size_t itemno) noexcept
       : bits_(chunkno << kChunkShift | itemno)
     {}
@@ -257,26 +333,81 @@ private:
     }
     size_t to_index() const noexcept { return chunk_start(chunk()) + item(); }
 
-    Location operator++(int) noexcept
+    decltype(auto) operator+=(this is_mutable auto &&self, ptrdiff_t d) noexcept
     {
-      Location ret = *this;
-      ++*this;
+      self.bits_ = from_index(self.to_index() + d).bits_;
+      return (self);
+    }
+    auto operator++(this is_mutable auto &&self, int) noexcept
+    {
+      auto ret = self;
+      self += 1;
       return ret;
     }
-    Location &operator++() noexcept
+    decltype(auto) operator++(this is_mutable auto &&self) noexcept
     {
-      *this = *this + 1;
-      return *this;
-    }
-    Location operator+(ptrdiff_t d) const noexcept
-    {
-      return from_index(to_index() + d);
+      return self += 1;
     }
 
-    friend auto operator<=>(const Location &a, const Location &b) noexcept
+    decltype(auto) operator-=(this is_mutable auto &&self, ptrdiff_t d) noexcept
     {
+      self.bits_ = from_index(self.to_index() - d).bits_;
+      return (self);
+    }
+    auto operator--(this is_mutable auto &&self, int) noexcept
+    {
+      auto ret = self;
+      self -= 1;
+      return ret;
+    }
+    decltype(auto) operator--(this is_mutable auto &&self) noexcept
+    {
+      return self -= 1;
+    }
+
+    template<typename Self>
+    Self operator+(this const Self &self, difference_type d) noexcept
+    {
+      auto ret = self;
+      ret += d;
+      return ret;
+    }
+    template<references<Location> Self>
+    friend Self operator+(difference_type d, const Self &self) noexcept
+    {
+      return self + d;
+    }
+    template<typename Self>
+    Self operator-(this const Self &self, difference_type d) noexcept
+    {
+      auto ret = self;
+      ret -= d;
+      return ret;
+    }
+    template<references<Location> Self>
+    friend Self operator-(difference_type d, const Self &self) noexcept
+    {
+      return self - d;
+    }
+
+    friend difference_type
+    operator-(const references<Location> auto &a,
+              const references<Location> auto &b) noexcept
+    {
+      if constexpr (requires { a.check_compat(b); })
+        a.check_compat(b);
+      return a.to_index() - b.to_index();
+    }
+
+    auto operator<=>(this const references<Location> auto &a,
+                     const references<Location> auto &b) noexcept
+    {
+      if constexpr (requires { a.check_compat(b); })
+        a.check_compat(b);
       return a.bits_ <=> b.bits_;
     }
+
+    Location loc() const { return *this; }
   };
 
   static constexpr size_t kLocked = size_t(-1);
@@ -384,11 +515,17 @@ private:
     return c;
   }
 
-  T &get_index(size_t i) const noexcept
+  T &get_location(Location l) const noexcept
   {
-    auto l = Location::from_index(i);
     return chunks_[l.chunk()].load(std::memory_order_relaxed)[l.item()];
   }
+  T &get_index(size_t i) const noexcept
+  {
+    return get_location(Location::from_index(i));
+  }
 };
+
+static_assert(std::random_access_iterator<NMVec<int>::iterator_type>);
+static_assert(std::ranges::random_access_range<NMVec<int>>);
 
 } // namespace x23
