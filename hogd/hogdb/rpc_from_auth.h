@@ -4,7 +4,6 @@
 #include "auth_rpc.hh"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -15,11 +14,11 @@ public:
   using rpc_service = DBAuth1;
   explicit HogDBAuthRpc(RPCContext &ctx) : ctx_(ctx) {}
 
-  x23::Async<DBAuthResult> authdb_get_auth_data(BlockID block_id,
+  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight height,
                                                 ContractAddress address);
 
   x23::Async<DBAuthResultBatch>
-  authdb_get_auth_data_batch(BlockID block_id, ContractAddressBatch addresses);
+  authdb_get_auth_data_batch(BlockHeight height, ContractAddressBatch addresses);
 
   static x23::Async<void> dbauth_intro(AuthCard card)
   {

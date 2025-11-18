@@ -4,15 +4,19 @@
 #include "auth_rpc.hh"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
-#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
 
 x23::Async<DBAuthResult>
-HogDBAuthRpc::authdb_get_auth_data(BlockID block_id, ContractAddress address)
+HogDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
 {
+  BlockHeight current_height = ctx_.get_height_threadsafe();
+  if (height != current_height) {
+    co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
+  }
+
   HogDBDAO &db = ctx_.get_db();
   HogDBStatus<AccountAuthData> status =
       db.read_address_account_auth_data(address);
@@ -29,11 +33,20 @@ HogDBAuthRpc::authdb_get_auth_data(BlockID block_id, ContractAddress address)
 }
 
 x23::Async<DBAuthResultBatch>
-HogDBAuthRpc::authdb_get_auth_data_batch(BlockID block_id,
+HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
                                          ContractAddressBatch addresses)
 {
   DBAuthResultBatch result;
   result.reserve(addresses.size());
+
+  BlockHeight current_height = ctx_.get_height_threadsafe();
+  if (height != current_height) {
+    for (auto i = 0; i < addresses.size(); i++) {
+      result.emplace_back(DBAuthError::kDBAuthStaleBlockHeight);
+    }
+    co_return result;
+  }
+
   auto &db = ctx_.get_db();
   for (const ContractAddress &address : addresses) {
     result.emplace_back(DBAuthError::kDBAuthSuccess);

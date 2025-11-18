@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -28,6 +29,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
+#include "types.hh"
 #include "x23/rpc.h"
 
 namespace hogd {
@@ -67,6 +69,11 @@ public:
   HogDBDAO &get_db() { return db_; }
   MerkleTriePrefix &get_trie() { return *trie_; }
   DbTip &get_tip() { return tip_; }
+  
+  // Get the committed block height, when exact synchronization with DbTip is not required.
+  // current_committed_height_ is updated when a block is committed, but might be slightly stale.
+  BlockHeight get_height_threadsafe() { return current_committed_height_.load(); }
+
   StorageCostModel const &get_cost_model()
   {
     assert(cost_model_.has_value());
@@ -118,6 +125,7 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   // tracks details about the last committed block.
   DbTip tip_ = DbTip{.id = UINT64_MAX};
+  std::atomic<BlockHeight> current_committed_height_ = tip_.height;
   // the storage cost model for computing storage costs at the current block
   // height.
   std::optional<StorageCostModel> cost_model_;
