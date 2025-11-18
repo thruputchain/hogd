@@ -291,15 +291,64 @@ IndexDB::consume_events(BlockHeight block_height,
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  constexpr size_t kNumThreads = 16;
-  const size_t chunk_size = (events.size() + kNumThreads - 1) / kNumThreads;
-  assert(chunk_size * kNumThreads >= events.size());
-
-  // Create worker pool and submit jobs
-  auto &pool = WorkerPool::get_default_pool();
-  std::vector<std::future<IndexerStatus<void>>> futures;
-
   auto start_ts = x23::fastclock::get_ns();
+
+  // Create worker pool and submit jobs for each column family
+  auto &pool = WorkerPool::get_default_pool();
+
+  // Thread 1: Build batch for tx_index column family
+  auto tx_future = pool.submit([this, block_height, events]() -> rocksdb::WriteBatch {
+    rocksdb::WriteBatch batch;
+    std::string key_buffer; // Reusable buffer for key construction
+
+    for (const auto &event_log : events) {
+      // Serialize the TxEventLog for storage
+      auto serialized = x23::serialize(event_log);
+      std::string value(reinterpret_cast<const char *>(serialized.data()),
+                        serialized.size());
+
+      // Index by transaction (in tx_index column family)
+      IndexerKeyFormat::make_tx_key(key_buffer, block_height,
+                                    event_log.proposed_tx_hash);
+      batch.Put(tx_cf_handle_, key_buffer, value);
+    }
+
+    return batch;
+  });
+
+  // Thread 2: Build batch for contract_index column family
+  auto contract_future = pool.submit([this, block_height, events]() -> rocksdb::WriteBatch {
+    rocksdb::WriteBatch batch;
+    std::string key_buffer; // Reusable buffer for key construction
+
+    for (const auto &event_log : events) {
+      // Index by contract address (in contract_index column family)
+      uint32_t sequence_number = 0;
+      for (const auto &emitted_event : event_log.events) {
+        IndexerKeyFormat::make_contract_key(key_buffer,
+                                            emitted_event.contract_address,
+                                            block_height,
+                                            event_log.proposed_tx_hash,
+                                            sequence_number);
+        // Serialize the individual event
+        auto event_serialized = x23::serialize(emitted_event);
+        std::string event_value(reinterpret_cast<const char *>(
+                                    event_serialized.data()),
+                                event_serialized.size());
+        batch.Put(contract_cf_handle_, key_buffer, event_value);
+        sequence_number++;
+      }
+    }
+
+    return batch;
+  });
+
+  // Wait for both batches to be built
+  rocksdb::WriteBatch tx_batch = tx_future.get();
+  rocksdb::WriteBatch contract_batch = contract_future.get();
+
+  auto make_batch_ts = x23::fastclock::get_ns();
+  info("Make batch time: {} ns", make_batch_ts - start_ts);
 
   // When writing events into this indexer, we already have the data written to disk in the upstream
   // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
@@ -307,70 +356,21 @@ IndexDB::consume_events(BlockHeight block_height,
   rocksdb::WriteOptions write_options;
   write_options.sync = false;
 
-  for (size_t i = 0; i < kNumThreads; i++) {
-    const size_t start_idx = i * chunk_size;
-    if (start_idx >= events.size()) {
-      break;
-    }
-    const size_t end_idx = std::min(start_idx + chunk_size, events.size());
-    const auto chunk = events.subspan(start_idx, end_idx - start_idx);
-
-    auto future = pool.submit([this, block_height, chunk, write_options]() -> IndexerStatus<void> {
-      rocksdb::WriteBatch batch;
-      std::string key_buffer; // Reusable buffer for key construction
-
-      for (const auto &event_log : chunk) {
-        // Serialize the TxEventLog for storage
-        auto serialized = x23::serialize(event_log);
-        std::string value(reinterpret_cast<const char *>(serialized.data()),
-                          serialized.size());
-
-        // Index by transaction (in tx_index column family)
-        IndexerKeyFormat::make_tx_key(key_buffer, block_height,
-                                      event_log.proposed_tx_hash);
-        batch.Put(tx_cf_handle_, key_buffer, value);
-
-        // Index by contract address (in contract_index column family)
-        uint32_t sequence_number = 0;
-        for (const auto &emitted_event : event_log.events) {
-          IndexerKeyFormat::make_contract_key(key_buffer,
-                                              emitted_event.contract_address,
-                                              block_height,
-                                              event_log.proposed_tx_hash,
-                                              sequence_number);
-          // Serialize the individual event
-          auto event_serialized = x23::serialize(emitted_event);
-          std::string event_value(reinterpret_cast<const char *>(
-                                      event_serialized.data()),
-                                  event_serialized.size());
-          batch.Put(contract_cf_handle_, key_buffer, event_value);
-          sequence_number++;
-        }
-      }
-
-      // Write the batch directly from this thread
-      rocksdb::Status status = db_->Write(write_options, &batch);
-      if (!status.ok()) {
-        error("Failed to write events to indexer: {}", status.ToString());
-        return IndexerError(IndexerErrorCode::kInternal);
-      }
-
-      return {};
-    });
-
-    futures.push_back(std::move(future));
+  // Write batches sequentially on main thread
+  rocksdb::Status status = db_->Write(write_options, &tx_batch);
+  if (!status.ok()) {
+    error("Failed to write tx_index events to indexer: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  // Wait for all jobs to complete and check for errors
-  for (auto &future : futures) {
-    auto result = future.get();
-    if (!result.has_value()) {
-      return result.error();
-    }
+  status = db_->Write(write_options, &contract_batch);
+  if (!status.ok()) {
+    error("Failed to write contract_index events to indexer: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
   }
 
   auto write_ts = x23::fastclock::get_ns();
-  info("Total time: {} ns", write_ts - start_ts);
+  info("Write time: {} ns", write_ts - make_batch_ts);
   return {};
 }
 
