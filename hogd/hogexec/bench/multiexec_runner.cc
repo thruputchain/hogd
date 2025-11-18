@@ -40,6 +40,7 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
@@ -163,6 +164,7 @@ public:
   }
 
   static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
+  static void scheddb_changed_accounts(BlockHeight height, ContractAddressBatch const& addresses) {}
 
   x23::Vec<ShardCard> await_shard_cards(unsigned int num_cards)
   {
