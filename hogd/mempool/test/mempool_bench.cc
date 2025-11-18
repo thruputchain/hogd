@@ -9,7 +9,6 @@
 #include "auth_claim.hh"
 #include "db_sched.hh"
 #include "discovery.hh"
-#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"

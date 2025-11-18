@@ -1,11 +1,14 @@
 add_xdr(
   protocol
   ../../protocol/account.x
+  ../../protocol/auth_card.x
   ../../protocol/auth_claim.x
+  ../../protocol/auth_rpc.x
   ../../protocol/batch.x
   ../../protocol/block.x
   ../../protocol/catchup.x
   ../../protocol/ci_server.x
+  ../../protocol/consensus.x
   ../../protocol/contract.x
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x

@@ -1,26 +1,21 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
+#include <memory>
 #include <utility>
 
-#include "discovery.hh"
+#include "db_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/shared.h"
-#include "nomination.hh"
-#include "rpc_types.hh"
-#include "sched_coord.hh"
-#include "sched_exec.hh"
-#include "transaction.hh"
+#include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/rpc.h"
+#include "x23/format.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -56,6 +51,14 @@ public:
     CHECK_PTR(scheduler_.get());
     // See the comment above if you change this.
     handle_transfer(transfers);
+    co_return;
+  }
+
+  x23::Async<void> scheddb_changed_accounts(BlockHeight height,
+                                            ContractAddressBatch addresses)
+  {
+    CHECK_PTR(scheduler_.get());
+    // TODO(geoff): implement invalidation of cached auth checks
     co_return;
   }
 
