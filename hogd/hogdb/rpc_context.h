@@ -69,10 +69,14 @@ public:
   HogDBDAO &get_db() { return db_; }
   MerkleTriePrefix &get_trie() { return *trie_; }
   DbTip &get_tip() { return tip_; }
-  
-  // Get the committed block height, when exact synchronization with DbTip is not required.
-  // current_committed_height_ is updated when a block is committed, but might be slightly stale.
-  BlockHeight get_height_threadsafe() { return current_committed_height_.load(); }
+
+  // Get the committed block height, when exact synchronization with DbTip is
+  // not required. current_committed_height_ is updated when a block is
+  // committed, but might be slightly stale.
+  BlockHeight get_height_threadsafe()
+  {
+    return current_committed_height_.load();
+  }
 
   StorageCostModel const &get_cost_model()
   {

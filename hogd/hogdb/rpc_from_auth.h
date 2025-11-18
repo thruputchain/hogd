@@ -18,7 +18,8 @@ public:
                                                 ContractAddress address);
 
   x23::Async<DBAuthResultBatch>
-  authdb_get_auth_data_batch(BlockHeight height, ContractAddressBatch addresses);
+  authdb_get_auth_data_batch(BlockHeight height,
+                             ContractAddressBatch addresses);
 
   static x23::Async<void> dbauth_intro(AuthCard card)
   {
