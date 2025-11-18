@@ -144,7 +144,8 @@ private:
     x23::Vec<SignedTransaction> txs;
     x23::Vec<SignedTransactionHash> tx_hashes;
 
-    x23::Vec<SchedulerNominationChunk> sched_nominations;
+    x23::Vec<SchedulerNominationChunk> sched_nominations =
+        x23::Vec<SchedulerNominationChunk>(kNumSchedulerIterations, {});
     SchedulerNominationChunk last_chunk;
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
