@@ -152,7 +152,7 @@ public:
   size_t size() const noexcept
   {
     for (;;) {
-      size_t sz = size_.load(std::memory_order_relaxed);
+      size_t sz = size_.load(std::memory_order_acquire);
       if (sz != kLocked)
         return sz;
       size_.wait(sz);
@@ -166,7 +166,7 @@ public:
 
     auto l = Location::from_index(size);
     T *c = get_or_allocate_chunk(l.chunk());
-    std::construct_at(c + l.index(), std::forward<decltype(args)>(args)...);
+    std::construct_at(c + l.item(), std::forward<decltype(args)>(args)...);
     return size++;
   }
 
@@ -194,8 +194,11 @@ public:
           break;
         std::ranges::destroy(s | std::views::reverse);
         size = cur.to_index();
-        if (cur.item() == 0)
-          a.deallocate(s.data(), chunk_size(target.chunk()));
+        if (cur.item() == 0) {
+          auto cn = cur.chunk();
+          if (T *p = chunks_[cn].exchange(nullptr, std::memory_order_relaxed))
+            a.deallocate(p, chunk_size(cn));
+        }
       }
     }
   }
