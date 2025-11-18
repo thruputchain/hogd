@@ -416,17 +416,6 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transaction_hashes.clear();
     nomination.transaction_nominations.clear();
-  }
-  {
-    cache.last_chunk.chunk_idx = kNumSchedulerIterations;
-    cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
-    cache.last_chunk.chunk.block_id = cache.block_id;
-
-    Nomination &nomination = cache.last_chunk.chunk.nomination;
-    nomination.block_height = cache.db_tip.height + 1;
-    nomination.prev_block_hash = cache.db_tip.hash;
-    nomination.transaction_hashes.clear();
-    nomination.transaction_nominations.clear();
     // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
     // [nomination.transaction_hashes] and [nomination.transaction_nominations]
     // are filled in below.
@@ -533,12 +522,20 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
                                  *finish_nomination_handles.back()));
   }
 
-  const SHA256Hash nomination_block_hash =
-      get_block_hash(cache.tx_hashes,
-                     /*prev_block_hash=*/cache.db_tip.hash);
+  {
+    cache.last_chunk.chunk_idx = kNumSchedulerIterations;
+    cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
+    cache.last_chunk.chunk.block_id = cache.block_id;
+    cache.last_chunk.chunk.nomination.block_hash =
+        get_block_hash(cache.tx_hashes,
+                       /*prev_block_hash=*/cache.db_tip.hash);
 
-  cache.last_chunk.chunk_idx = cache.sched_nominations.size();
-  cache.last_chunk.chunk.nomination.block_hash = nomination_block_hash;
+    Nomination &nomination = cache.last_chunk.chunk.nomination;
+    nomination.block_height = cache.db_tip.height + 1;
+    nomination.prev_block_hash = cache.db_tip.hash;
+    nomination.transaction_hashes.clear();
+    nomination.transaction_nominations.clear();
+  }
   x23::Async<void> last_chunk_handle =
       coord_client_->coordscheduler_finish_nomination(cache.last_chunk);
 
@@ -632,6 +629,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
              RPCError::kRPCNone);
 
+    // [scheduler_->scheduler()] increments the block number, so we need to
+    // decrement it since we did not nominate a block.
     scheduler_->decrement_current_block();
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
