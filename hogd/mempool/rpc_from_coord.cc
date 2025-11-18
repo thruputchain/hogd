@@ -350,21 +350,22 @@ MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
 }
 
 x23::Async<bool>
-MempoolCoordinatorRpc::initialize_block(const DbTip &db_tip, BlockID block_id)
+MempoolCoordinatorRpc::initialize_block(const NominationData &cache)
 {
   // Create snapshot.
   x23::Async<DbSchedResult> create_snapshot_handler =
-      create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
+      create_snapshot(/*prev_block_id=*/cache.db_tip.id, cache.block_id,
                       BlockExecutionMode::kBlockExecutionModeProposal);
 
   // Open block (on event server).
-  x23::Async<RPCError> open_block_handler = eventsched_open_block(block_id);
+  x23::Async<RPCError> open_block_handler =
+      eventsched_open_block(cache.block_id);
 
   // Open proposal blocks.
   x23::Vec<x23::Async<ExecResult>> open_proposal_block_handlers;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     open_proposal_block_handlers.push_back(
-        open_proposal_block(block_id, /*executor_idx=*/i));
+        open_proposal_block(cache.block_id, /*executor_idx=*/i));
   }
 
   // [co_await] the block initialization RPCs.
@@ -383,13 +384,14 @@ MempoolCoordinatorRpc::initialize_block(const DbTip &db_tip, BlockID block_id)
   if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
       !open_proposal_block_success) {
     if (create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK) {
-      CHECK_EQ(co_await abandon_snapshot(block_id),
+      CHECK_EQ(co_await abandon_snapshot(cache.block_id),
                DbSchedResult::DbSchedResultOK);
     }
-    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
+    CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
+             RPCError::kRPCNone);
     for (size_t i = 0; i < open_proposal_block_handler_ret.size(); i++) {
       if (open_proposal_block_handler_ret[i] == ExecResult::ExecResultOK) {
-        co_await finish_block(block_id, /*executor_idx=*/i);
+        co_await finish_block(cache.block_id, /*executor_idx=*/i);
       }
     }
 
@@ -398,38 +400,31 @@ MempoolCoordinatorRpc::initialize_block(const DbTip &db_tip, BlockID block_id)
   co_return true;
 }
 
-x23::Async<x23::Vec<SchedulerNominationChunk>>
-MempoolCoordinatorRpc::schedule(
-    const DbTip &db_tip, BlockID block_id,
-    const x23::Vec<SignedTransaction> &txs,
-    const x23::Vec<SignedTransactionHash> &tx_hashes)
+x23::Async<void>
+MempoolCoordinatorRpc::schedule(NominationData &cache)
 {
-  static x23::Vec<SchedulerNominationChunk> sched_nominations(
-      kNumSchedulerIterations, {});
-
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
-  for (size_t i = 0; i < sched_nominations.size(); i++) {
-    SchedulerNominationChunk &sched_nomination = sched_nominations[i];
+  for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
+    SchedulerNominationChunk &sched_nomination = cache.sched_nominations[i];
     sched_nomination.chunk_idx = i;
     sched_nomination.total_chunks = kNumSchedulerIterations + 1;
 
-    sched_nomination.chunk.block_id = block_id;
+    sched_nomination.chunk.block_id = cache.block_id;
     Nomination &nomination = sched_nomination.chunk.nomination;
-    nomination.block_height = db_tip.height + 1;
-    nomination.prev_block_hash = db_tip.hash;
+    nomination.block_height = cache.db_tip.height + 1;
+    nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transaction_hashes.clear();
     nomination.transaction_nominations.clear();
   }
-  static SchedulerNominationChunk last_chunk;
   {
-    last_chunk.chunk_idx = kNumSchedulerIterations;
-    last_chunk.total_chunks = kNumSchedulerIterations + 1;
-    last_chunk.chunk.block_id = block_id;
+    cache.last_chunk.chunk_idx = kNumSchedulerIterations;
+    cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
+    cache.last_chunk.chunk.block_id = cache.block_id;
 
-    Nomination &nomination = last_chunk.chunk.nomination;
-    nomination.block_height = db_tip.height + 1;
-    nomination.prev_block_hash = db_tip.hash;
+    Nomination &nomination = cache.last_chunk.chunk.nomination;
+    nomination.block_height = cache.db_tip.height + 1;
+    nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transaction_hashes.clear();
     nomination.transaction_nominations.clear();
     // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
@@ -440,20 +435,17 @@ MempoolCoordinatorRpc::schedule(
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>>
       propose_batch_in_chunks_handles;
   propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
-  static x23::Vec<bool> statuses(kMaxBlockSize, false);
-  static x23::Vec<x23::XdrVec<NominatedTransaction>>
-      transaction_nomination_chunks;
-  transaction_nomination_chunks.clear();
-  transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
+  cache.transaction_nomination_chunks.clear();
+  cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     if (i > 0) {
       // The first call to [schedule()] is done above since we want to overlap
       // it with opening the snapshot and the block.
-      scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
-                           txs);
+      scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
+                           cache.tx_hashes, cache.txs);
     }
-    size_t num_scheduled_this_iteration = txs.size() - num_scheduled;
+    size_t num_scheduled_this_iteration = cache.txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
       break;
     }
@@ -462,18 +454,29 @@ MempoolCoordinatorRpc::schedule(
     propose_batch_in_chunks_handles.push_back(
         std::make_unique<x23::Awaitable<void>>());
 
-    x23::span<bool> ret_span(statuses.begin() + num_scheduled,
-                             statuses.begin() + tx_hashes.size());
-    x23::span<SignedTransaction> txs_span(txs.begin() + num_scheduled,
-                                          txs.end());
-    num_scheduled = tx_hashes.size();
-    propose_batch_in_chunks(block_id, txs_span,
-                            transaction_nomination_chunks[i], ret_span,
+    x23::span<bool> ret_span(cache.statuses.begin() + num_scheduled,
+                             cache.statuses.begin() + cache.tx_hashes.size());
+    x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
+                                          cache.txs.end());
+    num_scheduled = cache.tx_hashes.size();
+    propose_batch_in_chunks(cache.block_id, txs_span,
+                            cache.transaction_nomination_chunks[i], ret_span,
                             x23::CoroCB<void>(
                                 *propose_batch_in_chunks_handles.back()));
   }
 
-  co_return sched_nominations;
+  for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
+    co_await *propose_batch_in_chunks_handles[i];
+
+    size_t total_nominations_so_far = i * kChunkSize;
+    SchedulerNominationChunk &nomination =
+        cache.sched_nominations[total_nominations_so_far /
+                                kNumTxsPerNominationChunk];
+    nomination.chunk.nomination.transaction_nominations +=
+        cache.transaction_nomination_chunks[i];
+  }
+
+  co_return;
 }
 
 x23::Async<SchedulerNominationOutcome>
@@ -485,20 +488,19 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
 
-  BlockID block_id = get_ns_since_epoch();
+  static NominationData cache;
+  cache.block_id = get_ns_since_epoch();
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
-  static x23::Vec<SignedTransaction> txs;
-  static x23::Vec<SignedTransactionHash> tx_hashes;
-  txs.clear();
-  tx_hashes.clear();
+  cache.txs.clear();
+  cache.tx_hashes.clear();
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
   // first batch of txs below while these RPCs are outstanding and before we
   // [co_await] them.
-  x23::Async<bool> initialize_block_handle = initialize_block(db_tip, block_id);
+  x23::Async<bool> initialize_block_handle = initialize_block(cache);
 
   {
     // This is the first call to [schedule()]. We do it up here rather than with
@@ -506,8 +508,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // call with the block initialization work.
     x23::CoroGuard cg;
     co_await cg(scheduler_->global_lock_);
-    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations, tx_hashes,
-                         txs);
+    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
+                         cache.tx_hashes, cache.txs);
   }
 
   if (!co_await initialize_block_handle) {
@@ -518,82 +520,79 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // failure is pretty bad and unexpected, and I do not think it is worth
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
-    co_await scheduler_->add_txs(txs);
+    co_await scheduler_->add_txs(cache.txs);
     scheduler_->decrement_current_block();
 
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
-  // Schedule the block.
-  x23::Vec<SchedulerNominationChunk> sched_nominations =
-      co_await schedule(db_tip, block_id, txs, tx_hashes);
+  // Schedule the block and send the txs to the executors.
+  co_await schedule(cache);
 
-  if (tx_hashes.empty()) {
+  if (cache.tx_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(block_id, /*executor_idx=*/i);
+      co_await finish_block(cache.block_id, /*executor_idx=*/i);
     }
-    CHECK_EQ(co_await abandon_snapshot(block_id),
+    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
              DbSchedResult::DbSchedResultOK);
-    CHECK_EQ(co_await eventsched_abandon_block(block_id), RPCError::kRPCNone);
+    CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
+             RPCError::kRPCNone);
+
+    scheduler_->decrement_current_block();
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
   // Finished scheduling the block.
 
-  for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
-    co_await *propose_batch_in_chunks_handles[i];
-
-    size_t total_nominations_so_far = i * kChunkSize;
-    SchedulerNominationChunk &nomination =
-        sched_nominations[total_nominations_so_far / kNumTxsPerNominationChunk];
-    nomination.chunk.nomination.transaction_nominations +=
-        transaction_nomination_chunks[i];
-  }
-
   static x23::Vec<SignedTransaction> failed_txs;
   failed_txs.clear();
-  for (size_t i = 0; i < txs.size(); i++) {
-    if (statuses[i]) {
+  for (size_t i = 0; i < cache.txs.size(); i++) {
+    if (cache.statuses[i]) {
       SchedulerNominationChunk &nomination =
-          sched_nominations[i / kNumTxsPerNominationChunk];
-      nomination.chunk.nomination.transaction_hashes.push_back(tx_hashes[i]);
+          cache.sched_nominations[i / kNumTxsPerNominationChunk];
+      nomination.chunk.nomination.transaction_hashes.push_back(
+          cache.tx_hashes[i]);
     }
     else {
-      failed_txs.push_back(txs[i]);
+      failed_txs.push_back(cache.txs[i]);
     }
   }
   if (!failed_txs.empty()) {
-    x23::CoroGuard cg;
-    co_await cg(scheduler_->global_lock_);
     co_await scheduler_->add_txs(failed_txs);
   }
 
-  if (tx_hashes.empty()) {
+  if (failed_txs.size() == cache.tx_hashes.size()) {
     // It is possible that all txs failed to execute, in which case the block
     // is empty. Thus, we fail the nomination.
     for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(block_id, /*executor_idx=*/i);
+      co_await finish_block(cache.block_id, /*executor_idx=*/i);
     }
-    CHECK_EQ(co_await abandon_snapshot(block_id),
+    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
              DbSchedResult::DbSchedResultOK);
-    co_await eventsched_abandon_block(block_id);
+    co_await eventsched_abandon_block(cache.block_id);
+
+    scheduler_->decrement_current_block();
     co_return SchedulerNominationOutcome::SchedulerNominationError;
   }
 
   x23::Vec<x23::Async<void>> finish_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
-    finish_block_handles.push_back(finish_block(block_id, /*executor_idx=*/i));
+    finish_block_handles.push_back(
+        finish_block(cache.block_id, /*executor_idx=*/i));
   }
-  x23::Async<DbBlockResult> close_snapshot_handle = close_snapshot(block_id);
+  x23::Async<DbBlockResult> close_snapshot_handle =
+      close_snapshot(cache.block_id);
   x23::Async<EventBlockResult> close_block_handle =
-      eventsched_close_block(block_id);
-  x23::Async<DbBlockResult> commit_snapshot_handle = commit_snapshot(block_id);
-  x23::Async<void> mark_block_committed_handle = mark_block_committed(block_id);
+      eventsched_close_block(cache.block_id);
+  x23::Async<DbBlockResult> commit_snapshot_handle =
+      commit_snapshot(cache.block_id);
+  x23::Async<void> mark_block_committed_handle =
+      mark_block_committed(cache.block_id);
 
   x23::Vec<std::unique_ptr<x23::Awaitable<void>>> finish_nomination_handles;
-  finish_nomination_handles.reserve(sched_nominations.size());
-  for (size_t i = 0; i < sched_nominations.size(); i++) {
-    sched_nominations[i].chunk_idx = i;
+  finish_nomination_handles.reserve(cache.sched_nominations.size());
+  for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
+    cache.sched_nominations[i].chunk_idx = i;
     finish_nomination_handles.push_back(
         std::make_unique<x23::Awaitable<void>>());
 
@@ -604,19 +603,19 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
       co_await coord_client->coordscheduler_finish_nomination(chunk);
       cb();
-    }(coord_client_, sched_nominations[i],
+    }(coord_client_, cache.sched_nominations[i],
                              x23::CoroCB<void>(
                                  *finish_nomination_handles.back()));
   }
 
   const SHA256Hash nomination_block_hash =
-      get_block_hash(tx_hashes,
-                     /*prev_block_hash=*/db_tip.hash);
+      get_block_hash(cache.tx_hashes,
+                     /*prev_block_hash=*/cache.db_tip.hash);
 
-  last_chunk.chunk_idx = sched_nominations.size();
-  last_chunk.chunk.nomination.block_hash = nomination_block_hash;
+  cache.last_chunk.chunk_idx = cache.sched_nominations.size();
+  cache.last_chunk.chunk.nomination.block_hash = nomination_block_hash;
   x23::Async<void> last_chunk_handle =
-      coord_client_->coordscheduler_finish_nomination(last_chunk);
+      coord_client_->coordscheduler_finish_nomination(cache.last_chunk);
 
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
