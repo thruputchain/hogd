@@ -77,6 +77,14 @@ IndexDB::make_new(const std::filesystem::path &path,
   rocksdb::Options options;
   options.create_if_missing = true;
   options.compression = compression_algorithm;
+  
+  // Performance optimizations for bulk loading
+  // Increase write buffer size for better SST file writing performance
+  options.write_buffer_size = 256_MiB; // 256 MB (default is 64 MB)
+  // Increase target file size for larger SST files (better for bulk loading)
+  options.target_file_size_base = 256_MiB; // 256 MB (default is 64 MB)
+  // Allow more write buffers in memory
+  options.max_write_buffer_number = 6; // default is 2
 
   rocksdb::DB *db_ptr = nullptr;
 
@@ -304,20 +312,32 @@ IndexDB::consume_events(BlockHeight block_height,
   std::string tx_sst_path = (db_dir / std::format("tx_index_{}.sst", block_height)).string();
   std::string contract_sst_path = (db_dir / std::format("contract_index_{}.sst", block_height)).string();
 
-  // Get database options for SstFileWriter
-  rocksdb::Options db_options;
-  rocksdb::ColumnFamilyOptions cf_options;
-  // We need to get the actual options from the column family handles
-  // For now, use default options with compression matching what we set
-  rocksdb::Options sst_options;
-  sst_options.compression = rocksdb::CompressionType::kLZ4Compression;
+  // Get options from column family handles to ensure consistency
+  rocksdb::Options tx_sst_options = db_->GetOptions(tx_cf_handle_);
+  rocksdb::Options contract_sst_options = db_->GetOptions(contract_cf_handle_);
+  
+  // Enable paranoid file checks in debug builds to verify key sortedness
+  // This will reopen and read back the SST file to verify keys are in order
+#ifndef NDEBUG
+  tx_sst_options.paranoid_file_checks = true;
+  contract_sst_options.paranoid_file_checks = true;
+#endif
+  
+  // Configure EnvOptions for better SST file writing performance
   rocksdb::EnvOptions env_options;
+  // Use direct I/O for writes (bypasses OS page cache, better for large sequential writes)
+  env_options.use_direct_writes = true; // Set to true if you have fast storage
+  // Sync data incrementally to disk (0 = disabled, larger = more frequent syncs)
+  // For bulk loading, we can disable this since we're not concerned with durability
+  env_options.bytes_per_sync = 0; // Disable incremental sync for bulk loading
+  // Allow fallocate for pre-allocating file space (can improve write performance)
+  env_options.allow_fallocate = true;
 
   // Create worker pool and submit jobs for each column family
   auto &pool = WorkerPool::get_default_pool();
 
   // Thread 1: Create SST file for tx_index column family
-  auto tx_future = pool.submit([this, block_height, events, tx_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+  auto tx_future = pool.submit([this, block_height, events, tx_sst_path, tx_sst_options, env_options]() -> IndexerStatus<std::string> {
     auto collect_start = x23::fastclock::get_ns();
     
     // Collect all entries first
@@ -350,7 +370,7 @@ IndexDB::consume_events(BlockHeight block_height,
 
     // Now write sorted entries to SST file
     auto write_start = x23::fastclock::get_ns();
-    rocksdb::SstFileWriter sst_writer(env_options, sst_options, tx_cf_handle_);
+    rocksdb::SstFileWriter sst_writer(env_options, tx_sst_options, tx_cf_handle_);
     rocksdb::Status status = sst_writer.Open(tx_sst_path);
     if (!status.ok()) {
       error("Failed to open tx_index SST file: {}", status.ToString());
@@ -377,7 +397,7 @@ IndexDB::consume_events(BlockHeight block_height,
   });
 
   // Thread 2: Create SST file for contract_index column family
-  auto contract_future = pool.submit([this, block_height, events, contract_sst_path, sst_options, env_options]() -> IndexerStatus<std::string> {
+  auto contract_future = pool.submit([this, block_height, events, contract_sst_path, contract_sst_options, env_options]() -> IndexerStatus<std::string> {
     auto collect_start = x23::fastclock::get_ns();
     
     // Collect all entries first
@@ -423,7 +443,7 @@ IndexDB::consume_events(BlockHeight block_height,
 
     // Now write sorted entries to SST file
     auto write_start = x23::fastclock::get_ns();
-    rocksdb::SstFileWriter sst_writer(env_options, sst_options, contract_cf_handle_);
+    rocksdb::SstFileWriter sst_writer(env_options, contract_sst_options, contract_cf_handle_);
     rocksdb::Status status = sst_writer.Open(contract_sst_path);
     if (!status.ok()) {
       error("Failed to open contract_index SST file: {}", status.ToString());
