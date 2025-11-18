@@ -479,73 +479,11 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
   co_return;
 }
 
-x23::Async<SchedulerNominationOutcome>
-MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
+void
+MempoolCoordinatorRpc::process_tx_outcomes(NominationData &cache)
 {
-  // Wait for hogdb to notify us of all HOG transfers that occurred in the
-  // previous block. These transfer affect account balances, which in turn
-  // affects scheduling priorities for accounts, so we need to wait for this
-  // notification before scheduling the next block.
-  co_await scheduler_->transfer_finished_.acquire();
+  cache.failed_txs.clear();
 
-  static NominationData cache;
-  cache.block_id = get_ns_since_epoch();
-  // We place the block txs and tx hashes into these vectors. We mark these
-  // vectors static and clear them on each call to [nominate()] so to avoid
-  // memory allocation/free overhead.
-  cache.txs.clear();
-  cache.tx_hashes.clear();
-
-  // Block initialization work. We sent these RPCs concurrently and [co_await]
-  // them below. This block initialization work takes ~10ms, so we schedule the
-  // first batch of txs below while these RPCs are outstanding and before we
-  // [co_await] them.
-  x23::Async<bool> initialize_block_handle = initialize_block(cache);
-
-  {
-    // This is the first call to [schedule()]. We do it up here rather than with
-    // the other calls in the loop below because we want to overlap the first
-    // call with the block initialization work.
-    x23::CoroGuard cg;
-    co_await cg(scheduler_->global_lock_);
-    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
-                         cache.tx_hashes, cache.txs);
-  }
-
-  if (!co_await initialize_block_handle) {
-    // Add the txs from the first call to [schedule()] above back to the
-    // scheduler.
-    // We do not reset the hog ages since failure is rare and one failure will
-    // not impact long term fairness. We also do not recover expired txs. A
-    // failure is pretty bad and unexpected, and I do not think it is worth
-    // adding complexity and overhead in the common case to for full recovery
-    // from a rare event.
-    co_await scheduler_->add_txs(cache.txs);
-    scheduler_->decrement_current_block();
-
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
-  }
-
-  // Schedule the block and send the txs to the executors.
-  co_await schedule(cache);
-
-  if (cache.tx_hashes.empty()) {
-    // There are no vetted txs, so we cannot propose a block.
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(cache.block_id, /*executor_idx=*/i);
-    }
-    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-             DbSchedResult::DbSchedResultOK);
-    CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
-             RPCError::kRPCNone);
-
-    scheduler_->decrement_current_block();
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
-  }
-  // Finished scheduling the block.
-
-  static x23::Vec<SignedTransaction> failed_txs;
-  failed_txs.clear();
   for (size_t i = 0; i < cache.txs.size(); i++) {
     if (cache.statuses[i]) {
       SchedulerNominationChunk &nomination =
@@ -554,27 +492,14 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
           cache.tx_hashes[i]);
     }
     else {
-      failed_txs.push_back(cache.txs[i]);
+      cache.failed_txs.push_back(cache.txs[i]);
     }
   }
-  if (!failed_txs.empty()) {
-    co_await scheduler_->add_txs(failed_txs);
-  }
+}
 
-  if (failed_txs.size() == cache.tx_hashes.size()) {
-    // It is possible that all txs failed to execute, in which case the block
-    // is empty. Thus, we fail the nomination.
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(cache.block_id, /*executor_idx=*/i);
-    }
-    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
-             DbSchedResult::DbSchedResultOK);
-    co_await eventsched_abandon_block(cache.block_id);
-
-    scheduler_->decrement_current_block();
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
-  }
-
+x23::Async<void>
+MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
+{
   x23::Vec<x23::Async<void>> finish_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     finish_block_handles.push_back(
@@ -639,7 +564,79 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_await *handle;
   }
   co_await last_chunk_handle;
+}
 
+x23::Async<SchedulerNominationOutcome>
+MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
+{
+  // Wait for hogdb to notify us of all HOG transfers that occurred in the
+  // previous block. These transfer affect account balances, which in turn
+  // affects scheduling priorities for accounts, so we need to wait for this
+  // notification before scheduling the next block.
+  co_await scheduler_->transfer_finished_.acquire();
+
+  static NominationData cache;
+  cache.block_id = get_ns_since_epoch();
+  // We place the block txs and tx hashes into these vectors. We mark these
+  // vectors static and clear them on each call to [nominate()] so to avoid
+  // memory allocation/free overhead.
+  cache.txs.clear();
+  cache.tx_hashes.clear();
+
+  // Block initialization work. We sent these RPCs concurrently and [co_await]
+  // them below. This block initialization work takes ~10ms, so we schedule the
+  // first batch of txs below while these RPCs are outstanding and before we
+  // [co_await] them.
+  x23::Async<bool> initialize_block_handle = initialize_block(cache);
+
+  {
+    // This is the first call to [schedule()]. We do it up here rather than with
+    // the other calls in the loop below because we want to overlap the first
+    // call with the block initialization work.
+    x23::CoroGuard cg;
+    co_await cg(scheduler_->global_lock_);
+    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
+                         cache.tx_hashes, cache.txs);
+  }
+
+  if (!co_await initialize_block_handle) {
+    // Add the txs from the first call to [schedule()] above back to the
+    // scheduler.
+    // We do not reset the hog ages since failure is rare and one failure will
+    // not impact long term fairness. We also do not recover expired txs. A
+    // failure is pretty bad and unexpected, and I do not think it is worth
+    // adding complexity and overhead in the common case to for full recovery
+    // from a rare event.
+    co_await scheduler_->add_txs(cache.txs);
+    scheduler_->decrement_current_block();
+
+    co_return SchedulerNominationOutcome::SchedulerNominationError;
+  }
+
+  // Schedule the block and send the txs to the executors.
+  co_await schedule(cache);
+
+  // Process the transaction outcomes.
+  process_tx_outcomes(cache);
+  if (!cache.failed_txs.empty()) {
+    co_await scheduler_->add_txs(cache.failed_txs);
+  }
+  if (cache.tx_hashes.empty() ||
+      cache.failed_txs.size() == cache.tx_hashes.size()) {
+    // There are no txs for the block, so we cannot propose a block.
+    for (size_t i = 0; i < exec_clients_.size(); i++) {
+      co_await finish_block(cache.block_id, /*executor_idx=*/i);
+    }
+    CHECK_EQ(co_await abandon_snapshot(cache.block_id),
+             DbSchedResult::DbSchedResultOK);
+    CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
+             RPCError::kRPCNone);
+
+    scheduler_->decrement_current_block();
+    co_return SchedulerNominationOutcome::SchedulerNominationError;
+  }
+
+  co_await finish_nominating_block(cache);
   co_return SchedulerNominationOutcome::SchedulerNominationOK;
 }
 
