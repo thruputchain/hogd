@@ -141,20 +141,29 @@ template<typename T> class NMVec {
 public:
   using value_type = T;
   using difference_type = ptrdiff_t;
-  class iterator_type : public Location {
+
+  template<bool Const> class gen_iterator_type : public Location {
   public:
     using iterator_concept = std::random_access_iterator_tag;
-    using value_type = T;
+    using value_type = std::conditional_t<Const, const T, T>;
+    using container_type = std::conditional_t<Const, const NMVec, NMVec>;
     using difference_type = ptrdiff_t;
 
-    constexpr iterator_type() noexcept = default;
-    constexpr explicit iterator_type(NMVec *v, size_t index) noexcept
-      : Location(Location::from_index(index)), v_(v) {}
-    decltype(auto) operator*() const noexcept
+    constexpr gen_iterator_type() noexcept = default;
+    constexpr explicit gen_iterator_type(container_type *v,
+                                         size_t index) noexcept
+      : Location(Location::from_index(index)), v_(v)
+    {}
+    template<bool C = Const> requires C
+    constexpr gen_iterator_type(const gen_iterator_type<false> &other) noexcept
+      : Location(other), v_(other.v_)
+    {}
+
+    value_type &operator*() const noexcept
     {
       return v_->get_location(this->loc());
     }
-    decltype(auto) operator->() const noexcept
+    value_type *operator->() const noexcept
     {
       return std::addressof(v_->get_location(this->loc()));
     }
@@ -163,21 +172,24 @@ public:
       return *(*this + n);
     }
 
-    friend bool operator==(const iterator_type &a, const iterator_type &b)
-    {
-      return a.v_ == b.v_ && a.loc() == b.loc();
-    }
+    // Make sure to compare v_ and Location
+    friend bool operator==(const gen_iterator_type &a,
+                           const gen_iterator_type &b) = default;
 
 #ifndef NDEBUG
     // It's UB to compare iterators from different NMVecs
-    void check_compat(const iterator_type &other) const
+    template<bool C> void check_compat(const gen_iterator_type<C> &other) const
     {
       x23assert(v_ == other.v_);
     }
 #endif // !NDEBUG
   private:
-    NMVec *v_{};
+    template<bool> friend class gen_iterator_type;
+
+    container_type *v_{};
   };
+  using iterator_type = gen_iterator_type<false>;
+  using const_iterator_type = gen_iterator_type<true>;
 
   NMVec() noexcept = default;
   NMVec(NMVec &&other) noexcept
@@ -277,14 +289,10 @@ public:
     }
   }
 
-  iterator_type begin()
-  {
-    return iterator_type{this, 0};
-  }
-  iterator_type end()
-  {
-    return iterator_type{this, size()};
-  }
+  auto begin() noexcept { return iterator_type{this, 0}; }
+  auto end() noexcept { return iterator_type{this, size()}; }
+  auto begin() const noexcept { return const_iterator_type{this, 0}; }
+  auto end() const noexcept { return const_iterator_type{this, size()}; }
 
 private:
   static constexpr size_t kLogMinChunk =
@@ -406,6 +414,7 @@ private:
         a.check_compat(b);
       return a.bits_ <=> b.bits_;
     }
+    friend bool operator==(Location a, Location b) noexcept = default;
 
     Location loc() const { return *this; }
   };
@@ -524,8 +533,5 @@ private:
     return get_location(Location::from_index(i));
   }
 };
-
-static_assert(std::random_access_iterator<NMVec<int>::iterator_type>);
-static_assert(std::ranges::random_access_range<NMVec<int>>);
 
 } // namespace x23

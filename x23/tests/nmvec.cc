@@ -1,5 +1,8 @@
+#include <algorithm>
 #include <cstddef>
 #include <random>
+#include <ranges>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -7,6 +10,12 @@
 #include "x23/nmvec.h"
 
 using x23::NMVec;
+
+static_assert(std::random_access_iterator<NMVec<int>::iterator_type>);
+static_assert(std::ranges::random_access_range<NMVec<int>>);
+static_assert(std::ranges::random_access_range<const NMVec<int>>);
+static_assert(std::same_as<std::ranges::range_reference_t<const NMVec<int>>,
+                           const int &>);
 
 template<int N = 0> struct CountingT {
   int value{};
@@ -354,6 +363,105 @@ TEST(NMVec, ExceptionSafetyEmplaceBack)
   nm.resize(0);
   EXPECT_EQ(nm.size(), 0u);
   EXPECT_EQ(ThrowingT::live(), 0);
+}
+
+TEST(NMVec, RangeBasedIteration)
+{
+  NMVec<int> nm;
+  constexpr int kCount = 64;
+
+  for (int i = 0; i < kCount; ++i)
+    nm.emplace_back(i);
+
+  // Range-for should hand out mutable references.
+  for (auto &value : nm)
+    value += 10;
+
+  int expected = 10;
+  for (auto value : nm)
+    EXPECT_EQ(value, expected++);
+
+  auto first = nm.begin();
+  auto last = nm.end();
+  EXPECT_EQ(last - first, static_cast<std::ptrdiff_t>(nm.size()));
+  EXPECT_EQ(first + static_cast<std::ptrdiff_t>(nm.size()), last);
+  EXPECT_EQ(std::ranges::distance(nm),
+            static_cast<std::ptrdiff_t>(nm.size()));
+
+  // Random-access operations should behave the same as for vectors.
+  EXPECT_EQ(*(nm.begin() + 5), 15);
+  EXPECT_TRUE(std::ranges::is_sorted(nm));
+}
+
+TEST(NMVec, ConstIteratorBasics)
+{
+  NMVec<int> nm;
+  constexpr int kCount = 32;
+  for (int i = 0; i < kCount; ++i)
+    nm.emplace_back(i);
+
+  const NMVec<int> &cnm = nm;
+  static_assert(
+      std::is_same_v<decltype(cnm.begin()), NMVec<int>::const_iterator_type>);
+  static_assert(std::is_const_v<
+                std::remove_reference_t<decltype(*cnm.begin())>>);
+
+  NMVec<int>::const_iterator_type cit = nm.begin(); // implicit conversion
+  EXPECT_EQ(*cit, 0);
+
+  int expected = 0;
+  for (int value : cnm)
+    EXPECT_EQ(value, expected++);
+
+  auto first = cnm.begin();
+  auto last = cnm.end();
+  EXPECT_EQ(last - first, static_cast<std::ptrdiff_t>(cnm.size()));
+  first += 7;
+  EXPECT_EQ(*first, 7);
+  EXPECT_EQ(last - first, static_cast<std::ptrdiff_t>(cnm.size() - 7));
+}
+
+TEST(NMVec, IterComparisons)
+{
+  NMVec<int> v1, v2;
+  EXPECT_EQ(v1.begin(), v1.end());
+  EXPECT_NE(v1.begin(), v2.begin());
+  v1.emplace_back(0);
+  EXPECT_NE(v1.begin(), v1.end());
+  EXPECT_LT(v1.begin(), v1.end());
+#ifndef NDEBUG
+  EXPECT_DEATH(void(v1.begin() <= v2.begin()), "");
+#endif // !NDEBUG
+}
+
+TEST(NMVec, WorksWithStdRangesAlgorithms)
+{
+  NMVec<int> nm;
+  std::vector<int> baseline = {9, 1, 7, 3, 5, 2, 8, 6, 4, 0};
+
+  for (int v : baseline)
+    nm.emplace_back(v);
+
+  std::vector<int> sorted = baseline;
+  std::ranges::sort(sorted);
+  std::ranges::sort(nm);
+  EXPECT_TRUE(std::ranges::equal(nm, sorted));
+
+  auto lb = std::ranges::lower_bound(nm, 5);
+  ASSERT_NE(lb, nm.end());
+  EXPECT_EQ(*lb, 5);
+
+  std::ranges::reverse(nm);
+  std::ranges::reverse(sorted);
+  EXPECT_TRUE(std::ranges::equal(nm, sorted));
+
+  std::vector<int> copy;
+  std::ranges::copy(nm, std::back_inserter(copy));
+  EXPECT_TRUE(std::ranges::equal(copy, sorted));
+
+  std::ranges::fill(nm, 3);
+  for (std::size_t i = 0; i < nm.size(); ++i)
+    EXPECT_EQ(nm[i], 3);
 }
 
 TEST(NMVec, ExceptionSafetyResizeGrow)
