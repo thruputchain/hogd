@@ -93,6 +93,10 @@ public:
                                                 SignedTransactionBatch batch);
 
   x23::Async<bool> initialize_block(const DbTip &db_tip, BlockID block_id);
+  x23::Async<x23::Vec<SchedulerNominationChunk>>
+  schedule(const DbTip &db_tip, BlockID block_id,
+           const x23::Vec<SignedTransaction> &txs,
+           const x23::Vec<SignedTransactionHash> &tx_hashes);
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
