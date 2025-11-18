@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -5,13 +6,10 @@
 #include <vector>
 
 #include "event.hh"
-#include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
 #include "types.hh"
-#include "x23/fileio.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -91,12 +89,12 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   // Create test events
   BlockHeight block_height = 100;
   SHA256Hash tx_hash1, tx_hash2;
-  std::fill(tx_hash1.begin(), tx_hash1.end(), 0x01);
-  std::fill(tx_hash2.begin(), tx_hash2.end(), 0x02);
+  std::ranges::fill(tx_hash1, 0x01);
+  std::ranges::fill(tx_hash2, 0x02);
 
   ContractAddress contract_addr1, contract_addr2;
-  std::fill(contract_addr1.begin(), contract_addr1.end(), 0xAA);
-  std::fill(contract_addr2.begin(), contract_addr2.end(), 0xBB);
+  std::ranges::fill(contract_addr1, 0xAA);
+  std::ranges::fill(contract_addr2, 0xBB);
 
   TxEventLog event_log1;
   event_log1.proposed_tx_hash = tx_hash1;
@@ -104,8 +102,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   event1.contract_address = contract_addr1;
   event1.num_topics = 0;
   event1.serialized_event.resize(10);
-  std::fill(event1.serialized_event.begin(), event1.serialized_event.end(),
-            0x11);
+  std::ranges::fill(event1.serialized_event, 0x11);
   event_log1.events.push_back(event1);
 
   TxEventLog event_log2;
@@ -114,8 +111,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   event2.contract_address = contract_addr2;
   event2.num_topics = 1;
   event2.serialized_event.resize(20);
-  std::fill(event2.serialized_event.begin(), event2.serialized_event.end(),
-            0x22);
+  std::ranges::fill(event2.serialized_event, 0x22);
   event_log2.events.push_back(event2);
 
   std::vector<TxEventLog> events = {event_log1, event_log2};
@@ -140,7 +136,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
 
   // Lookup non-existent transaction
   SHA256Hash tx_hash3;
-  std::fill(tx_hash3.begin(), tx_hash3.end(), 0x03);
+  std::ranges::fill(tx_hash3, 0x03);
   auto lookup3 = db->get_tx_events(block_height, tx_hash3);
   EXPECT_FALSE(lookup3.has_value());
   EXPECT_EQ(lookup3.error(), IndexerErrorCode::kDBNotFound);
@@ -163,12 +159,12 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
   // Create test events with multiple contracts
   BlockHeight block_height = 200;
   SHA256Hash tx_hash1, tx_hash2;
-  std::fill(tx_hash1.begin(), tx_hash1.end(), 0x10);
-  std::fill(tx_hash2.begin(), tx_hash2.end(), 0x20);
+  std::ranges::fill(tx_hash1, 0x10);
+  std::ranges::fill(tx_hash2, 0x20);
 
   ContractAddress contract_addr1, contract_addr2;
-  std::fill(contract_addr1.begin(), contract_addr1.end(), 0xCC);
-  std::fill(contract_addr2.begin(), contract_addr2.end(), 0xDD);
+  std::ranges::fill(contract_addr1, 0xCC);
+  std::ranges::fill(contract_addr2, 0xDD);
 
   // First transaction has events from contract1
   TxEventLog event_log1;
@@ -177,16 +173,14 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
   event1a.contract_address = contract_addr1;
   event1a.num_topics = 0;
   event1a.serialized_event.resize(5);
-  std::fill(event1a.serialized_event.begin(), event1a.serialized_event.end(),
-            0x33);
+  std::ranges::fill(event1a.serialized_event, 0x33);
   event_log1.events.push_back(event1a);
 
   TxEmittedEvent event1b;
   event1b.contract_address = contract_addr1;
   event1b.num_topics = 2;
   event1b.serialized_event.resize(15);
-  std::fill(event1b.serialized_event.begin(), event1b.serialized_event.end(),
-            0x44);
+  std::ranges::fill(event1b.serialized_event, 0x44);
   event_log1.events.push_back(event1b);
 
   // Second transaction has events from contract1 and contract2
@@ -196,16 +190,14 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
   event2a.contract_address = contract_addr1;
   event2a.num_topics = 1;
   event2a.serialized_event.resize(8);
-  std::fill(event2a.serialized_event.begin(), event2a.serialized_event.end(),
-            0x55);
+  std::ranges::fill(event2a.serialized_event, 0x55);
   event_log2.events.push_back(event2a);
 
   TxEmittedEvent event2b;
   event2b.contract_address = contract_addr2;
   event2b.num_topics = 0;
   event2b.serialized_event.resize(12);
-  std::fill(event2b.serialized_event.begin(), event2b.serialized_event.end(),
-            0x66);
+  std::ranges::fill(event2b.serialized_event, 0x66);
   event_log2.events.push_back(event2b);
 
   std::vector<TxEventLog> events = {event_log1, event_log2};

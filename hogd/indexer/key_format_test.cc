@@ -1,13 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <array>
-#include <cstdint>
 #include <cstring>
+#include <string>
 
 #include "hogd/base/types.h"
 #include "hogd/indexer/key_format.h"
-#include "hogd/init.h"
 #include "types.hh"
 
 namespace hogd {
@@ -50,7 +48,7 @@ TEST_F(IndexerKeyFormatTest, TxKeyZeroHeight)
 {
   BlockHeight block_height = 0;
   SHA256Hash tx_hash;
-  std::fill(tx_hash.begin(), tx_hash.end(), 0xBB);
+  std::ranges::fill(tx_hash, 0xBB);
 
   std::string key;
   IndexerKeyFormat::make_tx_key(key, block_height, tx_hash);
@@ -71,7 +69,7 @@ TEST_F(IndexerKeyFormatTest, TxKeyMaxHeight)
 {
   BlockHeight block_height = 0xFFFFFFFFFFFFFFFF;
   SHA256Hash tx_hash;
-  std::fill(tx_hash.begin(), tx_hash.end(), 0xCC);
+  std::ranges::fill(tx_hash, 0xCC);
 
   std::string key;
   IndexerKeyFormat::make_tx_key(key, block_height, tx_hash);
@@ -91,7 +89,7 @@ TEST_F(IndexerKeyFormatTest, TxKeyMaxHeight)
 TEST_F(IndexerKeyFormatTest, ContractKeyPrefixByteOrder)
 {
   ContractAddress address;
-  std::fill(address.begin(), address.end(), 0x11);
+  std::ranges::fill(address, 0x11);
   BlockHeight block_height = 0x0123456789ABCDEF;
 
   std::string key;
@@ -120,10 +118,10 @@ TEST_F(IndexerKeyFormatTest, ContractKeyPrefixByteOrder)
 TEST_F(IndexerKeyFormatTest, ContractKeyByteOrder)
 {
   ContractAddress address;
-  std::fill(address.begin(), address.end(), 0x22);
+  std::ranges::fill(address, 0x22);
   BlockHeight block_height = 0x0123456789ABCDEF;
   SHA256Hash tx_hash;
-  std::fill(tx_hash.begin(), tx_hash.end(), 0x33);
+  std::ranges::fill(tx_hash, 0x33);
   uint32_t sequence_number = 0x12345678;
 
   std::string key;
@@ -163,10 +161,10 @@ TEST_F(IndexerKeyFormatTest, ContractKeyByteOrder)
 TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
 {
   ContractAddress original_address;
-  std::fill(original_address.begin(), original_address.end(), 0x44);
+  std::ranges::fill(original_address, 0x44);
   BlockHeight original_height = 0x1122334455667788;
   SHA256Hash original_tx_hash;
-  std::fill(original_tx_hash.begin(), original_tx_hash.end(), 0x55);
+  std::ranges::fill(original_tx_hash, 0x55);
   uint32_t original_seq = 0xAABBCCDD;
 
   std::string key;
@@ -193,10 +191,10 @@ TEST_F(IndexerKeyFormatTest, ContractKeyRoundTrip)
 TEST_F(IndexerKeyFormatTest, ContractKeyParseNullAddress)
 {
   ContractAddress address;
-  std::fill(address.begin(), address.end(), 0x66);
+  std::ranges::fill(address, 0x66);
   BlockHeight height = 100;
   SHA256Hash tx_hash;
-  std::fill(tx_hash.begin(), tx_hash.end(), 0x77);
+  std::ranges::fill(tx_hash, 0x77);
   uint32_t seq = 5;
 
   std::string key;
