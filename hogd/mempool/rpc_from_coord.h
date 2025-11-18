@@ -92,8 +92,6 @@ public:
   x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
                                                 SignedTransactionBatch batch);
 
-  x23::Async<bool> initialize_block(const DbTip &db_tip, BlockID block_id);
-
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
   x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
@@ -140,6 +138,20 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  struct NominationData {
+    DbTip db_tip;
+    BlockID block_id;
+    x23::Vec<SignedTransaction> txs;
+    x23::Vec<SignedTransactionHash> tx_hashes;
+
+    x23::Vec<SchedulerNominationChunk> sched_nominations =
+        x23::Vec<SchedulerNominationChunk>(kNumSchedulerIterations, {});
+    SchedulerNominationChunk last_chunk;
+
+    x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
+    x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
+  };
+
   const std::function<x23::Async<bool>(const SignedTransaction &tx)>
       auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
     co_return co_await authentication_->authenticate(tx);
@@ -212,6 +224,9 @@ private:
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
+
+  x23::Async<bool> initialize_block(const NominationData &cache);
+  x23::Async<void> schedule(NominationData &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
