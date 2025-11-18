@@ -9,6 +9,8 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #include <rocksdb/compression_type.h>
 // NOLINTNEXTLINE(misc-header-include-cycle)
@@ -18,8 +20,7 @@
 #include <rocksdb/slice.h>
 #include <rocksdb/status.h>
 #include <rocksdb/write_batch.h>
-#include <utility>
-#include <vector>
+
 
 #include "event.hh"
 #include "hogd/base/log.h"
@@ -31,6 +32,7 @@
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -291,10 +293,13 @@ IndexDB::consume_events(BlockHeight block_height,
 
   constexpr size_t kNumThreads = 16;
   const size_t chunk_size = (events.size() + kNumThreads - 1) / kNumThreads;
+  assert(chunk_size * kNumThreads >= events.size());
 
   // Create worker pool and submit jobs
   auto &pool = WorkerPool::get_default_pool();
   std::vector<std::future<rocksdb::WriteBatch>> futures;
+
+  auto start_ts = x23::fastclock::get_ns();
 
   for (size_t i = 0; i < kNumThreads; i++) {
     const size_t start_idx = i * chunk_size;
@@ -350,6 +355,9 @@ IndexDB::consume_events(BlockHeight block_height,
     batches.push_back(future.get());
   }
 
+  auto make_batch_ts = x23::fastclock::get_ns();
+  info("Make batch time: {} ns", make_batch_ts - start_ts);
+
   // When writing events into this indexer, we already have the data written to disk in the upstream
   // event server, and the insertions here are idempotent.  So we do not need the WAL and fsync,
   // in that we can tolerate 
@@ -364,7 +372,9 @@ IndexDB::consume_events(BlockHeight block_height,
       return IndexerError(IndexerErrorCode::kInternal);
     }
   }
-
+  
+  auto write_ts = x23::fastclock::get_ns();
+  info("Write time: {} ns", write_ts - make_batch_ts);
   return {};
 }
 
