@@ -40,10 +40,13 @@ namespace hogd {
 
 namespace {
 
+// Inclusive-exclusive half-open range used when slicing transaction batches.
 struct ChunkRange {
   size_t start;
   size_t end; // [start, end)
 };
+
+using AwaitablePtr = std::unique_ptr<x23::Awaitable<void>>;
 
 std::vector<ChunkRange>
 make_chunks(size_t total_size, size_t chunk_count)
@@ -60,6 +63,8 @@ make_chunks(size_t total_size, size_t chunk_count)
   size_t offset = 0;
   chunks.reserve(chunk_count);
   for (size_t i = 0; i < chunk_count; ++i) {
+    // Distribute remainder across the first [remainder] chunks to keep them as
+    // balanced as possible.
     const size_t chunk_size = base_size + (i < remainder ? 1 : 0);
     const size_t start = offset;
     const size_t end = start + chunk_size;
@@ -77,6 +82,7 @@ make_chunks_for_max_size(size_t total_size, size_t max_chunk_size)
   if (!max_chunk_size) {
     return {};
   }
+  // Round up so we never exceed [max_chunk_size] in any bucket.
   const size_t chunk_count = (total_size + max_chunk_size - 1) / max_chunk_size;
   return make_chunks(total_size, chunk_count);
 }
@@ -163,6 +169,16 @@ MempoolCoordinatorRpc::finish_block(BlockID block_id, size_t executor_idx)
   return exec_clients_[executor_idx].executorsched_finish_block(block_id);
 }
 
+x23::Async<void>
+MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
+{
+  // Best-effort cleanup helper used when we need to shut down/finish a block
+  // across all executor clients in a uniform way.
+  for (size_t i = 0; i < exec_clients_.size(); i++) {
+    co_await finish_block(block_id, /*executor_idx=*/i);
+  }
+}
+
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
     const x23::Vec<SignedTransactionHash> &hashes,
@@ -210,6 +226,8 @@ MempoolCoordinatorRpc::propose_batch(
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
                                                                        txs);
+  // Record nomination metadata for txs that succeeded on the executor and mark
+  // the per-tx status in [ret_chunk] so upstream callers can rebuild summaries.
   for (size_t i = 0; i < res.size(); i++) {
     const ExecProposeResult &result = res[i];
 
@@ -244,7 +262,7 @@ MempoolCoordinatorRpc::propose_small_chunks_from_large_chunk(
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
 
-  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
+  x23::Vec<AwaitablePtr> awaitables;
   awaitables.reserve(chunks.size());
 
   nomination_chunks.resize(chunks.size(), {});
@@ -300,7 +318,7 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 
   // The coroutines notify us when they are done via these [awaitables]. There
   // is one awaitable per coroutine.
-  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> awaitables;
+  x23::Vec<AwaitablePtr> awaitables;
   awaitables.reserve(large_chunks.size());
 
   // The nomination data is placed into this vector, with one entry reserved for
@@ -405,6 +423,8 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
 {
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
+  // Reset the nomination chunks so each scheduling iteration writes into a
+  // clean slot.
   for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
     SchedulerNominationChunk &sched_nomination = cache.sched_nominations[i];
     sched_nomination.chunk_idx = i;
@@ -421,8 +441,7 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     // are filled in below.
   }
 
-  x23::Vec<std::unique_ptr<x23::Awaitable<void>>>
-      propose_batch_in_chunks_handles;
+  x23::Vec<AwaitablePtr> propose_batch_in_chunks_handles;
   propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
@@ -489,6 +508,9 @@ MempoolCoordinatorRpc::process_tx_outcomes(NominationData &cache)
 x23::Async<void>
 MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
 {
+  // Gracefully shut down executor work, finalize database/event snapshots, and
+  // send the nomination chunks (including the final block hash) back to the
+  // coordinator.
   x23::Vec<x23::Async<void>> finish_block_handles;
   for (size_t i = 0; i < exec_clients_.size(); i++) {
     finish_block_handles.push_back(
@@ -503,7 +525,7 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   x23::Async<void> mark_block_committed_handle =
       mark_block_committed(cache.block_id);
 
-  x23::Vec<std::unique_ptr<x23::Awaitable<void>>> finish_nomination_handles;
+  x23::Vec<AwaitablePtr> finish_nomination_handles;
   finish_nomination_handles.reserve(cache.sched_nominations.size());
   for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
     cache.sched_nominations[i].chunk_idx = i;
@@ -556,8 +578,7 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   }
   co_await mark_block_committed_handle;
 
-  for (std::unique_ptr<x23::Awaitable<void>> &handle :
-       finish_nomination_handles) {
+  for (AwaitablePtr &handle : finish_nomination_handles) {
     co_await *handle;
   }
   co_await last_chunk_handle;
@@ -621,9 +642,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   if (cache.tx_hashes.empty() ||
       cache.failed_txs.size() == cache.tx_hashes.size()) {
     // There are no txs for the block, so we cannot propose a block.
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(cache.block_id, /*executor_idx=*/i);
-    }
+    co_await finish_all_executors(cache.block_id);
     CHECK_EQ(co_await abandon_snapshot(cache.block_id),
              DbSchedResult::DbSchedResultOK);
     CHECK_EQ(co_await eventsched_abandon_block(cache.block_id),
@@ -647,6 +666,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
+  // Validation succeeds only if every entry in the executor response is OK.
   co_return !(std::ranges::any_of(res, [](const ExecResult &r) {
     return r != ExecResult::ExecResultOK;
   }));
@@ -729,9 +749,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   {
     if (!scheduler_->find_and_remove_from_runqueue(
             nomination.transaction_hashes, signed_txs)) {
-      for (size_t i = 0; i < exec_clients_.size(); i++) {
-        co_await finish_block(block_id, /*executor_idx=*/i);
-      }
+      co_await finish_all_executors(block_id);
       CHECK_EQ(co_await abandon_snapshot(block_id),
                DbSchedResult::DbSchedResultOK);
       co_await eventsched_abandon_block(block_id);
@@ -761,9 +779,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                         nomination.block_hash) {
     co_await scheduler_->add_txs(signed_txs);
 
-    for (size_t i = 0; i < exec_clients_.size(); i++) {
-      co_await finish_block(block_id, /*executor_idx=*/i);
-    }
+    co_await finish_all_executors(block_id);
     CHECK_EQ(co_await abandon_snapshot(block_id),
              DbSchedResult::DbSchedResultOK);
     co_await eventsched_abandon_block(block_id);
@@ -771,9 +787,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  for (size_t i = 0; i < exec_clients_.size(); i++) {
-    co_await finish_block(block_id, /*executor_idx=*/i);
-  }
+  co_await finish_all_executors(block_id);
   {
     DbBlockResult result = co_await close_snapshot(block_id);
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);

@@ -212,6 +212,7 @@ private:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
+  x23::Async<void> finish_all_executors(BlockID block_id);
 
   x23::Detached
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
