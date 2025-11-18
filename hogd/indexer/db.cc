@@ -17,6 +17,7 @@
 #include <rocksdb/slice.h>
 #include <rocksdb/status.h>
 #include <rocksdb/write_batch.h>
+#include <utility>
 #include <vector>
 
 #include "event.hh"

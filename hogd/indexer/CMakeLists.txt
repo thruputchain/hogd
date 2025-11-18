@@ -21,3 +21,15 @@ target_link_libraries(indexer_test
 )
 
 add_test(NAME indexer_test COMMAND indexer_test)
+
+# Benchmark executable
+add_executable(indexer_bench
+    indexer_bench.cc
+)
+
+target_link_libraries(indexer_bench
+    indexer
+    hogd
+)
+
+set_property(TARGET indexer_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
