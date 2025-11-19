@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "event.hh"
+#include "hogd/base/test.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
@@ -19,26 +20,17 @@ class IndexDBTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    // Create a unique temporary directory for each test
-    test_dir_ = std::filesystem::temp_directory_path() / "indexdb_test";
-    std::filesystem::remove_all(test_dir_);
     // Ensure the test directory exists for the database under test
-    std::filesystem::create_directories(test_dir_);
+    std::filesystem::create_directories(tmp_dir_.directory());
   }
 
-  void TearDown() override
-  {
-    // Clean up test directory
-    std::filesystem::remove_all(test_dir_);
-  }
-
-  std::filesystem::path test_dir_;
+  TmpDir tmp_dir_;
 };
 
 // Test creating a new database
 TEST_F(IndexDBTest, CreateNew)
 {
-  auto db = IndexDB::make_new(test_dir_);
+  auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_TRUE(db->is_open());
 }
@@ -47,12 +39,12 @@ TEST_F(IndexDBTest, CreateNew)
 TEST_F(IndexDBTest, CreateNewFailsIfExists)
 {
   {
-    auto db1 = IndexDB::make_new(test_dir_);
+    auto db1 = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(db1.has_value());
   }
 
   // Try to create another database at the same path (should fail)
-  auto db2 = IndexDB::make_new(test_dir_);
+  auto db2 = IndexDB::make_new(tmp_dir_.directory());
   EXPECT_FALSE(db2.has_value());
   EXPECT_EQ(db2.error(), IndexerErrorCode::kDBAlreadyExists);
 }
@@ -62,12 +54,12 @@ TEST_F(IndexDBTest, OpenExisting)
 {
   // Create a database first
   {
-    auto db = IndexDB::make_new(test_dir_);
+    auto db = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(db.has_value());
   }
 
   // Now open it
-  auto db = IndexDB::open(test_dir_);
+  auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
   EXPECT_TRUE(db->is_open());
 }
@@ -75,7 +67,7 @@ TEST_F(IndexDBTest, OpenExisting)
 // Test that opening a non-existent database fails
 TEST_F(IndexDBTest, OpenNonExistent)
 {
-  auto db = IndexDB::open(test_dir_);
+  auto db = IndexDB::open(tmp_dir_.directory());
   EXPECT_FALSE(db.has_value());
   EXPECT_EQ(db.error(), IndexerErrorCode::kDBNotFound);
 }
@@ -83,7 +75,7 @@ TEST_F(IndexDBTest, OpenNonExistent)
 // Test consuming events and looking them up by transaction
 TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
 {
-  auto db = IndexDB::make_new(test_dir_);
+  auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
 
   // Create test events
@@ -153,7 +145,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
 // Test consuming events and looking them up by contract address
 TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
 {
-  auto db = IndexDB::make_new(test_dir_);
+  auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
 
   // Create test events with multiple contracts
