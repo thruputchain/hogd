@@ -235,7 +235,7 @@ TEST_F(IndexerKeyFormatTest, ContractKeyParseWrongSize)
 TEST_F(IndexerKeyFormatTest, TxKeyLexicographicOrder)
 {
   SHA256Hash tx_hash;
-  std::fill(tx_hash.begin(), tx_hash.end(), 0x88);
+  std::ranges::fill(tx_hash, 0x88);
 
   std::string key1, key2, key3;
   IndexerKeyFormat::make_tx_key(key1, 100, tx_hash);
@@ -252,7 +252,7 @@ TEST_F(IndexerKeyFormatTest, TxKeyLexicographicOrder)
 TEST_F(IndexerKeyFormatTest, ContractKeyPrefixLexicographicOrder)
 {
   ContractAddress address;
-  std::fill(address.begin(), address.end(), 0x99);
+  std::ranges::fill(address, 0x99);
 
   std::string key1, key2, key3;
   IndexerKeyFormat::make_contract_key_prefix(key1, address, 100);
