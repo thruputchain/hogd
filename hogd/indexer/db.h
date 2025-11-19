@@ -4,7 +4,9 @@
 #include <memory>
 #include <rocksdb/compression_type.h>
 #include <span>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "event.hh"
@@ -78,6 +80,8 @@ public:
   // Log RocksDB statistics (memory usage, database size, etc.)
   void log_stats() const;
 
+  void launch_stats_worker();
+
 private:
   IndexDB() = default;
   IndexDB(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *tx_cf,
@@ -85,9 +89,12 @@ private:
     : db_(db), tx_cf_handle_(tx_cf), contract_cf_handle_(contract_cf)
   {}
 
+  void stats_worker(std::stop_token &stoken) const;
+
   std::unique_ptr<rocksdb::DB, RocksDBDeleter> db_;
   rocksdb::ColumnFamilyHandle *tx_cf_handle_;
   rocksdb::ColumnFamilyHandle *contract_cf_handle_;
+  std::jthread stats_worker_thread_;
 };
 
 } // namespace hogd

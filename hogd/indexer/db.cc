@@ -1,7 +1,9 @@
 #include "hogd/indexer/db.h"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <future>
 #include <memory>
 #include <rocksdb/version.h>
@@ -15,6 +17,7 @@
 #include <rocksdb/compression_type.h>
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <rocksdb/db.h>
+#include <rocksdb/env.h>
 #include <rocksdb/iterator.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice.h>
@@ -22,6 +25,11 @@
 #include <rocksdb/status.h>
 #include <rocksdb/write_batch.h>
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <stop_token>
+#include <thread>
 
 #include "event.hh"
 #include "hogd/base/bits.h"
@@ -32,11 +40,143 @@
 #include "hogd/indexer/key_format.h"
 #include "hogd/indexer/status.h"
 #include "types.hh"
+#include "x23/fastclock.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
-#include "x23/fastclock.h"
 
 namespace hogd {
+
+namespace {
+
+// Helper function to create a tx_index SST file chunk
+IndexerStatus<std::string>
+create_tx_index_sst_chunk(
+    rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *tx_cf_handle,
+    BlockHeight block_height, std::span<const TxEventLog> events_chunk,
+    const std::string &sst_path, const rocksdb::Options &sst_options,
+    const rocksdb::EnvOptions &env_options, size_t chunk_idx)
+{
+  // Collect entries for this chunk
+  std::vector<std::pair<std::string, std::string>> entries;
+  entries.reserve(events_chunk.size());
+  std::string key_buffer; // Reusable buffer for key construction
+
+  for (const auto &event_log : events_chunk) {
+    // Serialize the TxEventLog for storage
+    auto serialized = x23::serialize(event_log);
+    std::string value(reinterpret_cast<const char *>(serialized.data()),
+                      serialized.size());
+
+    // Index by transaction (in tx_index column family)
+    IndexerKeyFormat::make_tx_key(key_buffer, block_height,
+                                  event_log.proposed_tx_hash);
+    entries.emplace_back(key_buffer, value);
+  }
+
+  // Sort entries for this chunk
+  std::ranges::sort(entries, [](const auto &a, const auto &b) {
+    return a.first < b.first;
+  });
+
+  // Write sorted entries to SST file
+  rocksdb::SstFileWriter sst_writer(env_options, sst_options, tx_cf_handle);
+  rocksdb::Status status = sst_writer.Open(sst_path);
+  if (!status.ok()) {
+    error("Failed to open tx_index SST file {}: {}", chunk_idx,
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  for (const auto &[key, value] : entries) {
+    status = sst_writer.Put(key, value);
+    if (!status.ok()) {
+      error("Failed to add key to tx_index SST file {}: {}", chunk_idx,
+            status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+  }
+
+  status = sst_writer.Finish();
+  if (!status.ok()) {
+    error("Failed to finish tx_index SST file {}: {}", chunk_idx,
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  return sst_path;
+}
+
+// Helper function to create a contract_index SST file chunk
+IndexerStatus<std::string>
+create_contract_index_sst_chunk(
+    rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *contract_cf_handle,
+    BlockHeight block_height, std::span<const TxEventLog> events_chunk,
+    const std::string &sst_path, const rocksdb::Options &sst_options,
+    const rocksdb::EnvOptions &env_options, size_t chunk_idx)
+{
+  // Collect entries for this chunk
+  std::vector<std::pair<std::string, std::string>> entries;
+  std::string key_buffer; // Reusable buffer for key construction
+
+  // Count total events in this chunk to reserve space
+  size_t total_events = 0;
+  for (const auto &event_log : events_chunk) {
+    total_events += event_log.events.size();
+  }
+  entries.reserve(total_events);
+
+  for (const auto &event_log : events_chunk) {
+    uint32_t sequence_number = 0;
+    for (const auto &emitted_event : event_log.events) {
+      IndexerKeyFormat::make_contract_key(key_buffer,
+                                          emitted_event.contract_address,
+                                          block_height,
+                                          event_log.proposed_tx_hash,
+                                          sequence_number);
+      auto event_serialized = x23::serialize(emitted_event);
+      std::string event_value(reinterpret_cast<const char *>(
+                                  event_serialized.data()),
+                              event_serialized.size());
+      entries.emplace_back(key_buffer, event_value);
+      sequence_number++;
+    }
+  }
+
+  // Sort entries for this chunk
+  std::ranges::sort(entries, [](const auto &a, const auto &b) {
+    return a.first < b.first;
+  });
+
+  // Write sorted entries to SST file
+  rocksdb::SstFileWriter sst_writer(env_options, sst_options,
+                                    contract_cf_handle);
+  rocksdb::Status status = sst_writer.Open(sst_path);
+  if (!status.ok()) {
+    error("Failed to open contract_index SST file {}: {}", chunk_idx,
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  for (const auto &[key, value] : entries) {
+    status = sst_writer.Put(key, value);
+    if (!status.ok()) {
+      error("Failed to add key to contract_index SST file {}: {}", chunk_idx,
+            status.ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+  }
+
+  status = sst_writer.Finish();
+  if (!status.ok()) {
+    error("Failed to finish contract_index SST file {}: {}", chunk_idx,
+          status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  return sst_path;
+}
+
+} // namespace
 
 void
 RocksDBDeleter::operator()(rocksdb::DB *db) const
@@ -78,7 +218,7 @@ IndexDB::make_new(const std::filesystem::path &path,
   rocksdb::Options options;
   options.create_if_missing = true;
   options.compression = compression_algorithm;
-  
+
   // Performance optimizations for bulk loading
   // Increase write buffer size for better SST file writing performance
   options.write_buffer_size = 256_MiB; // 256 MB (default is 64 MB)
@@ -210,6 +350,12 @@ IndexDB::open(const std::filesystem::path &path,
 
 IndexDB::~IndexDB()
 {
+  // Stop stats worker thread
+  if (stats_worker_thread_.joinable()) {
+    stats_worker_thread_.request_stop();
+    stats_worker_thread_.join();
+  }
+
   if (db_ != nullptr) {
     // Destroy column family handles before deleting the database
     if (tx_cf_handle_ != nullptr) {
@@ -226,7 +372,8 @@ IndexDB::~IndexDB()
 
 IndexDB::IndexDB(IndexDB &&other) noexcept
   : db_(std::move(other.db_)), tx_cf_handle_(other.tx_cf_handle_),
-    contract_cf_handle_(other.contract_cf_handle_)
+    contract_cf_handle_(other.contract_cf_handle_),
+    stats_worker_thread_(std::move(other.stats_worker_thread_))
 {
   other.tx_cf_handle_ = nullptr;
   other.contract_cf_handle_ = nullptr;
@@ -236,6 +383,12 @@ IndexDB &
 IndexDB::operator=(IndexDB &&other) noexcept
 {
   if (this != &other) {
+    // Stop existing stats worker thread
+    if (stats_worker_thread_.joinable()) {
+      stats_worker_thread_.request_stop();
+      stats_worker_thread_.join();
+    }
+
     // Clean up existing handles
     if (db_ != nullptr) {
       if (tx_cf_handle_ != nullptr) {
@@ -249,6 +402,7 @@ IndexDB::operator=(IndexDB &&other) noexcept
     db_ = std::move(other.db_);
     tx_cf_handle_ = other.tx_cf_handle_;
     contract_cf_handle_ = other.contract_cf_handle_;
+    stats_worker_thread_ = std::move(other.stats_worker_thread_);
     other.tx_cf_handle_ = nullptr;
     other.contract_cf_handle_ = nullptr;
   }
@@ -312,7 +466,7 @@ IndexDB::consume_events(BlockHeight block_height,
   std::string db_path = db_->GetName();
   std::filesystem::path db_path_fs(db_path);
   std::filesystem::path db_dir = db_path_fs.parent_path();
-  
+
   // Create temporary SST file paths for tx_index
   std::vector<std::string> tx_sst_paths;
   tx_sst_paths.reserve(kNumTxIndexChunks);
@@ -320,203 +474,103 @@ IndexDB::consume_events(BlockHeight block_height,
     tx_sst_paths.push_back(
         (db_dir / std::format("tx_index_{}_{}.sst", block_height, i)).string());
   }
-  
+
   // Create temporary SST file paths for contract_index
   std::vector<std::string> contract_sst_paths;
   contract_sst_paths.reserve(kNumContractIndexChunks);
   for (size_t i = 0; i < kNumContractIndexChunks; i++) {
     contract_sst_paths.push_back(
-        (db_dir / std::format("contract_index_{}_{}.sst", block_height, i)).string());
+        (db_dir / std::format("contract_index_{}_{}.sst", block_height, i))
+            .string());
   }
 
   // Get options from column family handles to ensure consistency
   rocksdb::Options tx_sst_options = db_->GetOptions(tx_cf_handle_);
   rocksdb::Options contract_sst_options = db_->GetOptions(contract_cf_handle_);
-  
+
   // Enable paranoid file checks in debug builds to verify key sortedness
   // This will reopen and read back the SST file to verify keys are in order
 #ifndef NDEBUG
   tx_sst_options.paranoid_file_checks = true;
   contract_sst_options.paranoid_file_checks = true;
 #endif
-  
+
   // Configure EnvOptions for better SST file writing performance
   rocksdb::EnvOptions env_options;
-  // Use direct I/O for writes (bypasses OS page cache, better for large sequential writes)
+  // Use direct I/O for writes (bypasses OS page cache, better for large
+  // sequential writes)
   env_options.use_direct_writes = true; // Set to true if you have fast storage
-  // Sync data incrementally to disk (0 = disabled, larger = more frequent syncs)
-  // For bulk loading, we can disable this since we're not concerned with durability
+  // Sync data incrementally to disk (0 = disabled, larger = more frequent
+  // syncs) For bulk loading, we can disable this since we're not concerned with
+  // durability
   env_options.bytes_per_sync = 0; // Disable incremental sync for bulk loading
-  // Allow fallocate for pre-allocating file space (can improve write performance)
+  // Allow fallocate for pre-allocating file space (can improve write
+  // performance)
   env_options.allow_fallocate = true;
 
   // Create worker pool and submit jobs for each column family
   auto &pool = WorkerPool::get_default_pool();
 
   // Create tx_index SST files in parallel (one per chunk)
-  // Divide events into chunks first, then each thread collects, sorts, and writes its chunk
+  // Divide events into chunks first, then each thread collects, sorts, and
+  // writes its chunk
   std::vector<std::future<IndexerStatus<std::string>>> tx_futures;
   tx_futures.reserve(kNumTxIndexChunks);
 
-  const auto tx_events_chunk_size = divide_up<size_t>(events.size(), kNumTxIndexChunks);
-  
+  const auto tx_events_chunk_size =
+      divide_up<size_t>(events.size(), kNumTxIndexChunks);
+
   for (size_t i = 0; i < kNumTxIndexChunks; i++) {
     const size_t start_idx = i * tx_events_chunk_size;
     if (start_idx >= events.size()) {
       break;
     }
-    const size_t end_idx = std::min(start_idx + tx_events_chunk_size, events.size());
+    const size_t end_idx =
+        std::min(start_idx + tx_events_chunk_size, events.size());
     const auto events_chunk = events.subspan(start_idx, end_idx - start_idx);
     const std::string &chunk_sst_path = tx_sst_paths[i];
-    
-    auto future = pool.submit([this, block_height, events_chunk, chunk_sst_path, tx_sst_options, env_options, i]() -> IndexerStatus<std::string> {
-      auto collect_start = x23::fastclock::get_ns();
-      
-      // Collect entries for this chunk
-      std::vector<std::pair<std::string, std::string>> entries;
-      entries.reserve(events_chunk.size());
-      std::string key_buffer; // Reusable buffer for key construction
 
-      for (const auto &event_log : events_chunk) {
-        // Serialize the TxEventLog for storage
-        auto serialized = x23::serialize(event_log);
-        std::string value(reinterpret_cast<const char *>(serialized.data()),
-                          serialized.size());
+    auto future =
+        pool.submit([db = db_.get(), tx_cf = tx_cf_handle_, block_height,
+                     events_chunk, chunk_sst_path, tx_sst_options, env_options,
+                     i]() -> IndexerStatus<std::string> {
+          return create_tx_index_sst_chunk(db, tx_cf, block_height,
+                                           events_chunk, chunk_sst_path,
+                                           tx_sst_options, env_options, i);
+        });
 
-        // Index by transaction (in tx_index column family)
-        IndexerKeyFormat::make_tx_key(key_buffer, block_height,
-                                      event_log.proposed_tx_hash);
-        entries.emplace_back(key_buffer, value);
-      }
-
-      auto collect_end = x23::fastclock::get_ns();
-      info("Tx index chunk {}: collect time: {} ns", i, collect_end - collect_start);
-
-      // Sort entries for this chunk
-      auto sort_start = x23::fastclock::get_ns();
-      std::ranges::sort(entries, [](const auto &a, const auto &b) {
-        return a.first < b.first;
-      });
-      auto sort_end = x23::fastclock::get_ns();
-      info("Tx index chunk {}: sort time: {} ns", i, sort_end - sort_start);
-
-      // Write sorted entries to SST file
-      auto write_start = x23::fastclock::get_ns();
-      rocksdb::SstFileWriter sst_writer(env_options, tx_sst_options, tx_cf_handle_);
-      rocksdb::Status status = sst_writer.Open(chunk_sst_path);
-      if (!status.ok()) {
-        error("Failed to open tx_index SST file {}: {}", i, status.ToString());
-        return IndexerError(IndexerErrorCode::kInternal);
-      }
-
-      for (const auto &[key, value] : entries) {
-        status = sst_writer.Put(key, value);
-        if (!status.ok()) {
-          error("Failed to add key to tx_index SST file {}: {}", i, status.ToString());
-          return IndexerError(IndexerErrorCode::kInternal);
-        }
-      }
-
-      status = sst_writer.Finish();
-      if (!status.ok()) {
-        error("Failed to finish tx_index SST file {}: {}", i, status.ToString());
-        return IndexerError(IndexerErrorCode::kInternal);
-      }
-      auto write_end = x23::fastclock::get_ns();
-      info("Tx index chunk {}: write time: {} ns", i, write_end - write_start);
-
-      return chunk_sst_path;
-    });
-    
     tx_futures.push_back(std::move(future));
   }
 
   // Create contract_index SST files in parallel (one per chunk)
-  // Divide events into chunks first, then each thread collects, sorts, and writes its chunk
+  // Divide events into chunks first, then each thread collects, sorts, and
+  // writes its chunk
   std::vector<std::future<IndexerStatus<std::string>>> contract_futures;
   contract_futures.reserve(kNumContractIndexChunks);
 
-  const auto contract_events_chunk_size = divide_up<size_t>(events.size(), kNumContractIndexChunks);
-  
+  const auto contract_events_chunk_size =
+      divide_up<size_t>(events.size(), kNumContractIndexChunks);
+
   for (size_t i = 0; i < kNumContractIndexChunks; i++) {
     const size_t start_idx = i * contract_events_chunk_size;
     if (start_idx >= events.size()) {
       break;
     }
-    const size_t end_idx = std::min(start_idx + contract_events_chunk_size, events.size());
+    const size_t end_idx =
+        std::min(start_idx + contract_events_chunk_size, events.size());
     const auto events_chunk = events.subspan(start_idx, end_idx - start_idx);
     const std::string &chunk_sst_path = contract_sst_paths[i];
-    
-    auto future = pool.submit([this, block_height, events_chunk, chunk_sst_path, contract_sst_options, env_options, i]() -> IndexerStatus<std::string> {
-      auto collect_start = x23::fastclock::get_ns();
-      
-      // Collect entries for this chunk
-      std::vector<std::pair<std::string, std::string>> entries;
-      std::string key_buffer; // Reusable buffer for key construction
-      
-      // Count total events in this chunk to reserve space
-      size_t total_events = 0;
-      for (const auto &event_log : events_chunk) {
-        total_events += event_log.events.size();
-      }
-      entries.reserve(total_events);
 
-      for (const auto &event_log : events_chunk) {
-        uint32_t sequence_number = 0;
-        for (const auto &emitted_event : event_log.events) {
-          IndexerKeyFormat::make_contract_key(key_buffer,
-                                              emitted_event.contract_address,
-                                              block_height,
-                                              event_log.proposed_tx_hash,
-                                              sequence_number);
-          auto event_serialized = x23::serialize(emitted_event);
-          std::string event_value(reinterpret_cast<const char *>(
-                                      event_serialized.data()),
-                                  event_serialized.size());
-          entries.emplace_back(key_buffer, event_value);
-          sequence_number++;
-        }
-      }
+    auto future = pool.submit(
+        [db = db_.get(), contract_cf = contract_cf_handle_, block_height,
+         events_chunk, chunk_sst_path, contract_sst_options, env_options,
+         i]() -> IndexerStatus<std::string> {
+          return create_contract_index_sst_chunk(db, contract_cf, block_height,
+                                                 events_chunk, chunk_sst_path,
+                                                 contract_sst_options,
+                                                 env_options, i);
+        });
 
-      auto collect_end = x23::fastclock::get_ns();
-      info("Contract index chunk {}: collect time: {} ns", i, collect_end - collect_start);
-
-      // Sort entries for this chunk
-      auto sort_start = x23::fastclock::get_ns();
-      std::ranges::sort(entries, [](const auto &a, const auto &b) {
-        return a.first < b.first;
-      });
-      auto sort_end = x23::fastclock::get_ns();
-      info("Contract index chunk {}: sort time: {} ns", i, sort_end - sort_start);
-
-      // Write sorted entries to SST file
-      auto write_start = x23::fastclock::get_ns();
-      rocksdb::SstFileWriter sst_writer(env_options, contract_sst_options, contract_cf_handle_);
-      rocksdb::Status status = sst_writer.Open(chunk_sst_path);
-      if (!status.ok()) {
-        error("Failed to open contract_index SST file {}: {}", i, status.ToString());
-        return IndexerError(IndexerErrorCode::kInternal);
-      }
-
-      for (const auto &[key, value] : entries) {
-        status = sst_writer.Put(key, value);
-        if (!status.ok()) {
-          error("Failed to add key to contract_index SST file {}: {}", i, status.ToString());
-          return IndexerError(IndexerErrorCode::kInternal);
-        }
-      }
-
-      status = sst_writer.Finish();
-      if (!status.ok()) {
-        error("Failed to finish contract_index SST file {}: {}", i, status.ToString());
-        return IndexerError(IndexerErrorCode::kInternal);
-      }
-      auto write_end = x23::fastclock::get_ns();
-      info("Contract index chunk {}: write time: {} ns", i, write_end - write_start);
-
-      return chunk_sst_path;
-    });
-    
     contract_futures.push_back(std::move(future));
   }
 
@@ -553,18 +607,17 @@ IndexDB::consume_events(BlockHeight block_height,
     contract_sst_files.push_back(*result);
   }
 
-  auto make_sst_ts = x23::fastclock::get_ns();
-  info("Make SST time: {} ns", make_sst_ts - start_ts);
-
   // Ingest the SST files into RocksDB
   rocksdb::IngestExternalFileOptions ingest_options;
   ingest_options.move_files = true; // Move files instead of copying
-  ingest_options.snapshot_consistency = false; // We don't need snapshot consistency for indexer
-  ingest_options.allow_global_seqno = true; // Allow global seqno assignment (default, but explicit)
+  ingest_options.snapshot_consistency =
+      false; // We don't need snapshot consistency for indexer
+  ingest_options.allow_global_seqno =
+      true; // Allow global seqno assignment (default, but explicit)
 
-  auto ingest_start = x23::fastclock::get_ns();
   // Ingest all tx_index SST files at once
-  rocksdb::Status status = db_->IngestExternalFile(tx_cf_handle_, tx_sst_files, ingest_options);
+  rocksdb::Status status =
+      db_->IngestExternalFile(tx_cf_handle_, tx_sst_files, ingest_options);
   if (!status.ok()) {
     error("Failed to ingest tx_index SST files: {}", status.ToString());
     for (const auto &file : tx_sst_files) {
@@ -578,14 +631,15 @@ IndexDB::consume_events(BlockHeight block_height,
   // Verify files were moved (since move_files = true)
   for (const auto &file : tx_sst_files) {
     if (std::filesystem::exists(file)) {
-      panic("tx_index SST file {} still exists after ingestion (expected to be moved)", file);
+      panic("tx_index SST file {} still exists after ingestion (expected to be "
+            "moved)",
+            file);
     }
   }
-  auto ingest_tx_end = x23::fastclock::get_ns();
-  info("Ingest tx_index ({} files) time: {} ns", tx_sst_files.size(), ingest_tx_end - ingest_start);
 
   // Ingest all contract index SST files at once
-  status = db_->IngestExternalFile(contract_cf_handle_, contract_sst_files, ingest_options);
+  status = db_->IngestExternalFile(contract_cf_handle_, contract_sst_files,
+                                   ingest_options);
   if (!status.ok()) {
     error("Failed to ingest contract_index SST files: {}", status.ToString());
     return IndexerError(IndexerErrorCode::kInternal);
@@ -593,16 +647,42 @@ IndexDB::consume_events(BlockHeight block_height,
   // Verify files were moved (since move_files = true)
   for (const auto &file : contract_sst_files) {
     if (std::filesystem::exists(file)) {
-      panic("contract_index SST file {} still exists after ingestion (expected to be moved)", file);
+      panic("contract_index SST file {} still exists after ingestion (expected "
+            "to be moved)",
+            file);
     }
   }
-  auto ingest_ts = x23::fastclock::get_ns();
-  info("Ingest contract_index ({} files) time: {} ns", contract_sst_files.size(), ingest_ts - ingest_tx_end);
-  info("Total ingest time: {} ns", ingest_ts - ingest_start);
 
-  log_stats();
+  auto end_ts = x23::fastclock::get_ns();
+  info("consume_events time: {} ns ({:.3f} s)", end_ts - start_ts,
+       (end_ts - start_ts) / 1'000'000'000.0);
 
   return {};
+}
+
+void
+IndexDB::launch_stats_worker()
+{
+  if (!stats_worker_thread_.joinable()) {
+    stats_worker_thread_ =
+        std::jthread([this](std::stop_token stoken) { stats_worker(stoken); });
+  }
+}
+
+void
+IndexDB::stats_worker(std::stop_token &stoken) const
+{
+  std::mutex cv_mutex;
+  std::condition_variable_any cv;
+
+  while (!stoken.stop_requested()) {
+    std::unique_lock g(cv_mutex);
+    cv.wait_for(g, stoken, std::chrono::seconds(1), [] { return false; });
+
+    if (!stoken.stop_requested() && is_open()) {
+      log_stats();
+    }
+  }
 }
 
 void
@@ -613,22 +693,33 @@ IndexDB::log_stats() const
   }
 
   uint64_t value;
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &value)) {
-    info("RocksDB total SST files size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize,
+                                    &value)) {
+    info("RocksDB total SST files size: {} bytes ({:.2f} MB)", value,
+         value / (1024.0 * 1024.0));
   }
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &value)) {
-    info("RocksDB live SST files size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize,
+                                    &value)) {
+    info("RocksDB live SST files size: {} bytes ({:.2f} MB)", value,
+         value / (1024.0 * 1024.0));
   }
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &value)) {
-    info("RocksDB total memtable size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kSizeAllMemTables,
+                                    &value)) {
+    info("RocksDB total memtable size: {} bytes ({:.2f} MB)", value,
+         value / (1024.0 * 1024.0));
   }
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kCurSizeAllMemTables, &value)) {
-    info("RocksDB unflushed memtable size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  if (db_->GetAggregatedIntProperty(
+          rocksdb::DB::Properties::kCurSizeAllMemTables, &value)) {
+    info("RocksDB unflushed memtable size: {} bytes ({:.2f} MB)", value,
+         value / (1024.0 * 1024.0));
   }
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateTableReadersMem, &value)) {
-    info("RocksDB table readers memory: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  if (db_->GetAggregatedIntProperty(
+          rocksdb::DB::Properties::kEstimateTableReadersMem, &value)) {
+    info("RocksDB table readers memory: {} bytes ({:.2f} MB)", value,
+         value / (1024.0 * 1024.0));
   }
-  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateNumKeys, &value)) {
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateNumKeys,
+                                    &value)) {
     info("RocksDB estimated number of keys: {}", value);
   }
 }
