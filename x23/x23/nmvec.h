@@ -18,6 +18,7 @@
 #include <x23/cleanup.h>
 #include <x23/cpumap.h>
 #include <x23/debug.h>
+#include <x23/iter.h>
 #include <x23/mvar.h>
 #include <x23/vec.h>
 
@@ -129,7 +130,7 @@ private:
   static void *&next(void *ptr) noexcept { return *static_cast<void **>(ptr); }
 };
 
-extern PerCpuSet<MVar<AllocCache>> memcaches;
+// extern PerCpuSet<MVar<AllocCache>> memcaches;
 
 // A "non-movable vector", can contain up to about 30 GiB of items T
 // indexed by an integer.  Items are never moved, so pointers and
@@ -142,8 +143,8 @@ public:
   using value_type = T;
   using difference_type = ptrdiff_t;
 
-  template<bool Const> class gen_iterator_type : public Location {
-  public:
+  template<bool Const>
+  struct gen_iterator_type : public Location, public detail::AccessMixin {
     using iterator_concept = std::random_access_iterator_tag;
     using value_type = std::conditional_t<Const, const T, T>;
     using container_type = std::conditional_t<Const, const NMVec, NMVec>;
@@ -163,18 +164,13 @@ public:
     {
       return v_->get_location(this->loc());
     }
-    value_type *operator->() const noexcept
-    {
-      return std::addressof(v_->get_location(this->loc()));
-    }
-    decltype(auto) operator[](difference_type n) const noexcept
-    {
-      return *(*this + n);
-    }
 
     // Make sure to compare v_ and Location
     friend bool operator==(const gen_iterator_type &a,
-                           const gen_iterator_type &b) = default;
+                           const gen_iterator_type &b)
+    {
+      return a.v_ == b.v_ && a.loc() == b.loc();
+    }
 
 #ifndef NDEBUG
     // It's UB to compare iterators from different NMVecs
@@ -183,13 +179,13 @@ public:
       x23assert(v_ == other.v_);
     }
 #endif // !NDEBUG
-  private:
+
     template<bool> friend class gen_iterator_type;
 
     container_type *v_{};
   };
-  using iterator_type = gen_iterator_type<false>;
-  using const_iterator_type = gen_iterator_type<true>;
+  using iterator = gen_iterator_type<false>;
+  using const_iterator = gen_iterator_type<true>;
 
   NMVec() noexcept = default;
   NMVec(NMVec &&other) noexcept
@@ -289,10 +285,10 @@ public:
     }
   }
 
-  auto begin() noexcept { return iterator_type{this, 0}; }
-  auto end() noexcept { return iterator_type{this, size()}; }
-  auto begin() const noexcept { return const_iterator_type{this, 0}; }
-  auto end() const noexcept { return const_iterator_type{this, size()}; }
+  auto begin() noexcept { return iterator{this, 0}; }
+  auto end() noexcept { return iterator{this, size()}; }
+  auto begin() const noexcept { return const_iterator{this, 0}; }
+  auto end() const noexcept { return const_iterator{this, size()}; }
 
 private:
   static constexpr size_t kLogMinChunk =
@@ -306,7 +302,7 @@ private:
   static constexpr size_t kLogMaxChunk = kLogMinChunk + kNumChunks - 1;
   static constexpr size_t kMaxChunk = 1UZ << kLogMaxChunk;
 
-  struct Location {
+  struct Location : detail::PlusMinusMixin {
     // Leave room to store chunks [0,kNumChunks] where kNumChunks can
     // be used for a sentinel value.
     static constexpr unsigned kChunkShift = 64 - std::bit_width(kNumChunks);
@@ -341,66 +337,15 @@ private:
     }
     size_t to_index() const noexcept { return chunk_start(chunk()) + item(); }
 
-    decltype(auto) operator+=(this is_mutable auto &&self, ptrdiff_t d) noexcept
+    decltype(auto) operator+=(this is_mutable auto &&self,
+                              difference_type d) noexcept
     {
       self.bits_ = from_index(self.to_index() + d).bits_;
       return (self);
     }
-    auto operator++(this is_mutable auto &&self, int) noexcept
-    {
-      auto ret = self;
-      self += 1;
-      return ret;
-    }
-    decltype(auto) operator++(this is_mutable auto &&self) noexcept
-    {
-      return self += 1;
-    }
 
-    decltype(auto) operator-=(this is_mutable auto &&self, ptrdiff_t d) noexcept
-    {
-      self.bits_ = from_index(self.to_index() - d).bits_;
-      return (self);
-    }
-    auto operator--(this is_mutable auto &&self, int) noexcept
-    {
-      auto ret = self;
-      self -= 1;
-      return ret;
-    }
-    decltype(auto) operator--(this is_mutable auto &&self) noexcept
-    {
-      return self -= 1;
-    }
-
-    template<typename Self>
-    Self operator+(this const Self &self, difference_type d) noexcept
-    {
-      auto ret = self;
-      ret += d;
-      return ret;
-    }
-    template<references<Location> Self>
-    friend Self operator+(difference_type d, const Self &self) noexcept
-    {
-      return self + d;
-    }
-    template<typename Self>
-    Self operator-(this const Self &self, difference_type d) noexcept
-    {
-      auto ret = self;
-      ret -= d;
-      return ret;
-    }
-    template<references<Location> Self>
-    friend Self operator-(difference_type d, const Self &self) noexcept
-    {
-      return self - d;
-    }
-
-    friend difference_type
-    operator-(const references<Location> auto &a,
-              const references<Location> auto &b) noexcept
+    template<std::derived_from<Location> Self>
+    friend difference_type operator-(const Self &a, const Self &b) noexcept
     {
       if constexpr (requires { a.check_compat(b); })
         a.check_compat(b);
@@ -414,7 +359,10 @@ private:
         a.check_compat(b);
       return a.bits_ <=> b.bits_;
     }
-    friend bool operator==(Location a, Location b) noexcept = default;
+    friend bool operator==(Location a, Location b) noexcept
+    {
+      return a.bits_ == b.bits_;
+    }
 
     Location loc() const { return *this; }
   };

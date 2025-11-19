@@ -11,7 +11,7 @@
 
 using x23::NMVec;
 
-static_assert(std::random_access_iterator<NMVec<int>::iterator_type>);
+static_assert(std::random_access_iterator<NMVec<int>::iterator>);
 static_assert(std::ranges::random_access_range<NMVec<int>>);
 static_assert(std::ranges::random_access_range<const NMVec<int>>);
 static_assert(std::same_as<std::ranges::range_reference_t<const NMVec<int>>,
@@ -402,11 +402,11 @@ TEST(NMVec, ConstIteratorBasics)
 
   const NMVec<int> &cnm = nm;
   static_assert(
-      std::is_same_v<decltype(cnm.begin()), NMVec<int>::const_iterator_type>);
+      std::is_same_v<decltype(cnm.begin()), NMVec<int>::const_iterator>);
   static_assert(std::is_const_v<
                 std::remove_reference_t<decltype(*cnm.begin())>>);
 
-  NMVec<int>::const_iterator_type cit = nm.begin(); // implicit conversion
+  NMVec<int>::const_iterator cit = nm.begin(); // implicit conversion
   EXPECT_EQ(*cit, 0);
 
   int expected = 0;

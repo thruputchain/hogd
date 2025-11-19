@@ -20,8 +20,8 @@ add_library(x23
   fileio.h
   format.h
   heap.h
+  iter.h
   mvar.h
-  nmvec.cc
   nmvec.h
   progname.cc
   progname.h
