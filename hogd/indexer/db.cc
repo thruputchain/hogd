@@ -530,14 +530,13 @@ IndexDB::consume_events(BlockHeight block_height,
     auto *db_ptr = db_.get();
     CHECK_PTR(db_ptr);
 
-    auto future =
-        pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
-                     events_chunk, &chunk_sst_path, &tx_sst_options,
-                     &env_options, i]() -> IndexerStatus<void> {
-            return create_tx_index_sst_chunk(db, tx_cf, block_height,
-                                             events_chunk, chunk_sst_path,
-                                             tx_sst_options, env_options, i);
-        });
+    auto future = pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
+                               events_chunk, &chunk_sst_path, &tx_sst_options,
+                               &env_options, i]() -> IndexerStatus<void> {
+      return create_tx_index_sst_chunk(db, tx_cf, block_height, events_chunk,
+                                       chunk_sst_path, tx_sst_options,
+                                       env_options, i);
+    });
 
     tx_futures.push_back(std::move(future));
   }
@@ -571,8 +570,8 @@ IndexDB::consume_events(BlockHeight block_height,
       try {
         return create_contract_index_sst_chunk(db, contract_cf, block_height,
                                                events_chunk, chunk_sst_path,
-                                               contract_sst_options, env_options,
-                                               i);
+                                               contract_sst_options,
+                                               env_options, i);
       } catch (...) {
         return IndexerError(IndexerErrorCode::kInternal);
       }
