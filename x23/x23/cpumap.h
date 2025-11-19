@@ -433,7 +433,7 @@ using LLCMap = cpu_map_t<llc_map>;
 // Initialize global CPU topology mappings during static
 // initialization.  Called automatically before main() starts, but can
 // be called explicitly to ensure early initialization.
-void init_cpumaps();
+std::tuple<> init_cpumaps();
 
 /*
 // Wrapper that aligns type T to cache line boundaries to prevent

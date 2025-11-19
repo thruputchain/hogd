@@ -23,6 +23,7 @@ add_library(x23
   iter.h
   mvar.h
   nmvec.h
+  nodestroy.h
   progname.cc
   progname.h
   refcnt.h

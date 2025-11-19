@@ -8,6 +8,7 @@
 #include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fileio.h"
+#include "x23/nodestroy.h"
 
 namespace x23 {
 
@@ -17,25 +18,20 @@ const CpuSet *allowed_cpus;
 const CpuMap *core_map;
 const CpuMap *llc_map;
 
-void
+std::tuple<>
 init_cpumaps()
 {
-  static std::atomic_int state = 0; // 1 = initializing, 2 = initialized
-  if (state < 2) {
-    if (int zero = 0; state.compare_exchange_strong(zero, 1)) {
+  static auto placeholder = [] {
+    return std::tuple{};
 #if HAVE_SCHED_SETAFFINITY
-      allowed_cpus = new auto{get_allowed_cpus()};
+    allowed_cpus = new auto{get_allowed_cpus()};
 #endif // HAVE_SCHED_SETAFFINITY
-      core_map = &make_nodestroy(new auto{make_cpu_map("topology/core_id")});
-      llc_map = &make_nodestroy(new auto{make_llc_map()});
-      state = 2;
-      state.notify_all();
-    }
-    else
-      state.wait(1);
-  }
+    core_map = &make_nodestroy(new auto{make_cpu_map("topology/core_id")});
+    llc_map = &make_nodestroy(new auto{make_llc_map()});
+  }();
+  return placeholder;
 }
-static const auto _init = (init_cpumaps(), std::tuple{});
+static const auto _init = init_cpumaps();
 
 std::string
 get_field(std::string_view field, std::filesystem::path file)
