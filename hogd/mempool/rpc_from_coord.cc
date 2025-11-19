@@ -45,8 +45,6 @@ struct ChunkRange {
   size_t end; // [start, end)
 };
 
-using AwaitablePtr = std::unique_ptr<x23::Awaitable<void>>;
-
 std::vector<ChunkRange>
 make_chunks(size_t total_size, size_t chunk_count)
 {
@@ -309,8 +307,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
-  x23::Vec<x23::Async<void>> multiplex_handles;
-  multiplex_handles.reserve(large_chunks.size());
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(large_chunks.size());
 
   // The nomination data is placed into this vector, with one entry reserved for
   // each coroutine.
@@ -327,14 +325,14 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
     x23::span<bool> status_chunk(ret.begin() + chunk.start,
                                  ret.begin() + chunk.end);
 
-    multiplex_handles.push_back(multiplex_large_chunk_across_executors(
+    handles.push_back(multiplex_large_chunk_across_executors(
         block_id, tx_chunk, nomination_chunks[i], status_chunk));
   }
 
   // Wait for the RPC responses.
   transaction_nominations.reserve(txs.size());
   for (size_t i = 0; i < large_chunks.size(); i++) {
-    co_await multiplex_handles[i];
+    co_await handles[i];
 
     // Collect the nomination data into the [transaction_nominations] vector.
     for (const x23::XdrVec<NominatedTransaction> &nominated_txs :
@@ -386,6 +384,8 @@ MempoolCoordinatorRpc::initialize_block(const NominationData &cache)
 
   if (create_snapshot_handler_ret != DbSchedResult::DbSchedResultOK ||
       !open_proposal_block_success) {
+    // One of the RPCs failed, so we need to undo any of the successful RPC
+    // calls.
     if (create_snapshot_handler_ret == DbSchedResult::DbSchedResultOK) {
       CHECK_EQ(co_await abandon_snapshot(cache.block_id),
                DbSchedResult::DbSchedResultOK);
@@ -426,15 +426,15 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     // are filled in below.
   }
 
-  x23::Vec<x23::Async<void>> propose_batch_in_chunks_handles;
-  propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(kNumSchedulerIterations);
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
   size_t num_scheduled = 0;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     if (i > 0) {
-      // The first call to [schedule()] is done above since we want to overlap
-      // it with opening the snapshot and the block.
+      // The first call to [schedule()] is done in [schedulercoord_nominate()]
+      // since we want to overlap it with the block initialization RPCs.
       scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                            cache.tx_hashes, cache.txs);
     }
@@ -448,14 +448,14 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
                                           cache.txs.end());
     num_scheduled = cache.tx_hashes.size();
-    propose_batch_in_chunks_handles.push_back(
+    handles.push_back(
         propose_batch_in_chunks(cache.block_id, txs_span,
                                 cache.transaction_nomination_chunks[i],
                                 ret_span));
   }
 
-  for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
-    co_await propose_batch_in_chunks_handles[i];
+  for (size_t i = 0; i < handles.size(); i++) {
+    co_await handles[i];
 
     size_t total_nominations_so_far = i * kChunkSize;
     SchedulerNominationChunk &nomination =
@@ -523,11 +523,12 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   }
 
   {
-    // The last chunk is special. It does not included any tx nomination data.
+    // The last chunk is special. It does not include any tx nomination data.
     // Rather, it contains only the block hash. We create this special chunk and
     // place the block hash in it because we want to overlap the compute for
     // generating the block hash with the network I/O of sending the tx
-    // nomination data to the coordinator.
+    // nomination data to the coordinator. So if we instead placed the block
+    // hash in all of the chunks, we could not overlap this compute.
     cache.last_chunk.chunk_idx = kNumSchedulerIterations;
     cache.last_chunk.total_chunks = kNumSchedulerIterations + 1;
     cache.last_chunk.chunk.block_id = cache.block_id;
@@ -660,8 +661,8 @@ x23::Async<ExecResult>
 MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
                                              size_t executor_idx)
 {
-  return exec_clients_[executor_idx].executorsched_open_validation_block(
-      block_id);
+  co_return co_await exec_clients_[executor_idx]
+      .executorsched_open_validation_block(block_id);
 }
 
 x23::Async<SchedulerValidationResult>
