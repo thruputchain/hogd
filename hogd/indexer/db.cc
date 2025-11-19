@@ -49,7 +49,7 @@ namespace hogd {
 namespace {
 
 // Helper function to create a tx_index SST file chunk
-IndexerStatus<std::string>
+IndexerStatus<void>
 create_tx_index_sst_chunk(
     rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *tx_cf_handle,
     BlockHeight block_height, std::span<const TxEventLog> events_chunk,
@@ -103,11 +103,11 @@ create_tx_index_sst_chunk(
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  return sst_path;
+  return {};
 }
 
 // Helper function to create a contract_index SST file chunk
-IndexerStatus<std::string>
+IndexerStatus<void>
 create_contract_index_sst_chunk(
     rocksdb::DB * /*db*/, rocksdb::ColumnFamilyHandle *contract_cf_handle,
     BlockHeight block_height, std::span<const TxEventLog> events_chunk,
@@ -170,7 +170,7 @@ create_contract_index_sst_chunk(
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  return sst_path;
+  return {};
 }
 
 } // namespace
@@ -511,7 +511,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // Create tx_index SST files in parallel (one per chunk)
   // Divide events into chunks first, then each thread collects, sorts, and
   // writes its chunk
-  std::vector<std::future<IndexerStatus<std::string>>> tx_futures;
+  std::vector<std::future<IndexerStatus<void>>> tx_futures;
   tx_futures.reserve(kNumTxIndexChunks);
 
   const auto tx_events_chunk_size =
@@ -532,11 +532,11 @@ IndexDB::consume_events(BlockHeight block_height,
 
     auto future =
         pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
-                     events_chunk, chunk_sst_path, &tx_sst_options,
-                     &env_options, i]() -> IndexerStatus<std::string> {
-          return create_tx_index_sst_chunk(db, tx_cf, block_height,
-                                           events_chunk, chunk_sst_path,
-                                           tx_sst_options, env_options, i);
+                     events_chunk, chunk_sst_path, tx_sst_options,
+                     env_options, i]() -> IndexerStatus<void> {
+            return create_tx_index_sst_chunk(db, tx_cf, block_height,
+                                             events_chunk, chunk_sst_path,
+                                             tx_sst_options, env_options, i);
         });
 
     tx_futures.push_back(std::move(future));
@@ -545,7 +545,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // Create contract_index SST files in parallel (one per chunk)
   // Divide events into chunks first, then each thread collects, sorts, and
   // writes its chunk
-  std::vector<std::future<IndexerStatus<std::string>>> contract_futures;
+  std::vector<std::future<IndexerStatus<void>>> contract_futures;
   contract_futures.reserve(kNumContractIndexChunks);
 
   const auto contract_events_chunk_size =
@@ -567,11 +567,15 @@ IndexDB::consume_events(BlockHeight block_height,
     auto future = pool.submit([db = db_ptr, contract_cf = contract_cf_handle_,
                                block_height, events_chunk, chunk_sst_path,
                                contract_sst_options, env_options,
-                               i]() -> IndexerStatus<std::string> {
-      return create_contract_index_sst_chunk(db, contract_cf, block_height,
-                                             events_chunk, chunk_sst_path,
-                                             contract_sst_options, env_options,
-                                             i);
+                               i]() -> IndexerStatus<void> {
+      try {
+        return create_contract_index_sst_chunk(db, contract_cf, block_height,
+                                               events_chunk, chunk_sst_path,
+                                               contract_sst_options, env_options,
+                                               i);
+      } catch (...) {
+        return IndexerError(IndexerErrorCode::kInternal);
+      }
     });
 
     contract_futures.push_back(std::move(future));
@@ -581,35 +585,29 @@ IndexDB::consume_events(BlockHeight block_height,
   IndexerStatus<void> sst_error = {};
 
   // Wait for all SST files to be created
-  std::vector<std::string> tx_sst_files;
-  tx_sst_files.reserve(tx_futures.size());
   for (auto &tx_future : tx_futures) {
     auto result = tx_future.get();
     if (!result.has_value()) {
       sst_error = result.error();
       continue;
     }
-    tx_sst_files.push_back(*result);
   }
 
   // Wait for all contract index chunks
-  std::vector<std::string> contract_sst_files;
-  contract_sst_files.reserve(contract_futures.size());
   for (auto &contract_future : contract_futures) {
     auto result = contract_future.get();
     if (!result.has_value()) {
       sst_error = result.error();
       continue;
     }
-    contract_sst_files.push_back(*result);
   }
 
   if (!sst_error.has_value()) {
     // clean up intermediate files
-    for (const auto &file : tx_sst_files) {
+    for (const auto &file : tx_sst_paths) {
       std::filesystem::remove(file);
     }
-    for (const auto &file : contract_sst_files) {
+    for (const auto &file : contract_sst_paths) {
       std::filesystem::remove(file);
     }
     return sst_error;
@@ -625,20 +623,20 @@ IndexDB::consume_events(BlockHeight block_height,
 
   // Ingest all tx_index SST files at once
   rocksdb::Status status =
-      db_->IngestExternalFile(tx_cf_handle_, tx_sst_files, ingest_options);
+      db_->IngestExternalFile(tx_cf_handle_, tx_sst_paths, ingest_options);
   if (!status.ok()) {
     error("Failed to ingest tx_index SST files: {}", status.ToString());
-    for (const auto &file : tx_sst_files) {
+    for (const auto &file : tx_sst_paths) {
       std::filesystem::remove(file);
     }
-    for (const auto &file : contract_sst_files) {
+    for (const auto &file : contract_sst_paths) {
       std::filesystem::remove(file);
     }
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
   // Verify files were moved (since move_files = true)
-  for (const auto &file : tx_sst_files) {
+  for (const auto &file : tx_sst_paths) {
     if (std::filesystem::exists(file)) {
       panic("tx_index SST file {} still exists after ingestion (expected to be "
             "moved)",
@@ -647,14 +645,14 @@ IndexDB::consume_events(BlockHeight block_height,
   }
 
   // Ingest all contract index SST files at once
-  status = db_->IngestExternalFile(contract_cf_handle_, contract_sst_files,
+  status = db_->IngestExternalFile(contract_cf_handle_, contract_sst_paths,
                                    ingest_options);
   if (!status.ok()) {
     error("Failed to ingest contract_index SST files: {}", status.ToString());
     return IndexerError(IndexerErrorCode::kInternal);
   }
   // Verify files were moved (since move_files = true)
-  for (const auto &file : contract_sst_files) {
+  for (const auto &file : contract_sst_paths) {
     if (std::filesystem::exists(file)) {
       panic("contract_index SST file {} still exists after ingestion (expected "
             "to be moved)",
