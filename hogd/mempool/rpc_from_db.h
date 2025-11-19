@@ -9,8 +9,8 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "types.hh"

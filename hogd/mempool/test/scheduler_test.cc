@@ -8,8 +8,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/rpc_from_coord.h"
+#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
 #include "sched_db.hh"
@@ -33,8 +33,7 @@ TEST(Scheduler, ReadAge)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
   const auto [ret, lock] =
@@ -51,8 +50,7 @@ TEST(Scheduler, AddVettedTx)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
   scheduler->add_txs({txs[0]})();
@@ -65,8 +63,7 @@ TEST(Scheduler, AddVettedTxDuplicate)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
   scheduler->add_txs({txs[0]})();
@@ -107,8 +104,7 @@ TEST(Scheduler, Single)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0]})();
   // Check that the correct number of hogs was deducted.
@@ -146,8 +142,7 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   HogsTransferred transfer;
   transfer.block = kBlock;
@@ -173,8 +168,7 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kGas * 3);
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kGas * 2);
 
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   HogsTransferred transfer;
   transfer.block = 10;
@@ -209,8 +203,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
   server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
                   /*num_hogs=*/0);
 
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0]})();
 
@@ -234,8 +227,7 @@ TEST(Scheduler, FindAndRemoveFromRunqueue)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
   EXPECT_EQ(scheduler->size(), 2UL);
@@ -291,8 +283,7 @@ TEST(Scheduler, Fairness)
   }
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   // Sets the age and hogs for all accounts. Each account has this age and hogs:
   //
@@ -360,8 +351,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
   }
 
   MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler =
-      server.mempool_coord_rpc().scheduler();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   // Sets the age and hogs for all accounts. Each account has this age and
   // hogs:

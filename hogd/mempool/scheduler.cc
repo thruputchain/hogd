@@ -202,7 +202,7 @@ Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
       cb();
       co_return;
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
-                                                       *this);
+                                                    *this);
   }
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
@@ -223,8 +223,7 @@ Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 }
 
 void
-Scheduler::cycle_if_needed(const ContractAddress &account,
-                              GasAmount gas_limit)
+Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 {
   for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
     auto [hog_age, lock] = get_cached_hog_age(account);
@@ -344,7 +343,7 @@ Scheduler::dump_runqueue()
 
 void
 Scheduler::process_transfers_helper(const Delta &delta,
-                                       BlockHeight block_height)
+                                    BlockHeight block_height)
 {
   int128_t num_received = from_xdr(delta.hog_delta);
   CHECK_NE(num_received, static_cast<int128_t>(0));
@@ -446,8 +445,8 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
       }
       cb();
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), transfers,
-                                                          deltas_per_thread,
-                                                          *this);
+                                                       deltas_per_thread,
+                                                       *this);
   }
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
@@ -456,7 +455,7 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
 
 bool
 Scheduler::account_is_ready(const ContractAddress &account,
-                               bool remove_expired_txs)
+                            bool remove_expired_txs)
 {
   auto [txs, lock] = account_to_tx_[account];
   const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
@@ -475,8 +474,8 @@ Scheduler::account_is_ready(const ContractAddress &account,
 
 void
 Scheduler::move_hogs_to_already_scheduled_group(HogAge &hog_ages,
-                                                   uint128_t num_hogs,
-                                                   BlockHeight block_height)
+                                                uint128_t num_hogs,
+                                                BlockHeight block_height)
 {
   const uint128_xdr already_scheduled_hogs =
       hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled];
@@ -526,9 +525,8 @@ Scheduler::cycle_accounts_during_schedule_helper(
 }
 
 void
-Scheduler::schedule(size_t num_txs,
-                       x23::Vec<SignedTransactionHash> &tx_hashes,
-                       x23::Vec<SignedTransaction> &txs)
+Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
+                    x23::Vec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
   static std::unordered_set<ContractAddress> removed_accounts;
