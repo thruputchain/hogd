@@ -9,8 +9,8 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "types.hh"
@@ -74,7 +74,7 @@ public:
     scheduler_->transfer_finished_.release();
   }
 
-  void register_scheduler(std::shared_ptr<NewScheduler> scheduler)
+  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
     CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
@@ -107,7 +107,7 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
-  std::shared_ptr<NewScheduler> scheduler_;
+  std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 
