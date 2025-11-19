@@ -212,22 +212,22 @@ private:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
+  x23::Async<void> finish_all_executors(BlockID block_id);
 
-  x23::Detached
+  x23::Async<void>
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                x23::span<bool> ret_chunk, size_t executor_idx,
-                x23::CoroCB<void> cb);
+                x23::span<bool> ret_chunk, size_t executor_idx);
 
-  x23::Detached propose_small_chunks_from_large_chunk(
+  x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
-  x23::Detached propose_batch_in_chunks(
+  x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NominatedTransaction> &transaction_nominations,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
@@ -235,6 +235,7 @@ private:
   x23::Async<bool> initialize_block(const NominationData &cache);
   x23::Async<void> schedule(NominationData &cache);
   static void process_tx_outcomes(NominationData &cache);
+  x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
   x23::Async<void> finish_nominating_block(NominationData &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
