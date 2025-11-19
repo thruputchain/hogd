@@ -153,11 +153,13 @@ hogdb_init(std::string_view path, size_t ram_bytes,
 
     const std::string exec_address = create_address(kDbExecutorServerPort);
     const std::string sched_address = create_address(kDbMempoolServerPort);
+    const std::string auth_address = create_address(kDbAuthServerPort);
     ShardCard card{.protocol = version::kHogdProtocol,
                    .upid = {},
                    .block_height = 0,
                    .address_for_exec = exec_address.c_str(),
-                   .address_for_sched = sched_address.c_str()};
+                   .address_for_sched = sched_address.c_str(),
+                   .address_for_auth = auth_address.c_str()};
 
     client->scheddb_intro_shard(card)();
   }

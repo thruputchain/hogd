@@ -2,6 +2,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "account.hh"
 #include "hogd/auth/auth_data_cache.h"
@@ -179,6 +180,52 @@ TEST(AuthDataCacheTest, Eviction)
   for (size_t i = 100 - 16; i < 100; i++) {
     ASSERT_NE(bucket.get(addresses[i]), nullptr);
   }
+}
+
+TEST(AuthDataCacheTest, RejectOlderUpdateAfterEviction)
+{
+  AuthDataCache cache(1); // Single bucket for predictable behavior
+
+  ContractAddress addr1 = make_test_address(1);
+  ContractAddress addr2 = make_test_address(2);
+  AccountAuthData auth_data{};
+
+  // Insert at height 10
+  auto data10 =
+      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+          10, auth_data);
+  cache.put(addr1, data10);
+
+  // Verify it's in the cache
+  auto retrieved = cache.get(addr1);
+  ASSERT_NE(retrieved, nullptr);
+  EXPECT_EQ(retrieved->first, 10);
+
+  // Evict everything
+  cache.evict_all();
+
+  // Verify it's been evicted
+  retrieved = cache.get(addr1);
+  ASSERT_EQ(retrieved, nullptr);
+
+  // Try to reinsert at height 9 (older than height 10)
+  auto data9 =
+      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+          9, auth_data);
+  cache.put(addr1, data9);
+
+  // The update should be rejected because height 9 < max_observed_height (10)
+  // So the address should still not be in the cache
+  retrieved = cache.get(addr1);
+  ASSERT_EQ(retrieved, nullptr);
+
+  // an update for a different address at height 9 should be rejected
+  auto data9_2 =
+      std::make_shared<std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+          9, auth_data);
+  cache.put(addr2, data9_2);
+  retrieved = cache.get(addr2);
+  ASSERT_EQ(retrieved, nullptr);
 }
 
 } // namespace hogd

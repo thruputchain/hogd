@@ -1,11 +1,18 @@
+add_library(auth
+    dbauth_client.cc
+    status.cc
+)
 
-# Tests
+target_link_libraries(auth
+    hogd
+)
+
 add_executable(auth_test
     auth_data_cache_test.cc
 )
 
 target_link_libraries(auth_test
-    hogd
+    auth
     GTest::gtest
 )
 gtest_discover_tests(auth_test)
