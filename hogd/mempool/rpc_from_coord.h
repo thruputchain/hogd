@@ -220,10 +220,10 @@ private:
                 x23::span<bool> ret_chunk, size_t executor_idx,
                 x23::CoroCB<void> cb);
 
-  x23::Detached propose_small_chunks_from_large_chunk(
+  x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
   x23::Detached propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
