@@ -1,5 +1,5 @@
 
-echo 'cloning hogd'
+echo 'cloning hogd' >&2
 
 git clone \
     --separate-git-dir=.git \
