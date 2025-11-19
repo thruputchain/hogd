@@ -297,6 +297,7 @@ IndexerStatus<void>
 IndexDB::consume_events(BlockHeight block_height,
                         std::span<const TxEventLog> events)
 {
+  auto usage = x23::dump_rusage(1);
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
