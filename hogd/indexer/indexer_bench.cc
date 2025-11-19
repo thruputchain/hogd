@@ -183,7 +183,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::println("Generating event data...");
   auto gen_start = x23::fastclock::get_ns();
   std::vector<std::vector<hogd::TxEventLog>> blocks(num_blocks);
-  for (size_t block = 0; block < num_blocks; block++) {
+  for (int block = 0; block < num_blocks; block++) {
     blocks[block].reserve(txs_per_block);
     for (size_t tx = 0; tx < txs_per_block; tx++) {
       size_t tx_id = (block * txs_per_block) + tx;
