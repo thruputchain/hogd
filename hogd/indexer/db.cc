@@ -297,7 +297,6 @@ IndexerStatus<void>
 IndexDB::consume_events(BlockHeight block_height,
                         std::span<const TxEventLog> events)
 {
-  auto usage = x23::dump_rusage(1);
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
@@ -305,8 +304,8 @@ IndexDB::consume_events(BlockHeight block_height,
   auto start_ts = x23::fastclock::get_ns();
 
   // Parallelism configuration
-  static constexpr size_t kNumTxIndexChunks = 4;
-  static constexpr size_t kNumContractIndexChunks = 4;
+  static constexpr size_t kNumTxIndexChunks = 8;
+  static constexpr size_t kNumContractIndexChunks = 8;
 
   // Get database path for temporary SST files
   // We'll create them in the same directory as the database
