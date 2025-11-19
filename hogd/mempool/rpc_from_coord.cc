@@ -217,11 +217,11 @@ MempoolCoordinatorRpc::get_block_hash(
   return sha256(preimage);
 }
 
-x23::Detached
+x23::Async<void>
 MempoolCoordinatorRpc::propose_batch(
     BlockID block_id, x23::span<const SignedTransaction> txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
-    x23::span<bool> ret_chunk, size_t executor_idx, x23::CoroCB<void> cb)
+    x23::span<bool> ret_chunk, size_t executor_idx)
 {
   ExecProposeBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_propose_batch(block_id,
@@ -243,8 +243,6 @@ MempoolCoordinatorRpc::propose_batch(
       break;
     }
   }
-
-  cb();
 }
 
 // This function spawns a coroutine and sends [txs] to the executors. The
@@ -262,8 +260,8 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
 
-  x23::Vec<AwaitablePtr> awaitables;
-  awaitables.reserve(chunks.size());
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(chunks.size());
 
   nomination_chunks.resize(chunks.size(), {});
   CHECK_EQ(ret.size(), txs.size());
@@ -271,8 +269,6 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
   // Each iteration in this loop creates a small chunk and sends it to the
   // executor via [propose_batch()].
   for (size_t i = 0; i < chunks.size(); i++) {
-    awaitables.push_back(std::make_unique<x23::Awaitable<void>>());
-
     const ChunkRange &chunk = chunks[i];
     x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                 txs.begin() + chunk.end);
@@ -282,22 +278,22 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
     // We multiplex the small chunks across multiple TCP connections and
     // multiple executors by setting the [executor_idx] to [i %
     // exec_clients_.size()].
-    propose_batch(block_id, tx_chunk, nomination_chunks[i], ret_chunk,
-                  /*executor_idx=*/i % exec_clients_.size(),
-                  x23::CoroCB<void>(*awaitables[i]));
+    handles.push_back(propose_batch(block_id, tx_chunk, nomination_chunks[i],
+                                    ret_chunk,
+                                    /*executor_idx=*/i % exec_clients_.size()));
   }
 
   // Wait for the executor to finish executing the txs.
   for (size_t i = 0; i < chunks.size(); i++) {
-    co_await *awaitables[i];
+    co_await handles[i];
   }
 }
 
-x23::Detached
+x23::Async<void>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
     BlockID block_id, x23::span<SignedTransaction> txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations,
-    x23::span<bool> ret, x23::CoroCB<void> cb)
+    x23::span<bool> ret)
 {
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
@@ -346,9 +342,6 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
       transaction_nominations += nominated_txs;
     }
   }
-
-  // Notify the calling coroutine that we are finished.
-  cb();
 }
 
 x23::Async<ExecResult>
@@ -433,7 +426,7 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
     // are filled in below.
   }
 
-  x23::Vec<AwaitablePtr> propose_batch_in_chunks_handles;
+  x23::Vec<x23::Async<void>> propose_batch_in_chunks_handles;
   propose_batch_in_chunks_handles.reserve(kNumSchedulerIterations);
   cache.transaction_nomination_chunks.clear();
   cache.transaction_nomination_chunks.resize(kNumSchedulerIterations, {});
@@ -450,21 +443,19 @@ MempoolCoordinatorRpc::schedule(NominationData &cache)
       break;
     }
 
-    propose_batch_in_chunks_handles.push_back(
-        std::make_unique<x23::Awaitable<void>>());
     x23::span<bool> ret_span(cache.statuses.begin() + num_scheduled,
                              cache.statuses.begin() + cache.tx_hashes.size());
     x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
                                           cache.txs.end());
     num_scheduled = cache.tx_hashes.size();
-    propose_batch_in_chunks(cache.block_id, txs_span,
-                            cache.transaction_nomination_chunks[i], ret_span,
-                            x23::CoroCB<void>(
-                                *propose_batch_in_chunks_handles.back()));
+    propose_batch_in_chunks_handles.push_back(
+        propose_batch_in_chunks(cache.block_id, txs_span,
+                                cache.transaction_nomination_chunks[i],
+                                ret_span));
   }
 
   for (size_t i = 0; i < propose_batch_in_chunks_handles.size(); i++) {
-    co_await *propose_batch_in_chunks_handles[i];
+    co_await propose_batch_in_chunks_handles[i];
 
     size_t total_nominations_so_far = i * kChunkSize;
     SchedulerNominationChunk &nomination =
@@ -516,23 +507,18 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
       mark_block_committed(cache.block_id);
 
   // Send the nomination chunks back to the coordinator.
-  x23::Vec<AwaitablePtr> finish_nomination_handles;
+  x23::Vec<x23::Async<void>> finish_nomination_handles;
   finish_nomination_handles.reserve(cache.sched_nominations.size());
   for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
     cache.sched_nominations[i].chunk_idx = i;
     finish_nomination_handles.push_back(
-        std::make_unique<x23::Awaitable<void>>());
+        [](std::unique_ptr<coord_sched_client_t> &coord_client,
+           SchedulerNominationChunk &chunk,
+           x23::CoroCB<void> cb) -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
 
-    [](std::unique_ptr<coord_sched_client_t> &coord_client,
-       SchedulerNominationChunk &chunk,
-       x23::CoroCB<void> cb) -> x23::Detached {
-      co_await default_coropoll().pool_.bg();
-
-      co_await coord_client->coordscheduler_finish_nomination(chunk);
-      cb();
-    }(coord_client_, cache.sched_nominations[i],
-                             x23::CoroCB<void>(
-                                 *finish_nomination_handles.back()));
+          co_await coord_client->coordscheduler_finish_nomination(chunk);
+        }(coord_client_, cache.sched_nominations[i], x23::CoroCB<void>()));
   }
 
   {
@@ -575,8 +561,8 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   }
   co_await mark_block_committed_handle;
 
-  for (AwaitablePtr &handle : finish_nomination_handles) {
-    co_await *handle;
+  for (x23::Async<void> &handle : finish_nomination_handles) {
+    co_await handle;
   }
   co_await last_chunk_handle;
 }

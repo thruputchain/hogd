@@ -214,21 +214,20 @@ private:
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
 
-  x23::Detached
+  x23::Async<void>
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                x23::span<bool> ret_chunk, size_t executor_idx,
-                x23::CoroCB<void> cb);
+                x23::span<bool> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
       x23::span<bool> ret);
 
-  x23::Detached propose_batch_in_chunks(
+  x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NominatedTransaction> &transaction_nominations,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
