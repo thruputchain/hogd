@@ -5,12 +5,14 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/crypto.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
+#include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -164,7 +166,7 @@ TEST(NewScheduler, ProcessTransfersUpdatesReceivedGroup)
 TEST(NewScheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  constexpr uint128_t kGas = static_cast<uint128_t>(5'000'000'000);
+  constexpr auto kGas = static_cast<uint128_t>(5'000'000'000);
 
   MempoolTestInfra server;
   server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kGas * 4);
@@ -176,7 +178,7 @@ TEST(NewScheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
 
   HogsTransferred transfer;
   transfer.block = 10;
-  const int128_t signed_gas = static_cast<int128_t>(kGas);
+  const auto signed_gas = static_cast<int128_t>(kGas);
   const int128_t delta_value = -8 * signed_gas;
   transfer.deltas.push_back(
       Delta{.address = account, .hog_delta = to_xdr(delta_value)});
@@ -197,8 +199,7 @@ TEST(NewScheduler, CycleAccountWhenGasInsufficient)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  const uint128_t gas_limit =
-      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   MempoolTestInfra server;
   server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5,
