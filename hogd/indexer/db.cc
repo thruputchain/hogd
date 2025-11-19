@@ -24,6 +24,7 @@
 
 
 #include "event.hh"
+#include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -404,55 +405,65 @@ IndexDB::consume_events(BlockHeight block_height,
   });
 
   // Create 4 contract index SST files in parallel (one per chunk)
+  // Divide events into chunks first, then each thread collects, sorts, and writes its chunk
   std::vector<std::future<IndexerStatus<std::string>>> contract_futures;
   contract_futures.reserve(kNumContractChunks);
 
-  // First, collect all contract entries to determine chunk boundaries
-  std::vector<std::pair<std::string, std::string>> all_contract_entries;
-  std::string key_buffer; // Reusable buffer for key construction
-  
-  size_t total_events = 0;
-  for (const auto &event_log : events) {
-    total_events += event_log.events.size();
-  }
-  all_contract_entries.reserve(total_events);
-
-  for (const auto &event_log : events) {
-    uint32_t sequence_number = 0;
-    for (const auto &emitted_event : event_log.events) {
-      IndexerKeyFormat::make_contract_key(key_buffer,
-                                          emitted_event.contract_address,
-                                          block_height,
-                                          event_log.proposed_tx_hash,
-                                          sequence_number);
-      auto event_serialized = x23::serialize(emitted_event);
-      std::string event_value(reinterpret_cast<const char *>(
-                                  event_serialized.data()),
-                              event_serialized.size());
-      all_contract_entries.emplace_back(key_buffer, event_value);
-      sequence_number++;
-    }
-  }
-
-  // Sort all entries first
-  std::ranges::sort(all_contract_entries, [](const auto &a, const auto &b) {
-    return a.first < b.first;
-  });
-
-  // Divide into 4 chunks and create SST files in parallel
-  const size_t chunk_size = (all_contract_entries.size() + kNumContractChunks - 1) / kNumContractChunks;
+  const auto events_chunk_size = divide_up<size_t>(events.size(), kNumContractChunks);
   
   for (int i = 0; i < kNumContractChunks; i++) {
-    const size_t start_idx = i * chunk_size;
-    if (start_idx >= all_contract_entries.size()) {
+    const size_t start_idx = i * events_chunk_size;
+    if (start_idx >= events.size()) {
       break;
     }
-    const size_t end_idx = std::min(start_idx + chunk_size, all_contract_entries.size());
+    const size_t end_idx = std::min(start_idx + events_chunk_size, events.size());
+    const auto events_chunk = events.subspan(start_idx, end_idx - start_idx);
     const std::string &chunk_sst_path = contract_sst_paths[i];
     
-    auto future = pool.submit([this, start_idx, end_idx, &all_contract_entries, chunk_sst_path, contract_sst_options, env_options, i]() -> IndexerStatus<std::string> {
-      auto write_start = x23::fastclock::get_ns();
+    auto future = pool.submit([this, block_height, events_chunk, chunk_sst_path, contract_sst_options, env_options, i]() -> IndexerStatus<std::string> {
+      auto collect_start = x23::fastclock::get_ns();
       
+      // Collect entries for this chunk
+      std::vector<std::pair<std::string, std::string>> entries;
+      std::string key_buffer; // Reusable buffer for key construction
+      
+      // Count total events in this chunk to reserve space
+      size_t total_events = 0;
+      for (const auto &event_log : events_chunk) {
+        total_events += event_log.events.size();
+      }
+      entries.reserve(total_events);
+
+      for (const auto &event_log : events_chunk) {
+        uint32_t sequence_number = 0;
+        for (const auto &emitted_event : event_log.events) {
+          IndexerKeyFormat::make_contract_key(key_buffer,
+                                              emitted_event.contract_address,
+                                              block_height,
+                                              event_log.proposed_tx_hash,
+                                              sequence_number);
+          auto event_serialized = x23::serialize(emitted_event);
+          std::string event_value(reinterpret_cast<const char *>(
+                                      event_serialized.data()),
+                                  event_serialized.size());
+          entries.emplace_back(key_buffer, event_value);
+          sequence_number++;
+        }
+      }
+
+      auto collect_end = x23::fastclock::get_ns();
+      info("Contract index chunk {}: collect time: {} ns", i, collect_end - collect_start);
+
+      // Sort entries for this chunk
+      auto sort_start = x23::fastclock::get_ns();
+      std::ranges::sort(entries, [](const auto &a, const auto &b) {
+        return a.first < b.first;
+      });
+      auto sort_end = x23::fastclock::get_ns();
+      info("Contract index chunk {}: sort time: {} ns", i, sort_end - sort_start);
+
+      // Write sorted entries to SST file
+      auto write_start = x23::fastclock::get_ns();
       rocksdb::SstFileWriter sst_writer(env_options, contract_sst_options, contract_cf_handle_);
       rocksdb::Status status = sst_writer.Open(chunk_sst_path);
       if (!status.ok()) {
@@ -460,9 +471,7 @@ IndexDB::consume_events(BlockHeight block_height,
         return IndexerError(IndexerErrorCode::kInternal);
       }
 
-      // Write entries for this chunk (already sorted)
-      for (size_t j = start_idx; j < end_idx; j++) {
-        const auto &[key, value] = all_contract_entries[j];
+      for (const auto &[key, value] : entries) {
         status = sst_writer.Put(key, value);
         if (!status.ok()) {
           error("Failed to add key to contract_index SST file {}: {}", i, status.ToString());
