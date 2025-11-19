@@ -5,9 +5,9 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "hogd/base/crypto.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
