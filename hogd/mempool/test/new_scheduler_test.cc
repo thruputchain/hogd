@@ -74,6 +74,33 @@ TEST(NewScheduler, AddVettedTxDuplicate)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+TEST(NewScheduler, CycleGroupsMovesHogsBetweenBuckets)
+{
+  HogAge hog_age{};
+  hog_age.address = MempoolTestInfra::kAccountAddresses[0];
+  hog_age.num_hogs[kHogAgeGroupToSchedule] =
+      to_xdr(static_cast<uint128_t>(1));
+  hog_age.average_ages[kHogAgeGroupToSchedule] = 10;
+  hog_age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(static_cast<uint128_t>(2));
+  hog_age.average_ages[kHogAgeGroupAlreadyScheduled] = 5;
+  hog_age.num_hogs[kHogAgeGroupReceived] =
+      to_xdr(static_cast<uint128_t>(3));
+  hog_age.average_ages[kHogAgeGroupReceived] = 1;
+
+  NewScheduler::cycle_groups(hog_age);
+
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]),
+            static_cast<uint128_t>(3));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupToSchedule], 7);
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(3));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupReceived], 0);
+}
+
 TEST(NewScheduler, Single)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -111,6 +138,139 @@ TEST(NewScheduler, Single)
             5'000'000'000);
   EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
             age->average_ages[kHogAgeGroupToSchedule]);
+}
+
+TEST(NewScheduler, ProcessTransfersUpdatesReceivedGroup)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<NewScheduler> scheduler =
+      server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = kBlock;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
+TEST(NewScheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  constexpr uint128_t kGas = static_cast<uint128_t>(5'000'000'000);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kGas * 4);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kGas * 3);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kGas * 2);
+
+  std::shared_ptr<NewScheduler> scheduler =
+      server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = 10;
+  const int128_t signed_gas = static_cast<int128_t>(kGas);
+  const int128_t delta_value = -8 * signed_gas;
+  transfer.deltas.push_back(
+      Delta{.address = account, .hog_delta = to_xdr(delta_value)});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
+}
+
+TEST(NewScheduler, CyclesAccountWhenGasInsufficient)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const uint128_t gas_limit =
+      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
+                  /*num_hogs=*/0);
+
+  std::shared_ptr<NewScheduler> scheduler =
+      server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
+}
+
+TEST(NewScheduler, FindAndRemoveFromRunqueue)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<NewScheduler> scheduler =
+      server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  {
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[0]));
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    ASSERT_EQ(removed.size(), 1UL);
+    EXPECT_EQ(removed.front().tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[0]);
+    EXPECT_EQ(scheduler->size(), 1UL);
+  }
+
+  {
+    SignedTransactionHash fake_hash{};
+    fake_hash.fill(0xAA);
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[1]));
+    hashes.push_back(fake_hash);
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_FALSE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    EXPECT_TRUE(removed.empty());
+    EXPECT_EQ(scheduler->size(), 1UL);
+  }
+
+  {
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[1]));
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    ASSERT_EQ(removed.size(), 1UL);
+    EXPECT_EQ(scheduler->size(), 0UL);
+  }
 }
 
 TEST(Scheduler, Fairness)
