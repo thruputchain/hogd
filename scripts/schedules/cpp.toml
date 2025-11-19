@@ -5,7 +5,18 @@ name = "{{ .hog_schedule }}_{{ .hog_host }}"
 host = ["hog8"]
 script = """
 
-source ./scripts/ci/clone_hogd.sh
+# source ./scripts/ci/clone_hogd.sh
+echo 'cloning hogd'
+git clone \
+    --separate-git-dir=.git \
+    --depth=1 --recursive \
+    --branch {{ .git_branch }} \
+    git@github.com:groundhogchain/hogd.git tmp
+rm -rf tmp
+git checkout -q {{ .git_branch }}
+git reset --hard
+
+
 source ./scripts/ci/prepare_env.sh
 
 ./scripts/check.sh -p -b
