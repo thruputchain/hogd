@@ -240,7 +240,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupContractEvents)
 
   // Lookup events for non-existent contract
   ContractAddress contract_addr3;
-  std::fill(contract_addr3.begin(), contract_addr3.end(), 0xEE);
+  std::ranges::fill(contract_addr3, 0xEE);
   auto contract3_events =
       db->get_contract_events(block_height, block_height + 1, contract_addr3);
   ASSERT_TRUE(contract3_events.has_value());

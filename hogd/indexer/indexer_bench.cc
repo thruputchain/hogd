@@ -8,7 +8,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -141,7 +140,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     }
   }
-  // NOLINTEND(misc-include-cleaner)
 
   // Check for required arguments
   if (db_path.empty()) {
@@ -154,6 +152,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     std::println(stderr, "Error: Unexpected extra arguments");
     hogd::usage(argv[0]);
   }
+  // NOLINTEND(misc-include-cleaner)
 
   std::println("Indexer benchmark:");
   std::println("  Database path: {}", db_path);
