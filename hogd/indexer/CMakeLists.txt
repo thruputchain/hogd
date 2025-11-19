@@ -19,8 +19,7 @@ target_link_libraries(indexer_test
     indexer
     gtest
 )
-
-add_test(NAME indexer_test COMMAND indexer_test)
+gtest_discover_tests(indexer_test)
 
 # Benchmark executable
 add_executable(indexer_bench
