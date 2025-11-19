@@ -530,13 +530,14 @@ IndexDB::consume_events(BlockHeight block_height,
     auto *db_ptr = db_.get();
     CHECK_PTR(db_ptr);
 
-    auto future = pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
-                               events_chunk, chunk_sst_path, &tx_sst_options,
-                               &env_options, i]() -> IndexerStatus<std::string> {
-      return create_tx_index_sst_chunk(db, tx_cf, block_height, events_chunk,
-                                       chunk_sst_path, tx_sst_options,
-                                       env_options, i);
-    });
+    auto future =
+        pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
+                     events_chunk, chunk_sst_path, &tx_sst_options,
+                     &env_options, i]() -> IndexerStatus<std::string> {
+          return create_tx_index_sst_chunk(db, tx_cf, block_height,
+                                           events_chunk, chunk_sst_path,
+                                           tx_sst_options, env_options, i);
+        });
 
     tx_futures.push_back(std::move(future));
   }
