@@ -1,0 +1,28 @@
+name = "cpp_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+host = ["hog8"]
+script = """
+
+git clone --depth=1 --recursive git@github.com:groundhogchain/hogd.git .
+git checkout -q {{ .git_branch }}
+
+source ./scripts/ci/prepare_env.sh
+
+./scripts/check.sh -p -b
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ../core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_COMMIT = "{{ .git_commit }}"
