@@ -235,6 +235,7 @@ private:
   x23::Async<bool> initialize_block(const NominationData &cache);
   x23::Async<void> schedule(NominationData &cache);
   static void process_tx_outcomes(NominationData &cache);
+  x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
   x23::Async<void> finish_nominating_block(NominationData &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,

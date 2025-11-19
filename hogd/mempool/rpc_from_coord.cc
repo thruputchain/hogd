@@ -113,39 +113,39 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 {
   // We [co_await] rather than [return] because [add_txs] takes the txs as a
   // const reference, so we need [batch] to stay in scope.
-  co_await scheduler_->add_txs(batch);
+  co_return co_await scheduler_->add_txs(batch);
 }
 
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::create_snapshot(BlockID prev_block_id, BlockID block_id,
                                        BlockExecutionMode mode)
 {
-  return db_sched_client_->dbsched_create_snapshot(prev_block_id, block_id,
-                                                   mode);
+  co_return co_await db_sched_client_->dbsched_create_snapshot(prev_block_id,
+                                                               block_id, mode);
 }
 
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_open_block(BlockID block_id)
 {
-  return event_sched_client_->eventsched_open_block(block_id);
+  co_return co_await event_sched_client_->eventsched_open_block(block_id);
 }
 
 x23::Async<DbSchedResult>
 MempoolCoordinatorRpc::abandon_snapshot(BlockID block_id)
 {
-  return db_sched_client_->dbsched_abandon_snapshot(block_id);
+  co_return co_await db_sched_client_->dbsched_abandon_snapshot(block_id);
 }
 
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_abandon_block(BlockID block_id)
 {
-  return event_sched_client_->eventsched_abandon_block(block_id);
+  co_return co_await event_sched_client_->eventsched_abandon_block(block_id);
 }
 
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 {
-  return db_sched_client_->dbsched_close_snapshot(block_id);
+  co_return co_await db_sched_client_->dbsched_close_snapshot(block_id);
   // TODO(geoff): forward the root hash of the event block back to the block
   // header
   // TODO(geoff): consider whether this should be called from commit instead
@@ -154,19 +154,20 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id)
 {
-  return event_sched_client_->eventsched_close_block(block_id);
+  co_return co_await event_sched_client_->eventsched_close_block(block_id);
 }
 
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 {
-  return db_sched_client_->dbsched_commit_snapshot(block_id);
+  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id);
 }
 
 x23::Async<void>
 MempoolCoordinatorRpc::finish_block(BlockID block_id, size_t executor_idx)
 {
-  return exec_clients_[executor_idx].executorsched_finish_block(block_id);
+  co_return co_await exec_clients_[executor_idx].executorsched_finish_block(
+      block_id);
 }
 
 x23::Async<void>
@@ -487,6 +488,13 @@ MempoolCoordinatorRpc::process_tx_outcomes(NominationData &cache)
 }
 
 x23::Async<void>
+MempoolCoordinatorRpc::send_nomination_chunk(
+    const SchedulerNominationChunk &chunk)
+{
+  co_return co_await coord_client_->coordscheduler_finish_nomination(chunk);
+}
+
+x23::Async<void>
 MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
 {
   // Gracefully shut down executor work, finalize database/event snapshots, and
@@ -512,13 +520,7 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
     cache.sched_nominations[i].chunk_idx = i;
     finish_nomination_handles.push_back(
-        [](std::unique_ptr<coord_sched_client_t> &coord_client,
-           SchedulerNominationChunk &chunk,
-           x23::CoroCB<void> cb) -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-
-          co_await coord_client->coordscheduler_finish_nomination(chunk);
-        }(coord_client_, cache.sched_nominations[i], x23::CoroCB<void>()));
+        send_nomination_chunk(cache.sched_nominations[i]));
   }
 
   {
