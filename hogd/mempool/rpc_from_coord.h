@@ -23,7 +23,7 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
-#include "new_scheduler.h"
+#include "scheduler.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -58,7 +58,7 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  std::shared_ptr<NewScheduler> scheduler() { return scheduler_; }
+  std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client()
@@ -196,7 +196,7 @@ private:
     // [current_block_id_] with it.
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
-    scheduler_ = std::make_shared<NewScheduler>(db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     db_rpc_->register_scheduler(scheduler_);
 
     ready_.store(true, std::memory_order_release);
@@ -256,7 +256,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_ = 0;
-  std::shared_ptr<NewScheduler> scheduler_;
+  std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
   std::atomic<bool> ready_ = false;

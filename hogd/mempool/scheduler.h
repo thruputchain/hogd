@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -10,6 +11,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/mempool/shared.h"
@@ -27,12 +29,7 @@ public:
     : db_sched_client_(std::move(db_sched_client))
   {}
 
-  x23::Async<void> shut_down()
-  {
-    // TODO(jhumphri): Need to remove the txs from the runqueue and add their
-    // hogs back to the [kHogAgeGroupToSchedule] group for each wallet.
-    co_await write_cache();
-  }
+  static x23::Async<void> shut_down() { co_return; }
 
   // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
   // scheduler detects and silently drops the duplicates rather than enqueue
@@ -43,47 +40,16 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const SignedTransactionBatch &txs);
+  x23::Async<void> add_txs(const x23::Vec<SignedTransaction> &txs);
 
-  // Call this method when account [account_address] receives [num_received]
-  // hogs from another account in block [current_block]. This method adds the
-  // hogs to the [kHogAgeGroupReceived] group.
-  x23::Async<void> process_received_hogs(const ContractAddress &account,
-                                         uint128_t num_received,
-                                         BlockHeight current_block);
-
-  x23::Async<void> process_deducted_hogs(const ContractAddress &account,
-                                         uint128_t num_deducted);
-
-  // Reorders txs in the runqueue and adds/removes txs from the runqueue based
-  // on the number of hogs and hog ages for an account. Note that this function
-  // assumes [cached_hogs_[account]] contains this information for [account], so
-  // before calling this function, [cached_hogs_[account]] must be updated.
-  void update_accounts(const x23::Vec<ContractAddress> &accounts);
+  x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  x23::Async<
-      std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>>
-  schedule(BlockHeight block_height, size_t block_size);
-
-  // Call this method when txs are successfully executed *as part of a block
-  // that this node proposed* and/or when txs failed to execute.
-  //
-  // All of the txs pass to this method must having the same invoking account!
-  //
-  // This method removes the remaining tx state from the scheduler, so we need
-  // to call this to prevent a memory leak.
-  //
-  // Note: I initially thought it made sense to have this method add the failed
-  // txs back to the runqueue. However, txs may have failed due to irrecoverable
-  // errors, such as sending too many hogs to another account. The caller must
-  // choose what to do next, whether that is reenqueing the txs in the
-  // scheduler, dropping the txs, or doing something else.
-  x23::Async<void>
-  mark_txs_finished(const x23::Vec<SignedTransactionHash> &tx_hashes);
+  void schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
+                x23::Vec<SignedTransaction> &txs);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -92,26 +58,22 @@ public:
   // re-execute the txs to verify the block.
   //
   // This method fills in [ret] with the [SignedTransaction]s to verify.
-  //
-  // Note that this method removes the txs from the runqueue, but it does not
-  // remove their state entirely from the scheduler. Specifically, information
-  // about the txs is still held in [hash_to_tx_]. The caller needs to
-  // ultimately call [mark_txs_finished()] to remove this state.
-  // TODO(jhumphri): We should pass a set instead of a vector, both here and in
-  // [mark_txs_finished()] and the other functions. Otherwise, a malicious
-  // nomination could crash a node by including the same hash twice and
-  // triggering a CHECK failure.
   bool
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> *ret);
+                                x23::Vec<SignedTransaction> &txs);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  x23::Async<bool> read_average_hog_age(const ContractAddressBatch &addresses,
-                                        bool force);
-  HogAge &get_cached_hog_age(const ContractAddress &address);
-  x23::Async<bool> write_average_hog_age(const ContractAddressBatch &addresses);
+  std::pair<HogAge *, std::unique_lock<std::mutex>>
+  get_cached_hog_age(const ContractAddress &address);
+
+  x23::Async<void>
+  read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
+  x23::Async<std::unordered_set<ContractAddress>>
+  read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
+  x23::Async<std::unordered_set<ContractAddress>>
+  read_average_hog_ages(const HogsTransferred &transfers);
 
   // Moves the hogs between groups as specified by the scheduling protocol.
   // Specifically:
@@ -126,62 +88,72 @@ public:
   //
   // Note that the average ages of these groups change when hogs are moved
   // between them.
-  x23::Async<void> cycle_groups(const ContractAddress &account);
+  static void cycle_groups(HogAge &current_averages);
 
-  x23::Async<void> filter_txs_for_account(
-      const ContractAddress &account,
-      const std::function<x23::Async<bool>(const SignedTransaction &tx)>
-          &filter);
+  void increment_current_block() { current_block_++; }
+  void decrement_current_block() { current_block_--; }
 
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
-  size_t size() const { return size_; }
-  size_t num_stranded() const;
-  // If you call [schedule()] and then call [num_on_runqueue()] *before* you
-  // call [mark_txs_finished()], this function will return a stale count.
-  size_t num_on_runqueue() const
-  {
-    size_t n_stranded = num_stranded();
-    CHECK_LE(n_stranded, size());
-    return size() - n_stranded;
-  }
+  size_t size() const { return size_.load(std::memory_order_relaxed); }
 
   // Debug.
-  void dump_runqueue() const;
+  void dump_runqueue();
 
-  // TODO(jhumphri): Add multi-thread support to the scheduler.
-
-  // TODO(jhumphri): Replace [transfer_finished_] with the coropoll semaphore
-  // that David aded on [dm/x23].
-  std::atomic<bool> transfer_finished_ = false;
+  x23::CoroSem transfer_finished_;
   x23::CoroLock global_lock_;
 
 private:
-  // We use this type to store information about a tx in the runqueue.
-  struct TxInfo {
-    // The average age of hogs in the account that submitted this tx. This age
-    // dictates the scheduling priority of the tx.
-    BlockHeight age;
-    // The account that submitted the tx.
-    ContractAddress account;
-    // The hash of the tx.
+  struct TxKey {
+    BlockHeight expiry_block_height;
     SignedTransactionHash tx_hash;
+
+    bool operator<(const TxKey &other) const noexcept
+    {
+      if (expiry_block_height != other.expiry_block_height) {
+        return expiry_block_height < other.expiry_block_height;
+      }
+      // std::array defines lexicographic comparison.
+      return tx_hash < other.tx_hash;
+    }
+  };
+
+  struct TxValue {
     // The tx itself.
     SignedTransaction tx;
   };
 
-  // Writes the contents of [cached_hogs_] back to the database.
-  //
-  // Note that the scheduler removes hogs from the [kHogAgeGroupToSchedule]
-  // group when a tx is added to the runqueue, *not* when the tx executes.
-  // However, we want the [kHogAgeGroupToSchedule] group we write to hogdb to
-  // contain these hogs. Thus, this method adds the deducted hogs back to the
-  // [kHogAgeGroupToSchedule] group for each account in [cached_hogs_], then
-  // writes [cached_hogs_] to hogdb, and then deducts the hogs again from
-  // [cached_hogs_]. So [cached_hogs_] is the same both before and after this
-  // method calls, and the [kHogAgeGroupToSchedule] group written to hogdb
-  // contains the correct number of hogs.
-  x23::Async<void> write_cache();
+  struct AccountKey {
+    BlockHeight average_hog_age;
+    ContractAddress account;
+
+    bool operator<(const AccountKey &other) const noexcept
+    {
+      if (average_hog_age != other.average_hog_age) {
+        return average_hog_age < other.average_hog_age;
+      }
+      // std::array defines lexicographic comparison.
+      return account < other.account;
+    }
+  };
+
+  AccountKey get_account_key(const ContractAddress &account);
+
+  bool account_is_ready(const ContractAddress &account,
+                        bool remove_expired_txs);
+
+  bool add_txs_helper(const SignedTransaction &tx);
+
+  // TODO(jhumphri): Give this a better name.
+  void cycle_accounts_during_schedule_helper(
+      const std::unordered_set<ContractAddress> &accounts,
+      const TxKey &lower_bound);
+
+  void process_transfers_helper(const Delta &delta, BlockHeight block_height);
+
+  static void move_hogs_to_already_scheduled_group(HogAge &hog_ages,
+                                                   uint128_t num_hogs,
+                                                   BlockHeight block_height);
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
@@ -189,96 +161,33 @@ private:
   // currently on the runqueue for [account] and the [kHogAgeGroupToSchedule]
   // group does not have enough hogs to schedule a tx with a gas limit of
   // [gas_limit].
-  x23::Async<void> cycle_if_needed(const ContractAddress &account,
-                                   GasAmount gas_limit);
+  void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
 
-  void remove_tx_from_runqueue(TxInfo *info,
-                               x23::Vec<SignedTransactionHash> &hashes,
-                               x23::Vec<SignedTransaction> &txs);
+  // Maps an account to the txs it has submitted.
+  // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
+  // (i.e., are we inserting new accounts into it rarely)? Would it be better to
+  // make it an [std::unordered_map<>] and protect it with a rw lock?
+  SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
+  std::set<AccountKey> ready_accounts_;
 
-  // Helper function for [schedule()]. Removes txs from the runqueue. Note that
-  // removing txs from the runqueue is a bit cumbersome because we maintain
-  // several data structures to make it easy to look up txs with various key
-  // types.
-  void get_txs_all(std::unordered_set<TxInfo *> &info,
-                   x23::Vec<SignedTransactionHash> &hashes,
-                   x23::Vec<SignedTransaction> &txs);
+  // Tx cache.
+  // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
+  // free them automatically without too much overhead/garbage collection with
+  // smart pointers (e.g., [std::shared_ptr<>]).
+  SynchronizedMap<SignedTransactionHash, TxValue> txs_;
+  // Account cache.
+  // TODO(jhumphri): Similarly, is this read heavy? Would it be better to make
+  // it an [std::unordered_map] and protect it with a rw lock?
+  SynchronizedMap<ContractAddress, HogAge> accounts_;
 
-  void get_txs_subset(std::unordered_set<TxInfo *> &info, size_t num,
-                      x23::Vec<SignedTransactionHash> &hashes,
-                      x23::Vec<SignedTransaction> &txs);
-
-  void return_tx_hogs(const SignedTransaction &tx, BlockHeight block_height);
-
-  // Discards all txs that have expired before [current_height]. In other words,
-  // if [current_height] is the height of the current block being scheduled,
-  // then all txs that expire at heights [current_height - 1] and smaller are
-  // discarded.
-  x23::Async<void> discard_expired_txs(BlockHeight current_height);
-  x23::Async<void>
-  discard_txs(const x23::Vec<SignedTransactionHash> &tx_hashes);
-
-  bool on_runqueue(TxInfo &info)
-  {
-    return account_to_tx_.contains(info.account) &&
-           account_to_tx_[info.account].contains(&info);
-  }
+  // The number of txs on the runqueue.
+  std::atomic<size_t> size_ = 0;
+  BlockHeight current_block_ = 0;
 
   // The RPC client that the scheduler uses to talk to the database. The
   // scheduler uses this to read/write the number of hogs and hog ages for
   // accounts.
   std::shared_ptr<db_sched_client_t> db_sched_client_;
-
-  // Caches the number of hogs and hog ages for an account so that the scheduler
-  // does not need to make as many RPC calls to the database.
-  std::unordered_map<ContractAddress, HogAge> cached_hogs_;
-
-  // Maps a tx hash to information about the tx.
-  std::unordered_map<SignedTransactionHash, TxInfo> hash_to_tx_;
-
-  // ---------------
-  // Runqueue data structures. We maintain several data structures to make it
-  // easy to order the runqueue and look up txs with several key types.
-  //
-  // These data structures *only* hold txs that are currently on the runqueue,
-  // i.e., eligible to be scheduled! Txs that are not eligible to be scheduled,
-  // such as due to an insuffucient hog balance on the submitting account, are
-  // stored in [stranded_] below.
-
-  // Maps an account to the txs it has submitted.
-  std::unordered_map<ContractAddress, std::unordered_set<TxInfo *>>
-      account_to_tx_;
-  // Maps an average hog age to a set of txs submitted by accounts with that
-  // average hog age. The scheduler uses this map to find the txs with the
-  // largest hog age as those txs are scheduled with the highest priority.
-  std::map<BlockHeight, std::unordered_set<TxInfo *>> age_to_tx_;
-
-  // ---------------
-  // Stranded txs.
-
-  // Holds all txs that cannot be scheduled, typically because an account does
-  // not have enough hogs. Maps an account to its stranded txs. This makes it
-  // easy to look up which stranded txs correspond to an account, since we will
-  // want to know this once the number of hogs owned by an account changes.
-  std::unordered_map<ContractAddress,
-                     std::map<GasAmount, std::unordered_set<TxInfo *>>>
-      stranded_;
-
-  // ---------------
-  // Other data structures for txs.
-
-  // Maps a block expiry height to a set of txs that expire at that height. So
-  // in other words, if a set of txs expire at block height 10, those txs can be
-  // included in block 10 and all blocks with smaller heights, but they cannot
-  // be included in blocks 11+.
-  //
-  // This data structure holds *all* txs. So in other words, it holds all txs on
-  // the runqueue and all txs in [stranded_]. When we advance past a block
-  // height, we want to discard all txs that expire at that block height,
-  // regardless of whether they are on the runqueue or stranded.
-  std::map<BlockHeight, std::unordered_set<TxInfo *>> expiry_to_tx_;
-
-  size_t size_ = 0;
 };
 
 } // namespace hogd
