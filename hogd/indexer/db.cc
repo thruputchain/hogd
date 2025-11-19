@@ -532,8 +532,8 @@ IndexDB::consume_events(BlockHeight block_height,
 
     auto future =
         pool.submit([db = db_ptr, tx_cf = tx_cf_handle_, block_height,
-                     events_chunk, chunk_sst_path, tx_sst_options,
-                     env_options, i]() -> IndexerStatus<void> {
+                     events_chunk, &chunk_sst_path, &tx_sst_options,
+                     &env_options, i]() -> IndexerStatus<void> {
             return create_tx_index_sst_chunk(db, tx_cf, block_height,
                                              events_chunk, chunk_sst_path,
                                              tx_sst_options, env_options, i);
@@ -565,8 +565,8 @@ IndexDB::consume_events(BlockHeight block_height,
     CHECK_PTR(db_ptr);
 
     auto future = pool.submit([db = db_ptr, contract_cf = contract_cf_handle_,
-                               block_height, events_chunk, chunk_sst_path,
-                               contract_sst_options, env_options,
+                               block_height, events_chunk, &chunk_sst_path,
+                               &contract_sst_options, &env_options,
                                i]() -> IndexerStatus<void> {
       try {
         return create_contract_index_sst_chunk(db, contract_cf, block_height,
