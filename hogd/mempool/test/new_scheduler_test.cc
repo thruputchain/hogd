@@ -78,14 +78,12 @@ TEST(NewScheduler, CycleGroupsMovesHogsBetweenBuckets)
 {
   HogAge hog_age{};
   hog_age.address = MempoolTestInfra::kAccountAddresses[0];
-  hog_age.num_hogs[kHogAgeGroupToSchedule] =
-      to_xdr(static_cast<uint128_t>(1));
+  hog_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(1));
   hog_age.average_ages[kHogAgeGroupToSchedule] = 10;
   hog_age.num_hogs[kHogAgeGroupAlreadyScheduled] =
       to_xdr(static_cast<uint128_t>(2));
   hog_age.average_ages[kHogAgeGroupAlreadyScheduled] = 5;
-  hog_age.num_hogs[kHogAgeGroupReceived] =
-      to_xdr(static_cast<uint128_t>(3));
+  hog_age.num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(3));
   hog_age.average_ages[kHogAgeGroupReceived] = 1;
 
   NewScheduler::cycle_groups(hog_age);
@@ -193,7 +191,7 @@ TEST(NewScheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
 }
 
-TEST(NewScheduler, CyclesAccountWhenGasInsufficient)
+TEST(NewScheduler, CycleAccountWhenGasInsufficient)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -220,10 +218,11 @@ TEST(NewScheduler, CyclesAccountWhenGasInsufficient)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
 
   ASSERT_EQ(scheduled.size(), 1UL);
-  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+  EXPECT_EQ(scheduled.front().tx, txs[0]);
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }
