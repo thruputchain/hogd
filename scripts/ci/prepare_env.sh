@@ -1,10 +1,8 @@
 
 echo "prepare the environment for building hogd"
 
-SCRIPT_DIR=$(dirname $(readlink -f "$0"))
-
 echo 'setting up cargo'
-source ${SCRIPT_DIR}/setup_cargo.sh
+source ./scripts/ci/setup_cargo.sh
 
 echo 'gcc version check'
 gcc --version
