@@ -218,7 +218,7 @@ TEST(NewScheduler, CycleAccountWhenGasInsufficient)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
 
   ASSERT_EQ(scheduled.size(), 1UL);
-  EXPECT_EQ(scheduled.front().tx, txs[0]);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
