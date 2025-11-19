@@ -204,6 +204,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       std::println(stderr, "Failed to consume events for block {}", block);
       return 1;
     }
+    db.log_stats();
   }
 
   auto insert_end = x23::fastclock::get_ns();

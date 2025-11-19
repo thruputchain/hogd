@@ -75,6 +75,9 @@ public:
   get_contract_events(BlockHeight start_height, BlockHeight end_height,
                       ContractAddress const &contract_address) const;
 
+  // Log RocksDB statistics (memory usage, database size, etc.)
+  void log_stats() const;
+
 private:
   IndexDB() = default;
   IndexDB(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *tx_cf,

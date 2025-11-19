@@ -600,7 +600,38 @@ IndexDB::consume_events(BlockHeight block_height,
   auto ingest_ts = x23::fastclock::get_ns();
   info("Ingest contract_index ({} files) time: {} ns", contract_sst_files.size(), ingest_ts - ingest_tx_end);
   info("Total ingest time: {} ns", ingest_ts - ingest_start);
+
+  log_stats();
+
   return {};
+}
+
+void
+IndexDB::log_stats() const
+{
+  if (!is_open()) {
+    return;
+  }
+
+  uint64_t value;
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &value)) {
+    info("RocksDB total SST files size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  }
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &value)) {
+    info("RocksDB live SST files size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  }
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &value)) {
+    info("RocksDB total memtable size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  }
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kCurSizeAllMemTables, &value)) {
+    info("RocksDB unflushed memtable size: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  }
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateTableReadersMem, &value)) {
+    info("RocksDB table readers memory: {} bytes ({:.2f} MB)", value, value / (1024.0 * 1024.0));
+  }
+  if (db_->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateNumKeys, &value)) {
+    info("RocksDB estimated number of keys: {}", value);
+  }
 }
 
 IndexerStatus<TxEventLog>
