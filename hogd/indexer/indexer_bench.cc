@@ -110,7 +110,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string db_path;
   size_t num_accounts = 10;
   size_t num_events_per_tx = 3; // Match event server bench default
-  size_t num_blocks = 10;
+  int num_blocks = 10;
   size_t txs_per_block = 100;
 
   // Parse command line arguments

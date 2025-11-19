@@ -577,7 +577,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // Wait for all SST files to be created
   std::vector<std::string> tx_sst_files;
   tx_sst_files.reserve(tx_futures.size());
-  for (auto& tx_future : tx_futures) {
+  for (auto &tx_future : tx_futures) {
     auto result = tx_future.get();
     if (!result.has_value()) {
       sst_error = result.error();
@@ -589,7 +589,7 @@ IndexDB::consume_events(BlockHeight block_height,
   // Wait for all contract index chunks
   std::vector<std::string> contract_sst_files;
   contract_sst_files.reserve(contract_futures.size());
-  for (auto & contract_future : contract_futures) {
+  for (auto &contract_future : contract_futures) {
     auto result = contract_future.get();
     if (!result.has_value()) {
       sst_error = result.error();
