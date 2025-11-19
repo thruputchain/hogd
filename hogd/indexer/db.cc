@@ -124,6 +124,7 @@ create_contract_index_sst_chunk(
     total_events += event_log.events.size();
   }
   entries.reserve(total_events);
+  const std::string empty_string;
 
   for (const auto &event_log : events_chunk) {
     uint32_t sequence_number = 0;
@@ -133,11 +134,7 @@ create_contract_index_sst_chunk(
                                           block_height,
                                           event_log.proposed_tx_hash,
                                           sequence_number);
-      auto event_serialized = x23::serialize(emitted_event);
-      std::string event_value(reinterpret_cast<const char *>(
-                                  event_serialized.data()),
-                              event_serialized.size());
-      entries.emplace_back(key_buffer, event_value);
+      entries.emplace_back(key_buffer, empty_string);
       sequence_number++;
     }
   }
@@ -574,17 +571,17 @@ IndexDB::consume_events(BlockHeight block_height,
     contract_futures.push_back(std::move(future));
   }
 
+  // wait for all SST files to be created
+  IndexerStatus<void> sst_error = {};
+
   // Wait for all SST files to be created
   std::vector<std::string> tx_sst_files;
   tx_sst_files.reserve(tx_futures.size());
-  for (size_t i = 0; i < tx_futures.size(); i++) {
-    auto result = tx_futures[i].get();
+  for (auto& tx_future : tx_futures) {
+    auto result = tx_future.get();
     if (!result.has_value()) {
-      // Clean up on error
-      for (const auto &file : tx_sst_files) {
-        std::filesystem::remove(file);
-      }
-      return result.error();
+      sst_error = result.error();
+      continue;
     }
     tx_sst_files.push_back(*result);
   }
@@ -592,19 +589,24 @@ IndexDB::consume_events(BlockHeight block_height,
   // Wait for all contract index chunks
   std::vector<std::string> contract_sst_files;
   contract_sst_files.reserve(contract_futures.size());
-  for (size_t i = 0; i < contract_futures.size(); i++) {
-    auto result = contract_futures[i].get();
+  for (auto & contract_future : contract_futures) {
+    auto result = contract_future.get();
     if (!result.has_value()) {
-      // Clean up on error
-      for (const auto &file : tx_sst_files) {
-        std::filesystem::remove(file);
-      }
-      for (const auto &file : contract_sst_files) {
-        std::filesystem::remove(file);
-      }
-      return result.error();
+      sst_error = result.error();
+      continue;
     }
     contract_sst_files.push_back(*result);
+  }
+
+  if (!sst_error.has_value()) {
+    // clean up intermediate files
+    for (const auto &file : tx_sst_files) {
+      std::filesystem::remove(file);
+    }
+    for (const auto &file : contract_sst_files) {
+      std::filesystem::remove(file);
+    }
+    return sst_error;
   }
 
   // Ingest the SST files into RocksDB
@@ -628,6 +630,7 @@ IndexDB::consume_events(BlockHeight block_height,
     }
     return IndexerError(IndexerErrorCode::kInternal);
   }
+
   // Verify files were moved (since move_files = true)
   for (const auto &file : tx_sst_files) {
     if (std::filesystem::exists(file)) {
@@ -825,16 +828,20 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
       continue;
     }
 
-    // Deserialize the event
-    std::string value_str(it->value().data(), it->value().size());
-    TxEmittedEvent emitted_event;
-    try {
-      x23::deserialize(&emitted_event,
-                       x23::BufView{reinterpret_cast<const uint8_t *>(
-                                        value_str.data()),
-                                    value_str.size()});
-    } catch (const x23::XdrBadInput &e) {
-      error("Failed to deserialize TxEmittedEvent: {}", e.what());
+    // Look up the transaction events from tx_index
+    auto tx_events_result = get_tx_events(block_height, tx_hash);
+    if (!tx_events_result.has_value()) {
+      error("Failed to look up transaction events for block_height={}, tx_hash",
+            block_height);
+      continue;
+    }
+
+    const TxEventLog &event_log = *tx_events_result;
+
+    // Extract the event at the sequence_number
+    if (sequence_number >= event_log.events.size()) {
+      error("Sequence number {} out of range for transaction ({} events)",
+            sequence_number, event_log.events.size());
       continue;
     }
 
@@ -842,7 +849,7 @@ IndexDB::get_contract_events(BlockHeight start_height, BlockHeight end_height,
     IdentifiedEvent identified_event;
     identified_event.proposed_tx_hash = tx_hash;
     identified_event.sequence_number = sequence_number;
-    identified_event.emitted_event = emitted_event;
+    identified_event.emitted_event = event_log.events[sequence_number];
 
     result.push_back(identified_event);
   }

@@ -13,6 +13,29 @@ class IndexerKeyFormat {
 public:
   IndexerKeyFormat() = delete;
 
+  // Scheme format for this index:
+  // Column family: tx_index
+  // This is the primary index, and is responsible for storing the list of events per each transaction.
+  // Key format:
+  //   block_height (8 bytes BE) + tx_hash (32 bytes) (total: 40 bytes)
+  // Value format:
+  //   serialized TxEventLog
+  // The first bytes of the key are the block height, so that appending new elts and pruning old data is efficient.
+  //
+  // This index is the primary event index.  Other indices do not store copies of the events, but rather just reference things
+  // that can be looked up in this index.
+
+  // Column family: contract_index
+  // This index is responsible for allowing searches of events by contract address.
+  // Key format:
+  //   contract_address (32 bytes) + block_height (8 bytes BE) + tx_hash (32 bytes) + sequence_number (4 bytes BE) (total: 76 bytes)
+  // Value format:
+  //   empty string (event data is looked up from tx_index using block_height and tx_hash)
+  //
+  // This index provides a way to find events by contract address. The actual event data
+  // is retrieved by looking up the transaction in tx_index using the block_height and
+  // tx_hash from the key, then extracting the event at the sequence_number.
+
   // Column family names for RocksDB
   static constexpr const char *kTxIndexColumnFamily = "tx_index";
   static constexpr const char *kContractIndexColumnFamily = "contract_index";
