@@ -2,12 +2,10 @@
 
 #pragma once
 
-#include "x23/utility.h"
 #include <algorithm>
 #include <atomic>
 #include <bit>
 #include <cstddef>
-#include <cstdint>
 #include <iterator>
 #include <ranges>
 #include <semaphore>
@@ -19,11 +17,13 @@
 #include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/iter.h>
-#include <x23/mvar.h>
-#include <x23/vec.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
+// An IndexAllocator is a thread-safe way to allocate unique, dense
+// size_t values starting at 0.  These can be used to index
+// per-thread, per-core, or per-LLC data structures.
 class IndexAllocator {
 public:
   using index_type = size_t;
@@ -130,12 +130,11 @@ private:
   static void *&next(void *ptr) noexcept { return *static_cast<void **>(ptr); }
 };
 
-// extern PerCpuSet<MVar<AllocCache>> memcaches;
-
 // A "non-movable vector", can contain up to about 30 GiB of items T
 // indexed by an integer.  Items are never moved, so pointers and
 // references to items remain valid until the NMVec is resized below
-// their index or destroyed.
+// their index or destroyed.  Unlike a deque, it is safe to access
+// items in one thread while resizing an NMVec in another thread.
 template<typename T> class NMVec {
   struct Location;
 
@@ -188,6 +187,8 @@ public:
   using const_iterator = gen_iterator_type<true>;
 
   NMVec() noexcept = default;
+
+  // Not thread-safe with respect to resizing.
   NMVec(NMVec &&other) noexcept
   {
     for (unsigned i = 0; i < kNumChunks; ++i)
@@ -199,7 +200,7 @@ public:
   }
   ~NMVec() { resize(0); }
 
-  // Not thread-safe
+  // Not thread-safe with respect to resizing.
   NMVec &operator=(NMVec &&other) noexcept
   {
     if (&other == this)
@@ -213,6 +214,7 @@ public:
                 std::memory_order_release);
   }
 
+  // Thread-safe even while resizing.
   T &operator[](size_t index) noexcept
   {
     x23assert(index < size());
@@ -304,7 +306,7 @@ private:
 
   struct Location : detail::PlusMinusMixin {
     // Leave room to store chunks [0,kNumChunks] where kNumChunks can
-    // be used for a sentinel value.
+    // be used in a sentinel value.
     static constexpr unsigned kChunkShift = 64 - std::bit_width(kNumChunks);
 
     // chunk << kChunkShift | item
@@ -383,10 +385,10 @@ private:
   {
     return (1UZ << chunkno) * kMinChunk;
   }
-  // The index of the first item in the chunk.  Since the chunks
-  // start at size kMinChunk and keep doubling, the size of chunk k
-  // is 2^k * kMinChunk, the sum of sizes of all previous chunks
-  // will be (2^k - 1) * kMinChunk.
+  // The index of the first item in a chunk.  Since the chunks start
+  // at size kMinChunk and keep doubling, the size of chunk k is 2^k *
+  // kMinChunk, the sum of sizes of all previous chunks will be (2^k -
+  // 1) * kMinChunk.
   static constexpr size_t chunk_start(unsigned chunkno) noexcept
   {
     return chunk_size(chunkno) - kMinChunk;
@@ -414,8 +416,8 @@ private:
   }
 
   // Returns the largest contiguous span [start, end) where end <=
-  // stop.  Advances start so that on the next call it returns the
-  // next span.  Returns an empty span when start >= stop.
+  // stop.  Advances start so that on the next call, it will returns
+  // the next span.  Returns an empty span when start >= stop.
   std::span<T> nextspan(Location &start, Location stop)
   {
     if (start >= stop)
@@ -474,6 +476,9 @@ private:
 
   T &get_location(Location l) const noexcept
   {
+    // The assumption is that you got the index you are looking up
+    // from somewhere, so you are synchronized and don't need acquire
+    // memory order here.
     return chunks_[l.chunk()].load(std::memory_order_relaxed)[l.item()];
   }
   T &get_index(size_t i) const noexcept
