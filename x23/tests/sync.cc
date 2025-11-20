@@ -282,3 +282,25 @@ TEST(CoroSem, ManyWaiters)
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
+
+TEST(CoroFutex, Basic)
+{
+  x23::CoroFutex<int> futex{0};
+
+  for (int i = 0; i < 50; ++i) {
+    futex.rmw([](auto &i) { ++i; });
+    [&futex](this auto self) -> Detached {
+      int n;
+      while ((n = futex.load()) < 50)
+        co_await futex.wait(n);
+      if (futex.rmw([](auto &i) { return ++i; }) == 100)
+        futex.broadcast();
+    }();
+  }
+  futex.broadcast(&pool);
+  [&futex] -> Async<void> {
+    int n;
+    while ((n = futex.load()) < 100)
+      co_await futex.wait(n);
+  }()();
+}
