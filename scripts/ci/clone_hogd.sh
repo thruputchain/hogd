@@ -1,10 +1,7 @@
 echo 'cloning hogd'
 
-git clone \
-  --separate-git-dir=.git \
-  --depth=1 --recursive \
-  --branch {{ .git_branch }} \
-  git@github.com:groundhogchain/hogd.git tmp
-rm -rf tmp
-git checkout -q {{ .git_branch }}
-git reset --hard
+git init -q .
+git remote add origin git@github.com:$GIT_REPO.git
+git fetch --depth 1 origin $GIT_COMMIT
+git checkout $GIT_COMMIT
+git submodule update --init --recursive

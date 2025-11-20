@@ -14,17 +14,6 @@ git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-# source ./scripts/ci/clone_hogd.sh
-# git clone \
-#     --separate-git-dir=.git \
-#     --depth=1 --recursive \
-#     --branch {{ .git_branch }} \
-#     git@github.com:groundhogchain/hogd.git tmp
-# rm -rf tmp
-# git checkout -q {{ .git_branch }}
-# git reset --hard
-# git submodule update --init --recursive
-
 source ./scripts/ci/prepare_env.sh
 
 ./scripts/check.sh -p -b
@@ -35,11 +24,12 @@ after = """
 if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
 
     echo 'saving core dumps and associated binaries'
-    ./scripts/save_core_dumps.sh ../core_dumps
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
 
 fi
 
 """
 
 [jobs.env]
+GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
