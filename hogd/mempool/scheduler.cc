@@ -643,8 +643,6 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
-
-  increment_current_block();
 }
 
 bool

@@ -13,7 +13,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/loadgen.h"
@@ -65,40 +64,12 @@ private:
   std::unique_ptr<LoadgenClient> client_;
 };
 
-constexpr AuthClaim
-make_self_sign_claim(uint32_t key_id)
-{
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-  claim.invoked_address_signature_id() = key_id;
-  return claim;
-}
-
 SignedTransactionBatch
 generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
                     size_t num_txs)
 {
-  SignedTransactionBatch unsigned_txs =
-      generate_unsigned_txs(fib_client, num_txs);
-  AccountAuthData auth_data = get_default_account();
-  auth_data.nonce_config.required_weight = 1;
-  set_nonce_key(auth_data, /*idx=*/0);
-  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
-                 /*required_weight=*/1);
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-
-  SignedTransactionBatch txs;
-  for (SignedTransaction &unsigned_tx : unsigned_txs) {
-    unsigned_tx.tx.auth_claims.push_back(make_self_sign_claim(0));
-    txs.push_back(
-        hogd::Authentication::sign_claims(unsigned_tx.tx, {{0, private_key}},
-                                          /*auxiliary_private_keys=*/{}));
-  }
-  return txs;
+  // TODO(jhumphri): Sign the txs once we handle authentication.
+  return generate_unsigned_txs(fib_client, num_txs);
 }
 
 void

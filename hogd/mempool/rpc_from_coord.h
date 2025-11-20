@@ -16,7 +16,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -59,7 +58,6 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
-  Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client()
   {
@@ -101,10 +99,35 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block(BlockID block_id)
   {
-    // TODO(jhumphri): Implement.
-    co_return;
+    if (nominated_block_cache_.block_id != block_id &&
+        !validated_block_cache_.contains(block_id)) {
+      co_return SchedulerCommitOutcome::SchedulerValidationBlockNotFound;
+    }
+
+    x23::Vec<x23::Async<void>> handles;
+    handles.reserve(validated_block_cache_.size());
+    if (nominated_block_cache_.block_id == block_id) {
+      handles.push_back(commit_block(nominated_block_cache_));
+    }
+    else {
+      handles.push_back(commit_block(validated_block_cache_[block_id]));
+      handles.push_back(abandon_block(nominated_block_cache_));
+    }
+    for (const auto &[_, cache] : validated_block_cache_) {
+      if (cache.block_id != block_id) {
+        handles.push_back(abandon_block(cache));
+      }
+    }
+
+    // TODO(jhumphri): Abandon the remaining blocks, including returning any of
+    // their txs to the scheduler.
+    for (x23::Async<void> &handle : handles) {
+      co_await handle;
+    }
+    co_return SchedulerCommitOutcome::SchedulerValidationOK;
   }
 
   // These are just stubs that pass through the calls from the coordinator to
@@ -144,7 +167,7 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  struct NominationData {
+  struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
     x23::Vec<SignedTransaction> txs;
@@ -157,11 +180,6 @@ private:
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
     x23::Vec<SignedTransaction> failed_txs;
-  };
-
-  const std::function<x23::Async<bool>(const SignedTransaction &tx)>
-      auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
-    co_return co_await authentication_->authenticate(tx);
   };
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
@@ -193,9 +211,7 @@ private:
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
-    // [current_block_id_] with it.
-    authentication_ =
-        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    // [current_block_id_] with it in the scheduler.
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     db_rpc_->register_scheduler(scheduler_);
 
@@ -232,11 +248,13 @@ private:
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
 
-  x23::Async<bool> initialize_block(const NominationData &cache);
-  x23::Async<void> schedule(NominationData &cache);
-  static void process_tx_outcomes(NominationData &cache);
+  x23::Async<bool> initialize_block(const PendingBlock &cache);
+  x23::Async<void> schedule(PendingBlock &cache);
+  static void process_tx_outcomes(PendingBlock &cache);
   x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
-  x23::Async<void> finish_nominating_block(NominationData &cache);
+  x23::Detached finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> abandon_block(const PendingBlock &cache);
+  x23::Async<void> commit_block(const PendingBlock &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
@@ -244,8 +262,6 @@ private:
 
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
-
-  x23::Async<void> mark_block_committed(BlockID block_id);
 
   MempoolDbRpc *db_rpc_;
 
@@ -255,9 +271,10 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_ = 0;
   std::shared_ptr<Scheduler> scheduler_;
-  std::unique_ptr<Authentication> authentication_;
+
+  PendingBlock nominated_block_cache_ = {};
+  std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
   std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;

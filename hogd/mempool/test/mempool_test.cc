@@ -6,7 +6,6 @@
 #include "discovery.hh"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
@@ -23,6 +22,8 @@ constexpr size_t kNumTxs = 100;
 
 } // namespace
 
+// TODO(jhumphri): Update this test once we implement authentication and
+// vetting.
 TEST(Mempool, SubmitUnvetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -35,8 +36,6 @@ TEST(Mempool, SubmitUnvetted)
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
                  /*required_weight=*/1);
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   // TODO(jhumphri): Add this to each of the tests and more extensively verify
   // the output of nominations, etc.
   server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
@@ -49,10 +48,7 @@ TEST(Mempool, SubmitUnvetted)
   };
   tx.auth_claims.push_back(make_sign_claim(0));
 
-  const SignedTransaction stx =
-      hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                        /*auxiliary_private_keys=*/{});
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted({stx})();
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted({txs[0]})();
 }
 
 TEST(Mempool, SubmitVetted)
