@@ -3,6 +3,9 @@ echo "prepare the environment for building hogd" >&2
 echo 'setting up cargo' >&2
 source ./scripts/ci/setup_cargo.sh
 
+echo 'installing cbindgen'
+cargo install --force cbindgen
+
 echo 'gcc version check' >&2
 gcc --version
 
