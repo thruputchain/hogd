@@ -178,13 +178,17 @@ public:
   x23::Async<OptSignedTransactionBatch>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    x23::Vec<OptSignedTransaction> ret;
+    x23::Vec<x23::BorrowedPtr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
       ret.push_back(tx);
     }
-    co_return ret;
+    // [OptSignedTransactionBatch] is an
+    // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
+    // which are not the same as [Ptrs], but they serialize the same way. So we
+    // return a span of [BorrowedPtr]s.
+    co_return x23::span<x23::BorrowedPtr<SignedTransaction>>(ret);
   }
 
   static SHA256Hash
