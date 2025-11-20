@@ -62,6 +62,12 @@ public:
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
                                 x23::Vec<SignedTransaction> &txs);
 
+  bool reenqueue_txs(const auto &begin, const auto &end) { return false; }
+  bool remove_from_runqueue(x23::span<const SignedTransactionHash> hashes)
+  {
+    return false;
+  }
+
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 

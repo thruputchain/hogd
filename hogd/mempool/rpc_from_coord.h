@@ -109,6 +109,7 @@ public:
 
     x23::Vec<x23::Async<void>> handles;
     handles.reserve(validated_block_cache_.size());
+
     if (nominated_block_cache_.block_id == block_id) {
       handles.push_back(commit_block(nominated_block_cache_));
     }
@@ -122,8 +123,38 @@ public:
       }
     }
 
-    // TODO(jhumphri): Abandon the remaining blocks, including returning any of
-    // their txs to the scheduler.
+    // TODO(jhumphri): I need to do two things:
+    // 1. If the nominated block is not the committed block, I need to return
+    // the nominated block's txs to the scheduler.
+    //
+    // 2. Next, I need to remove the committed block's txs from the scheduler.
+    // Note that some of these txs may overlap with the txs in the nominated
+    // block, so I can optimize this by only returning to the scheduler the
+    // txs in the nominated block that are not in the committed block. Then I
+    // can remove all of the committed block's txs from the scheduler.
+
+    static std::unordered_set<SignedTransactionHash> return_to_runqueue;
+    return_to_runqueue.clear();
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id != block_id) {
+      return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
+                                nominated_block_cache_.tx_hashes.end());
+    }
+    const x23::Vec<SignedTransactionHash> *remove_from_scheduler = nullptr;
+    for (const auto &[_, cache] : validated_block_cache_) {
+      if (cache.block_id == block_id) {
+        remove_from_scheduler = &cache.tx_hashes;
+      }
+    }
+    CHECK_CONST_PTR(remove_from_scheduler);
+    for (const SignedTransactionHash &hash : *remove_from_scheduler) {
+      return_to_runqueue.erase(hash);
+    }
+    scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
+                              return_to_runqueue.cend());
+    CHECK(scheduler_->remove_from_runqueue(
+        x23::span<const SignedTransactionHash>(*remove_from_scheduler)));
+
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
