@@ -1,6 +1,7 @@
 #include "hogd/auth/auth_server.h"
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 
@@ -48,6 +49,33 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   auth_data_cache_.put(address, entry);
 
   co_return entry;
+}
+
+void
+AuthServer::register_auth_data_updates(BlockHeight height,
+                                       KeyChangeBatch const &key_changes)
+{
+  std::unique_lock lock(key_changes_mutex_);
+  key_changes_cv_.wait(lock, [this, height] {
+    return height == current_height_.load() + 1;
+  });
+  CHECK(height == current_height_.load() + 1);
+
+  for (const auto &key_change : key_changes) {
+    if (key_change.auth_data == nullptr) {
+      auto entry = std::make_shared<
+          std::pair<BlockHeight, std::optional<AccountAuthData>>>(height,
+                                                                  std::nullopt);
+      auth_data_cache_.put(key_change.address, entry);
+      continue;
+    }
+    auto entry = std::make_shared<
+        std::pair<BlockHeight, std::optional<AccountAuthData>>>(
+        height, *key_change.auth_data);
+    auth_data_cache_.put(key_change.address, entry);
+  }
+  current_height_.store(height);
+  key_changes_cv_.notify_all();
 }
 
 } // namespace hogd
