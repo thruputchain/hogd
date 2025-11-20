@@ -737,12 +737,15 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   x23::Vec<ProposedTransaction> txs;
   x23::Vec<SignedTransaction> signed_txs;
   {
-    if (!scheduler_->find_and_remove_from_runqueue(
-            nomination.transaction_hashes, signed_txs)) {
-      co_await finish_all_executors(cache.block_id);
-      co_await abandon_block(cache);
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+    for (const SignedTransactionHash &tx_hash : nomination.transaction_hashes) {
+      SignedTransaction *tx = scheduler_->find_tx(tx_hash);
+      if (!tx) {
+        co_await finish_all_executors(cache.block_id);
+        co_await abandon_block(cache);
+        co_return SchedulerValidationResult(
+            SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+      }
+      signed_txs.push_back(*tx);
     }
     CHECK_EQ(signed_txs.size(), nomination.transaction_nominations.size());
     for (size_t i = 0; i < signed_txs.size(); i++) {

@@ -653,61 +653,6 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
   }
 }
 
-bool
-Scheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> &hashes,
-    x23::Vec<SignedTransaction> &txs)
-{
-  CHECK(txs.empty());
-
-  std::vector<TxKey> keys;
-  std::vector<TxValue *> values;
-  keys.reserve(hashes.size());
-  values.reserve(values.size());
-  txs.reserve(hashes.size());
-
-  std::unordered_set<ContractAddress> accounts;
-  for (const SignedTransactionHash &tx_hash : hashes) {
-    auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-    if (!tx_value_ptr) {
-      // We could not find all of the txs, so we put the txs we did find back
-      // and return false.
-      CHECK_EQ(keys.size(), values.size());
-      CHECK_EQ(keys.size(), txs.size());
-      CHECK_LT(keys.size(), hashes.size());
-      for (size_t i = 0; i < keys.size(); i++) {
-        auto [per_account_txs, lock] =
-            account_to_tx_[txs[i].tx.invocation.invoked_address];
-        CHECK(per_account_txs.insert({keys[i], values[i]}).second);
-      }
-      size_ += keys.size();
-      txs.clear();
-      return false;
-    }
-
-    const SignedTransaction &tx = tx_value_ptr->tx;
-    const ContractAddress &account = tx.tx.invocation.invoked_address;
-    const TxKey key = {.expiry_block_height =
-                           tx.tx.uniquifier.block_expiry_height,
-                       .tx_hash = tx_hash};
-    keys.push_back(key);
-    values.push_back(tx_value_ptr);
-    txs.push_back(tx);
-    {
-      auto [txs, lock] = account_to_tx_[account];
-      CHECK_EQ(txs.erase(key), 1UL);
-    }
-    size_.fetch_sub(1, std::memory_order_relaxed);
-    accounts.insert(account);
-  }
-  for (const ContractAddress &account : accounts) {
-    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
-    }
-  }
-  return true;
-}
-
 void
 Scheduler::remove_from_runqueue(
     x23::span<const SignedTransactionHash> tx_hashes)

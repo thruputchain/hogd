@@ -175,10 +175,20 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
-  static x23::Async<OptSignedTransactionBatch>
-  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  x23::Async<OptSignedTransactionBatch>
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    panic("unimplemented");
+    x23::Vec<OptSignedTransaction> ret;
+    ret.reserve(tx_hashes.size());
+    for (const SignedTransactionHash &tx_hash : tx_hashes) {
+      // TODO(jhumphri): Use [x23::BorrowedPtr<>] once dmazieres@ implements it.
+      SignedTransaction *tx = scheduler_->find_tx(tx_hash);
+      if (tx) {
+        tx = new SignedTransaction(*tx);
+      }
+      ret.push_back(x23::Ptr<SignedTransaction>(tx));
+    }
+    co_return ret;
   }
 
   static SHA256Hash

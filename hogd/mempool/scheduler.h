@@ -56,11 +56,11 @@ public:
   // committed to a block already, so we do not want to schedule the txs. But
   // the validator still needs to get the tx state because it needs to
   // re-execute the txs to verify the block.
-  //
-  // This method fills in [ret] with the [SignedTransaction]s to verify.
-  bool
-  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> &txs);
+  SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
+  {
+    auto [tx_value_ptr, _] = txs_.find(tx_hash);
+    return &tx_value_ptr->tx;
+  }
 
   void reenqueue_txs(const auto &begin, const auto &end)
   {
