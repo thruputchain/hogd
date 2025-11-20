@@ -17,6 +17,7 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "port.hh"
 #include "sched_db.hh"
 
@@ -140,17 +141,25 @@ hogdb_init(std::string_view path, size_t ram_bytes,
   CHECK_EQ(mempool_server.start_server(kDbMempoolServerPort),
            uint16_t{kDbMempoolServerPort});
 
+  // start the auth server.
+  info("starting auth server.");
+  HogDBAuthServer auth_server(ctx);
+  CHECK_EQ(auth_server.start_server(kDbAuthServerPort),
+           uint16_t{kDbAuthServerPort});
+
   if (coordinator_addr) {
     auto const &client = ctx.get_sched_db_client();
     assert(client);
 
     const std::string exec_address = create_address(kDbExecutorServerPort);
     const std::string sched_address = create_address(kDbMempoolServerPort);
+    const std::string auth_address = create_address(kDbAuthServerPort);
     ShardCard card{.protocol = version::kHogdProtocol,
                    .upid = {},
                    .block_height = 0,
                    .address_for_exec = exec_address.c_str(),
-                   .address_for_sched = sched_address.c_str()};
+                   .address_for_sched = sched_address.c_str(),
+                   .address_for_auth = auth_address.c_str()};
 
     client->scheddb_intro_shard(card)();
   }

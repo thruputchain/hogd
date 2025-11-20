@@ -49,7 +49,7 @@ public:
 
   std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
   {
-    test_sched_db_server_->impl()->wait_for_height(height);
+    test_sched_db_server_->impl()->wait_for_hog_transferred_height(height);
     return test_sched_db_server_->impl()->get_hogs_transferred(height);
   }
 

@@ -1,26 +1,21 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
+#include <memory>
 #include <utility>
 
-#include "discovery.hh"
+#include "db_sched.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/new_scheduler.h"
 #include "hogd/mempool/registration.h"
+#include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/shared.h"
-#include "nomination.hh"
-#include "rpc_types.hh"
-#include "sched_coord.hh"
-#include "sched_exec.hh"
-#include "transaction.hh"
+#include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/rpc.h"
+#include "x23/format.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -59,6 +54,14 @@ public:
     co_return;
   }
 
+  x23::Async<void> scheddb_changed_accounts(BlockHeight height,
+                                            ContractAddressBatch addresses)
+  {
+    CHECK_PTR(scheduler_.get());
+    // TODO(geoff): implement invalidation of cached auth checks
+    co_return;
+  }
+
   x23::Detached handle_transfer(HogsTransferred transfers)
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
@@ -71,7 +74,7 @@ public:
     scheduler_->transfer_finished_.release();
   }
 
-  void register_scheduler(std::shared_ptr<NewScheduler> scheduler)
+  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
     CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
@@ -104,7 +107,7 @@ public:
 
 private:
   std::atomic<bool> shutdown_flag_ = false;
-  std::shared_ptr<NewScheduler> scheduler_;
+  std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
 

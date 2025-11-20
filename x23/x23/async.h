@@ -479,15 +479,16 @@ struct SuspendedCoroPromise : PromiseBase {
 };
 } // namespace detail
 
-// A function returning an SCH (suspended coroutine handle) is an
+// A function returning Suspended (suspended coroutine handle) is an
 // initially suspended coroutine that just returns its own handle.
 // This is a light-weight means of turning a lambda into a
 // coroutine_handle for a suspended coroutine.
-using SCH = std::coroutine_handle<detail::SuspendedCoroPromise>;
+using Suspended = std::coroutine_handle<detail::SuspendedCoroPromise>;
 
 } // namespace x23
 
-template<typename... Args> struct std::coroutine_traits<x23::SCH, Args...> {
+template<typename... Args>
+struct std::coroutine_traits<x23::Suspended, Args...> {
   using promise_type = x23::detail::SuspendedCoroPromise;
 };
 
@@ -566,7 +567,7 @@ template<typename R> struct [[nodiscard]] Async {
     promise_type &p = callee_.promise();
     if (!p.await_ready()) {
       std::binary_semaphore wait(0);
-      if (p.await_suspend([&wait] -> SCH {
+      if (p.await_suspend([&wait](this auto self) -> Suspended {
             wait.release();
             co_return;
           }()))

@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "exec_sched.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -13,6 +12,7 @@
 #include "hogd/mempool/scheduler.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/txs.h"
+#include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -35,48 +35,13 @@ TEST(Scheduler, ReadAge)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/true)());
-  HogAge &ret =
+  scheduler->read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
+  const auto [ret, lock] =
       scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
+  EXPECT_EQ(ret->num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
-  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
-}
-
-TEST(Scheduler, WriteAge)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/true)());
-  HogAge &ret =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
-            // TODO(jhumphri): Update this, too.
-            to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
-  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
-
-  // Now write a new hog balance.
-  ret.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(5));
-  EXPECT_TRUE(scheduler->write_average_hog_age(
-      {MempoolTestInfra::kAccountAddresses[0]})());
-
-  // Check that we read the new balance back.
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/true)());
-  ret = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(ret.num_hogs[kHogAgeGroupToSchedule],
-            to_xdr(static_cast<uint128_t>(5)));
-  EXPECT_EQ(ret.average_ages[kHogAgeGroupToSchedule], 1);
+  EXPECT_EQ(ret->average_ages[kHogAgeGroupToSchedule], 0);
 }
 
 TEST(Scheduler, AddVettedTx)
@@ -87,7 +52,9 @@ TEST(Scheduler, AddVettedTx)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
+  EXPECT_EQ(scheduler->size(), 0UL);
   scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
@@ -98,9 +65,37 @@ TEST(Scheduler, AddVettedTxDuplicate)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
+  EXPECT_EQ(scheduler->size(), 0UL);
   scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
   scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+}
+
+TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
+{
+  HogAge hog_age{};
+  hog_age.address = MempoolTestInfra::kAccountAddresses[0];
+  hog_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(1));
+  hog_age.average_ages[kHogAgeGroupToSchedule] = 10;
+  hog_age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+      to_xdr(static_cast<uint128_t>(2));
+  hog_age.average_ages[kHogAgeGroupAlreadyScheduled] = 5;
+  hog_age.num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(3));
+  hog_age.average_ages[kHogAgeGroupReceived] = 1;
+
+  Scheduler::cycle_groups(hog_age);
+
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]),
+            static_cast<uint128_t>(3));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupToSchedule], 7);
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(3));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupReceived], 0);
 }
 
 TEST(Scheduler, Single)
@@ -112,419 +107,161 @@ TEST(Scheduler, Single)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0]})();
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
+  // Check that the correct number of hogs was deducted.
+  auto [age, lock] =
+      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
+  lock.unlock();
+
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+            5'000'000'000 * 10);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
+
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
 
-  scheduler->mark_txs_finished(/*tx_hashes=*/{sha256(txs[0])})();
-  // Check that the correct number of hogs was deducted.
-  const HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+  // Check the correct number of hogs was deducted from the
+  // [kHogAgeGroupToSchedule] group.
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
 
   // Check that the correct number of hogs was added to the
   // [kHogAgeGroupAlreadyScheduled] group.
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
-  // Due to rounding, the age of the [kHogAgeGroupAlreadyScheduled] will be
-  // either equal to that of the [kHogAgeGroupToSchedule] or one less.
-  EXPECT_LE(age.average_ages[kHogAgeGroupAlreadyScheduled],
-            age.average_ages[kHogAgeGroupToSchedule]);
-  EXPECT_GE(age.average_ages[kHogAgeGroupAlreadyScheduled],
-            age.average_ages[kHogAgeGroupToSchedule] - 1);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
+            age->average_ages[kHogAgeGroupToSchedule]);
 }
 
-TEST(Scheduler, TxCycled)
+TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
 {
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
 
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000);
+  HogsTransferred transfer;
+  transfer.block = kBlock;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
+TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  constexpr auto kGas = static_cast<uint128_t>(5'000'000'000);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kGas * 4);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kGas * 3);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kGas * 2);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = 10;
+  const auto signed_gas = static_cast<int128_t>(kGas);
+  const int128_t delta_value = -8 * signed_gas;
+  transfer.deltas.push_back(
+      Delta{.address = account, .hog_delta = to_xdr(delta_value)});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
+}
+
+TEST(Scheduler, CycleAccountWhenGasInsufficient)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
+                  /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
+}
+
+TEST(Scheduler, FindAndRemoveFromRunqueue)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
   {
-    scheduler->add_txs({txs[0], txs[1]})();
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 2);
-  }
-
-  // Check that the correct number of hogs was deducted.
-  HogAge age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            5'000'000'000);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 1);
-
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-
-  scheduler->mark_txs_finished(
-      /*tx_hashes=*/{sha256(txs[0]), sha256(txs[1])})();
-}
-
-TEST(Scheduler, Empty)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
-  EXPECT_TRUE(scheduled.empty());
-}
-
-TEST(Scheduler, MultipleOneBlock)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, kBlockSize);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * kBlockSize);
-  scheduler->add_txs(txs)();
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
-  ASSERT_EQ(scheduled.size(), kBlockSize);
-  for (const SignedTransaction &signed_tx : scheduled) {
-    EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[0]));
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    ASSERT_EQ(removed.size(), 1UL);
+    EXPECT_EQ(removed.front().tx.invocation.invoked_address,
               MempoolTestInfra::kAccountAddresses[0]);
-  }
-}
-
-TEST(Scheduler, MultipleMultipleBlocks)
-{
-  constexpr size_t kNumBlocks = 10;
-
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, kBlockSize * kNumBlocks);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 * kBlockSize * kNumBlocks);
-  scheduler->add_txs(txs)();
-  for (size_t i = 0; i < kNumBlocks; i++) {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), kBlockSize);
-    for (const SignedTransaction &signed_tx : scheduled) {
-      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
-                MempoolTestInfra::kAccountAddresses[0]);
-    }
+    EXPECT_EQ(scheduler->size(), 1UL);
   }
 
   {
-    // Now check that no transactions remain.
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-}
-
-TEST(Scheduler, MultipleMultipleBlocksNonMultiple)
-{
-  constexpr size_t kNumBlocks = 10;
-  constexpr size_t kRemainder = 5;
-
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, (kBlockSize * kNumBlocks) + kRemainder);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 *
-                      (kBlockSize * kNumBlocks + kRemainder));
-  scheduler->add_txs(txs)();
-  for (size_t i = 0; i < kNumBlocks; i++) {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), kBlockSize);
-    for (const SignedTransaction &signed_tx : scheduled) {
-      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
-                MempoolTestInfra::kAccountAddresses[0]);
-    }
+    SignedTransactionHash fake_hash{};
+    fake_hash.fill(0xAA);
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[1]));
+    hashes.push_back(fake_hash);
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_FALSE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    EXPECT_TRUE(removed.empty());
+    EXPECT_EQ(scheduler->size(), 1UL);
   }
 
   {
-    // Now check the remainder.
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), kRemainder);
-    for (const SignedTransaction &signed_tx : scheduled) {
-      EXPECT_EQ(signed_tx.tx.invocation.invoked_address,
-                MempoolTestInfra::kAccountAddresses[0]);
-    }
-  }
-
-  {
-    // Now check that no transactions remain.
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/2, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-}
-
-TEST(Scheduler, NotEnoughHogs)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/false)());
-  HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  age.average_ages[kHogAgeGroupToSchedule] = 1;
-  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-
-  scheduler->add_txs({txs[0]})();
-  // Calling [scheduler->update_accounts()] is unnecessary here, but we do it
-  // anyway to test that it is a no-op.
-  scheduler->update_accounts({MempoolTestInfra::kAccountAddresses[0]});
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
-  EXPECT_TRUE(scheduled.empty());
-}
-
-TEST(Scheduler, TwoAccounts)
-{
-  fib_client_t fib_client_a(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs_a =
-      generate_unsigned_txs(fib_client_a, kNumTxs);
-
-  fib_client_t fib_client_b(MempoolTestInfra::kAccountAddresses[1]);
-  const SignedTransactionBatch txs_b =
-      generate_unsigned_txs(fib_client_b, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  scheduler->add_txs({txs_a[0], txs_b[0]})();
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
-  ASSERT_EQ(scheduled.size(), 2);
-  EXPECT_TRUE(txs_a[0] == scheduled[0] || txs_a[0] == scheduled[1]);
-  EXPECT_TRUE(txs_b[0] == scheduled[0] || txs_b[0] == scheduled[1]);
-}
-
-TEST(Scheduler, MultipleAccounts)
-{
-  std::vector<fib_client_t> fib_clients;
-  std::vector<SignedTransactionBatch> txs;
-  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
-    fib_clients.emplace_back(address);
-    txs.push_back(generate_unsigned_txs(fib_clients.back(), kNumTxs));
-  }
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  for (const SignedTransactionBatch &tx : txs) {
-    scheduler->add_txs({tx[0]})();
-  }
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/0, kBlockSize)();
-  ASSERT_EQ(scheduled.size(), MempoolTestInfra::kAccountAddresses.size());
-}
-
-TEST(Scheduler, UpdateGroupsBasic)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1, /*num_hogs=*/0);
-  scheduler->add_txs({txs[0]})();
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-
-  // Add enough hogs to the [kHogAgeGroupAlreadyScheduled] group.
-  HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  age.num_hogs[kHogAgeGroupAlreadyScheduled] =
-      to_xdr(static_cast<uint128_t>(5'000'000'000 * 5));
-  age.average_ages[kHogAgeGroupAlreadyScheduled] = 10;
-  scheduler->cycle_groups(MempoolTestInfra::kAccountAddresses[0])();
-
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/10, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[0]);
-    EXPECT_EQ(age.num_hogs[kHogAgeGroupToSchedule],
-              to_xdr(static_cast<uint128_t>(5'000'000'000 * 4)));
-    EXPECT_EQ(age.num_hogs[kHogAgeGroupAlreadyScheduled],
-              to_xdr(static_cast<uint128_t>(5'000'000'000)));
-    EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 10);
-  }
-}
-
-TEST(Scheduler, ProcessReceivedHogs)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/10)();
-  HogAge age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 10);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000 * 1);
-
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000 * 4),
-      /*current_block=*/20)();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 18);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000 * 5);
-}
-
-TEST(Scheduler, ProcessReceivedHogsAndUpdateGroups)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/10,
-                  /*num_hogs=*/5'000'000'000);
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupAlreadyScheduled, /*age=*/25,
-                  /*num_hogs=*/5'000'000'000 * 2);
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/60)();
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/120)();
-  HogAge age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 90);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000 * 2);
-
-  scheduler->cycle_groups(MempoolTestInfra::kAccountAddresses[0])();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 20);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 3);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 90);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            5'000'000'000 * 2);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-
-  scheduler->cycle_groups(MempoolTestInfra::kAccountAddresses[0])();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 48);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 5);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-
-  // Calling [scheduler->cycle_groups()] again should not do anything as there
-  // are no hogs to move between groups (hogs in the [kHogAgeGroupToSchedule]
-  // group cannot be moved to another group, and the other groups have no hogs).
-  scheduler->cycle_groups(MempoolTestInfra::kAccountAddresses[0])();
-  age = scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 48);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 5);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-}
-
-TEST(Scheduler, ProcessReceivedHogsSchedule)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/false)());
-  HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  age.average_ages[kHogAgeGroupToSchedule] = 1;
-  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/1, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-  }
-
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/2)();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 2);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
-  {
-    const auto &[scheduled_hashes, scheduled] =
-        scheduler->schedule(/*block_height=*/3, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0], txs[0]);
-    // If we ever change this test to schedule more than 1 tx at once, then
-    // remember that [mark_txs_finished()] below should only be called with the
-    // txs for a single account.
-    scheduler->mark_txs_finished(/*tx_hashes=*/scheduled_hashes)();
-
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-              5'000'000'000);
-    EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 3);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
+    x23::Vec<SignedTransactionHash> hashes;
+    hashes.push_back(sha256(txs[1]));
+    x23::Vec<SignedTransaction> removed;
+    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
+    ASSERT_EQ(removed.size(), 1UL);
+    EXPECT_EQ(scheduler->size(), 0UL);
   }
 }
 
@@ -568,17 +305,11 @@ TEST(Scheduler, Fairness)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] =
-        scheduler->schedule(/*block_height=*/i, kBlockSize)();
-    std::unordered_map<ContractAddress, x23::Vec<SignedTransactionHash>> sorted;
-    for (size_t i = 0; i < scheduled.size(); i++) {
-      const SignedTransaction &tx = scheduled[i];
-      const SignedTransactionHash &h = scheduled_hashes[i];
+    x23::Vec<SignedTransactionHash> scheduled_hashes;
+    x23::Vec<SignedTransaction> scheduled;
+    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+    for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
-      sorted[tx.tx.invocation.invoked_address].push_back(h);
-    }
-    for (const auto &[account, tx_hashes] : sorted) {
-      scheduler->mark_txs_finished(tx_hashes)();
     }
   }
 
@@ -593,7 +324,11 @@ TEST(Scheduler, Fairness)
     //
     // We divide by 10 at the end rather than do (i + 1) / 10 * [kBlockSize] *
     // [kNumRounds] to avoid truncation due to integer division.
-    EXPECT_EQ(tx_counts[address], (i + 1) * kBlockSize * kNumRounds / 10);
+    const size_t target = (i + 1) * kBlockSize * kNumRounds / 10;
+    EXPECT_LE(tx_counts[address],
+              target + MempoolTestInfra::kAccountAddresses.size());
+    EXPECT_GE(tx_counts[address],
+              target - MempoolTestInfra::kAccountAddresses.size());
   }
 }
 
@@ -639,897 +374,21 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] =
-        scheduler->schedule(/*block_height=*/i, /*block_size=*/1)();
+    x23::Vec<SignedTransactionHash> scheduled_hashes;
+    x23::Vec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
-    // If we ever change this test to schedule more than 1 tx at once, then
-    // remember that [mark_txs_finished()] below should only be called with the
-    // txs for a single account.
-    scheduler->mark_txs_finished(/*tx_hashes=*/scheduled_hashes)();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestInfra::kAccountAddresses[i];
     const size_t target = (i + 1) * (kNumRounds / 10);
-    constexpr size_t kErrorBound = 2;
-    EXPECT_LE(tx_counts[address], target + kErrorBound);
-    EXPECT_GE(tx_counts[address], target - kErrorBound);
+    EXPECT_LE(tx_counts[address],
+              target + MempoolTestInfra::kAccountAddresses.size());
+    EXPECT_GE(tx_counts[address],
+              target - MempoolTestInfra::kAccountAddresses.size());
   }
-}
-
-TEST(Scheduler, YoungHogStarvation)
-{
-  constexpr size_t kNumRounds = 10;
-
-  std::vector<fib_client_t> fib_clients;
-  std::vector<SignedTransactionBatch> txs;
-  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
-    fib_clients.emplace_back(address);
-    // We create enough txs for each account such that each account could fill
-    // all blocks with txs. In other words, an account always have txs to
-    // schedule. This is important for ensuring that when we see a certain
-    // throughput of txs for a given account, this throughput resulted solely
-    // from the scheduling policy rather than a lack of txs to schedule.
-    txs.push_back(generate_unsigned_txs(fib_clients.back(), kNumRounds * 2));
-  }
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  // Sets the age and hogs for all accounts. Each account has this age and
-  // hogs:
-  //
-  // Account 0: Age 0 and (5 billion * kNumRounds) hogs.
-  // Account 1: Age 1 and 5 billion hogs.
-  // Account 2: Age 0 and 0 hogs.
-  // Account 3: Age 0 and 0 hogs.
-  //
-  // Thus, there are 505 billion hogs in total across the four accounts.
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/5'000'000'000 * kNumRounds);
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[1],
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/1,
-                  /*num_hogs=*/5'000'000'000);
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[2],
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[3],
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  for (const SignedTransactionBatch &tx : txs) {
-    scheduler->add_txs(tx)();
-  }
-
-  std::unordered_map<ContractAddress, size_t> tx_counts;
-  for (size_t i = 0; i < kNumRounds; i++) {
-    const auto &[scheduled_hashes, scheduled] =
-        scheduler->schedule(/*block_height=*/i, /*block_size=*/1)();
-    EXPECT_EQ(scheduled.size(), 1);
-    tx_counts[scheduled.front().tx.invocation.invoked_address]++;
-    // If we ever change this test to schedule more than 1 tx at once, then
-    // remember that [mark_txs_finished()] below should only be called with the
-    // txs for a single account.
-    scheduler->mark_txs_finished(/*tx_hashes=*/scheduled_hashes)();
-  }
-  // All txs handled should have been submitted by account 0.
-  EXPECT_EQ(tx_counts.size(), 1);
-  EXPECT_EQ(tx_counts[MempoolTestInfra::kAccountAddresses[0]], kNumRounds);
-
-  {
-    // The next tx scheduled should have been submitted by account 1.
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/kNumRounds + 1,
-                            /*block_size=*/1)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[1]);
-  }
-}
-
-TEST(Scheduler, CycleFromAlreadyScheduled)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/10'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(10'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(10'000'000'000 -
-                                   txs[0].tx.invocation.gas_limit));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleFromReceived)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  scheduler->process_received_hogs(
-      account, /*num_received=*/static_cast<uint128_t>(15'000'000'000),
-      /*current_block=*/0)();
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(15'000'000'000));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(15'000'000'000 -
-                                   txs[0].tx.invocation.gas_limit));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleFromAlreadyScheduledNotEnough)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/4'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleFromReceivedNotEnough)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  scheduler->process_received_hogs(
-      account, /*num_received=*/static_cast<uint128_t>(4'000'000'000),
-      /*current_block=*/0)();
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(4'000'000'000));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleTotalIsEnough)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/3'000'000'000);
-  scheduler->process_received_hogs(
-      account, /*num_received=*/static_cast<uint128_t>(4'000'000'000),
-      /*current_block=*/0)();
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(3'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(4'000'000'000));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(7'000'000'000 -
-                                   txs[0].tx.invocation.gas_limit));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleTotalIsNotEnough)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/3'000'000'000);
-  scheduler->process_received_hogs(
-      account, /*num_received=*/static_cast<uint128_t>(1'000'000'000),
-      /*current_block=*/0)();
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(3'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(1'000'000'000));
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-}
-
-TEST(Scheduler, CycleOlderAgeInAlreadyScheduled)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/1,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/0,
-                  /*num_hogs=*/4'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/1,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 1);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, CycleOlderAgeInReceived)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/1,
-                  /*num_hogs=*/1);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/1,
-                  /*num_hogs=*/0);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/4'000'000'000);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(1));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(4'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000'001));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, CycleCombineAges)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/80,
-                  /*num_hogs=*/1'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/5,
-                  /*num_hogs=*/2'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(1'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 80);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(2'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 5);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(3'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 30);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, CycleCombineAgesAllGroups)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/37,
-                  /*num_hogs=*/1'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/10,
-                  /*num_hogs=*/2'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/7,
-                  /*num_hogs=*/1'000'000);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 37);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(2'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 10);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 7);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 16);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, CycleCombineAgesRoundUp)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/10,
-                  /*num_hogs=*/2'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/5,
-                  /*num_hogs=*/1'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(2'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 10);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 5);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(3'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 9);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, CycleCombineAgesRoundUpAllGroups)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/14,
-                  /*num_hogs=*/1'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/10,
-                  /*num_hogs=*/2'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/5,
-                  /*num_hogs=*/1'000'000);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 14);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(2'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 10);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 5);
-
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(4'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 11);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, ProcessReceivedHogsRoundUp)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  scheduler->process_received_hogs(
-      account,
-      /*num_received=*/static_cast<uint128_t>(1'000'000),
-      /*current_block=*/5)();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(1'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 5);
-
-  scheduler->process_received_hogs(
-      account,
-      /*num_received=*/static_cast<uint128_t>(2'000'000),
-      /*current_block=*/10)();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(3'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 9);
-}
-
-TEST(Scheduler, AlreadyScheduledRoundUp)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupToSchedule,
-                  /*age=*/1,
-                  /*num_hogs=*/5'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupAlreadyScheduled,
-                  /*age=*/3,
-                  /*num_hogs=*/10'000'000'000);
-  server.set_hogs(account,
-                  /*group=*/kHogAgeGroupReceived,
-                  /*age=*/0,
-                  /*num_hogs=*/0);
-
-  ASSERT_TRUE(scheduler->read_average_hog_age({account}, /*force=*/false)());
-  const HogAge &age = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(5'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(10'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 3);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  {
-    scheduler->add_txs({txs[0]})();
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/11, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[0]);
-    scheduler->mark_txs_finished(/*tx_hashes=*/{sha256(txs[0])})();
-  }
-
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(0));
-  // The age for the [kHogAgeGroupToSchedule] remains 1 until [cycle_groups()]
-  // is called again.
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 1);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(15'000'000'000));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 6);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-
-  scheduler->add_txs({txs[1]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
-            static_cast<uint128_t>(15'000'000'000 -
-                                   txs[1].tx.invocation.gas_limit));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupToSchedule], 6);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupAlreadyScheduled], 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]),
-            static_cast<uint128_t>(0));
-  EXPECT_EQ(age.average_ages[kHogAgeGroupReceived], 0);
-}
-
-TEST(Scheduler, Expired)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  txs[0].tx.uniquifier.block_expiry_height = 5;
-  scheduler->add_txs({txs[0]})();
-
-  // Check that the correct number of hogs was deducted.
-  const HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-
-  const auto &[_, scheduled] =
-      scheduler->schedule(/*block_height=*/6, kBlockSize)();
-  EXPECT_TRUE(scheduled.empty());
-
-  // Check that the correct number of hogs was added back to the
-  // [kHogAgeGroupToSchedule] group.
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
-}
-
-TEST(Scheduler, ExpiredStranded)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/false)());
-  HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  age.average_ages[kHogAgeGroupToSchedule] = 1;
-  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-
-  txs[0].tx.uniquifier.block_expiry_height = 5;
-  scheduler->add_txs({txs[0]})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/6, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-  }
-
-  // The tx should have been discarded because it has expired. We check that
-  // adding enough hogs to run the tx does not cause it to be scheduled.
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/7)();
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/8, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-    EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 5'000'000'000);
-  }
-}
-
-TEST(Scheduler, Filter)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  scheduler->add_txs({txs[0]})();
-  scheduler->filter_txs_for_account(MempoolTestInfra::kAccountAddresses[0],
-                                    [&txs](const SignedTransaction &tx)
-                                        -> x23::Async<bool> {
-                                      EXPECT_EQ(tx, txs[0]);
-                                      co_return false;
-                                    })();
-  // Check that the hogs were refunded to the account.
-  const HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 10);
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-
-  // Now do the test again but do not filter the tx out.
-  scheduler->add_txs({txs[0]})();
-  scheduler->filter_txs_for_account(MempoolTestInfra::kAccountAddresses[0],
-                                    [&txs](const SignedTransaction &tx)
-                                        -> x23::Async<bool> {
-                                      EXPECT_EQ(tx, txs[0]);
-                                      co_return true;
-                                    })();
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0], txs[0]);
-  }
-  scheduler->mark_txs_finished(/*tx_hashes=*/{sha256(txs[0])})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            5'000'000'000);
-}
-
-TEST(Scheduler, FilterStranded)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-
-  EXPECT_TRUE(
-      scheduler->read_average_hog_age({MempoolTestInfra::kAccountAddresses[0]},
-                                      /*force=*/false)());
-  HogAge &age =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  age.average_ages[kHogAgeGroupToSchedule] = 1;
-  age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(0));
-
-  scheduler->add_txs({txs[0]})();
-  scheduler->filter_txs_for_account(MempoolTestInfra::kAccountAddresses[0],
-                                    [&txs](const SignedTransaction &tx)
-                                        -> x23::Async<bool> {
-                                      EXPECT_EQ(tx, txs[0]);
-                                      co_return false;
-                                    })();
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/1)();
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    EXPECT_TRUE(scheduled.empty());
-  }
-
-  // Now do the test again but do not filter the tx out.
-  EXPECT_EQ(age.num_hogs[kHogAgeGroupToSchedule],
-            to_xdr(static_cast<uint128_t>(0)));
-  EXPECT_EQ(age.num_hogs[kHogAgeGroupAlreadyScheduled],
-            to_xdr(static_cast<uint128_t>(0)));
-  EXPECT_EQ(age.num_hogs[kHogAgeGroupReceived],
-            to_xdr(static_cast<uint128_t>(5'000'000'000)));
-  age.average_ages[kHogAgeGroupReceived] = 1;
-  age.num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(0));
-
-  scheduler->add_txs({txs[0]})();
-  scheduler->filter_txs_for_account(MempoolTestInfra::kAccountAddresses[0],
-                                    [&txs](const SignedTransaction &tx)
-                                        -> x23::Async<bool> {
-                                      EXPECT_EQ(tx, txs[0]);
-                                      co_return true;
-                                    })();
-  scheduler->process_received_hogs(
-      MempoolTestInfra::kAccountAddresses[0],
-      /*num_received=*/static_cast<uint128_t>(5'000'000'000),
-      /*current_block=*/1)();
-  {
-    const auto &[_, scheduled] =
-        scheduler->schedule(/*block_height=*/0, kBlockSize)();
-    ASSERT_EQ(scheduled.size(), 1);
-    EXPECT_EQ(scheduled[0], txs[0]);
-  }
-  scheduler->mark_txs_finished(/*tx_hashes=*/{sha256(txs[0])})();
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]), 0);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
-            5'000'000'000);
-  EXPECT_EQ(from_xdr(age.num_hogs[kHogAgeGroupReceived]), 0);
 }
 
 } // namespace hogd

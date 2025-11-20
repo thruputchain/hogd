@@ -23,10 +23,10 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/version.h"
-#include "new_scheduler.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -58,7 +58,7 @@ public:
   MempoolCoordinatorRpc(MempoolCoordinatorRpc &&) = delete;
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
-  std::shared_ptr<NewScheduler> scheduler() { return scheduler_; }
+  std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
   Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client()
@@ -92,8 +92,6 @@ public:
   x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
                                                 SignedTransactionBatch batch);
 
-  x23::Async<bool> initialize_block(const DbTip &db_tip, BlockID block_id);
-
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
   x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
@@ -123,6 +121,12 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
+  static x23::Async<OptSignedTransactionBatch>
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  {
+    panic("unimplemented");
+  }
+
   static SHA256Hash
   get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
                  const BlockHash &prev_block_hash);
@@ -140,6 +144,21 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  struct NominationData {
+    DbTip db_tip;
+    BlockID block_id;
+    x23::Vec<SignedTransaction> txs;
+    x23::Vec<SignedTransactionHash> tx_hashes;
+
+    x23::Vec<SchedulerNominationChunk> sched_nominations =
+        x23::Vec<SchedulerNominationChunk>(kNumSchedulerIterations, {});
+    SchedulerNominationChunk last_chunk;
+
+    x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
+    x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
+    x23::Vec<SignedTransaction> failed_txs;
+  };
+
   const std::function<x23::Async<bool>(const SignedTransaction &tx)>
       auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
     co_return co_await authentication_->authenticate(tx);
@@ -177,7 +196,7 @@ private:
     // [current_block_id_] with it.
     authentication_ =
         std::make_unique<Authentication>(current_block_id_, db_sched_client_);
-    scheduler_ = std::make_shared<NewScheduler>(db_sched_client_);
+    scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     db_rpc_->register_scheduler(scheduler_);
 
     ready_.store(true, std::memory_order_release);
@@ -193,25 +212,31 @@ private:
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
+  x23::Async<void> finish_all_executors(BlockID block_id);
 
-  x23::Detached
+  x23::Async<void>
   propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                x23::span<bool> ret_chunk, size_t executor_idx,
-                x23::CoroCB<void> cb);
+                x23::span<bool> ret_chunk, size_t executor_idx);
 
-  x23::Detached propose_small_chunks_from_large_chunk(
+  x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
       x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
-  x23::Detached propose_batch_in_chunks(
+  x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
       x23::XdrVec<NominatedTransaction> &transaction_nominations,
-      x23::span<bool> ret, x23::CoroCB<void> cb);
+      x23::span<bool> ret);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
+
+  x23::Async<bool> initialize_block(const NominationData &cache);
+  x23::Async<void> schedule(NominationData &cache);
+  static void process_tx_outcomes(NominationData &cache);
+  x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
+  x23::Async<void> finish_nominating_block(NominationData &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
@@ -231,7 +256,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   BlockID current_block_id_ = 0;
-  std::shared_ptr<NewScheduler> scheduler_;
+  std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<Authentication> authentication_;
 
   std::atomic<bool> ready_ = false;

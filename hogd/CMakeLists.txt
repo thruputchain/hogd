@@ -14,6 +14,7 @@ add_subdirectory(xdr)
 add_subdirectory(genesis)
 add_subdirectory(loadgen)
 add_subdirectory(auth_claim)
+add_subdirectory(auth)
 
 set_source_files_properties(
   ${VERSION_CC}

@@ -203,6 +203,24 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   value_type &back(this auto &&self) { return *self.get(); }
 };
 
+// A non-owning Ptr that serializes like a Ptr.
+template<typename T> struct BorrowedPtr {
+  BorrowedPtr() noexcept = default;
+  BorrowedPtr(T *p) noexcept : p_(p) {}
+  BorrowedPtr(auto ptr) requires requires {
+    { ptr.get() } -> std::convertible_to<T *>;
+  }
+    : p_(ptr.get())
+  {}
+
+  T *get() const noexcept { return p_; }
+  explicit operator bool() const noexcept { return p_; }
+  T *operator->() const noexcept { return p_; }
+  T &operator*() const noexcept { return *p_; }
+
+  T *p_{};
+};
+
 template<typename T>
 inline bool
 operator==(const Ptr<T> &a, const Ptr<T> &b)

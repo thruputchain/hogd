@@ -15,6 +15,7 @@ usage(char *argv[])
   // database
   std::println("  kDbExecutorServerPort: {}", hogd::kDbExecutorServerPort);
   std::println("  kDbMempoolServerPort: {}", hogd::kDbMempoolServerPort);
+  std::println("  kDbAuthServerPort: {}", hogd::kDbAuthServerPort);
   // mempool
   std::println("  kMempoolCoordinatorServerPort: {}",
                hogd::kMempoolCoordinatorServerPort);
@@ -44,6 +45,10 @@ get_port(const std::string &port_name)
 
   if (port_name == "kDbMempoolServerPort") {
     return hogd::kDbMempoolServerPort;
+  }
+
+  if (port_name == "kDbAuthServerPort") {
+    return hogd::kDbAuthServerPort;
   }
 
   // mempool
