@@ -19,6 +19,8 @@ public:
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
 private:
+  // clang-tidy bizarre false positive
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(0));
 
   // Sharded DB is not yet implemented.

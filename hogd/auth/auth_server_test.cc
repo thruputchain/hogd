@@ -49,6 +49,7 @@ class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
 };
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Test basic lookup of auth data that exists in the mock DB
 TEST_F(AuthServerTest, BasicLookup)
@@ -212,4 +213,7 @@ TEST_F(AuthServerTest, QueriesDelayed)
 
   thread.join();
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
+
 } // namespace hogd
