@@ -5,6 +5,8 @@ name = "{{ .hog_schedule }}_{{ .hog_host }}"
 host = ["hog8"]
 script = """
 
+set -x
+
 # source ./scripts/ci/clone_hogd.sh
 echo 'cloning hogd' >&2
 git clone \
