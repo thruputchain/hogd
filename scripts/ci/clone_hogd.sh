@@ -1,4 +1,4 @@
-echo 'cloning hogd' >&2
+echo 'cloning hogd'
 
 git clone \
   --separate-git-dir=.git \

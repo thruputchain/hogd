@@ -1,4 +1,4 @@
-echo 'setting up cargo' >&2
+echo 'setting up cargo'
 
 curl -sSf https://sh.rustup.rs | sh -s -- -y
 . "$HOME/.cargo/env"
