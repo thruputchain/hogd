@@ -1,0 +1,66 @@
+name = "sanitizer_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+host = ["hog8"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# Google benchmark seems to add Werror in release builds, which for some reason interacts badly with asan 
+# (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
+# We disable it overall just to save build time, but it's required for the gcc release build with asan.
+
+echo 'build gcc asan'
+./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run gcc tests'
+export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
+
+echo 'build clang asan'
+./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run llvm tests'
+export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
+
+echo 'build gcc asan release'
+./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run gcc tests release'
+export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
+
+# Gcc doesn't support ignorelist with ubsan
+echo 'build clang ubsan'
+./scripts/build.sh -d build/llvm_ubsan -c clang -f "-fsanitize=undefined -fno-sanitize-recover=all -fsanitize-ignorelist=$(pwd)/.ubsan_ignorelist" -t Debug -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run llvm ubsan tests'
+export UBSAN_OPTIONS=print_stacktrace=1
+ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
