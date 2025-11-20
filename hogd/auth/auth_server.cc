@@ -1,14 +1,13 @@
 #include "hogd/auth/auth_server.h"
 
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <utility>
 
 #include "account.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
-#include "hogd/base/log.h"
+#include "hogd/base/coropoll.h"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -18,11 +17,12 @@ x23::Async<AuthStatus<
     std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
-  BlockHeight current_height = current_height_.load();
-  if (height > current_height) {
-    panic("Waiting on incoming data is not yet implemented");
+  BlockHeight current_height;
+  while ((current_height = current_height_futex_.load()) < height) {
+    co_await current_height_futex_.wait(height);
   }
-  if (height < current_height) {
+
+  if (current_height > height) {
     co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
   }
 
@@ -51,15 +51,14 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   co_return entry;
 }
 
-void
+x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
                                        KeyChangeBatch const &key_changes)
 {
-  std::unique_lock lock(key_changes_mutex_);
-  key_changes_cv_.wait(lock, [this, height] {
-    return height == current_height_.load() + 1;
-  });
-  CHECK(height == current_height_.load() + 1);
+  BlockHeight current_height;
+  while ((current_height = current_height_futex_.load()) + 1 != height) {
+    co_await current_height_futex_.wait(current_height);
+  }
 
   for (const auto &key_change : key_changes) {
     if (key_change.auth_data == nullptr) {
@@ -74,8 +73,8 @@ AuthServer::register_auth_data_updates(BlockHeight height,
         height, *key_change.auth_data);
     auth_data_cache_.put(key_change.address, entry);
   }
-  current_height_.store(height);
-  key_changes_cv_.notify_all();
+  current_height_futex_.store(height);
+  current_height_futex_.broadcast(&default_threadpool());
 }
 
 } // namespace hogd

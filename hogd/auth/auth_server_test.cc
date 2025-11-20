@@ -63,7 +63,7 @@ TEST_F(AuthServerTest, BasicLookup)
 
   auth_server().register_auth_data_updates(height,
                                            mock_db().get_key_changes_at_height(
-                                               height));
+                                               height))();
 
   auto result = auth_server().lookup_auth_data(height, address)();
 
@@ -101,14 +101,14 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 
   std::jthread thread([&] {
     auth_server().register_auth_data_updates(
-        2, mock_db().get_key_changes_at_height(2));
+        2, mock_db().get_key_changes_at_height(2))();
   });
   // let that thread start running for a bit
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
-                                               1));
+                                               1))();
 
   thread.join();
 
@@ -130,7 +130,7 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   mock_db().increment_height();
 
   auto key_changes = mock_db().get_key_changes_at_height(1);
-  auth_server().register_auth_data_updates(1, key_changes);
+  auth_server().register_auth_data_updates(1, key_changes)();
 
   auto result = auth_server().lookup_auth_data(1, address)();
 
@@ -157,7 +157,7 @@ TEST_F(AuthServerTest, StaleBlockHeight)
 
   auth_server().register_auth_data_updates(2,
                                            mock_db().get_key_changes_at_height(
-                                               2));
+                                               2))();
 
   // now get the actual data
   result = auth_server().lookup_auth_data(2, address)();
@@ -174,4 +174,41 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_FALSE(result.value()->second.has_value());
 }
 
+TEST_F(AuthServerTest, QueriesDelayed)
+{
+  ContractAddress address = make_test_address(6);
+  AccountAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height(); // 1
+  mock_db().increment_height(); // 2
+  mock_db().increment_height(); // 3
+  mock_db().increment_height(); // 4
+  mock_db().increment_height(); // 5
+
+  std::atomic<bool> sequence = false;
+
+  std::jthread thread([&] {
+    auto res = auth_server().lookup_auth_data(5, address)();
+    ASSERT_TRUE(sequence);
+  });
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+  auth_server().register_auth_data_updates(3,
+                                           mock_db().get_key_changes_at_height(
+                                               3))();
+  auth_server().register_auth_data_updates(4,
+                                           mock_db().get_key_changes_at_height(
+                                               4))();
+  sequence = true;
+  auth_server().register_auth_data_updates(5,
+                                           mock_db().get_key_changes_at_height(
+                                               5))();
+
+  thread.join();
+}
 } // namespace hogd

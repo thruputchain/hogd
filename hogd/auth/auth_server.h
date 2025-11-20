@@ -1,9 +1,6 @@
 #pragma once
 
-#include <atomic>
-#include <condition_variable>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <utility>
 
@@ -14,6 +11,7 @@
 #include "hogd/auth/status.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -27,8 +25,9 @@ public:
       std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
-  void register_auth_data_updates(BlockHeight height,
-                                  KeyChangeBatch const &key_changes);
+  x23::Async<void>
+  register_auth_data_updates(BlockHeight height,
+                             KeyChangeBatch const &key_changes);
 
 private:
   // If the auth data cache contains data for a ContractAddress, then that data
@@ -36,14 +35,9 @@ private:
   AuthDataCache auth_data_cache_;
   DBAuthClient dbauth_client_;
 
-  std::atomic<BlockHeight> current_height_ = 0;
-
-  // Not strictly required if the db and network behave well.
-  // This gives a guarantee that we won't inadvertently process key change
-  // updates in a bad order and leave the auth data cache in an inconsistent
-  // state.
-  std::mutex key_changes_mutex_;
-  std::condition_variable key_changes_cv_;
+  // Used to stall incoming requests until the updates from the db are present,
+  // and to sequence potentially out of order updates from the db.
+  x23::CoroFutex<BlockHeight> current_height_futex_{0};
 };
 
 } // namespace hogd
