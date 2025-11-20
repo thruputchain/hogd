@@ -179,7 +179,7 @@ public:
     }
 #endif // !NDEBUG
 
-    template<bool> friend class gen_iterator_type;
+    template<bool> friend struct gen_iterator_type;
 
     container_type *v_{};
   };

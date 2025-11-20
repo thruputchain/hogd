@@ -67,11 +67,11 @@ struct PlusMinusMixin {
 // Define operator[] and operator-> in terms of operator* and
 // operator+=.
 struct AccessMixin {
-  auto operator->(this const auto &self) noexcept
+  constexpr auto operator->(this const auto &self) noexcept
   {
     return std::addressof(*self);
   }
-  decltype(auto) operator[](this auto self, ptrdiff_t d) noexcept
+  constexpr decltype(auto) operator[](this auto self, ptrdiff_t d) noexcept
   {
     self += d;
     return *self;

@@ -17,7 +17,7 @@
 
 namespace x23 {
 
-// When creating global objects that should not be destroyed at
+// When allocating global objects that should not be destroyed at
 // shutdown, wrap them in make_nodestroy to avoid address sanitizer
 // warnings about leaks.  For example:
 //
