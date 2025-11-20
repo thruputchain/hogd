@@ -102,6 +102,15 @@ round_trip()
     buf = serialize(s);
     assert(buf == buf2);
   }
+  {
+    Ptr<XdrVec<fix_4>> f4vp;
+    f4vp.emplace(XdrVec<fix_4>{{.i = 555}});
+    x23::span f4s(*f4vp);
+    BorrowedPtr bp(&f4s);
+    buf = serialize(f4vp);
+    buf2 = serialize(bp);
+    assert(buf == buf2);
+  }
 
   u_4_12 u(4), uprime;
   u.f4().i = 26;
