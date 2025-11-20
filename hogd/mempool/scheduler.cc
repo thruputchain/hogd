@@ -133,6 +133,20 @@ Scheduler::get_account_key(const ContractAddress &account)
 }
 
 bool
+Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+                                   TxValue &tx_value)
+{
+  const ContractAddress &account = tx_value.tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height =
+                      tx_value.tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_txs, lock] = account_to_tx_[account];
+  // Check if the tx is already present in [account_to_tx_[account]]. If it
+  // is, we are adding a duplicate tx, so we do not want to increment [size_].
+  return account_txs.insert({key, &tx_value}).second;
+}
+
+bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
   const SignedTransactionHash &tx_hash = sha256(tx);
@@ -148,13 +162,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
     value = tx_ptr;
   }
 
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_txs, lock] = account_to_tx_[account];
-  // Check if the tx is already present in [account_to_tx_[account]]. If it
-  // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  return account_txs.insert({key, value}).second;
+  return insert_tx_into_runqueue(tx_hash, *value);
 }
 
 x23::Async<void>
@@ -698,6 +706,34 @@ Scheduler::find_and_remove_from_runqueue(
     }
   }
   return true;
+}
+
+void
+Scheduler::remove_from_runqueue(
+    x23::span<const SignedTransactionHash> tx_hashes)
+{
+  std::unordered_set<ContractAddress> accounts;
+  for (const SignedTransactionHash &tx_hash : tx_hashes) {
+    auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    CHECK_PTR(tx_value_ptr);
+
+    const SignedTransaction &tx = tx_value_ptr->tx;
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    const TxKey key = {.expiry_block_height =
+                           tx.tx.uniquifier.block_expiry_height,
+                       .tx_hash = tx_hash};
+    {
+      auto [txs, lock] = account_to_tx_[account];
+      CHECK_EQ(txs.erase(key), 1UL);
+    }
+    accounts.insert(account);
+  }
+  for (const ContractAddress &account : accounts) {
+    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+    }
+  }
+  size_.fetch_sub(tx_hashes.size(), std::memory_order_relaxed);
 }
 
 } // namespace hogd

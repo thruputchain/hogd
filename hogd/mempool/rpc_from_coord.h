@@ -152,8 +152,8 @@ public:
     }
     scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                               return_to_runqueue.cend());
-    CHECK(scheduler_->remove_from_runqueue(
-        x23::span<const SignedTransactionHash>(*remove_from_scheduler)));
+    scheduler_->remove_from_runqueue(
+        x23::span<const SignedTransactionHash>(*remove_from_scheduler));
 
     for (x23::Async<void> &handle : handles) {
       co_await handle;

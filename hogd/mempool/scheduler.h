@@ -62,11 +62,17 @@ public:
   find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
                                 x23::Vec<SignedTransaction> &txs);
 
-  bool reenqueue_txs(const auto &begin, const auto &end) { return false; }
-  bool remove_from_runqueue(x23::span<const SignedTransactionHash> hashes)
+  void reenqueue_txs(const auto &begin, const auto &end)
   {
-    return false;
+    for (auto it = begin; it != end; it++) {
+      const SignedTransactionHash &tx_hash = *it;
+      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+      CHECK_PTR(tx_value_ptr);
+      insert_tx_into_runqueue(tx_hash, *tx_value_ptr);
+    }
   }
+
+  void remove_from_runqueue(x23::span<const SignedTransactionHash> hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -148,6 +154,8 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+                               TxValue &tx_value);
   bool add_txs_helper(const SignedTransaction &tx);
 
   // TODO(jhumphri): Give this a better name.
