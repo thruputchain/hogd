@@ -17,6 +17,7 @@ git clone \
 rm -rf tmp
 git checkout -q {{ .git_branch }}
 git reset --hard
+git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
