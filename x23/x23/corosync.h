@@ -501,4 +501,96 @@ private:
   Downer **last_{&next_};
 };
 
+// A CoroFutex is a way of suspending coroutines than can all
+// subsequently be woken up at once via the broadcast() method.  The
+// CoroFutex has an internal variable of type T (which you can
+// atomically load, store, and read-modify-write), and allows you to
+// wait only on condition that the internal variable have some
+// specific value.
+template<std::regular T = std::monostate>
+requires std::atomic<T>::is_always_lock_free
+class CoroFutex {
+public:
+  using value_type = T;
+
+  class [[nodiscard]] Awaiter {
+    using Ptr = MVar<std::vector<ThreadPool::Job>>::Ptr;
+
+  public:
+    Awaiter(Ptr s) : waiters_(std::move(s)) {}
+    bool await_ready() noexcept { return !waiters_; }
+    void await_suspend(CoroHandle h SLOC_DECL) noexcept
+    {
+#if X23_CORO_TRACE
+      if (PromiseBase *base = h.base())
+        base->suspension_ = sloc;
+#endif // X23_CORO_TRACE
+      waiters_->emplace_back(h);
+      waiters_.reset();
+    }
+    void await_resume() noexcept {}
+
+  private:
+    Ptr waiters_;
+  };
+
+  template<typename... Args>
+  requires std::constructible_from<value_type, Args...>
+  CoroFutex(Args &&...args) : val_(value_type(std::forward<Args>(args)...))
+  {}
+  ~CoroFutex() { x23assert(waiters_->empty()); }
+
+  // Read internal value
+  value_type load() noexcept { return val_.load(std::memory_order_relaxed); }
+
+  // Write internal value
+  void store(value_type v) noexcept
+  {
+    auto _p = waiters_.take();
+    val_.store(v, std::memory_order_relaxed);
+  }
+
+  // Read-Modify-Write internal value by applying a lambda to a
+  // std::reference_wrapper<T>.  For example:
+  //
+  //     futex.rmw([](auto& i) { ++i; });
+  template<typename F>
+  decltype(auto) rmw(F &&f)
+      // If the requires fails, the argument needs to be by reference.
+      // For instance, this would be a bug: rmw([](auto i) { ++i; })
+      requires std::invocable<F, value_type &> &&
+               (!std::invocable<F, value_type>)
+  {
+    auto _p = waiters_.take();
+    auto v = val_.load(std::memory_order_relaxed);
+    Defer _d([&v, this] { val_.store(v, std::memory_order_relaxed); });
+    return std::invoke(std::forward<F>(f), v);
+  }
+
+  // Suspend the coroutine until someone calls notify_all().
+  Awaiter wait() { return Awaiter{waiters_.take()}; }
+
+  // Suspend the coroutine until someone calls notify_all(), except
+  // that if the internal value not old, then don't suspend.
+  Awaiter wait(const T &old)
+  {
+    auto ptr = waiters_.take();
+    if (val_.load(std::memory_order_relaxed) != old)
+      ptr.reset();
+    return Awaiter{std::move(ptr)};
+  }
+
+  // Wake all waiting threads (regardless of whether the current value
+  // is the one they waited on).
+  void broadcast(ThreadPool *pool = ThreadPool::get_thread_pool())
+  {
+    x23assert(pool);
+    pool->go(waiters_.exchange({}));
+  }
+
+private:
+  [[no_unique_address]] std::atomic<value_type> val_;
+  MVar<std::vector<ThreadPool::Job>> waiters_;
+};
+
 } // namespace x23
