@@ -356,7 +356,7 @@ static_assert(is_xdr_serializable<std::monostate>);
 
 template<x23::is_xdr_serializable X>
 size_t
-xdr_size(span<X> s)
+xdr_size(const span<X> &s)
 {
   if constexpr (requires {
                   {
@@ -402,6 +402,30 @@ requires serializes_like<T, X> && (NT == std::dynamic_extent || NT <= NX)
 struct serialize_equiv<Vec<X, NX>, span<T, NT>> : std::true_type {};
 
 static_assert(serializes_like<span<const int32_t>, Vec<int32_t>>);
+
+template<is_xdr_serializable T>
+inline size_t
+xdr_size(BorrowedPtr<T> p)
+{
+  if (p)
+    return 4UZ + xdr_size(*p);
+  return 0Z;
+}
+
+template<is_xdr_serializable T>
+void
+xdr_serialize(auto &serializer, BorrowedPtr<T> p)
+{
+  if (p) {
+    serializer.put32(1);
+    xdr_serialize(serializer, *p);
+  }
+  else
+    serializer.put32(0);
+}
+
+template<typename X, serializes_like<X> T>
+struct serialize_equiv<Ptr<X>, BorrowedPtr<T>> : std::true_type {};
 
 void
 serialize_to(Buf *bufp, const is_xdr_serializable auto &x)

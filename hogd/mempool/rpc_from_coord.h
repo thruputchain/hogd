@@ -181,12 +181,8 @@ public:
     x23::Vec<OptSignedTransaction> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
-      // TODO(jhumphri): Use [x23::BorrowedPtr<>] once dmazieres@ implements it.
-      SignedTransaction *tx = scheduler_->find_tx(tx_hash);
-      if (tx) {
-        tx = new SignedTransaction(*tx);
-      }
-      ret.push_back(x23::Ptr<SignedTransaction>(tx));
+      x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
+      ret.push_back(tx);
     }
     co_return ret;
   }
