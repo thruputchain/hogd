@@ -507,9 +507,7 @@ private:
 // atomically load, store, and read-modify-write), and allows you to
 // wait only on condition that the internal variable have some
 // specific value.
-template<std::regular T = std::monostate>
-requires std::atomic<T>::is_always_lock_free
-class CoroFutex {
+template<std::regular T = std::monostate> class CoroFutex {
 public:
   using value_type = T;
 
@@ -541,13 +539,24 @@ public:
   ~CoroFutex() { x23assert(waiters_->empty()); }
 
   // Read internal value
-  value_type load() noexcept { return val_.load(std::memory_order_relaxed); }
+  value_type load() noexcept
+  {
+    if constexpr (kAtomic)
+      return val_.load(std::memory_order_relaxed);
+    else {
+      auto _p = waiters_.take();
+      return val_;
+    }
+  }
 
   // Write internal value
   void store(value_type v) noexcept
   {
     auto _p = waiters_.take();
-    val_.store(v, std::memory_order_relaxed);
+    if constexpr (kAtomic)
+      val_.store(v, std::memory_order_relaxed);
+    else
+      val_ = v;
   }
 
   // Read-Modify-Write internal value by applying a lambda to a
@@ -562,9 +571,13 @@ public:
                (!std::invocable<F, value_type>)
   {
     auto _p = waiters_.take();
-    auto v = val_.load(std::memory_order_relaxed);
-    Defer _d([&v, this] { val_.store(v, std::memory_order_relaxed); });
-    return std::invoke(std::forward<F>(f), v);
+    if constexpr (kAtomic) {
+      auto v = val_.load(std::memory_order_relaxed);
+      Defer _d([&v, this] { val_.store(v, std::memory_order_relaxed); });
+      return std::invoke(std::forward<F>(f), v);
+    }
+    else
+      return std::invoke(std::forward<F>(f), val_);
   }
 
   // Suspend the coroutine until someone calls notify_all().
@@ -575,7 +588,11 @@ public:
   Awaiter wait(const T &old)
   {
     auto ptr = waiters_.take();
-    if (val_.load(std::memory_order_relaxed) != old)
+    if constexpr (kAtomic) {
+      if (val_.load(std::memory_order_relaxed) != old)
+        ptr.reset();
+    }
+    else if (val_ != old)
       ptr.reset();
     return Awaiter{std::move(ptr)};
   }
@@ -589,7 +606,15 @@ public:
   }
 
 private:
-  [[no_unique_address]] std::atomic<value_type> val_;
+  // If the atomic is always lock free, we can do reads without
+  // exclusively caching the value.  Otherwise, std::atomic will
+  // probably just hash to some global mutex, so we are better off
+  // making val_ non-atomic and protecting reads with the same mutex
+  // as waiters_.
+  static constexpr bool kAtomic = std::atomic<T>::is_always_lock_free;
+
+  [[no_unique_address]] std::conditional_t<kAtomic, std::atomic<value_type>,
+                                           value_type> val_;
   MVar<std::vector<ThreadPool::Job>> waiters_;
 };
 

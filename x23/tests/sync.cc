@@ -304,3 +304,33 @@ TEST(CoroFutex, Basic)
       co_await futex.wait(n);
   }()();
 }
+
+struct TooBigForAtomic {
+  uint64_t v;
+  char buf[248];
+  friend bool operator==(const TooBigForAtomic &,
+                         const TooBigForAtomic &) = default;
+};
+static_assert(!std::atomic<TooBigForAtomic>::is_always_lock_free);
+
+TEST(CoroFutex, BigValue)
+{
+  x23::CoroFutex<TooBigForAtomic> futex{};
+
+  for (int i = 0; i < 50; ++i) {
+    futex.rmw([](auto &n) { ++n.v; });
+    [&futex](this auto self) -> Detached {
+      TooBigForAtomic n;
+      while ((n = futex.load()).v < 50)
+        co_await futex.wait(n);
+      if (futex.rmw([](auto &n) { return ++n.v; }) == 100)
+        futex.broadcast();
+    }();
+  }
+  futex.broadcast(&pool);
+  [&futex] -> Async<void> {
+    TooBigForAtomic n;
+    while ((n = futex.load()).v < 100)
+      co_await futex.wait(n);
+  }()();
+}
