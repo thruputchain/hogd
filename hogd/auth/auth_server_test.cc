@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -20,10 +21,20 @@ make_test_address(uint8_t id)
   return address;
 }
 
+PublicKeyConfigOpt
+make_test_pk_config(uint8_t id)
+{
+  PublicKey key;
+  key.ed25519().fill(id);
+  return x23::Ptr<PublicKeyConfig>(
+      new PublicKeyConfig{.key = key, .max_weight = 100});
+}
+
 AccountAuthData
-make_test_auth_data()
+make_test_auth_data(uint8_t id)
 {
   AccountAuthData auth_data{};
+  auth_data.public_keys[id] = make_test_pk_config(id);
   auth_data.last_written_height = 0;
   return auth_data;
 }
@@ -41,7 +52,7 @@ private:
 TEST_F(AuthServerTest, BasicLookup)
 {
   ContractAddress address = make_test_address(1);
-  AccountAuthData auth_data = make_test_auth_data();
+  AccountAuthData auth_data = make_test_auth_data(1);
 
   mock_db().set(address, auth_data);
   mock_db().increment_height();
@@ -73,6 +84,41 @@ TEST_F(AuthServerTest, LookupNonExistent)
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, mock_db().get_current_height());
   EXPECT_FALSE(result.value()->second.has_value());
+}
+
+TEST_F(AuthServerTest, OutOfOrderUpdates)
+{
+  ContractAddress address = make_test_address(3);
+  AccountAuthData auth_data = make_test_auth_data(1);
+  AccountAuthData auth_data_2 = make_test_auth_data(2);
+
+  mock_db().set(address, auth_data);
+  mock_db().increment_height();
+
+  mock_db().set(address, auth_data_2);
+  mock_db().increment_height();
+
+  std::jthread thread([&] {
+    auth_server().register_auth_data_updates(
+        2, mock_db().get_key_changes_at_height(2));
+  });
+  // let that thread start running for a bit
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1));
+
+  thread.join();
+
+  auto result =
+      auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
+
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, mock_db().get_current_height());
+  ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_EQ(result.value()->second.value(), auth_data_2);
 }
 
 } // namespace hogd
