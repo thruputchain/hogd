@@ -7,17 +7,23 @@ script = """
 
 set -x
 
-# source ./scripts/ci/clone_hogd.sh
-echo 'cloning hogd' >&2
-git clone \
-    --separate-git-dir=.git \
-    --depth=1 --recursive \
-    --branch {{ .git_branch }} \
-    git@github.com:groundhogchain/hogd.git tmp
-rm -rf tmp
-git checkout -q {{ .git_branch }}
-git reset --hard
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
 git submodule update --init --recursive
+
+# source ./scripts/ci/clone_hogd.sh
+# git clone \
+#     --separate-git-dir=.git \
+#     --depth=1 --recursive \
+#     --branch {{ .git_branch }} \
+#     git@github.com:groundhogchain/hogd.git tmp
+# rm -rf tmp
+# git checkout -q {{ .git_branch }}
+# git reset --hard
+# git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
