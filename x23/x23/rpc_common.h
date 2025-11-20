@@ -19,6 +19,7 @@
 #include <x23/cleanup.h>
 #include <x23/debug.h>
 #include <x23/format.h>
+#include <x23/nodestroy.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
