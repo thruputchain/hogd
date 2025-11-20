@@ -23,7 +23,6 @@ public:
     // Start the mock DB server on a random port
     uint16_t port = mock_db_server_.start_server(0);
     server_port_ = port;
-
     // Create ShardCard with the auth address
     std::string auth_address = std::format("localhost:{}", port);
     ShardCard shard_card{.protocol = version::kHogdProtocol,
@@ -32,7 +31,6 @@ public:
                          .address_for_exec = "",
                          .address_for_sched = "",
                          .address_for_auth = auth_address.c_str()};
-
     // Create IntroAuthResult
     IntroAuthResult intro_result;
     intro_result.shards.push_back(shard_card);

@@ -1,8 +1,11 @@
+#include <chrono>
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <thread>
 
 #include "account.hh"
+#include "auth_rpc.hh"
 #include "hogd/auth/auth_server_test_framework.h"
 #include "hogd/base/types.h"
 #include "types.hh"
@@ -43,8 +46,6 @@ make_test_auth_data(uint8_t id)
 
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
-  AuthServerTest() = default;
-
 private:
 };
 
@@ -119,6 +120,58 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
   EXPECT_EQ(result.value()->first, mock_db().get_current_height());
   ASSERT_TRUE(result.value()->second.has_value());
   EXPECT_EQ(result.value()->second.value(), auth_data_2);
+}
+
+TEST_F(AuthServerTest, StaleBlockHeight)
+{
+  ContractAddress address = make_test_address(4);
+  AccountAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height();
+
+  auto key_changes = mock_db().get_key_changes_at_height(1);
+  auth_server().register_auth_data_updates(1, key_changes);
+
+  auto result = auth_server().lookup_auth_data(1, address)();
+
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 1);
+  ASSERT_FALSE(result.value()->second.has_value());
+
+  mock_db().set(address, auth_data);
+  mock_db().increment_height(); // height 2
+
+  // it's ok to get cached data if the auth server hasn't gotten the next batch
+  // of key changes yet
+  result = auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 1);
+  ASSERT_FALSE(result.value()->second.has_value());
+
+  result = auth_server().lookup_auth_data(1, make_test_address(5))();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
+
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2));
+
+  // now get the actual data
+  result = auth_server().lookup_auth_data(2, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 2);
+  ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_EQ(result.value()->second.value(), auth_data);
+
+  result = auth_server().lookup_auth_data(2, make_test_address(5))();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 2);
+  ASSERT_FALSE(result.value()->second.has_value());
 }
 
 } // namespace hogd
