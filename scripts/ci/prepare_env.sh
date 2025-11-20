@@ -1,4 +1,3 @@
-
 echo "prepare the environment for building hogd" >&2
 
 echo 'setting up cargo' >&2
@@ -23,4 +22,4 @@ echo 'cargo fetch' >&2
 CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 
 echo 'set gcc-14 in check' >&2
-echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+echo "GCC_CC=gcc-14 GCC_CXX=g++-14" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
