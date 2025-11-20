@@ -36,14 +36,13 @@ public:
     intro_result.shards.push_back(shard_card);
 
     // Create AuthServer
-    auth_server_ = std::make_unique<AuthServer>(std::move(intro_result));
+    auth_server_ = std::make_unique<AuthServer>(std::move(intro_result), 16);
   }
 
   ~AuthServerTestFramework() { mock_db_server_.shut_down(); }
 
   AuthServer &auth_server() { return *auth_server_; }
   MockDBAuthRpc &mock_db() { return *mock_db_server_.impl(); }
-  uint16_t server_port() const { return server_port_; }
 
 private:
   MockDBAuthServer mock_db_server_;

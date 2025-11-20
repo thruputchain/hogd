@@ -28,7 +28,7 @@ make_test_address(uint8_t id)
 PublicKeyConfigOpt
 make_test_pk_config(uint8_t id)
 {
-  PublicKey key;
+  PublicKey key(CryptographicScheme::Ed25519);
   key.ed25519().fill(id);
   return x23::Ptr<PublicKeyConfig>(
       new PublicKeyConfig{.key = key, .max_weight = 100});
@@ -80,6 +80,12 @@ TEST_F(AuthServerTest, LookupNonExistent)
 {
   ContractAddress address = make_test_address(2);
 
+  mock_db().increment_height(); // height 1
+  // initialize the auth server at height 1
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
   auto result =
       auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
 
@@ -95,29 +101,38 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
   AccountAuthData auth_data = make_test_auth_data(1);
   AccountAuthData auth_data_2 = make_test_auth_data(2);
 
+  mock_db().increment_height(); // height 1
+
   mock_db().set(address, auth_data);
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 2
 
   mock_db().set(address, auth_data_2);
-  mock_db().increment_height();
+  mock_db().increment_height(); // height 3
+
+  // make sure the auth server starts initialized at height 1
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
 
   std::jthread thread([&] {
     auth_server().register_auth_data_updates(
-        2, mock_db().get_key_changes_at_height(2))();
+        3, mock_db().get_key_changes_at_height(3))();
   });
   // let that thread start running for a bit
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  auth_server().register_auth_data_updates(1,
+  auth_server().register_auth_data_updates(2,
                                            mock_db().get_key_changes_at_height(
-                                               1))();
+                                               2))();
 
   thread.join();
 
   auto result =
       auth_server().lookup_auth_data(mock_db().get_current_height(), address)();
+  ASSERT_EQ(mock_db().get_current_height(), 3);
 
   ASSERT_TRUE(result.has_value());
+
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, mock_db().get_current_height());
   ASSERT_TRUE(result.value()->second.has_value());
@@ -212,6 +227,42 @@ TEST_F(AuthServerTest, QueriesDelayed)
                                                5))();
 
   thread.join();
+}
+
+TEST_F(AuthServerTest, InitializeFromLateBlock)
+{
+  ContractAddress address = make_test_address(7);
+  AccountAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().set(address, auth_data);
+
+  mock_db().increment_height(); // height 1
+  mock_db().increment_height(); // height 2
+  mock_db().increment_height(); // height 3
+
+  mock_db().delete_address(address);
+  mock_db().increment_height(); // height 4
+
+  auth_server().register_auth_data_updates(4,
+                                           mock_db().get_key_changes_at_height(
+                                               4))();
+
+  auto result = auth_server().lookup_auth_data(4, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 4);
+  ASSERT_FALSE(result.value()->second.has_value());
+
+  // stale block updates don't break things
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  result = auth_server().lookup_auth_data(4, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 4);
+  ASSERT_FALSE(result.value()->second.has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

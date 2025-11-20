@@ -1,5 +1,6 @@
 #include "hogd/auth/auth_server.h"
 
+#include <cassert>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -8,6 +9,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/log.h"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -17,14 +19,24 @@ x23::Async<AuthStatus<
     std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
+  assert(height != kUninitializedHeight);
+  assert(height != kInitializing);
   BlockHeight current_height;
-  while ((current_height = current_height_futex_.load()) < height) {
-    co_await current_height_futex_.wait(height);
+  for (;;) {
+    current_height = current_height_futex_.load();
+    if (current_height == kUninitializedHeight ||
+        current_height == kInitializing) {
+      co_await current_height_futex_.wait(current_height);
+      continue;
+    }
+    if (current_height > height) {
+      co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
+    }
+    break;
   }
 
-  if (current_height > height) {
-    co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
-  }
+  CHECK(current_height != kUninitializedHeight);
+  CHECK(current_height != kInitializing);
 
   auto auth_data = auth_data_cache_.get(address);
   if (auth_data != nullptr) {
@@ -55,8 +67,39 @@ x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
                                        KeyChangeBatch const &key_changes)
 {
-  BlockHeight current_height;
-  while ((current_height = current_height_futex_.load()) + 1 != height) {
+  for (;;) {
+    BlockHeight current_height = current_height_futex_.load();
+    if (current_height == kUninitializedHeight) {
+      bool acquired_lock = current_height_futex_.rmw([&](auto &value) {
+        if (value == kUninitializedHeight) {
+          value = kInitializing;
+          return true;
+        }
+        return false;
+      });
+      if (acquired_lock) {
+        break;
+      }
+      co_await current_height_futex_.wait(current_height);
+      continue;
+    }
+
+    if (current_height == kInitializing) {
+      co_await current_height_futex_.wait(current_height);
+      continue;
+    }
+
+    if (current_height + 1 == height) {
+      break;
+    }
+
+    if (current_height >= height) {
+      warn("AuthData Cache: Received stale update for block height {} at "
+           "current height {}, ignoring.",
+           height, current_height);
+      co_return;
+    }
+
     co_await current_height_futex_.wait(current_height);
   }
 
