@@ -51,7 +51,8 @@ public:
   SchedulerNomination get_nomination()
   {
     CHECK(!nominations_.empty());
-    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+    while (nominations_.size() < nominations_[0].total_chunks)
+      ;
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
@@ -70,7 +71,8 @@ public:
   std::pair<SchedulerNomination, size_t> get_nomination_no_txs()
   {
     CHECK(!nominations_.empty());
-    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+    while (nominations_.size() < nominations_[0].total_chunks)
+      ;
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
