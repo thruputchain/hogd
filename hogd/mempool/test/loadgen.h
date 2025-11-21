@@ -69,8 +69,8 @@ public:
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        CHECK_EQ(res_nominate.block_id(), nomination.block_id);
         nomination = coord_sched_rpc.get_nomination();
+        CHECK_EQ(res_nominate.block_id(), nomination.block_id);
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
       }
