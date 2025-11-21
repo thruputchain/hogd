@@ -122,7 +122,8 @@ nominate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
 BENCHMARK(nominate)->Unit(benchmark::kMillisecond)->Iterations(3);
@@ -142,7 +143,8 @@ validate(benchmark::State &state)
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
@@ -230,7 +232,8 @@ loadgen_nominate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
   }
 }
 BENCHMARK(loadgen_nominate)->Unit(benchmark::kMillisecond);
@@ -253,7 +256,8 @@ loadgen_validate(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
@@ -307,7 +311,8 @@ loadgen_nominate_throughput(benchmark::State &state)
 
       auto res_nominate =
           server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-      CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+      CHECK_EQ(res_nominate.outcome(),
+               SchedulerNominationOutcome::SchedulerNominationOK);
 
       SchedulerNomination nomination =
           server.coord_sched_rpc().get_nomination();
@@ -339,7 +344,8 @@ loadgen_validate_throughput(benchmark::State &state)
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-    CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+    CHECK_EQ(res_nominate.outcome(),
+             SchedulerNominationOutcome::SchedulerNominationOK);
 
     state.ResumeTiming();
 

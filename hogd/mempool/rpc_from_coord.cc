@@ -574,7 +574,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
 }
 
-x23::Async<SchedulerNominationOutcome>
+x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   if (nominated_block_cache_.block_id) {
@@ -624,7 +624,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   // Schedule the block and send the txs to the executors.
@@ -641,11 +642,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // There are no txs for the block, so we cannot propose a block.
     co_await finish_all_executors(nominated_block_cache_.block_id);
     co_await abandon_block(nominated_block_cache_);
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   finish_nominating_block(nominated_block_cache_);
-  co_return SchedulerNominationOutcome::SchedulerNominationOK;
+
+  SchedulerNominationResult result(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  result.block_id() = cache.block_id;
+  co_return result;
 }
 
 x23::Async<bool>

@@ -92,7 +92,7 @@ public:
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
+  x23::Async<SchedulerNominationResult> schedulercoord_nominate(DbTip db_tip);
 
   // Have the mempool validate a block. [nomination] holds the block to
   // validate. [db_tip] specifies the last committed block.
@@ -104,7 +104,7 @@ public:
   {
     if (nominated_block_cache_.block_id != block_id &&
         !validated_block_cache_.contains(block_id)) {
-      co_return SchedulerCommitOutcome::SchedulerValidationBlockNotFound;
+      co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
     }
 
     x23::Vec<x23::Async<void>> handles;
@@ -158,7 +158,7 @@ public:
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
-    co_return SchedulerCommitOutcome::SchedulerValidationOK;
+    co_return SchedulerCommitOutcome::SchedulerCommitOK;
   }
 
   // These are just stubs that pass through the calls from the coordinator to
