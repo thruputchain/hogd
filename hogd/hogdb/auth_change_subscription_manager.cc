@@ -34,12 +34,14 @@ AuthChangeSubscriptionManager::detached_publish_auth_changes(
   // }(height, std::move(key_changes));
   // This version causes a gcc14 internal segfault.
   // Then if you switch `guard = inhibit_;` to `guard = this->inhibit_;`,
-  // clang21 accepts the code, and gcc14 rejects it.
-  [this](this auto, BlockHeight height, PerThread<KeyChangeBatch> key_changes,
-         x23::RefPtr<x23::DestroyInhibit> /*unused*/) -> x23::Detached {
+  // clang21 accepts the code, and gcc14 rejects it, then gets "confused by
+  // earlier errors, bailing out"
+  [](this auto, AuthChangeSubscriptionManager &manager, BlockHeight height,
+     PerThread<KeyChangeBatch> key_changes,
+     x23::RefPtr<x23::DestroyInhibit> /*unused*/) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await publish_auth_changes(height, std::move(key_changes));
-  }(height, std::move(key_changes), inhibit_);
+    co_await manager.publish_auth_changes(height, std::move(key_changes));
+  }(*this, height, std::move(key_changes), inhibit_);
 }
 
 x23::Async<void>
