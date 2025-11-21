@@ -47,6 +47,9 @@ jobs:
       run: |
         mkdir -p ci_work_dir/
         ./release/hogd/hogexec/bench/control_server -p ${{ env.CI_CONTROL_PORT }} -w ci_work_dir/
+    - name: save any core dumps
+      run: |
+        ./scripts/save_core_dumps.sh ../core_dumps || true
 
   build:
     runs-on: metrics

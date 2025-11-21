@@ -208,7 +208,7 @@ private:
             return make_record(rmsg);
           }
           else {
-            return_type res = awaiter.await_resume();
+            serializes_like<return_type> auto res = awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg, res);
             return make_record(rmsg, res);
           }
@@ -227,9 +227,9 @@ private:
               co_return make_record(rmsg);
             }
             else {
-              return_type res = co_await awaitable;
+              serializes_like<return_type> auto res = co_await awaitable;
               self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
-              co_return make_record<return_type>(rmsg, res);
+              co_return make_record(rmsg, res);
             }
           } catch (const std::exception &e) {
             co_return self.error(e);

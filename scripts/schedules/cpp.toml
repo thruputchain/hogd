@@ -1,0 +1,35 @@
+name = "cpp_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+host = ["hog8"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+./scripts/check.sh -p -b
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"

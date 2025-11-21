@@ -157,3 +157,28 @@ TEST(ExtensionPoint, CompileCheck)
     GTEST_FAIL() << "parse failure";
   }
 }
+
+TEST(XdrPtr, Constructor)
+{
+  {
+    x23::XdrVec<x23::Ptr<int32_t>> v;
+    v.emplace_back(nullptr);
+    v.emplace_back(0);
+    EXPECT_FALSE(v[0]);
+    EXPECT_TRUE(v[1]);
+  }
+
+  {
+    x23::Ptr<x23::XdrVec<int32_t>> v{std::in_place, {0}};
+    EXPECT_EQ(v.size(), 1UZ);
+  }
+
+  {
+    x23::Ptr<fix_12> p{{.i = 1, .d = 2.0}};
+    x23::Ptr p2{fix_12{.i = 1, .d = 2.0}};
+    EXPECT_EQ(p, p2);
+    x23::XdrVec<x23::Ptr<fix_12>> v{fix_12{.i = 1, .d = 2.0}, nullptr,
+                                    fix_12{.i = 4, .d = 8.0}};
+    EXPECT_EQ(v.size(), 3UZ);
+  }
+}

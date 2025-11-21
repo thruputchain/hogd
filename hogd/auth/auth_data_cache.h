@@ -49,6 +49,7 @@ public:
       }
       it->address = address;
       it->auth_data = std::move(auth_data);
+
       return;
     }
 

@@ -157,41 +157,24 @@ Gen::show_def(const ProgDef &prog)
   for (const VersDef &vers : prog.versions) {
     top_ += std::format(R"(
 template<typename Server,
-         template<typename> typename RetTrans,
-         typename...ExtraArgs>
+         template<typename> typename __RetTrans,
+         typename...__ExtraArgs>
 concept is_{0} =)",
                         vers.id);
     Join andand(" &&");
     for (const auto &proc : vers.procs) {
-      if (proc.return_type == "void"s)
-        top_ += std::format(
-            R"({0}
-  (requires(Server __s, ExtraArgs...ea) {{
-    {{ __s->{1}({2}{3}ea...) }};
-  }}) &&
-  ((requires(Server __s, ExtraArgs...ea) {{
-     {{ __s->{1}({2}{3}ea...) }}
-       -> std::convertible_to<RetTrans<void>>;
-   }} || std::convertible_to<std::monostate, RetTrans<void>>)))",
-            andand.get(), proc.id,
-            join(proc.arg_types | std::views::transform(map_type) |
-                     std::views::transform(
-                         [](const string t) { return t + "{}"; }),
-                 ", "),
-            proc.arg_types.empty() ? "" : ", ");
-      else
-        top_ += std::format(
-            R"({0}
-  requires(Server __s, ExtraArgs...ea) {{
-    {{ __s->{2}({3}{4}ea...) }}
-      -> std::convertible_to<RetTrans<{1}>>;
+      top_ += std::format(
+          R"({0}
+  requires(Server __s, __ExtraArgs ...__ea) {{
+    {{ __s->{2}({3}{4}__ea...) }}
+      -> x23::satisfies_rpc_return<{1}, __RetTrans>;
   }})",
-            andand.get(), map_type(proc.return_type), proc.id,
-            join(proc.arg_types | std::views::transform(map_type) |
-                     std::views::transform(
-                         [](const string t) { return t + "{}"; }),
-                 ", "),
-            proc.arg_types.empty() ? "" : ", ");
+          andand.get(), map_type(proc.return_type), proc.id,
+          join(proc.arg_types | std::views::transform(map_type) |
+                   std::views::transform(
+                       [](const string t) { return t + "{}"; }),
+               ", "),
+          proc.arg_types.empty() ? "" : ", ");
     }
     top_ += ";\n";
 
