@@ -110,15 +110,18 @@ struct SizeBounds {
   }
 };
 
-template<is_xdr_type X, typename... Blacklist>
+template<typename X, typename... Blacklist>
 consteval SizeBounds
 xdr_size_bounds()
 {
   using enum XdrCategory;
-  if constexpr (is_one_of<X, Blacklist...>)
-    // This means we have a recursive or mutually-recursive type, so
-    // it could go on forever.  (min doesn't matter because in any
-    // recursive type there's a Ptr or Vec already determining min.)
+  if constexpr (is_one_of<X, Blacklist...> || !is_xdr_type<X>)
+    // If X is in Blacklist, it means we have a recursive or
+    // mutually-recursive type, so it could go on forever.  (min
+    // doesn't matter because in any recursive type there's a Ptr or
+    // Vec already determining min.)  If X is not an XDR type, then
+    // it's a type with a custom serializer, so we don't care about
+    // size bounds for deserialization anyway.
     return {0, kNoBound};
   else if constexpr (is_xdr_cat<X, kPrimitive, kEnum>)
     return sizeof(X) <= 4 ? 4 : 8;
@@ -157,7 +160,7 @@ xdr_size_bounds()
 }
 
 // True if the size of a marshaled X is independent of its value.
-template<is_xdr_type X>
+template<typename X>
 consteval bool
 has_fixed_size()
 {
@@ -424,7 +427,7 @@ xdr_serialize(auto &serializer, BorrowedPtr<T> p)
 {
   if (p) {
     serializer.put32(1);
-    xdr_serialize(serializer, *p);
+    serializer(*p);
   }
   else
     serializer.put32(0);
