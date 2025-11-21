@@ -106,6 +106,40 @@ TEST(Mempool, NominateEmpty)
             SchedulerNominationOutcome::SchedulerNominationError);
 }
 
+TEST(Mempool, NominateCommit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.block_id())();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, CommitBlockNotFound)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      /*block_id=*/1)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+}
+
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -277,6 +311,106 @@ TEST(Mempool, ValidateBatchMissingTx)
     EXPECT_EQ(res_validate.outcome(),
               SchedulerValidationResult::SchedulerValidationMissingTxs);
   }
+}
+
+TEST(Mempool, ValidateCommit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+  // We nominate a block first and then reuse the returned [Nomination] struct
+  // for the validation below. The [Nomination] struct contains some data, such
+  // as the nondeterministic data, that I would prefer not to have to construct
+  // myself in this test.
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
+  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+      nomination.transaction_hashes,
+      /*prev_block_hash=*/nomination.prev_block_hash);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.db_tip().id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+TEST(Mempool, GetTip)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  auto res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(res_tip.db_tip().height, 0);
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+  // We nominate a block first and then reuse the returned [Nomination] struct
+  // for the validation below. The [Nomination] struct contains some data, such
+  // as the nondeterministic data, that I would prefer not to have to construct
+  // myself in this test.
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  // We reuse the [Nomination] struct and make some adjustments for the
+  // validation.
+  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  db_tip.height++;
+  db_tip.hash = nomination.block_hash;
+  db_tip.id++;
+
+  nomination.block_height++;
+  nomination.prev_block_hash = nomination.block_hash;
+  nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+      nomination.transaction_hashes,
+      /*prev_block_hash=*/nomination.prev_block_hash);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          {txs[0]})();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+
+  res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(res_tip.db_tip().height, 0);
+
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_validate.db_tip().id)();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(res_tip.db_tip(), res_validate.db_tip());
 }
 
 // [kMaxBlockSize] is 10,000, which causes this test to time out. We should

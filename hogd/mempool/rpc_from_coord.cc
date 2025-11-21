@@ -809,17 +809,4 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   co_return result;
 }
 
-x23::Async<DbTipResult>
-MempoolCoordinatorRpc::schedcoord_get_tip()
-{
-  return db_sched_client_->dbsched_get_tip();
-}
-
-x23::Async<void>
-MempoolCoordinatorRpc::schedulercoord_shutdown()
-{
-  shutdown_flag_.store(true, std::memory_order_release);
-  co_return;
-}
-
 } // namespace hogd

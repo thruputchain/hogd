@@ -163,11 +163,18 @@ public:
 
   // These are just stubs that pass through the calls from the coordinator to
   // hogdb.
-  x23::Async<DbTipResult> schedcoord_get_tip();
+  x23::Async<DbTipResult> schedcoord_get_tip()
+  {
+    return db_sched_client_->dbsched_get_tip();
+  }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> schedulercoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown()
+  {
+    shutdown_flag_.store(true, std::memory_order_release);
+    co_return;
+  }
 
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
