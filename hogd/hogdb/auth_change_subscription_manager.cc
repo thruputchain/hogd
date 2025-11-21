@@ -25,11 +25,11 @@ AuthChangeSubscriptionManager::detached_publish_auth_changes(
     BlockHeight height, PerThread<KeyChangeBatch> key_changes)
 {
   [this](this auto, BlockHeight height,
-         PerThread<KeyChangeBatch> key_changes) -> x23::Detached {
-    x23::RefPtr guard = this->inhibit_;
+         PerThread<KeyChangeBatch> key_changes,
+        x23::RefPtr<x23::DestroyInhibit> /*unused*/) -> x23::Detached {
     co_await default_threadpool().bg();
     co_await publish_auth_changes(height, std::move(key_changes));
-  }(height, std::move(key_changes));
+  }(height, std::move(key_changes), inhibit_);
 }
 
 x23::Async<void>
