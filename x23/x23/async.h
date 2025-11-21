@@ -687,13 +687,21 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   {}
 
   // Pass through any function call operators on async_type
-  template<typename... Args>
+  template<typename... Args> requires (sizeof...(Args) <= 1)
   decltype(auto) operator()(Args &&...args)
       noexcept(noexcept((*asyncp())(std::declval<Args>()...)))
   {
-    auto *a = asyncp();
-    x23assert(a);
-    return (*a)(std::forward<Args>(args)...);
+    if (has_value()) {
+      if constexpr (sizeof...(Args) == 0)
+        return xval();
+      else
+        return compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
+    }
+    else {
+      auto *a = asyncp();
+      x23assert(a);
+      return (*a)(std::forward<Args>(args)...);
+    }
   }
 
   bool await_ready() noexcept(noexcept(awaiter().await_ready()))

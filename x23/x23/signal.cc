@@ -7,11 +7,12 @@
 #include <signal.h> // Need for NSIG (might not be in <csignal>)
 #include <unistd.h>
 
-#include <x23/debug.h>
-#include <x23/mvar.h>
-#include <x23/signal.h>
-#include <x23/sockio.h>
-#include <x23/utility.h>
+#include "x23/debug.h"
+#include "x23/mvar.h"
+#include "x23/nodestroy.h"
+#include "x23/signal.h"
+#include "x23/sockio.h"
+#include "x23/utility.h"
 
 namespace x23 {
 

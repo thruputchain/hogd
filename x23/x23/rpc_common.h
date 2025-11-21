@@ -19,6 +19,7 @@
 #include <x23/cleanup.h>
 #include <x23/debug.h>
 #include <x23/format.h>
+#include <x23/nodestroy.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
@@ -256,7 +257,7 @@ struct RpcLogger {
     write(logfd_, logmsg.data(), logmsg.size());
   }
   template<typename Meta = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_server(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     if (logfd_ < 0)
@@ -292,7 +293,7 @@ struct RpcCsvLogger {
   }
 
   template<typename Meta>
-  void do_log(bool server, const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void do_log(bool server, const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     if (logfd_ < 0)
@@ -320,7 +321,7 @@ struct RpcCsvLogger {
   }
 
   template<typename Meta = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_server(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
     do_log<Meta>(true, msg, pl...);
@@ -342,7 +343,7 @@ struct RpcNoLogger {
   {}
   void log_client_fail(std::uint32_t xid, std::string_view text) {}
   template<typename = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_server(const rpc_msg &msg, const auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
   template<typename... Args>
