@@ -140,11 +140,11 @@ TEST(NMVec, BasicSequences)
   for (int i = 0; i < 100; ++i) {
     auto idx1 = nm.emplace_back(i);
     ref.emplace_back(i);
-    EXPECT_EQ(idx1, i);
+    EXPECT_EQ(idx1, size_t(i));
     EXPECT_EQ(nm.size(), ref.size());
     EXPECT_TRUE(equal(nm, ref));
-    EXPECT_EQ(nm.size(), CountingT<0>::live());
-    EXPECT_EQ(ref.size(), CountingT<1>::live());
+    EXPECT_EQ(nm.size(), size_t(CountingT<0>::live()));
+    EXPECT_EQ(ref.size(), size_t(CountingT<1>::live()));
     EXPECT_EQ(CountingT<0>::live(), CountingT<1>::live());
   }
 
@@ -152,14 +152,14 @@ TEST(NMVec, BasicSequences)
   nm.resize(150);
   ref.resize(150);
   EXPECT_TRUE(equal(nm, ref));
-  EXPECT_EQ(nm.size(), CountingT<0>::live());
+  EXPECT_EQ(nm.size(), size_t(CountingT<0>::live()));
   EXPECT_EQ(CountingT<0>::live(), CountingT<1>::live());
 
   // 3) shrink via resize
   nm.resize(37);
   ref.resize(37);
   EXPECT_TRUE(equal(nm, ref));
-  EXPECT_EQ(nm.size(), CountingT<0>::live());
+  EXPECT_EQ(nm.size(), size_t(CountingT<0>::live()));
   EXPECT_EQ(CountingT<0>::live(), CountingT<1>::live());
 
   // 4) mutate some elements in place
@@ -174,13 +174,13 @@ TEST(NMVec, BasicSequences)
   nm.resize(200);
   ref.resize(200);
   EXPECT_TRUE(equal(nm, ref));
-  EXPECT_EQ(nm.size(), CountingT<0>::live());
+  EXPECT_EQ(nm.size(), size_t(CountingT<0>::live()));
   EXPECT_EQ(CountingT<0>::live(), CountingT<1>::live());
 
   nm.resize(0);
   ref.resize(0);
   EXPECT_TRUE(equal(nm, ref));
-  EXPECT_EQ(nm.size(), CountingT<0>::live());
+  EXPECT_EQ(nm.size(), size_t(CountingT<0>::live()));
   EXPECT_EQ(CountingT<0>::live(), CountingT<1>::live());
 }
 
