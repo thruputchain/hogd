@@ -24,9 +24,19 @@ void
 AuthChangeSubscriptionManager::detached_publish_auth_changes(
     BlockHeight height, PerThread<KeyChangeBatch> key_changes)
 {
-  [this](this auto, BlockHeight height,
-         PerThread<KeyChangeBatch> key_changes,
-        x23::RefPtr<x23::DestroyInhibit> /*unused*/) -> x23::Detached {
+  // Interestingly:
+  // A prior version of this code was written as
+  // [this](this auto, BlockHeight height,
+  //        PerThread<KeyChangeBatch> key_changes) -> x23::Detached {
+  //   x23::RefPtr guard = inhibit_;
+  //   co_await default_threadpool().bg();
+  //   co_await publish_auth_changes(height, std::move(key_changes));
+  // }(height, std::move(key_changes));
+  // This version causes a gcc14 internal segfault.
+  // Then if you switch `guard = inhibit_;` to `guard = this->inhibit_;`,
+  // clang21 accepts the code, and gcc14 rejects it.
+  [this](this auto, BlockHeight height, PerThread<KeyChangeBatch> key_changes,
+         x23::RefPtr<x23::DestroyInhibit> /*unused*/) -> x23::Detached {
     co_await default_threadpool().bg();
     co_await publish_auth_changes(height, std::move(key_changes));
   }(height, std::move(key_changes), inhibit_);
