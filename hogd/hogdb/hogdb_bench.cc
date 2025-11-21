@@ -21,6 +21,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"

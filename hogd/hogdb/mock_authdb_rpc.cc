@@ -1,8 +1,10 @@
 #include "hogd/hogdb/mock_authdb_rpc.h"
 
 #include <mutex>
+#include <utility>
 
 #include "auth_rpc.hh"
+#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {

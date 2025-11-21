@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <map>
 #include <mutex>
+#include <optional>
 
 #include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
