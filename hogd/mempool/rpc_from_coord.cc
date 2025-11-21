@@ -581,7 +581,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
