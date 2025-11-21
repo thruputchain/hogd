@@ -72,7 +72,7 @@ public:
     }
   }
 
-  void remove_from_runqueue(x23::span<const SignedTransactionHash> hashes);
+  void remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

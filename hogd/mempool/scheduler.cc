@@ -654,12 +654,13 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
 }
 
 void
-Scheduler::remove_from_runqueue(
+Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes)
 {
   std::unordered_set<ContractAddress> accounts;
+  size_t num_removed_from_runqueue = 0;
   for (const SignedTransactionHash &tx_hash : tx_hashes) {
-    auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+    auto [tx_value_ptr, txs_lock] = txs_.find(tx_hash);
     CHECK_PTR(tx_value_ptr);
 
     const SignedTransaction &tx = tx_value_ptr->tx;
@@ -668,9 +669,16 @@ Scheduler::remove_from_runqueue(
                            tx.tx.uniquifier.block_expiry_height,
                        .tx_hash = tx_hash};
     {
-      auto [txs, lock] = account_to_tx_[account];
-      CHECK_EQ(txs.erase(key), 1UL);
+      auto [txs, account_to_tx_lock] = account_to_tx_[account];
+      // The tx may or may not be on the runqueue. If the tx is included in a
+      // block we are *nominating*, then it has already been taken off of the
+      // runqueue. If the tx is included in a block we are *validating*, then it
+      // is still on the runqueue.
+      if (txs.erase(key)) {
+        num_removed_from_runqueue++;
+      }
     }
+    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
     accounts.insert(account);
   }
   for (const ContractAddress &account : accounts) {
@@ -678,7 +686,7 @@ Scheduler::remove_from_runqueue(
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   }
-  size_.fetch_sub(tx_hashes.size(), std::memory_order_relaxed);
+  size_.fetch_sub(num_removed_from_runqueue, std::memory_order_relaxed);
 }
 
 } // namespace hogd

@@ -135,24 +135,34 @@ public:
 
     static std::unordered_set<SignedTransactionHash> return_to_runqueue;
     return_to_runqueue.clear();
-    if (nominated_block_cache_.block_id &&
-        nominated_block_cache_.block_id != block_id) {
-      return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
-                                nominated_block_cache_.tx_hashes.end());
-    }
     const x23::Vec<SignedTransactionHash> *remove_from_scheduler = nullptr;
-    for (const auto &[_, cache] : validated_block_cache_) {
-      if (cache.block_id == block_id) {
-        remove_from_scheduler = &cache.tx_hashes;
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id == block_id) {
+      remove_from_scheduler = &nominated_block_cache_.tx_hashes;
+    }
+    else {
+      if (nominated_block_cache_.block_id &&
+          nominated_block_cache_.block_id != block_id) {
+        return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
+                                  nominated_block_cache_.tx_hashes.end());
+      }
+      for (const auto &[_, cache] : validated_block_cache_) {
+        if (cache.block_id == block_id) {
+          remove_from_scheduler = &cache.tx_hashes;
+        }
+      }
+      CHECK_CONST_PTR(remove_from_scheduler);
+      for (const SignedTransactionHash &hash : *remove_from_scheduler) {
+        if (return_to_runqueue.empty()) {
+          break;
+        }
+        return_to_runqueue.erase(hash);
       }
     }
     CHECK_CONST_PTR(remove_from_scheduler);
-    for (const SignedTransactionHash &hash : *remove_from_scheduler) {
-      return_to_runqueue.erase(hash);
-    }
     scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                               return_to_runqueue.cend());
-    scheduler_->remove_from_runqueue(
+    scheduler_->remove_from_scheduler(
         x23::span<const SignedTransactionHash>(*remove_from_scheduler));
 
     for (x23::Async<void> &handle : handles) {
