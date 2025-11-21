@@ -355,32 +355,35 @@ concept is_xdr_serializable =
 
 static_assert(is_xdr_serializable<std::monostate>);
 
-template<x23::is_xdr_serializable X>
+template<x23::is_xdr_serializable X, size_t E>
 size_t
-xdr_size(const span<X> &s)
+xdr_size(const span<X, E> &s)
 {
+  constexpr size_t kSizeSize = E == std::dynamic_extent ? 4 : 0;
   if constexpr (requires {
                   {
                     x23::detail::size_of_fixed<X>()
                   } -> std::convertible_to<size_t>;
                 })
-    return 4UZ + (s.size() * x23::detail::size_of_fixed<X>());
-  size_t ret = 4;
+    return kSizeSize + (s.size() * x23::detail::size_of_fixed<X>());
+  size_t ret = kSizeSize;
   for (const auto &e : s)
     ret += xdr_size(e);
   return ret;
 }
 
-template<is_xdr_serializable X>
+template<is_xdr_serializable X, size_t E>
 void
-xdr_serialize(auto &serializer, span<X> s)
+xdr_serialize(auto &serializer, span<X, E> s)
 {
-  serializer.put32(s.size());
+  if constexpr (E == std::dynamic_extent)
+    serializer.put32(s.size());
   for (const auto &e : s)
     serializer(e);
 }
 
 static_assert(is_xdr_serializable<span<int32_t>>);
+static_assert(is_xdr_serializable<span<int32_t, 4>>);
 
 inline size_t
 xdr_size(BufView v)
@@ -398,9 +401,11 @@ xdr_serialize(auto &serializer, BufView v)
 
 static_assert(is_xdr_serializable<BufView>);
 
-template<typename X, size_t NX, typename T, size_t NT>
-requires serializes_like<T, X> && (NT == std::dynamic_extent || NT <= NX)
-struct serialize_equiv<Vec<X, NX>, span<T, NT>> : std::true_type {};
+template<typename X, size_t N, typename T> requires serializes_like<T, X>
+struct serialize_equiv<Vec<X, N>, span<T>> : std::true_type {};
+
+template<typename X, size_t N, typename T> requires serializes_like<T, X>
+struct serialize_equiv<std::array<X, N>, span<T, N>> : std::true_type {};
 
 static_assert(serializes_like<span<const int32_t>, Vec<int32_t>>);
 
