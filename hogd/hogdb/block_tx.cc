@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "account.hh"
+#include "auth_rpc.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
@@ -20,13 +22,16 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
+#include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -192,11 +197,12 @@ BlockTX::read_balance_base(const Address &addr)
   auto base = lock->get_cached_nnint128_base();
   return base.has_value() ? *base : 0;
 }
+
 namespace {
 x23::Detached
-async_dispatch_balance_deltas(BlockHeight block_height,
-                              PerThread<std::vector<Delta>> balance_deltas,
-                              auto sched_db_client)
+async_dispatch_balance_deltas(
+    BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,
+    std::shared_ptr<BlockTX::sched_db_client_t> sched_db_client)
 {
   co_await default_threadpool().bg();
 
@@ -216,9 +222,12 @@ BlockTX::commit(WorkerPool &pool)
   std::mutex lock;
   HogDBStatus<void> ret;
 
+  PerThread<KeyChangeBatch> key_changes;
+
   // write item changes.
   item_locks_.for_each_parallel_destructive(
-      [this, &lock, &ret](std::pair<const ItemKey &, const ItemLock &> v) {
+      [this, &lock, &ret,
+       &key_changes](std::pair<const ItemKey &, const ItemLock &> v) {
         if (!v.second.is_finalized()) {
           return;
         }
@@ -227,6 +236,22 @@ BlockTX::commit(WorkerPool &pool)
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
+        }
+
+        if (v.first.is_account_auth_data()) {
+          if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
+            AccountAuthData auth_data = inner->get()->build_result();
+            key_changes->emplace_back(v.first.to_contract_address(),
+                                      x23::Ptr<AccountAuthData>(
+                                          new AccountAuthData(
+                                              inner->get()->build_result())));
+          }
+          else if (v.second.get_inner<DeletionLock>()) {
+            key_changes->emplace_back(v.first.to_contract_address(), nullptr);
+          }
+          else {
+            panic("unsupported type at auth data key: {}", v.first);
+          }
         }
       },
       1024, pool);
@@ -272,6 +297,8 @@ BlockTX::commit(WorkerPool &pool)
                                   sched_db_client_);
   }
 
+  auth_change_subscription_manager_.detached_publish_auth_changes(
+      block_height_, std::move(key_changes));
   return ret;
 }
 

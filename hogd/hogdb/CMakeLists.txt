@@ -1,6 +1,7 @@
 # Create a hogdb module library
 
 add_library(hogdb_objects OBJECT
+  auth_change_subscription_manager.cc
   block_tx.cc
   block_id_manager.cc
   item_lock/auth_lock.cc
