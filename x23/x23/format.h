@@ -3,6 +3,7 @@
 #pragma once
 
 #include <x23/cleanup.h>
+#include <x23/typename.h>
 #include <x23/x23.h>
 
 namespace x23 {
@@ -42,8 +43,8 @@ template<is_xdr_type X0, is_bytevec Out = std::string>
 Out
 show(const X0 &x, size_t indent = 0, Out ret = {})
 {
-  auto go = []<is_xdr_type X>(this auto &&go, Out *out, const X &x,
-                              size_t indent) -> void {
+  auto go = []<typename X>(this auto &&go, Out *out, const X &x,
+                           size_t indent) -> void {
     auto opengroup = [&indent, out](const char *delims) {
       *out += delims[0];
       ++indent;
@@ -55,7 +56,13 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     };
 
     using enum XdrCategory;
-    if constexpr (std::same_as<X, bool>)
+    if constexpr (!is_xdr_type<X>) {
+      if constexpr (requires { *out = show(x, indent, std::move(*out)); })
+        *out = show(x, indent, std::move(*out));
+      else
+        uformat_to(out, "[{}]", type_name<X>());
+    }
+    else if constexpr (std::same_as<X, bool>)
       *out += x ? "TRUE" : "FALSE";
     else if constexpr (category<X> == kString) {
       // GNU libstdc++ doesn't support '?' escaped string format specifier
