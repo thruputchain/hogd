@@ -651,7 +651,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
-  result.block_id() = cache.block_id;
+  result.block_id() = nominated_block_cache_.block_id;
   co_return result;
 }
 
