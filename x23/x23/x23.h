@@ -151,13 +151,32 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   using iterator = value_type *;
   using const_iterator = const value_type *;
 
+  // Allow construction from nullptr
   using super::super;
+
   Ptr(const Ptr &other)
   {
     if (other)
       this->reset(new element_type(*other));
   }
   Ptr(Ptr &&other) noexcept = default;
+
+  // Allow construction from rvalues of type T
+  Ptr(value_type t) { emplace(std::move(t)); }
+
+  template<typename... Args>
+  requires std::constructible_from<value_type, Args...>
+  Ptr(std::in_place_t, Args &&...args)
+  {
+    emplace(std::forward<Args>(args)...);
+  }
+  template<typename U, typename... Args>
+  requires std::constructible_from<value_type, std::initializer_list<U>,
+                                   Args...>
+  Ptr(std::in_place_t, std::initializer_list<U> ilist, Args &&...args)
+  {
+    emplace(ilist, std::forward<Args>(args)...);
+  }
 
   Ptr &operator=(const Ptr &other)
   {
@@ -178,6 +197,14 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   element_type &emplace(Args &&...args)
   {
     this->reset(new element_type(std::forward<Args>(args)...));
+    return *this->get();
+  }
+  template<typename U, typename... Args>
+  requires std::constructible_from<element_type, std::initializer_list<U>,
+                                   Args...>
+  element_type &emplace(std::initializer_list<U> ilist, Args &&...args)
+  {
+    this->reset(new element_type(ilist, std::forward<Args>(args)...));
     return *this->get();
   }
 
@@ -202,6 +229,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   auto end(this auto &&self) noexcept { return self.begin() + self.size(); }
   value_type &back(this auto &&self) { return *self.get(); }
 };
+template<typename T> Ptr(T &&) -> Ptr<T>;
 
 // A non-owning Ptr that serializes like a Ptr.
 template<typename T> struct BorrowedPtr {
