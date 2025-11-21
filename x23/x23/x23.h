@@ -657,15 +657,26 @@ concept is_proc_enum = requires { typename version_for_proc_enum<E>::type; };
 // Specialize this template to declare that some XDR type serializes
 // equivalently to some other type.
 template<typename XdrType, typename OtherType>
-struct serialize_equiv : std::false_type {};
+struct serialize_equiv : std::is_same<XdrType, OtherType> {};
 
-template<is_xdr_type X> struct serialize_equiv<X, X> : std::true_type {};
 template<> struct serialize_equiv<void, std::monostate> : std::true_type {};
 template<> struct serialize_equiv<void, std::tuple<>> : std::true_type {};
 
 // Concept for types T you can use where you want to serialize an X.
 template<typename T, typename X>
 concept serializes_like = serialize_equiv<X, std::remove_cvref_t<T>>::value;
+
+// Vectors, Arrays, and Pointers serialize equivalently if their value
+// types do so as well.
+template<typename X, size_t NX, serializes_like<X> T, size_t TX>
+requires (NX >= std::min(TX, kMaxXdrSize))
+struct serialize_equiv<Vec<X, NX>, Vec<T, TX>> : std::true_type {};
+
+template<typename X, size_t N, serializes_like<X> T>
+struct serialize_equiv<std::array<X, N>, std::array<T, N>> : std::true_type {};
+
+template<typename X, serializes_like<X> T>
+struct serialize_equiv<Ptr<X>, Ptr<T>> : std::true_type {};
 
 // Concept for types you can pass to an RPC function expecting type X.
 template<typename T, typename X>
