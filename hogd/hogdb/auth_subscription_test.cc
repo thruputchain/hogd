@@ -332,6 +332,71 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   EXPECT_EQ(received3->at(0).address, addr.get_raw());
   EXPECT_NE(received3->at(0).auth_data, nullptr);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
+TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
+{
+  AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocol,
+                               .upid = {},
+                               .address = "localhost:12345"};
+  AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocol,
+                                .upid = {},
+                                .address = "unresolvable:12345"};
+  AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocol,
+                                .upid = {},
+                                .address = "unparseable_nonsense"};
+  // Subscribe to auth changes
+  [this, bad_card, bad_card2, bad_card3]() -> x23::Async<void> {
+    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card);
+    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card2);
+    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card3);
+    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card_);
+  }()();
+
+  // Create an address
+  Address addr = make_address(0x5555);
+
+  // Grant storage tokens to the address
+  constexpr int128_t kStorageTokens = 1'000'000;
+  grant_storage_token(addr, kStorageTokens);
+
+  BlockHeight height = 1;
+  db_.load_trie(trie_);
+
+  // Create PerThreadARC<BlockTX> and InvokeTX
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
+                                 subscription_manager_, height);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  // Create auth data change
+  AuthDataChangeArgs auth_data{};
+  auth_data.auth_data_change_signers.push_back(
+      AuthDataChangeSigner{.public_key_id = 0,
+                           .public_key = make_test_pk_config(99)});
+
+  // Request auth data change
+  HogDBStatus<void> ret = invoke_tx.request_auth_data(
+      addr, auth_data, std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  ASSERT_TRUE(ret);
+
+  HogDBStatus<void> sync_ret = invoke_tx.sync_balance_locks();
+  ASSERT_TRUE(sync_ret);
+
+  // Commit InvokeTX (applies changes to BlockTX)
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  // Commit BlockTX (writes to database and publishes auth changes)
+  HogDBStatus<void> commit_result = block_tx.get().commit();
+  ASSERT_TRUE(commit_result);
+
+  // Verify that the good server still received the change
+  mock_auth_server_.impl()->wait_for_changes(height);
+  auto received = mock_auth_server_.impl()->get_changes_at_height(height);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(received->size(), 1);
+  EXPECT_EQ(received->at(0).address, addr.get_raw());
+  EXPECT_NE(received->at(0).auth_data, nullptr);
+}
+// NOLINTEND(bugprone-unchecked-optional-access)
 } // namespace hogd

@@ -20,14 +20,15 @@ public:
                                      PerThread<KeyChangeBatch> key_changes);
   x23::Async<void> publish_auth_changes(BlockHeight height,
                                         PerThread<KeyChangeBatch> key_changes);
-  x23::Async<void> add_full_auth_change_subscriber(AuthCard card);
+  x23::Async<bool> add_full_auth_change_subscriber(AuthCard card);
 
   ~AuthChangeSubscriptionManager() { inhibit_.destroy_wait(); }
 
 private:
   // bizarre clang-tidy false positive
-  // NOLINTNEXTLINE(modernize-use-nullptr)
+  // NOLINTBEGIN(modernize-use-nullptr)
   using auth_db_client_t = decltype(make_rpc_client<AuthDB1>(0));
+  // NOLINTEND(modernize-use-nullptr)
 
   x23::CoroLock lock_;
   std::map<AuthCard, auth_db_client_t> auth_db_clients_;

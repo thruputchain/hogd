@@ -31,6 +31,7 @@ public:
                          .address_for_exec = "",
                          .address_for_sched = "",
                          .address_for_auth = auth_address.c_str()};
+
     // Create IntroAuthResult
     IntroAuthResult intro_result;
     intro_result.shards.push_back(shard_card);

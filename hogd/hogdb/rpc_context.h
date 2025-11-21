@@ -70,6 +70,10 @@ public:
   HogDBDAO &get_db() { return db_; }
   MerkleTriePrefix &get_trie() { return *trie_; }
   DbTip &get_tip() { return tip_; }
+  AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
+  {
+    return auth_change_subscription_manager_;
+  }
 
   // Get the committed block height, when exact synchronization with DbTip is
   // not required. current_committed_height_ is updated when a block is

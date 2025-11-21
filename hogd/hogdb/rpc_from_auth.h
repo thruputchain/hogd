@@ -21,10 +21,10 @@ public:
   authdb_get_auth_data_batch(BlockHeight height,
                              ContractAddressBatch addresses);
 
-  static x23::Async<void> dbauth_intro(AuthCard card)
+  x23::Async<bool> dbauth_intro(AuthCard card)
   {
-    // TODO(geoff): implement subscription to auth data changes
-    co_return;
+    return ctx_.get_auth_change_subscription_manager()
+        .add_full_auth_change_subscriber(std::move(card));
   }
 
 private:

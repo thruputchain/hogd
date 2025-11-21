@@ -1,15 +1,21 @@
 #pragma once
 
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "account.hh"
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_data_cache.h"
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/status.h"
+#include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/version.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -38,6 +44,8 @@ public:
   register_auth_data_updates(BlockHeight height,
                              KeyChangeBatch const &key_changes);
 
+  x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
+
 private:
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
@@ -54,6 +62,45 @@ private:
   // Used to stall incoming requests until the updates from the db are present,
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
+};
+
+class AuthDBRpc {
+public:
+  using rpc_service = AuthDB1;
+  explicit AuthDBRpc(AuthServer &auth_server) : auth_server_(auth_server) {}
+
+  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
+                                              KeyChangeBatch const &key_changes)
+  {
+    return auth_server_.register_auth_data_updates(height, key_changes);
+  }
+
+  x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card)
+  {
+    return auth_server_.subscribe_to_auth_data_changes(card);
+  }
+
+private:
+  AuthServer &auth_server_;
+};
+
+static_assert(is_AuthDB1<AuthDBRpc *, x23::Async>);
+
+class AuthDBServer : public RpcServer<AuthDBRpc> {
+public:
+  explicit AuthDBServer(AuthServer &auth_server) : RpcServer(auth_server) {}
+
+  x23::Async<void> subscribe_to_auth_data_changes(std::string self_address)
+  {
+    auto port = RpcServer::port();
+    // must start the auth db server before you can subscribe to updates
+    CHECK(port != 0);
+    auto addr = std::format("{}:{}", self_address, port);
+    AuthCard self_card = {.protocol = version::kHogdProtocol,
+                          .upid = {},
+                          .address = addr.c_str()};
+    return impl()->subscribe_to_auth_data_changes(self_card);
+  }
 };
 
 } // namespace hogd
