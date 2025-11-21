@@ -541,15 +541,23 @@ HogDBDAO::read_contract_data_item(const ItemKey &key)
 HogDBStatus<void>
 HogDBDAO::remove_item(const ItemKey &key)
 {
-  if (!key.is_contract_data()) [[unlikely]] {
-    error("item key is not contract data: {}", key.key_type());
-    return HogDBError(HogDBCode::kInternal);
+  if (key.is_contract_data()) {
+    auto db_key = make_contract_data_key(key.as_bytes());
+    auto before_item = get_before_item(db_key);
+    auto ret = db_.remove(db_key);
+    update_invariants_post(db_key, before_item);
+    return ret;
   }
-  auto db_key = make_contract_data_key(key.as_bytes());
-  auto before_item = get_before_item(db_key);
-  auto ret = db_.remove(db_key);
-  update_invariants_post(db_key, before_item);
-  return ret;
+  if (key.is_account_auth_data()) {
+    auto db_key = make_address_key(key.get_address(), Prefix::kAccountAuthData);
+    auto before_item = get_before_item(db_key);
+    auto ret = db_.remove(db_key);
+    update_invariants_post(db_key, before_item);
+    return ret;
+  }
+  error("unhandled item key type in remove_item: {}",
+        std::to_underlying(key.key_type()));
+  return HogDBError(HogDBCode::kInternal);
 }
 
 } // namespace hogd

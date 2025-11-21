@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "account.hh"
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/coropoll.h"
@@ -67,6 +68,10 @@ x23::Async<void>
 AuthServer::register_auth_data_updates(BlockHeight height,
                                        KeyChangeBatch const &key_changes)
 {
+  // TODO(geoff): this logic will break if there's a sharded db, and i.e.
+  // multiple batches of updates from the same block height. Probably the
+  // simplest solution will be to have a separate coro futex and separate auth
+  // cache for each one.
   for (;;) {
     BlockHeight current_height = current_height_futex_.load();
     if (current_height == kUninitializedHeight) {
@@ -118,6 +123,12 @@ AuthServer::register_auth_data_updates(BlockHeight height,
   }
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
+}
+
+x23::Async<void>
+AuthServer::subscribe_to_auth_data_changes(AuthCard const &card)
+{
+  return dbauth_client_.subscribe_to_auth_data_changes(card);
 }
 
 } // namespace hogd

@@ -7,6 +7,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
+#include <utility>
 
 namespace hogd {
 
@@ -14,14 +15,25 @@ HogDBStatus<void>
 DeletionLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
                                      MerkleTriePrefix &trie)
 {
-
-  HogDBStatus<int8_t> type_ret = dao.get_item_type(key);
-  if (!type_ret) {
-    // Deleting a non-existent key is a no-op.
-    if (type_ret.error() == HogDBCode::kNotFound) {
-      return {};
+  int8_t type = 0;
+  if (key.is_account_auth_data()) {
+    type = 0;
+  }
+  else if (key.is_contract_data()) {
+    auto type_ret = dao.get_item_type(key);
+    if (!type_ret) {
+      // Deleting a non-existent key is a no-op.
+      if (type_ret.error() == HogDBCode::kNotFound) {
+        return {};
+      }
+      return type_ret.error();
     }
-    return type_ret.error();
+    type = type_ret.value();
+  }
+  else {
+    error("unhandled item key type in DeletionLock: {}",
+          std::to_underlying(key.key_type()));
+    return HogDBError(HogDBCode::kInternal);
   }
 
   HogDBStatus<void> remove_ret = dao.remove_item(key);
@@ -31,8 +43,8 @@ DeletionLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
   // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
   // will never attempt to remove a key that does not exist. We already checked
   // above that the key exists when we removed it from the database.
-  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, key, type_ret.value())
-            .has_value());
+  CHECK(
+      MerkleTrieHelpers::remove_kv_pair_from_trie(trie, key, type).has_value());
   return {};
 }
 
