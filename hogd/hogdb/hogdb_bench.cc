@@ -21,6 +21,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -94,6 +95,7 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
+  AuthChangeSubscriptionManager subscription_manager_;
 
   StorageCostModel cost_model_{StorageCostModelXdr{
       .ext = ExtensionPoint(0),
@@ -309,7 +311,8 @@ Benchmark::run()
   // swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
   // trace("trace logging enabled");
 
-  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr, 1);
+  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr,
+                              subscription_manager_, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
   if (HogDBStatus<void> ret = db_.write_dbtip(tip); !ret)

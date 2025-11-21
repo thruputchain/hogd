@@ -22,6 +22,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/hogdb/auth_change_subscription_manager.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -69,6 +70,10 @@ public:
   HogDBDAO &get_db() { return db_; }
   MerkleTriePrefix &get_trie() { return *trie_; }
   DbTip &get_tip() { return tip_; }
+  AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
+  {
+    return auth_change_subscription_manager_;
+  }
 
   // Get the committed block height, when exact synchronization with DbTip is
   // not required. current_committed_height_ is updated when a block is
@@ -146,7 +151,9 @@ private:
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
 
+  // External serivces that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;
+  AuthChangeSubscriptionManager auth_change_subscription_manager_;
 
   // slow path for get_block_tx().
   PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,

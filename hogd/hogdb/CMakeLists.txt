@@ -1,6 +1,7 @@
 # Create a hogdb module library
 
 add_library(hogdb_objects OBJECT
+  auth_change_subscription_manager.cc
   block_tx.cc
   block_id_manager.cc
   item_lock/auth_lock.cc
@@ -65,6 +66,7 @@ target_link_libraries(
 # Build hogdb_test executable
 add_executable(
   hogdb_test
+  auth_subscription_test.cc
   hogdb_test.cc
   item_change_auth_test.cc
   item_change_exclusive_test.cc
@@ -73,6 +75,7 @@ add_executable(
   item_lock/auth_lock_test.cc
   item_lock/bytestring_lock_test.cc
   item_lock/nnint128_lock_test.cc
+  mock_authdb_rpc.cc
   recovery_tests.cc
 )
 target_link_libraries(

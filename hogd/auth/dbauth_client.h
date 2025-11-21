@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "account.hh"
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/rpc_client.h"
@@ -17,6 +18,8 @@ public:
 
   x23::Async<AuthStatus<std::optional<AccountAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
+
+  x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
   // clang-tidy bizarre false positive

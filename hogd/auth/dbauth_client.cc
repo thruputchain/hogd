@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "account.hh"
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
@@ -51,6 +52,14 @@ DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
   }
   error("unknown DBAuthError: {}", static_cast<int>(res.error()));
   co_return AuthError(AuthErrorCode::kAuthInternal);
+}
+
+x23::Async<void>
+DBAuthClient::subscribe_to_auth_data_changes(AuthCard const &card)
+{
+  auto res = co_await client_.dbauth_intro(card);
+  CHECK(res);
+  co_return;
 }
 
 } // namespace hogd

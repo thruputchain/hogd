@@ -213,6 +213,11 @@ public:
   }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
 
+  [[nodiscard]] constexpr ContractAddress to_contract_address() const
+  {
+    return item_key_.addr.get_raw();
+  }
+
   [[nodiscard]] constexpr SHA256Hash get_contract_code_hash() const
   {
     assert(is_contract_code() || is_contract_refcount());

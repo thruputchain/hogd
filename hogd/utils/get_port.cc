@@ -23,6 +23,8 @@ usage(char *argv[])
                hogd::kMempoolExecutorServerPort);
   std::println("  kMempoolDbServerPort: {}", hogd::kMempoolDbServerPort);
   std::println("  kMempoolEventServerPort: {}", hogd::kMempoolEventServerPort);
+  std::println("  kMempoolAuthServerPort: {}", hogd::kMempoolAuthServerPort);
+
   // executor
   std::println("  kExecutorMempoolServerPort: {}",
                hogd::kExecutorMempoolServerPort);
@@ -30,6 +32,9 @@ usage(char *argv[])
   std::println("  kEventExecutorServerPort: {}",
                hogd::kEventExecutorServerPort);
   std::println("  kEventMempoolServerPort: {}", hogd::kEventMempoolServerPort);
+  // auth
+  std::println("  kAuthDbServerPort: {}", hogd::kAuthDbServerPort);
+  std::println("  kAuthMempoolServerPort: {}", hogd::kAuthMempoolServerPort);
   // ci control
   std::println("  kCIControlServerPort: {}", hogd::kCIControlServerPort);
   exit(EXIT_FAILURE);
@@ -67,6 +72,11 @@ get_port(const std::string &port_name)
   if (port_name == "kMempoolEventServerPort") {
     return hogd::kMempoolEventServerPort;
   }
+
+  if (port_name == "kMempoolAuthServerPort") {
+    return hogd::kMempoolAuthServerPort;
+  }
+
   // executor
   if (port_name == "kExecutorMempoolServerPort") {
     return hogd::kExecutorMempoolServerPort;
@@ -79,6 +89,15 @@ get_port(const std::string &port_name)
 
   if (port_name == "kEventMempoolServerPort") {
     return hogd::kEventMempoolServerPort;
+  }
+
+  // auth
+  if (port_name == "kAuthDbServerPort") {
+    return hogd::kAuthDbServerPort;
+  }
+
+  if (port_name == "kAuthMempoolServerPort") {
+    return hogd::kAuthMempoolServerPort;
   }
 
   // ci control
