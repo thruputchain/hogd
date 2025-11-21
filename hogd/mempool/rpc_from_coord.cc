@@ -569,7 +569,7 @@ MempoolCoordinatorRpc::finish_nominating_block(NominationData &cache)
   co_await last_chunk_handle;
 }
 
-x23::Async<SchedulerNominationOutcome>
+x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
   // Wait for hogdb to notify us of all HOG transfers that occurred in the
@@ -613,7 +613,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     co_await scheduler_->add_txs(cache.txs);
     scheduler_->decrement_current_block();
 
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   // Schedule the block and send the txs to the executors.
@@ -636,11 +637,16 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // [scheduler_->scheduler()] increments the block number, so we need to
     // decrement it since we did not nominate a block.
     scheduler_->decrement_current_block();
-    co_return SchedulerNominationOutcome::SchedulerNominationError;
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   co_await finish_nominating_block(cache);
-  co_return SchedulerNominationOutcome::SchedulerNominationOK;
+
+  SchedulerNominationResult result(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  result.block_id() = cache.block_id;
+  co_return result;
 }
 
 x23::Async<bool>

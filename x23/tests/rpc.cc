@@ -6,6 +6,7 @@
 #include "x23/sockio.h"
 
 #include "tests/xdrtest.hh"
+#include "x23/x23.h"
 
 using namespace std::string_literals;
 // using namespace x23;
@@ -17,6 +18,7 @@ struct Context {};
 Context context;
 
 using x23::Async;
+using x23::MaybeAsync;
 
 struct Impl {
   using rpc_service = myvers;
@@ -45,9 +47,17 @@ struct Impl {
     co_return ret;
   }
 
-  Async<intvec> takes_vec(intvec v, Context &c) { co_return v; }
+  Async<x23::span<std::int32_t>> takes_vec(intvec v, Context &c)
+  {
+    static intvec ret = std::move(v);
+    co_return ret;
+  }
 };
 static_assert(is_myvers<Impl *, Async, Context>);
+
+static_assert(
+    x23::satisfies_rpc_return<Async<x23::span<int32_t>>, intvec, MaybeAsync>);
+static_assert(is_myvers<Impl *, MaybeAsync, Context>);
 
 Impl impl;
 
@@ -76,6 +86,12 @@ client(auto &c)
   co_await c.takes_vec(is);
 
   co_return;
+}
+
+void
+make_server(x23::RpcStream<x23::RpcLogger>::Configurator c)
+{
+  c->server(&impl, myvers{}, context);
 }
 
 int

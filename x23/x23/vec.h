@@ -60,6 +60,7 @@
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/debug.h>
+#include <x23/iter.h>
 #include <x23/typename.h>
 #include <x23/utility.h>
 
@@ -123,9 +124,9 @@ struct merged_allocator<T> {
 };
 
 template<typename T> struct VecBuf {
-  T *begin;
-  T *end;
-  T *bufend;
+  T begin;
+  T end;
+  T bufend;
 };
 
 // Like std::strlen, but constexpr
@@ -143,9 +144,9 @@ strlen(const char *s)
   }
 }
 
-template<typename T> class PtrIterator {
+template<typename T> class PtrIterator : public RandomAcessIterMixin {
 public:
-  using iterator_category = std::contiguous_iterator_tag;
+  using iterator_concept = std::contiguous_iterator_tag;
   using difference_type = std::ptrdiff_t;
   using value_type = T;
   using pointer = T *;
@@ -164,75 +165,18 @@ public:
   {
     return *self.ptr_;
   }
-  constexpr auto operator->(this const auto &self) noexcept
-  {
-    return self.ptr_;
-  }
-
-  constexpr auto &operator++(this auto &self) noexcept
-  {
-    ++self.ptr_;
-    return (self);
-  }
-  constexpr auto operator++(this auto &self, int) noexcept
-  {
-    auto tmp = self;
-    ++self;
-    return tmp;
-  }
-
-  constexpr auto &operator--(this auto &self) noexcept
-  {
-    --self.ptr_;
-    return (self);
-  }
-  constexpr auto operator--(this auto &self, int) noexcept
-  {
-    auto tmp = self;
-    --self;
-    return tmp;
-  }
 
   constexpr auto &operator+=(this auto &self, difference_type offset) noexcept
   {
     self.ptr_ += offset;
     return (self);
   }
-  template<typename Self>
-  constexpr Self operator+(this const Self &self,
-                           difference_type offset) noexcept
-  {
-    return Self(self.ptr_ + offset);
-  }
+
   template<std::derived_from<PtrIterator> Self>
-  friend constexpr Self operator+(difference_type offset,
-                                  const Self &self) noexcept
+  friend constexpr difference_type operator-(const Self &a,
+                                             const Self &b) noexcept
   {
-    return Self(self.ptr_ + offset);
-  }
-
-  constexpr auto &operator-=(this auto &self, difference_type offset) noexcept
-  {
-    self.ptr_ -= offset;
-    return (self);
-  }
-  template<typename Self>
-  constexpr Self operator-(this const Self &self,
-                           difference_type offset) noexcept
-  {
-    return Self(self.ptr_ - offset);
-  }
-  template<typename Self>
-  constexpr difference_type operator-(this const Self &self,
-                                      const Self &other) noexcept
-  {
-    return self.ptr_ - other.ptr_;
-  }
-
-  constexpr decltype(auto) operator[](this const auto &self,
-                                      difference_type offset) noexcept
-  {
-    return self.ptr_[offset];
+    return a.ptr_ - b.ptr_;
   }
 
   template<typename Self>
@@ -345,7 +289,7 @@ public:
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using allocator_type = Allocator;
 
-  using Buf = detail::VecBuf<T>;
+  using Buf = detail::VecBuf<T *>;
 
   static constexpr size_type kMaxSize = MaxSize;
 

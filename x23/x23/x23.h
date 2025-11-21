@@ -151,13 +151,32 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   using iterator = value_type *;
   using const_iterator = const value_type *;
 
+  // Allow construction from nullptr
   using super::super;
+
   Ptr(const Ptr &other)
   {
     if (other)
       this->reset(new element_type(*other));
   }
   Ptr(Ptr &&other) noexcept = default;
+
+  // Allow construction from rvalues of type T
+  Ptr(value_type t) { emplace(std::move(t)); }
+
+  template<typename... Args>
+  requires std::constructible_from<value_type, Args...>
+  Ptr(std::in_place_t, Args &&...args)
+  {
+    emplace(std::forward<Args>(args)...);
+  }
+  template<typename U, typename... Args>
+  requires std::constructible_from<value_type, std::initializer_list<U>,
+                                   Args...>
+  Ptr(std::in_place_t, std::initializer_list<U> ilist, Args &&...args)
+  {
+    emplace(ilist, std::forward<Args>(args)...);
+  }
 
   Ptr &operator=(const Ptr &other)
   {
@@ -178,6 +197,14 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   element_type &emplace(Args &&...args)
   {
     this->reset(new element_type(std::forward<Args>(args)...));
+    return *this->get();
+  }
+  template<typename U, typename... Args>
+  requires std::constructible_from<element_type, std::initializer_list<U>,
+                                   Args...>
+  element_type &emplace(std::initializer_list<U> ilist, Args &&...args)
+  {
+    this->reset(new element_type(ilist, std::forward<Args>(args)...));
     return *this->get();
   }
 
@@ -202,6 +229,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
   auto end(this auto &&self) noexcept { return self.begin() + self.size(); }
   value_type &back(this auto &&self) { return *self.get(); }
 };
+template<typename T> Ptr(T &&) -> Ptr<T>;
 
 // A non-owning Ptr that serializes like a Ptr.
 template<typename T> struct BorrowedPtr {
@@ -629,15 +657,26 @@ concept is_proc_enum = requires { typename version_for_proc_enum<E>::type; };
 // Specialize this template to declare that some XDR type serializes
 // equivalently to some other type.
 template<typename XdrType, typename OtherType>
-struct serialize_equiv : std::false_type {};
+struct serialize_equiv : std::is_same<XdrType, OtherType> {};
 
-template<is_xdr_type X> struct serialize_equiv<X, X> : std::true_type {};
 template<> struct serialize_equiv<void, std::monostate> : std::true_type {};
 template<> struct serialize_equiv<void, std::tuple<>> : std::true_type {};
 
 // Concept for types T you can use where you want to serialize an X.
 template<typename T, typename X>
 concept serializes_like = serialize_equiv<X, std::remove_cvref_t<T>>::value;
+
+// Vectors, Arrays, and Pointers serialize equivalently if their value
+// types do so as well.
+template<typename X, size_t NX, serializes_like<X> T, size_t TX>
+requires (NX >= std::min(TX, kMaxXdrSize))
+struct serialize_equiv<Vec<X, NX>, Vec<T, TX>> : std::true_type {};
+
+template<typename X, size_t N, serializes_like<X> T>
+struct serialize_equiv<std::array<X, N>, std::array<T, N>> : std::true_type {};
+
+template<typename X, serializes_like<X> T>
+struct serialize_equiv<Ptr<X>, Ptr<T>> : std::true_type {};
 
 // Concept for types you can pass to an RPC function expecting type X.
 template<typename T, typename X>
@@ -667,5 +706,49 @@ convert_rpc_arg(T &&t)
 
 static_assert(std::same_as<decltype(convert_rpc_arg<Str>("hi")), Str>);
 static_assert(std::same_as<decltype(convert_rpc_arg<Str>("hi"_str)), Str &&>);
+
+// untransform_t<RetTrans, RetTrans<T>> should yield type T
+template<template<typename> typename Trans, typename T> struct untransform;
+template<template<typename> typename Trans, typename T>
+using untransform_t = untransform<Trans, T>::type;
+
+template<typename T> struct untransform<std::type_identity_t, T> {
+  using type = T;
+};
+
+template<template<typename> typename Trans, typename T>
+struct untransform<Trans, Trans<T>> {
+  using type = T;
+};
+
+#if 0
+// This is the code we want, but it crashes on clang 20
+template<typename T>
+using untransform_auto_t =
+    decltype([]<template<typename> typename Trans, typename Inner>(
+                 Trans<Inner> *) -> Inner {
+      throw;
+    }(static_cast<T *>(nullptr)));
+#else
+namespace detail {
+template<typename T> struct untransform_auto {};
+template<template<typename> typename Trans, typename Inner>
+struct untransform_auto<Trans<Inner>> {
+  using type = Inner;
+};
+}; // namespace detail
+
+template<typename T>
+using untransform_auto_t = detail::untransform_auto<T>::type;
+#endif
+
+template<typename T, typename Xdr,
+         template<typename> typename RetTrans = std::type_identity_t>
+concept satisfies_rpc_return =
+    std::convertible_to<T, RetTrans<Xdr>> ||
+    serializes_like<untransform_t<RetTrans, T>, Xdr> ||
+    (std::convertible_to<T, RetTrans<untransform_auto_t<T>>> &&
+     serializes_like<untransform_auto_t<T>, Xdr>) ||
+    (std::is_void_v<T> && std::convertible_to<std::monostate, RetTrans<Xdr>>);
 
 } // namespace x23

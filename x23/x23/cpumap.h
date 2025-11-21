@@ -146,6 +146,7 @@ public:
 private:
   alignas(cpu_set_t) char buf_[kSize];
 };
+
 } // namespace x23
 
 template<> struct std::formatter<x23::CpuSet> {
@@ -257,6 +258,9 @@ private:
 #endif // HAVE_SCHED_SETAFFINITY
 };
 
+struct populate_t {};
+constexpr populate_t populate;
+
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
 // ValidOnly is false, then it will only construct a T for CpuSets on
 // which we can actually be scheduled.
@@ -266,11 +270,18 @@ public:
 
   const CpuMap &map_;
 
-  PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
+  explicit PerCpuSet(const CpuMap &map) : map_(map), values_(a.allocate(size()))
   {
     if constexpr (ValidOnly)
       constructed_.resize(map_.nbuckets());
   }
+  template<typename... Args>
+  explicit PerCpuSet(const CpuMap &map, populate_t, Args &&...args)
+    : PerCpuSet(map)
+  {
+    populate(std::forward<Args>(args)...);
+  }
+
   ~PerCpuSet()
   {
     for (auto i : valid_indices_)
@@ -292,7 +303,15 @@ public:
   {
     // If this assert fails, you probably tried to populate twice
     assert(!valid_indices_.size());
-    for (int i = 0; i < map_.nbuckets(); ++i) {
+    int i;
+    [[maybe_unused]] auto _d = [&] {
+      if constexpr (ValidOnly)
+        return std::tuple{};
+      else
+        return Defer{
+            [this, &i] { valid_indices_ = decltype(valid_indices_)(0, i); }};
+    }();
+    for (i = 0; i < map_.nbuckets(); ++i) {
       const auto &s = map_.cpuset(i);
       if (!ValidOnly || s.valid())
         construct(i, std::forward<Args>(args)...);
@@ -336,9 +355,10 @@ private:
   // Record which indices of values_ have been constructed
   [[no_unique_address]] std::conditional_t<ValidOnly, std::vector<bool>,
                                            std::tuple<>> constructed_;
-
-  value_type *values_;          // Per-CpuSet values
-  Vec<unsigned> valid_indices_; // List of valid indices to values_
+  value_type *values_; // Per-CpuSet values
+  std::conditional_t<ValidOnly, Vec<unsigned>,
+                     std::ranges::iota_view<unsigned, unsigned>>
+      valid_indices_; // List of valid indices to values_
 
   // Simple emplace
   template<typename... Args>
@@ -349,8 +369,8 @@ private:
     if constexpr (ValidOnly) {
       assert(!constructed_[i]);
       constructed_[i] = true;
+      valid_indices_.push_back(i);
     }
-    valid_indices_.push_back(i);
   }
 
   // Emplace from invocation result on CpuSet
@@ -364,7 +384,8 @@ private:
     std::construct_at(values_ + i,
                       std::invoke(std::forward<F>(f),
                                   std::forward<Args>(args)..., map_.cpuset(i)));
-    constructed_[i] = true;
+    if constexpr (ValidOnly)
+      constructed_[i] = true;
     valid_indices_.push_back(i);
   }
 };
@@ -399,16 +420,28 @@ CpuMap make_llc_map();
 extern const CpuMap *core_map; // Groups CPUs by physical core
 extern const CpuMap *llc_map;  // Groups CPUs by last-level cache
 
+// Reified type represent a specific CpuMap
+template<const CpuMap *&Map> struct cpu_map_t {
+  static constexpr const CpuMap *&map = Map;
+  consteval cpu_map_t() noexcept = default;
+  constexpr operator const CpuMap &() const noexcept { return *map; }
+};
+template<typename T> concept is_cpu_map = std::same_as<T, cpu_map_t<T::map>>;
+using CoreMap = cpu_map_t<core_map>;
+using LLCMap = cpu_map_t<llc_map>;
+
 // Initialize global CPU topology mappings during static
 // initialization.  Called automatically before main() starts, but can
 // be called explicitly to ensure early initialization.
-void init_cpumaps();
+std::tuple<> init_cpumaps();
 
+/*
 // Wrapper that aligns type T to cache line boundaries to prevent
 // false sharing between CPU cores.
 template<typename T>
 struct alignas(hardware_destructive_interference_size) CacheAligned : T {
   using T::T;
 };
+*/
 
 } // namespace x23

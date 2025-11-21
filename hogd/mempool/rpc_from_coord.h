@@ -94,17 +94,18 @@ public:
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerNominationOutcome> schedulercoord_nominate(DbTip db_tip);
+  x23::Async<SchedulerNominationResult> schedulercoord_nominate(DbTip db_tip);
 
   // Have the mempool validate a block. [nomination] holds the block to
   // validate. [db_tip] specifies the last committed block.
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  static x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block(BlockID block_id)
   {
     // TODO(jhumphri): Implement.
-    co_return;
+    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
 
   // These are just stubs that pass through the calls from the coordinator to
