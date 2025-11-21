@@ -50,9 +50,10 @@ echo 'build'
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh
 
-echo 'run metrics'
 export BUILD_DIR=release
-source ./scripts/ci/metrics.sh
+
+echo 'run metrics'
+./scripts/ci/metrics.sh
 
 echo 'commit metrics'
 ./scripts/commit_metrics.sh
