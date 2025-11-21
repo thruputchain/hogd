@@ -1,0 +1,134 @@
+name = "integration_ci"
+
+# loadgen
+
+[[jobs]]
+name = "{{ .hog_schedule }}_loadgen"
+host = ["hog7"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# XXX: start geoff's loadgen
+
+"""
+after = """
+"""
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+
+# coordinator
+
+[[jobs]]
+name = "{{ .hog_schedule }}_coordinator"
+host = ["hog8"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# XXX: start coordinator
+
+"""
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+
+# scheduler
+
+[[jobs]]
+name = "{{ .hog_schedule }}_scheduler"
+host = ["hog9"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# XXX: start scheduler
+
+"""
+after = """
+"""
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+
+# db
+
+[[jobs]]
+name = "{{ .hog_schedule }}_db_{{ .hog_host_index }}"
+host = ["hog6"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# XXX: start db
+
+"""
+after = """
+"""
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+
+# exec
+
+[[jobs]]
+name = "{{ .hog_schedule }}_exec_{{ .hog_host_index }}"
+host = ["hog1", "hog2", "hog3"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# XXX: start exec
+
+"""
+after = """
+"""
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
