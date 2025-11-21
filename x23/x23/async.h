@@ -693,9 +693,9 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   {
     if (has_value()) {
       if constexpr (sizeof...(Args) == 0)
-	return xval();
+        return xval();
       else
-	return compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
+        return compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
     }
     else {
       auto *a = asyncp();

@@ -385,8 +385,7 @@ TEST(NMVec, RangeBasedIteration)
   auto last = nm.end();
   EXPECT_EQ(last - first, static_cast<std::ptrdiff_t>(nm.size()));
   EXPECT_EQ(first + static_cast<std::ptrdiff_t>(nm.size()), last);
-  EXPECT_EQ(std::ranges::distance(nm),
-            static_cast<std::ptrdiff_t>(nm.size()));
+  EXPECT_EQ(std::ranges::distance(nm), static_cast<std::ptrdiff_t>(nm.size()));
 
   // Random-access operations should behave the same as for vectors.
   EXPECT_EQ(*(nm.begin() + 5), 15);
@@ -403,8 +402,8 @@ TEST(NMVec, ConstIteratorBasics)
   const NMVec<int> &cnm = nm;
   static_assert(
       std::is_same_v<decltype(cnm.begin()), NMVec<int>::const_iterator>);
-  static_assert(std::is_const_v<
-                std::remove_reference_t<decltype(*cnm.begin())>>);
+  static_assert(
+      std::is_const_v<std::remove_reference_t<decltype(*cnm.begin())>>);
 
   NMVec<int>::const_iterator cit = nm.begin(); // implicit conversion
   EXPECT_EQ(*cit, 0);
