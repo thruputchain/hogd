@@ -67,8 +67,9 @@ public:
                      .id = nomination.block_id};
         auto res_nominate =
             sched_coord_client.schedulercoord_nominate(db_tip)();
-        CHECK_EQ(res_nominate,
+        CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
+        CHECK_EQ(res_nominate.block_id(), nomination.block_id);
         nomination = coord_sched_rpc.get_nomination();
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
@@ -192,7 +193,7 @@ public:
       const std::chrono::steady_clock::time_point block_start =
           std::chrono::steady_clock::now();
 
-      x23::Async<SchedulerNominationOutcome> nominate_handle =
+      x23::Async<SchedulerNominationResult> nominate_handle =
           sched_coord_clients_[0].schedulercoord_nominate(db_tip);
 
       txs.clear();
@@ -203,12 +204,14 @@ public:
       x23::Awaitable<void> submit_vetted_handle;
       submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
 
-      SchedulerNominationOutcome res_nominate = co_await nominate_handle;
+      SchedulerNominationResult res_nominate = co_await nominate_handle;
       co_await submit_vetted_handle;
 
-      CHECK_EQ(res_nominate, SchedulerNominationOutcome::SchedulerNominationOK);
+      CHECK_EQ(res_nominate.outcome(),
+               SchedulerNominationOutcome::SchedulerNominationOK);
       const auto &[nomination, num_txs] =
           coord_sched_rpc_.get_nomination_no_txs();
+      CHECK_EQ(res_nominate.block_id(), nomination.block_id);
 
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,

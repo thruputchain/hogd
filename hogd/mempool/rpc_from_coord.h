@@ -101,10 +101,11 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  static x23::Async<void> schedulercoord_commit_block(BlockID block_id)
+  static x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block(BlockID block_id)
   {
     // TODO(jhumphri): Implement.
-    co_return;
+    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
 
   // These are just stubs that pass through the calls from the coordinator to
