@@ -26,7 +26,7 @@ public:
 
 private:
   // bizarre clang-tidy false positive
-  // NOLINTNEXTLINE(modernize-uze-nullptr)
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   using auth_db_client_t = decltype(make_rpc_client<AuthDB1>(0));
 
   x23::CoroLock lock_;
