@@ -94,6 +94,7 @@ private:
   std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
+  AuthChangeSubscriptionManager subscription_manager_;
 
   StorageCostModel cost_model_{StorageCostModelXdr{
       .ext = ExtensionPoint(0),
@@ -309,7 +310,8 @@ Benchmark::run()
   // swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
   // trace("trace logging enabled");
 
-  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr, 1);
+  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr,
+                              subscription_manager_, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
   if (HogDBStatus<void> ret = db_.write_dbtip(tip); !ret)

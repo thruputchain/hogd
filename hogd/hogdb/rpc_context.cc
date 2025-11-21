@@ -23,7 +23,8 @@ RPCContext::open_block_tx(BlockTXID bid)
   auto [it, inserted] = block_txes_.emplace(
       std::piecewise_construct, std::forward_as_tuple(bid),
       std::forward_as_tuple(get_db(), get_trie(), get_cost_model(),
-                            sched_db_client_, get_tip().height));
+                            sched_db_client_, auth_change_subscription_manager_,
+                            get_tip().height));
   if (!inserted) {
     warn("Attempt to open block tx {} that already exists", bid);
     return HogDBError(HogDBCode::kExists);

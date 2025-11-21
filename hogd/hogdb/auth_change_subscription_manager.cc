@@ -1,5 +1,6 @@
 #include "auth_change_subscription_manager.h"
 
+#include <cassert>
 #include <utility>
 #include <vector>
 
@@ -8,6 +9,8 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
+#include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -73,6 +76,22 @@ AuthChangeSubscriptionManager::publish_auth_changes(
       continue;
     }
   }
+}
+
+x23::Async<void>
+AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+
+  // Create RPC client from the AuthCard's address
+  auto sockaddr = server_address_to_sockaddr(card.address);
+  auto client = make_rpc_client<AuthDB1>(sockaddr, false);
+  auth_db_clients_.erase(card);
+  [[maybe_unused]] auto [_, inserted] =
+      auth_db_clients_.emplace(card, std::move(client));
+  assert(inserted);
+  co_return;
 }
 
 } // namespace hogd

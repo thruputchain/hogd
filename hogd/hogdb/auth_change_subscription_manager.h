@@ -1,6 +1,6 @@
 #pragma once
 
-#include <unordered_map>
+#include <map>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
@@ -28,7 +28,7 @@ private:
   using auth_db_client_t = decltype(make_rpc_client<AuthDB1>(0));
 
   x23::CoroLock lock_;
-  std::unordered_map<AuthCard, auth_db_client_t> auth_db_clients_;
+  std::map<AuthCard, auth_db_client_t> auth_db_clients_;
   x23::DestroyInhibit inhibit_;
 };
 
