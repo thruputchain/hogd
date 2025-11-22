@@ -27,10 +27,10 @@ after = """
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
-# coordinator
+# coordinator_loadgen
 
 [[jobs]]
-name = "{{ .hog_schedule }}_coordinator"
+name = "{{ .hog_schedule }}_coordinator_loadgen"
 host = ["hog8"]
 script = """
 
@@ -54,12 +54,11 @@ source ./groundhog-go/chuckd/scripts/setup_cargo.sh
 echo 'start coordinator_loadgen'
 sed \
     -e "s/{--METRIC--}/integration/g" \
-    -e "s/{--LABEL--}/{{ .hog_host_count }}v/g" \
+    -e "s/{--LABEL--}/1v/g" \
     -e "s/{--HOST--}/{{ .hog_host }}/g" \
-    -e "s/{--NODE--}/validator-{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}/g" \
-    ./groundhog-go/chuckd/scripts/templates/bench_with_metrics.sh | \
-    bash -s -- ./chuckd.dev ./scpd.dev
-XXX
+    -e "s/{--NODE--}/{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}/g" \
+    ./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh | \
+    HOST_JOBS_DIR="./scripts/schedules/host_jobs" bash -s -- ./chuckd.dev ./scpd.dev
 
 """
 after = """
