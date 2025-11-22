@@ -43,10 +43,27 @@ git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+echo 'build chuckd'
+source ./groundhog-go/chuckd/scripts/setup_go.sh
+./groundhog-go/chuckd/scripts/build_chuckd.sh
 
-# XXX: start coordinator
+echo 'build scpd'
+source ./groundhog-go/chuckd/scripts/setup_cargo.sh
+./groundhog-go/chuckd/scripts/build_scpd.sh
 
+echo 'start coordinator_loadgen'
+sed \
+    -e "s/{--METRIC--}/integration/g" \
+    -e "s/{--LABEL--}/{{ .hog_host_count }}v/g" \
+    -e "s/{--HOST--}/{{ .hog_host }}/g" \
+    -e "s/{--NODE--}/validator-{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}/g" \
+    ./groundhog-go/chuckd/scripts/templates/bench_with_metrics.sh | \
+    bash -s -- ./chuckd.dev ./scpd.dev
+XXX
+
+"""
+after = """
+killall scpd.dev chuckd.dev || true
 """
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
