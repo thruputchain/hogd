@@ -18,19 +18,51 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# XXX: start geoff's loadgen
+echo 'build'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc) # XXX: build just loadgen
 
-"""
-after = """
+export BUILD_DIR="$(pwd)/release"
+
+echo 'start loadgen server'
+
+wait_port() {
+  local host=$1
+  local port=$2
+  while true; do
+    if nc -z "$host" "$port" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.2
+  done
+}
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM # Prevent re-entry into the trap handler
+    (kill -9 ${loadgen_server_pid} 2>/dev/null) || true
+    exit $status
+}
+trap cleanup EXIT INT TERM
+
+./release/hogd/loadgen/loadgen_server -p 44400
+loadgen_server_pid=$!
+
+wait_port localhost 44400
+
+hog_signal integration/loadgen_server_up
+
+hog_wait integration/done
+
 """
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
-# coordinator
+# coordinator_loadgen
 
 [[jobs]]
-name = "{{ .hog_schedule }}_coordinator"
+name = "{{ .hog_schedule }}_coordinator_loadgen"
 host = ["hog8"]
 script = """
 
@@ -43,10 +75,28 @@ git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+echo 'build chuckd'
+source ./groundhog-go/chuckd/scripts/setup_go.sh
+./groundhog-go/chuckd/scripts/build_chuckd.sh
 
-# XXX: start coordinator
+echo 'build scpd'
+source ./groundhog-go/chuckd/scripts/setup_cargo.sh
+./groundhog-go/chuckd/scripts/build_scpd.sh
 
+hog_wait integration/loadgen_server_up
+
+echo 'start coordinator_loadgen'
+sed \
+    -e "s/{--METRIC--}/integration/g" \
+    -e "s/{--LABEL--}/1v/g" \
+    -e "s/{--HOST--}/{{ .hog_host }}/g" \
+    -e "s/{--NODE--}/{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}/g" \
+    ./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh | \
+    HOST_JOBS_DIR="./scripts/schedules/host_jobs" bash -s -- ./chuckd.dev ./scpd.dev
+
+"""
+after = """
+killall scpd.dev chuckd.dev || true
 """
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
