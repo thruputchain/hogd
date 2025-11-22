@@ -40,4 +40,4 @@ jobs:
                     --i="github-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
-                    ./scripts/schedules/integration.toml
+                    ./scripts/schedules/integration/integration.toml
