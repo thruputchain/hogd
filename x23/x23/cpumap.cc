@@ -21,12 +21,13 @@ const CpuMap *llc_map;
 std::tuple<>
 init_cpumaps()
 {
+  LsanDisabler _inhibit;
   static auto placeholder = [] {
 #if HAVE_SCHED_SETAFFINITY
     allowed_cpus = new auto{get_allowed_cpus()};
 #endif // HAVE_SCHED_SETAFFINITY
-    core_map = &make_nodestroy(new auto{make_cpu_map("topology/core_id")});
-    llc_map = &make_nodestroy(new auto{make_llc_map()});
+    core_map = new auto{make_cpu_map("topology/core_id")};
+    llc_map = new auto{make_llc_map()};
     return std::tuple{};
   }();
   return placeholder;
