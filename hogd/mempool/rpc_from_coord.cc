@@ -539,6 +539,11 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
     co_await handle;
   }
   co_await last_chunk_handle;
+
+  pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
+  // Only one thread will be waiting on [pending_detached_coroutines_] in the
+  // destructor.
+  pending_detached_coroutines_.notify_one();
 }
 
 x23::Async<void>
@@ -591,6 +596,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // notification before scheduling the next block.
   co_await scheduler_->transfer_finished_.acquire();
 
+  nominated_block_cache_.db_tip = db_tip;
   nominated_block_cache_.block_id = get_ns_since_epoch();
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
@@ -647,6 +653,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
   finish_nominating_block(nominated_block_cache_);
 
   SchedulerNominationResult result(

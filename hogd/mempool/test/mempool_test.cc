@@ -162,7 +162,9 @@ TEST(Mempool, Validate)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  Nomination nomination =
+      server.coord_sched_rpc().get_nomination()().nomination;
+  info("ok here nomination height is {}", nomination.block_height);
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -198,7 +200,8 @@ TEST(Mempool, ValidateBatch)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  Nomination nomination =
+      server.coord_sched_rpc().get_nomination()().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -248,7 +251,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  Nomination nomination =
+      server.coord_sched_rpc().get_nomination()().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -288,7 +292,7 @@ TEST(Mempool, ValidateBatchMissingTx)
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerNominationOutcome::SchedulerNominationOK);
-    nomination = server.coord_sched_rpc().get_nomination().nomination;
+    nomination = server.coord_sched_rpc().get_nomination()().nomination;
   }
 
   {
@@ -335,7 +339,8 @@ TEST(Mempool, ValidateCommit)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  Nomination nomination =
+      server.coord_sched_rpc().get_nomination()().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
@@ -383,7 +388,8 @@ TEST(Mempool, GetTip)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination = server.coord_sched_rpc().get_nomination().nomination;
+  Nomination nomination =
+      server.coord_sched_rpc().get_nomination()().nomination;
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;

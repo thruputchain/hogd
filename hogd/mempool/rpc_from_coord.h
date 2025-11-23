@@ -51,6 +51,15 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
+  ~MempoolCoordinatorRpc()
+  {
+    size_t current_val;
+    while ((current_val = pending_detached_coroutines_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_detached_coroutines_.wait(/*old=*/current_val);
+    }
+  }
+
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
@@ -333,6 +342,7 @@ private:
 
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;

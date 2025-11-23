@@ -69,7 +69,7 @@ public:
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = coord_sched_rpc.get_nomination();
+        nomination = coord_sched_rpc.get_nomination()();
         CHECK_EQ(res_nominate.block_id(), nomination.block_id);
 
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
@@ -210,7 +210,7 @@ public:
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
       const auto &[nomination, num_txs] =
-          coord_sched_rpc_.get_nomination_no_txs();
+          coord_sched_rpc_.get_nomination_no_txs()();
       CHECK_EQ(res_nominate.block_id(), nomination.block_id);
 
       db_tip = {.height = nomination.nomination.block_height,

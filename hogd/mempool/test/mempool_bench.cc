@@ -149,7 +149,7 @@ validate(benchmark::State &state)
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -262,7 +262,7 @@ loadgen_validate(benchmark::State &state)
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -315,7 +315,7 @@ loadgen_nominate_throughput(benchmark::State &state)
                SchedulerNominationOutcome::SchedulerNominationOK);
 
       SchedulerNomination nomination =
-          server.coord_sched_rpc().get_nomination();
+          server.coord_sched_rpc().get_nomination()();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
@@ -351,7 +351,7 @@ loadgen_validate_throughput(benchmark::State &state)
 
     size_t txs_so_far = 0;
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
