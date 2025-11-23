@@ -58,8 +58,6 @@ public:
   x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
 
-  x23::Async<DbTipResult> dbsched_get_tip();
-
   x23::Async<DbSchedResult>
   dbsched_load_genesis_block(GenesisBlock genesis_block);
 

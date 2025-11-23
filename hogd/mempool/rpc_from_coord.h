@@ -121,6 +121,7 @@ public:
 
     if (nominated_block_cache_.block_id == block_id) {
       handles.push_back(commit_block(nominated_block_cache_));
+      last_committed_block_ = nominated_block_cache_.db_tip;
     }
     else {
       info("here, block id = {}, height = {}, hash = {}, id = {}", block_id,
@@ -129,6 +130,7 @@ public:
            validated_block_cache_[block_id].db_tip.id);
       handles.push_back(commit_block(validated_block_cache_[block_id]));
       handles.push_back(abandon_block(nominated_block_cache_));
+      last_committed_block_ = validated_block_cache_[block_id].db_tip;
     }
     for (const auto &[_, cache] : validated_block_cache_) {
       if (cache.block_id != block_id) {
@@ -186,10 +188,7 @@ public:
 
   // These are just stubs that pass through the calls from the coordinator to
   // hogdb.
-  x23::Async<DbTipResult> schedcoord_get_tip()
-  {
-    return db_sched_client_->dbsched_get_tip();
-  }
+  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -346,6 +345,7 @@ private:
 
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  DbTip last_committed_block_{};
   std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;

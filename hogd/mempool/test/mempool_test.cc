@@ -369,8 +369,7 @@ TEST(Mempool, GetTip)
   MempoolTestInfra server;
 
   auto res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(res_tip.db_tip().height, 0);
+  EXPECT_EQ(res_tip.height, 0);
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -409,18 +408,16 @@ TEST(Mempool, GetTip)
        res_validate.db_tip().hash, res_validate.db_tip().id);
 
   res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(res_tip.db_tip().height, 0);
+  EXPECT_EQ(res_tip.height, 0);
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.db_tip().id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  info("commit tip, height = {}, hash = {}, id = {}", res_tip.db_tip().height,
-       res_tip.db_tip().hash, res_tip.db_tip().id);
-  EXPECT_EQ(res_tip.result(), DbSchedResult::DbSchedResultOK);
-  EXPECT_EQ(res_tip.db_tip(), res_validate.db_tip());
+  info("commit tip, height = {}, hash = {}, id = {}", res_tip.height,
+       res_tip.hash, res_tip.id);
+  EXPECT_EQ(res_tip, res_validate.db_tip());
 }
 
 // [kMaxBlockSize] is 10,000, which causes this test to time out. We should
