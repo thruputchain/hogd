@@ -123,6 +123,10 @@ public:
       handles.push_back(commit_block(nominated_block_cache_));
     }
     else {
+      info("here, block id = {}, height = {}, hash = {}, id = {}", block_id,
+           validated_block_cache_[block_id].db_tip.height,
+           validated_block_cache_[block_id].db_tip.hash,
+           validated_block_cache_[block_id].db_tip.id);
       handles.push_back(commit_block(validated_block_cache_[block_id]));
       handles.push_back(abandon_block(nominated_block_cache_));
     }

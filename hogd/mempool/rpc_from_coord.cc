@@ -793,11 +793,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   co_await finish_all_executors(cache.block_id);
 
+  cache.db_tip = DbTip{.height = nomination.block_height,
+                       .hash = nomination.block_hash,
+                       .id = cache.block_id};
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
-  result.db_tip() = DbTip{.height = nomination.block_height,
-                          .hash = nomination.block_hash,
-                          .id = cache.block_id};
+  result.db_tip() = cache.db_tip;
 
   CHECK(!validated_block_cache_.contains(cache.block_id));
   validated_block_cache_[cache.block_id] = std::move(cache);
