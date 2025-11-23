@@ -13,21 +13,21 @@
 namespace x23 {
 
 #if HAVE_SCHED_SETAFFINITY
-const CpuSet *allowed_cpus;
+Unconstructed<const CpuSet> allowed_cpus;
 #endif // HAVE_SCHED_SETAFFINITY
-const CpuMap *core_map;
-const CpuMap *llc_map;
+Unconstructed<const CpuMap> core_map;
+Unconstructed<const CpuMap> llc_map;
 
 std::tuple<>
 init_cpumaps()
 {
   LsanDisabler _inhibit;
-  static auto placeholder = [] {
+  static const auto placeholder = [] {
 #if HAVE_SCHED_SETAFFINITY
-    allowed_cpus = new auto{get_allowed_cpus()};
+    allowed_cpus.construct(get_allowed_cpus());
 #endif // HAVE_SCHED_SETAFFINITY
-    core_map = new auto{make_cpu_map("topology/core_id")};
-    llc_map = new auto{make_llc_map()};
+    core_map.construct(make_cpu_map("topology/core_id"));
+    llc_map.construct(make_llc_map());
     return std::tuple{};
   }();
   return placeholder;

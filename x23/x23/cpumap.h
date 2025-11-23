@@ -20,6 +20,7 @@
 
 #include <x23/config.h>
 #include <x23/err.h>
+#include <x23/nodestroy.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -54,7 +55,8 @@ std::string get_field(std::string_view field, std::filesystem::path file);
 
 #if HAVE_SCHED_SETAFFINITY
 
-extern const class CpuSet *allowed_cpus;
+class CpuSet;
+extern Unconstructed<const CpuSet> allowed_cpus;
 
 // CPU affinity set wrapper around Linux cpu_set_t.  Provides bitwise
 // &, |, ^ operators.  The size is set at compile time and defaults to
@@ -132,7 +134,7 @@ public:
 
   // True if the set contains at least one CPU we are allowed to run
   // on in our cgroup (or in the specified CpuSet).
-  bool valid(const CpuSet *allowed = allowed_cpus) const noexcept
+  bool valid(const CpuSet *allowed = allowed_cpus.get()) const noexcept
   {
     return allowed ? (*this & *allowed).count() : count();
   }
@@ -417,12 +419,12 @@ CpuMap make_cpu_map(std::string_view path);
 CpuMap make_llc_map();
 
 // Global CPU topology mappings initialized at startup.
-extern const CpuMap *core_map; // Groups CPUs by physical core
-extern const CpuMap *llc_map;  // Groups CPUs by last-level cache
+extern Unconstructed<const CpuMap> core_map; // Groups CPUs by physical core
+extern Unconstructed<const CpuMap> llc_map;  // Groups CPUs by last-level cache
 
-// Reified type represent a specific CpuMap
-template<const CpuMap *&Map> struct cpu_map_t {
-  static constexpr const CpuMap *&map = Map;
+// Reified type representing a specific CpuMap
+template<const Unconstructed<const CpuMap> &Map> struct cpu_map_t {
+  static constexpr const Unconstructed<const CpuMap> &map = Map;
   consteval cpu_map_t() noexcept = default;
   constexpr operator const CpuMap &() const noexcept { return *map; }
 };

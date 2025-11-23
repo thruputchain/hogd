@@ -35,20 +35,70 @@ make_nodestroy(auto *p)
   return *p;
 }
 
+// An Unconstructed<T> must be manually constructed an destroyed.  If
+// it's never destroyed, it may will leak memory, which is okay for
+// global variables.  Disables leak sanitizer during construction.
+template<typename T> requires (!std::is_reference_v<T>)
+class Unconstructed {
+public:
+  using value_type = T;
+
+  constexpr Unconstructed() noexcept {}
+  constexpr ~Unconstructed() {}
+
+  template<class... Args> requires std::constructible_from<T, Args...>
+  constexpr value_type *construct(Args &&...args)
+      noexcept(noexcept(T(std::forward<Args>(args)...)))
+  {
+    LsanDisabler _inhibit;
+    // std::construct_at fails on volatile types, so use placement new
+    return new (placement()) value_type(std::forward<Args>(args)...);
+  }
+
+  constexpr void destroy() noexcept { val_.~T(); }
+
+  constexpr auto &operator*(this auto &&self) noexcept
+  {
+    if constexpr (std::is_const_v<value_type>)
+      // in case self is not const but value_type is
+      return std::as_const(self.val_);
+    else
+      return (self.val_);
+  }
+
+  constexpr auto *get(this auto &&self) noexcept { return &*self; }
+  constexpr auto *operator->(this auto &&self) noexcept { return self.get(); }
+  constexpr auto *address(this auto &&self) noexcept
+  {
+    return std::addressof(*self);
+  }
+
+protected:
+  constexpr void *placement() noexcept
+  {
+    return const_cast<std::remove_cv_t<value_type> *>(address());
+  }
+
+private:
+  union {
+    std::remove_const_t<value_type> val_;
+  };
+};
+
 // NoDestroy<T> embeds an element of class T, a bit like optional<T>,
 // except that the object is never destroyed.  Hence, it's useful for
 // globals and statics that might be accessed during global
 // destruction.
-template<typename T> class NoDestroy {
+template<typename T> class NoDestroy : public Unconstructed<T> {
 public:
-  using value_type = T;
+  using typename Unconstructed<T>::value_type;
 
   template<class... Args> requires std::constructible_from<T, Args...>
   constexpr NoDestroy(Args &&...args)
       noexcept(noexcept(T(std::forward<Args>(args)...)))
   {
     LsanDisabler _inhibit;
-    std::construct_at(&val_, std::forward<Args>(args)...);
+    new (this->placement()) value_type(std::forward<Args>(args)...);
   }
 
   template<class U, class... Args>
@@ -57,75 +107,12 @@ public:
       noexcept(noexcept(T(ilist, std::forward<Args>(args)...)))
   {
     LsanDisabler _inhibit;
-    std::construct_at(&val_, ilist, std::forward<Args>(args)...);
+    new (this->placement()) value_type(ilist, std::forward<Args>(args)...);
   }
 
-  constexpr ~NoDestroy() {}
-
-  auto *get(this auto &&self) noexcept { return &self.val_; }
-  auto &operator*(this auto &&self) noexcept { return (self.val_); }
-  auto *operator->(this auto &&self) noexcept { return &self.val_; }
-
-private:
-  union {
-    std::remove_const_t<value_type> val_;
-  };
+  void construct() = delete;
 };
-template<typename T> NoDestroy(T &&) -> NoDestroy<std::remove_cvref_t<T>>;
-
-// A MonotonicFlag is a global, singleton object that starts out
-// returning false from test(), and then after you call set(), returns
-// true.  It uses a thread_local variable to cache the true result and
-// avoid further atomic reads of the global flag.  However, because it
-// relies on thread-local storage, there can be one instance of a
-// MonotonicFlag type.  The template parameter permits more than one
-// MonotonicFlag by giving each MonotonicFlag a different type.  To
-// avoid accidentally creating two MonotonicFlag objects with the same
-// type, all MonotonicFlags must be created with a helper function, as
-// in:
-//
-//   MonotonicFlag myflag = make_monotonic_flag();
-template<typename> class MonotonicFlag {
-public:
-  static bool test() noexcept { return test_or_set(false); }
-  static void set() noexcept { test_or_set(true); }
-
-  MonotonicFlag(const MonotonicFlag &) = delete;
-
-private:
-  consteval MonotonicFlag() noexcept = default;
-
-  static bool test_or_set(bool set)
-  {
-    thread_local bool started;
-    if (started) [[likely]]
-      return true;
-
-    static constinit std::atomic_bool global_started;
-    if (global_started.load(std::memory_order_acquire))
-      return started = true;
-
-    if (!set)
-      return false;
-
-    global_started.store(started = true, std::memory_order_release);
-    return true;
-  }
-
-  template<std::invocable U>
-  friend consteval MonotonicFlag<U> make_monotonic_flag() noexcept;
-};
-
-// Use this to construct a compile-time MonotonicFlag of a unique
-// type.  DO NOT SUPPLY A TEMPLATE ARGUMENT.  Every invocation must
-// have a unique type, which is guaranteed by the default template
-// argument, as each lambda has a unique type.
-template<std::invocable Uniquifier = decltype([] {})>
-consteval MonotonicFlag<Uniquifier>
-make_monotonic_flag() noexcept
-{
-  return {};
-}
+template<typename T> NoDestroy(T &&) -> NoDestroy<std::decay_t<T>>;
 
 // Once is a callable object that invoces a function a single time.
 // Subsequent calls wait foro the first call to complete (if it hasn't
@@ -136,9 +123,6 @@ make_monotonic_flag() noexcept
 //   void
 //   init_once()
 //   {
-//     static auto flag = make_monotonic_flag();
-//     if (flag.test())
-//       return;
 //     static Once once;
 //     once([&] {
 //       do_init();
@@ -146,15 +130,17 @@ make_monotonic_flag() noexcept
 //     });
 //   }
 //
-// That said, in the above example you are better off using static
-// initialization, making Once is mostly useful inside
-// dynamically-allocated objects.  Static initialization would look
-// like this:
+// That said, above you would be better off using static
+// initialization.  The problem is that Once needs to do an atomic
+// read every time it is invoked, and the compiler cannot cache the
+// result.  That means Once is mostly useful inside
+// dynamically-allocated objects, and for static initialization you
+// should do something like this:
 //
 //   void
 //   init_once()
 //   {
-//     static auto _placeholder = (do_init(), true);
+//     static const auto _placeholder = (do_init(), std::tuple{});
 //   }
 //
 // Once is about 10x faster than std::call_once with gcc, and exactly
@@ -190,13 +176,66 @@ private:
   //  0 - unconstructed
   // -1 - construction in progress
   //  1 - constructed
-  //
-  // [On x86, you can get the sign with "test %al,%al", which encodes
-  // in 2 bytes, one fewer than checking against an immediate constant
-  // like $1 or $2.]
   std::atomic_int8_t flag_;
 };
 // Ensure constexpr initialization and no non-trivial destruction
 static_assert((void(Once{}), std::is_trivially_destructible_v<Once>));
+
+// A MonotonicFlag is a global, singleton object that starts out
+// returning false from test(), and then after you call set(), returns
+// true.  It uses a thread_local variable to cache the true result and
+// avoid further atomic reads of the global flag, and should therefore
+// be more efficient than Once in the common case.
+//
+// Unfortunately, because MonotonicFlag relies on thread-local
+// storage, there can be one instance of a MonotonicFlag type.  The
+// template parameter permits more than one MonotonicFlag by giving
+// each MonotonicFlag a different type.  To avoid accidentally
+// creating two MonotonicFlag objects with the same type, all
+// MonotonicFlags must be created with the helper function
+// make_monotonic_flag, as in:
+//
+//   MonotonicFlag myflag = make_monotonic_flag();
+template<typename> class MonotonicFlag {
+public:
+  static bool test() noexcept { return test_or_set(false); }
+  static void set() noexcept { test_or_set(true); }
+
+  MonotonicFlag(const MonotonicFlag &) = delete;
+
+private:
+  consteval MonotonicFlag() noexcept = default;
+
+  static bool test_or_set(bool set)
+  {
+    thread_local bool local_flag;
+    if (local_flag) [[likely]]
+      return true;
+
+    static constinit std::atomic_bool global_flag;
+    if (global_flag.load(std::memory_order_acquire))
+      return local_flag = true;
+
+    if (!set)
+      return false;
+
+    global_flag.store(local_flag = true, std::memory_order_release);
+    return true;
+  }
+
+  template<std::invocable U>
+  friend consteval MonotonicFlag<U> make_monotonic_flag() noexcept;
+};
+
+// Use this to construct a compile-time MonotonicFlag of a unique
+// type.  DO NOT SUPPLY A TEMPLATE ARGUMENT that isn't a lambda.
+// Every invocation must have a unique type, which is guaranteed by
+// the default template argument, as each lambda has a unique type.
+template<std::invocable Uniquifier = decltype([] {})>
+consteval MonotonicFlag<Uniquifier>
+make_monotonic_flag() noexcept
+{
+  return {};
+}
 
 } // namespace x23
