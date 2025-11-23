@@ -164,7 +164,6 @@ TEST(Mempool, Validate)
   // validation.
   Nomination nomination =
       server.coord_sched_rpc().get_nomination()().nomination;
-  info("ok here nomination height is {}", nomination.block_height);
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;

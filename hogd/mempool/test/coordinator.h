@@ -24,22 +24,24 @@ public:
 
   static x23::Async<void> coordscheduler_null() { co_return; }
 
+  // We do not pass [txs] by reference just in case we call [co_await] in the
+  // function. If the coroutine gets paused and another RPC of the same name is
+  // delivered, a reference would become invalidated.
   static x23::Async<void>
-  coordscheduler_notify_vetted(const SignedTransactionBatch &txs)
+  coordscheduler_notify_vetted(const SignedTransactionBatch txs)
   {
     co_return;
   }
 
+  // We do not pass [chunk] by reference because we call [co_await] in the
+  // function. If the coroutine gets paused and another RPC of the same name is
+  // delivered, a reference would become invalidated.
   x23::Async<void>
-  coordscheduler_finish_nomination(const SchedulerNominationChunk &chunk)
+  coordscheduler_finish_nomination(const SchedulerNominationChunk chunk)
   {
-    info("received chunk idx {}", chunk.chunk_idx);
     x23::CoroGuard cg;
     co_await cg(nominations_lock_);
 
-    if (nominations_.contains(chunk.chunk_idx)) {
-      info("about to fail for chunk idx {}", chunk.chunk_idx);
-    }
     CHECK(!nominations_.contains(chunk.chunk_idx));
     if (!nominations_.empty()) {
       const SchedulerNominationChunk &existing = nominations_.begin()->second;
@@ -51,13 +53,14 @@ public:
 
   x23::Async<SchedulerNomination> get_nomination()
   {
+    x23::CoroGuard cg;
     while (true) {
-      x23::CoroGuard cg;
       co_await cg(nominations_lock_);
       if (!nominations_.empty() &&
           nominations_.size() == nominations_[0].total_chunks) {
         break;
       }
+      cg.reset();
     }
 
     // The block hash is in the last chunk.
@@ -76,13 +79,14 @@ public:
 
   x23::Async<std::pair<SchedulerNomination, size_t>> get_nomination_no_txs()
   {
+    x23::CoroGuard cg;
     while (true) {
-      x23::CoroGuard cg;
       co_await cg(nominations_lock_);
       if (!nominations_.empty() &&
           nominations_.size() == nominations_[0].total_chunks) {
         break;
       }
+      cg.reset();
     }
 
     // The block hash is in the last chunk.
