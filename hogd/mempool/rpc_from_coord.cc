@@ -792,18 +792,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   }
 
   co_await finish_all_executors(cache.block_id);
-  {
-    DbBlockResult result = co_await close_snapshot(cache.block_id);
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
-  {
-    EventBlockResult result = co_await eventsched_close_block(cache.block_id);
-    CHECK_EQ(result.error(), RPCError::kRPCNone);
-  }
-  {
-    DbBlockResult result = co_await commit_snapshot(cache.block_id);
-    CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
-  }
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
