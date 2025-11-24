@@ -68,8 +68,9 @@ public:
       const SignedTransactionHash &tx_hash = *it;
       const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
       CHECK_PTR(tx_value_ptr);
-      insert_tx_into_runqueue(tx_hash, *tx_value_ptr);
+      CHECK(insert_tx_into_runqueue(tx_hash, *tx_value_ptr));
     }
+    size_.fetch_add(std::distance(begin, end), std::memory_order_release);
   }
 
   void remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
@@ -154,6 +155,14 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
+  // insertion succeeded and false otherwise.
+  //
+  // This method does *not* modify [size_]! The caller must do this. Generally,
+  // the caller will often want to add multiple txs to the runqueue, so it is
+  // more efficient for the caller to do a single [fetch_add()] to [size_]
+  // rather than have [insert_tx_into_runqueue()] increment [size_] for every
+  // single tx.
   bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
                                TxValue &tx_value);
   bool add_txs_helper(const SignedTransaction &tx);
