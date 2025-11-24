@@ -20,44 +20,30 @@ source ./scripts/ci/prepare_env.sh
 
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
-make -C release -j$(nproc) # XXX: build just loadgen
+make -C release -j$(nproc)
 
 export BUILD_DIR="$(pwd)/release"
 
-echo 'start loadgen server'
-
-wait_port() {
-  local host=$1
-  local port=$2
-  while true; do
-    if nc -z "$host" "$port" 2>/dev/null; then
-      return 0
-    fi
-    sleep 0.2
-  done
-}
+echo 'start loadgen'
 
 cleanup() {
     status=$?
     trap - EXIT INT TERM # Prevent re-entry into the trap handler
-    (kill -9 ${loadgen_server_pid} 2>/dev/null) || true
+    (kill -9 ${server_pid} 2>/dev/null) || true
     exit $status
 }
 trap cleanup EXIT INT TERM
 
 ./release/hogd/loadgen/loadgen_server -p 44400
-loadgen_server_pid=$!
+server_pid=$!
 
-wait_port localhost 44400
+./scripts/wait-port localhost 44400
 
-hog_signal integration/loadgen_server_up
+hog_signal loadgen_is_up
 
-hog_wait integration/done
+hog_wait done
 
 """
-[jobs.env]
-GIT_REPO = "{{ .git_repo }}"
-GIT_COMMIT = "{{ .git_commit }}"
 
 # coordinator_loadgen
 
@@ -83,7 +69,7 @@ echo 'build scpd'
 source ./groundhog-go/chuckd/scripts/setup_cargo.sh
 ./groundhog-go/chuckd/scripts/build_scpd.sh
 
-hog_wait integration/loadgen_server_up
+hog_wait loadgen_is_up
 
 echo 'start coordinator_loadgen'
 sed \
@@ -94,13 +80,12 @@ sed \
     ./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh | \
     HOST_JOBS_DIR="./scripts/schedules/host_jobs" bash -s -- ./chuckd.dev ./scpd.dev
 
+hog_signal done
+
 """
 after = """
 killall scpd.dev chuckd.dev || true
 """
-[jobs.env]
-GIT_REPO = "{{ .git_repo }}"
-GIT_COMMIT = "{{ .git_commit }}"
 
 # scheduler
 
@@ -120,14 +105,34 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# XXX: start scheduler
+echo 'build'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc)
+
+export BUILD_DIR="$(pwd)/release"
+
+echo 'start scheduler'
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM # Prevent re-entry into the trap handler
+    (kill -9 ${server_pid} 2>/dev/null) || true
+    exit $status
+}
+trap cleanup EXIT INT TERM
+
+./release/hogd/mempool/mempool_exec 1 3 # number of db servers, number of exec servers
+server_pid=$!
+
+# Wait for mempool (ports 8070-8073).
+./scripts/wait-port localhost 8070
+./scripts/wait-port localhost 8071
+./scripts/wait-port localhost 8072
+./scripts/wait-port localhost 8073
+
+hog_signal mempool_is_up
 
 """
-after = """
-"""
-[jobs.env]
-GIT_REPO = "{{ .git_repo }}"
-GIT_COMMIT = "{{ .git_commit }}"
 
 # db
 
@@ -147,14 +152,32 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# XXX: start db
+echo 'build'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc)
+
+export BUILD_DIR="$(pwd)/release"
+
+echo 'start db'
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM # Prevent re-entry into the trap handler
+    (kill -9 ${server_pid} 2>/dev/null) || true
+    exit $status
+}
+trap cleanup EXIT INT TERM
+
+./release/hogd/hogdb/hogdb ./hogdb.data 10000000000 hog9:8072 # mempool addr
+server_pid=$!
+
+# Wait for hogdb (ports 8080-8081).
+./scripts/wait-port localhost 8080
+./scripts/wait-port localhost 8081
+
+hog_signal db_is_up
 
 """
-after = """
-"""
-[jobs.env]
-GIT_REPO = "{{ .git_repo }}"
-GIT_COMMIT = "{{ .git_commit }}"
 
 # exec
 
@@ -174,11 +197,67 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# XXX: start exec
+echo 'start exec'
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM # Prevent re-entry into the trap handler
+    (kill -9 ${server_pid} 2>/dev/null) || true
+    exit $status
+}
+trap cleanup EXIT INT TERM
+
+./release/hogd/hogexec/hogexec hog9:8072 -n 1024
+server_pid=$!
+
+# Wait for hogexec (port 8090).
+./scripts/wait-port localhost 8090
+
+hog_signal exec_is_up/{{ .hog_host_index }}
 
 """
-after = """
+
+# event
+
+[[jobs]]
+name = "{{ .hog_schedule }}_event"
+host = ["hog5"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+echo 'build'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc)
+
+export BUILD_DIR="$(pwd)/release"
+
+echo 'start event'
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM # Prevent re-entry into the trap handler
+    (kill -9 ${server_pid} 2>/dev/null) || true
+    exit $status
+}
+trap cleanup EXIT INT TERM
+
+./release/hogd/event/event_exec hog9:8073 ./event
+server_pid=$!
+
+# Wait for event (ports 8091-8092).
+./scripts/wait-port localhost 8091
+./scripts/wait-port localhost 8092
+
+hog_signal event_is_up
+
 """
-[jobs.env]
-GIT_REPO = "{{ .git_repo }}"
-GIT_COMMIT = "{{ .git_commit }}"
