@@ -179,6 +179,9 @@ public:
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
+
+    nominated_block_cache_ = {};
+    validated_block_cache_.clear();
     co_return SchedulerCommitOutcome::SchedulerCommitOK;
   }
 

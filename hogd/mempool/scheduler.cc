@@ -678,8 +678,11 @@ Scheduler::remove_from_scheduler(
         num_removed_from_runqueue++;
       }
     }
-    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
     accounts.insert(account);
+
+    // Careful! We remove the tx from [txs_] at the bottom here because once we
+    // remove it, the references above become invalidated.
+    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
   }
   for (const ContractAddress &account : accounts) {
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
