@@ -403,9 +403,6 @@ TEST(Mempool, GetTip)
       server.mempool_coord_rpc().schedulercoord_validate(db_tip, nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
-  info("here 2, block id = {}, height = {}, hash = {}, id = {}",
-       res_validate.db_tip().id, res_validate.db_tip().height,
-       res_validate.db_tip().hash, res_validate.db_tip().id);
 
   res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(res_tip.height, 0);
@@ -415,8 +412,6 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  info("commit tip, height = {}, hash = {}, id = {}", res_tip.height,
-       res_tip.hash, res_tip.id);
   EXPECT_EQ(res_tip, res_validate.db_tip());
 }
 

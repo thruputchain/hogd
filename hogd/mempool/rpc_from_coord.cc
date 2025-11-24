@@ -710,6 +710,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   PendingBlock cache{};
   cache.block_id = get_ns_since_epoch();
   cache.db_tip = db_tip;
+  cache.tx_hashes = nomination.transaction_hashes;
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
@@ -749,7 +750,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
-  x23::Vec<SignedTransaction> signed_txs;
   {
     for (const SignedTransactionHash &tx_hash : nomination.transaction_hashes) {
       SignedTransaction *tx = scheduler_->find_tx(tx_hash);
@@ -759,11 +759,11 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
-      signed_txs.push_back(*tx);
+      cache.txs.push_back(*tx);
     }
-    CHECK_EQ(signed_txs.size(), nomination.transaction_nominations.size());
-    for (size_t i = 0; i < signed_txs.size(); i++) {
-      txs.push_back({.signed_tx = signed_txs[i],
+    CHECK_EQ(cache.txs.size(), nomination.transaction_nominations.size());
+    for (size_t i = 0; i < cache.txs.size(); i++) {
+      txs.push_back({.signed_tx = cache.txs[i],
                      .nondeterministic_proposal_data =
                          nomination.transaction_nominations[i]
                              .nondeterministic_proposal_data});
@@ -783,7 +783,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   if (!validated || get_block_hash(nomination.transaction_hashes,
                                    /*prev_block_hash=*/cache.db_tip.hash) !=
                         nomination.block_hash) {
-    co_await scheduler_->add_txs(signed_txs);
+    co_await scheduler_->add_txs(cache.txs);
 
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
