@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <memory>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -10,7 +9,7 @@
 #include "hogd/container/concurrent_map.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -33,12 +32,10 @@ public:
 
   BlockTX(HogDBDAO &db, MerkleTriePrefix &trie,
           const StorageCostModel &cost_model,
-          std::shared_ptr<sched_db_client_t> sched_db_client,
-          AuthChangeSubscriptionManager &auth_change_subscription_manager,
+          BackgroundCommitWorker &background_commit_worker,
           BlockHeight block_height)
     : db_(db), trie_(trie), cost_model_(cost_model),
-      sched_db_client_(std::move(sched_db_client)),
-      auth_change_subscription_manager_(auth_change_subscription_manager),
+      background_commit_worker_(background_commit_worker),
       block_height_(block_height)
   {}
   ~BlockTX() = default;
@@ -96,8 +93,7 @@ private:
   StorageCostModel cost_model_;
   ConcurrentMap<Address, ItemLock, SipHash24Hasher> addr_balance_locks_;
   ConcurrentMap<ItemKey, ItemLock, SipHash24Hasher> item_locks_;
-  std::shared_ptr<sched_db_client_t> sched_db_client_;
-  AuthChangeSubscriptionManager &auth_change_subscription_manager_;
+  BackgroundCommitWorker &background_commit_worker_;
   BlockHeight block_height_;
 
   static inline HogDBStatus<int128_t>

@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -105,8 +106,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -206,8 +209,10 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -277,8 +282,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -350,8 +357,11 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 

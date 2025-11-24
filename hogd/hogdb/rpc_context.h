@@ -23,6 +23,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -154,6 +155,9 @@ private:
   // External serivces that may subscribe to changes in the database.
   std::shared_ptr<sched_db_client_t> sched_db_client_;
   AuthChangeSubscriptionManager auth_change_subscription_manager_;
+  BackgroundCommitWorker background_commit_worker_ =
+      BackgroundCommitWorker(auth_change_subscription_manager_,
+                             sched_db_client_);
 
   // slow path for get_block_tx().
   PerThreadARC<BlockTX> *get_block_tx_slow(BlockTXID bid,
