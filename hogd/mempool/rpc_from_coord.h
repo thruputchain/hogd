@@ -236,6 +236,9 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  // clang-tidy complains that an exception may be thrown in the function
+  // [operator=].
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
