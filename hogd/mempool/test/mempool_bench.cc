@@ -75,8 +75,7 @@ submit_unvetted(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -91,8 +90,7 @@ submit_vetted(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -109,8 +107,7 @@ nominate(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     // Submit unvetted transactions so there's something to nominate
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
@@ -131,8 +128,7 @@ validate(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
 
