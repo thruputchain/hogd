@@ -360,6 +360,10 @@ TEST(Scheduler, Fairness)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
+
+    // We simulate committing the block by increment the current block number in
+    // the scheduler.
+    scheduler->increment_current_block();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -428,6 +432,10 @@ TEST(Scheduler, FairnessAcrossBlocks)
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
+
+    // We simulate committing the block by increment the current block number in
+    // the scheduler.
+    scheduler->increment_current_block();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
