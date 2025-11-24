@@ -348,6 +348,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 #include <span>
 #include <utility>
 
+#include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_types.h"

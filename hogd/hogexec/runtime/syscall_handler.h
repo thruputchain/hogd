@@ -12,6 +12,7 @@
 #include "account.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
+#include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -128,9 +129,9 @@ public:
   // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
 
-  SyscallStatus<void> log_event(SHA256Hash const *topic0,
-                                SHA256Hash const *topic1,
-                                SHA256Hash const *topic2,
+  SyscallStatus<void> log_event(Topic const *topic0,
+                                Topic const *topic1,
+                                Topic const *topic2,
                                 std::span<const std::byte> data);
   SyscallStatus<void> log_event(uint32_t num_topics,
                                 std::span<const std::byte> data);
