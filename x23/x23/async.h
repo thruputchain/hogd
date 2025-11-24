@@ -102,12 +102,10 @@
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <expected>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <semaphore>
 #include <tuple>
 #include <type_traits>
