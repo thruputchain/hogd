@@ -144,7 +144,7 @@ strlen(const char *s)
   }
 }
 
-template<typename T> class PtrIterator : public RandomAcessIterMixin {
+template<typename T> class PtrIterator : public RandomAccessIterMixin {
 public:
   using iterator_concept = std::contiguous_iterator_tag;
   using difference_type = std::ptrdiff_t;
@@ -165,6 +165,8 @@ public:
   {
     return *self.ptr_;
   }
+
+  constexpr pointer operator->() const noexcept { return ptr_; }
 
   constexpr auto &operator+=(this auto &self, difference_type offset) noexcept
   {
@@ -999,7 +1001,7 @@ Str
 hexdump(const is_range_of<uint8_t> auto &r)
 {
   Str out;
-  constexpr char hexbytes[] = "0123456789abcdef";
+  constexpr static char hexbytes[] = "0123456789abcdef";
   for (auto c : r) {
     out.push_back(hexbytes[c >> 4 & 0xf]);
     out.push_back(hexbytes[c & 0xf]);
@@ -1011,7 +1013,7 @@ Str
 hexdump(const is_range_of<std::byte> auto &r)
 {
   Str out;
-  constexpr char hexbytes[] = "0123456789abcdef";
+  constexpr static char hexbytes[] = "0123456789abcdef";
   for (auto c : r) {
     auto val = static_cast<uint8_t>(c);
     out.push_back(hexbytes[val >> 4 & 0xf]);
