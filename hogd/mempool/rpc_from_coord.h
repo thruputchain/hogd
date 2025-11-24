@@ -111,6 +111,8 @@ public:
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id)
   {
+    ElapsedTimer timer;
+
     if (nominated_block_cache_.block_id != block_id &&
         !validated_block_cache_.contains(block_id)) {
       co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
@@ -133,6 +135,7 @@ public:
         handles.push_back(abandon_block(cache));
       }
     }
+    double a = timer.elapsed();
 
     // TODO(jhumphri): I need to do two things:
     // 1. If the nominated block is not the committed block, I need to return
@@ -170,18 +173,27 @@ public:
         return_to_runqueue.erase(hash);
       }
     }
+    double b = timer.elapsed();
+
     CHECK_CONST_PTR(remove_from_scheduler);
     scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                               return_to_runqueue.cend());
-    scheduler_->remove_from_scheduler(
+    double c = timer.elapsed();
+    co_await scheduler_->remove_from_scheduler(
         x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+    double d = timer.elapsed();
 
     for (x23::Async<void> &handle : handles) {
       co_await handle;
     }
+    double e = timer.elapsed();
 
     nominated_block_cache_ = {};
     validated_block_cache_.clear();
+    double f = timer.elapsed();
+
+    info("commit a {}, b-a {}, c-b {}, d-c {}, e-d {}, f-e {}", a, b - a, c - b,
+         d - c, e - d, f - e);
     co_return SchedulerCommitOutcome::SchedulerCommitOK;
   }
 

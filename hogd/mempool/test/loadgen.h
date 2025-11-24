@@ -215,8 +215,11 @@ public:
               res_nominate.block_id());
 
       co_await submit_vetted_handle;
+
+      ElapsedTimer timer;
       CHECK_EQ(co_await commit_handle,
                SchedulerCommitOutcome::SchedulerCommitOK);
+      info("commit handle took {} seconds", timer.elapsed());
 
       const auto &[nomination, num_txs] =
           coord_sched_rpc_.get_nomination_no_txs()();

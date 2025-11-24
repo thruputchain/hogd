@@ -73,7 +73,8 @@ public:
     size_.fetch_add(std::distance(begin, end), std::memory_order_release);
   }
 
-  void remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
+  x23::Async<void>
+  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.

@@ -653,43 +653,75 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
   }
 }
 
-void
+x23::Async<void>
 Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes)
 {
-  std::unordered_set<ContractAddress> accounts;
-  size_t num_removed_from_runqueue = 0;
-  for (const SignedTransactionHash &tx_hash : tx_hashes) {
-    auto [tx_value_ptr, txs_lock] = txs_.find(tx_hash);
-    CHECK_PTR(tx_value_ptr);
+  SynchronizedMap<ContractAddress, char> accounts;
+  ElapsedTimer timer;
 
-    const SignedTransaction &tx = tx_value_ptr->tx;
-    const ContractAddress &account = tx.tx.invocation.invoked_address;
-    const TxKey key = {.expiry_block_height =
-                           tx.tx.uniquifier.block_expiry_height,
-                       .tx_hash = tx_hash};
-    {
-      auto [txs, account_to_tx_lock] = account_to_tx_[account];
-      // The tx may or may not be on the runqueue. If the tx is included in a
-      // block we are *nominating*, then it has already been taken off of the
-      // runqueue. If the tx is included in a block we are *validating*, then it
-      // is still on the runqueue.
-      if (txs.erase(key)) {
-        num_removed_from_runqueue++;
+  constexpr size_t kNumThreads = 120;
+  const std::vector<ChunkRange> chunks =
+      make_chunks(tx_hashes.size(), kNumThreads);
+  std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
+
+  for (size_t i = 0; i < chunks.size(); i++) {
+    [](const ChunkRange &chunk, auto cb,
+       x23::span<const SignedTransactionHash> tx_hashes,
+       SynchronizedMap<ContractAddress, char> &accounts,
+       Scheduler &scheduler) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+
+      x23::span<const SignedTransactionHash> hash_chunk(
+          tx_hashes.begin() + chunk.start, tx_hashes.begin() + chunk.end);
+      size_t num_removed_from_runqueue = 0;
+      for (const SignedTransactionHash &tx_hash : hash_chunk) {
+        auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+        CHECK_PTR(tx_value_ptr);
+
+        const SignedTransaction &tx = tx_value_ptr->tx;
+        const ContractAddress &account = tx.tx.invocation.invoked_address;
+        const TxKey key = {.expiry_block_height =
+                               tx.tx.uniquifier.block_expiry_height,
+                           .tx_hash = tx_hash};
+        {
+          auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
+          // The tx may or may not be on the runqueue. If the tx is included in
+          // a block we are *nominating*, then it has already been taken off of
+          // the runqueue. If the tx is included in a block we are *validating*,
+          // then it is still on the runqueue.
+          if (txs.erase(key)) {
+            num_removed_from_runqueue++;
+          }
+        }
+        accounts.insert(account, 0);
+
+        // Careful! We remove the tx from [txs_] at the bottom here because once
+        // we remove it, the references above become invalidated.
+        CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
       }
-    }
-    accounts.insert(account);
 
-    // Careful! We remove the tx from [txs_] at the bottom here because once we
-    // remove it, the references above become invalidated.
-    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
+      cb(num_removed_from_runqueue);
+      co_return;
+    }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts, *this);
   }
-  for (const ContractAddress &account : accounts) {
+  size_t total_removed_from_runqueue = 0;
+  for (x23::Awaitable<size_t> &awaitable : awaitables) {
+    total_removed_from_runqueue += co_await awaitable;
+  }
+  double a = timer.elapsed();
+
+  accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
+    const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
-  }
-  size_.fetch_sub(num_removed_from_runqueue, std::memory_order_relaxed);
+  });
+  double b = timer.elapsed();
+  size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
+  double c = timer.elapsed();
+
+  info("remove_from_scheduler a {}, b-a {}, c-b {}", a, b - a, c - b);
 }
 
 } // namespace hogd

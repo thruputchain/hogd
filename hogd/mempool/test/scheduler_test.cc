@@ -254,7 +254,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   x23::Vec<SignedTransactionHash> hashes;
   hashes.push_back(sha256(txs[0]));
   scheduler->remove_from_scheduler(
-      x23::span<const SignedTransactionHash>(hashes));
+      x23::span<const SignedTransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   x23::Vec<SignedTransactionHash> scheduled_hashes;
@@ -279,7 +279,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   hashes.push_back(sha256(txs[0]));
   hashes.push_back(sha256(txs[1]));
   scheduler->remove_from_scheduler(
-      x23::span<const SignedTransactionHash>(hashes));
+      x23::span<const SignedTransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 0UL);
 
   x23::Vec<SignedTransactionHash> scheduled_hashes;
