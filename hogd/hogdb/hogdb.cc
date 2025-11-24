@@ -14,7 +14,6 @@
 #include <utility>
 
 // XDR headers
-#include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/hogdb/rpc_from_auth.h"
@@ -36,6 +35,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"

@@ -14,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"

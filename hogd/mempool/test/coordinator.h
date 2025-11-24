@@ -28,7 +28,7 @@ public:
   // function. If the coroutine gets paused and another RPC of the same name is
   // delivered, a reference would become invalidated.
   static x23::Async<void>
-  coordscheduler_notify_vetted(const SignedTransactionBatch txs)
+  coordscheduler_notify_vetted(const SignedTransactionBatch& txs)
   {
     co_return;
   }
@@ -37,7 +37,7 @@ public:
   // function. If the coroutine gets paused and another RPC of the same name is
   // delivered, a reference would become invalidated.
   x23::Async<void>
-  coordscheduler_finish_nomination(const SchedulerNominationChunk chunk)
+  coordscheduler_finish_nomination(const SchedulerNominationChunk& chunk)
   {
     x23::CoroGuard cg;
     co_await cg(nominations_lock_);

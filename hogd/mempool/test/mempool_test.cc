@@ -2,7 +2,6 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
-#include "db_sched.hh"
 #include "discovery.hh"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
