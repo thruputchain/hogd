@@ -30,10 +30,8 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
-#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/version.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -100,7 +98,7 @@ public:
           cv.wait(lk, [&event_card] { return event_card != EventCard{}; });
           info("event_card is not empty");
           cv.wait(lk, [&shard_cards] { return !shard_cards.empty(); });
-          info("shard_cards is not empty");
+          info("shard_cards is not empty: returning IntroExecResult");
 
           return IntroExecResult{.exec_id = exec_id++,
                                  .shards = shard_cards,
@@ -128,8 +126,10 @@ public:
 
   std::vector<ExecCard> await_executor_cards(unsigned int num_cards)
   {
+    info("awaiting {} executor cards", num_cards);
     std::unique_lock lk(mtx_);
     cv_.wait(lk, [this, num_cards] { return exec_cards_.size() == num_cards; });
+    info("got {} executor cards", exec_cards_.size());
     return std::move(exec_cards_);
   }
 
@@ -484,9 +484,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
-    "hogd/event/event_exec", {
-                         std::format("{}:{}", hostname, sched_event_port),
-                         work_dir_str});
+      "hogd/event/event_exec",
+      {std::format("{}:{}", hostname, sched_event_port), work_dir_str});
   server_idx++;
 
   EventCard event_card = sched_event_test->impl()->await_event_card();
@@ -510,7 +509,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   auto db_cards = sched_db_test->impl()->await_shard_cards(1);
   sched_exec_test->impl()->register_shard_cards(db_cards);
   auto exec_cards =
-      sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 1);
+      sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 2);
 
   auto event_sched_client =
       connect_to_event_sched_server(event_card.address_for_sched);
