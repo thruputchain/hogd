@@ -193,7 +193,7 @@ public:
     double e = timer.elapsed();
 
     // 20ms
-    nominated_block_cache_ = {};
+    nominated_block_cache_.block_id = 0;
     validated_block_cache_.clear();
     double f = timer.elapsed();
 
