@@ -85,3 +85,25 @@ add_dependencies(
   all_wasm_contracts
   all_wasm_headers
 )
+
+# create gas_usage_metric binary
+add_executable(
+  gas_usage_metric
+  gas_usage_metric.cc
+)
+target_link_libraries(
+  gas_usage_metric
+  loadgen
+  hogd
+  protocol
+  runtime_test_util
+  runtime_test_lib
+  precompiles
+  gtest
+)
+
+add_dependencies(
+  gas_usage_metric
+  all_wasm_contracts
+  all_wasm_headers
+)
