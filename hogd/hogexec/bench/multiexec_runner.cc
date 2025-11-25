@@ -184,11 +184,49 @@ private:
 
 static_assert(is_SchedDb1<SchedDBTest *, std::type_identity_t>);
 
+class SchedEventTest {
+public:
+  using rpc_service = SchedEvent1;
+
+  SchedEventTest() = default;
+
+  // Disable copy and move.
+  SchedEventTest(const SchedEventTest &) = delete;
+  SchedEventTest &operator=(const SchedEventTest &) = delete;
+  SchedEventTest(SchedEventTest &&) = delete;
+  SchedEventTest &operator=(SchedEventTest &&) = delete;
+
+  RPCError schedevent_intro_event(const EventCard &card)
+  {
+    std::unique_lock lk(mtx_);
+    event_card_ = std::move(card);
+    cv_.notify_all();
+    return RPCError::kRPCNone;
+  }
+
+  EventCard await_event_card()
+  {
+    std::unique_lock lk(mtx_);
+    cv_.wait(lk, [this] { return event_card_.has_value(); });
+    return event_card_.value();
+  }
+
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::optional<EventCard> event_card_;
+};
+
+static_assert(is_SchedEvent1<SchedEventTest *, std::type_identity_t>);
+
 namespace {
 auto
-connect_to_event_sched_server(uint16_t port)
+connect_to_event_sched_server(const ServerAddress &address)
 {
-  return make_rpc_client<EventSched1>(x23::HostPort{"localhost", port}, false);
+  x23::HostPort host_port;
+  if (!host_port.parse(address)) {
+    throw std::runtime_error("Failed to parse event sched server address");
+  }
+  return make_rpc_client<EventSched1>(host_port, false);
 }
 
 auto
@@ -237,7 +275,7 @@ namespace {
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-using event_sched_client_t = decltype(connect_to_event_sched_server(0));
+using event_sched_client_t = decltype(connect_to_event_sched_server("address"));
 using db_sched_client_t = decltype(connect_to_db_server(ShardCard{}));
 
 void
@@ -419,9 +457,9 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     control_server_handles.emplace_back(server_addr);
   }
 
-  if (server_addrs.size() < 2) {
-    // 1 db and the rest executors
-    throw std::runtime_error("At least 2 servers are required");
+  if (server_addrs.size() < 3) {
+    // 1 db, 1 event server, and the rest executors
+    throw std::runtime_error("At least 3 servers are required");
   }
 
   RpcServer<SchedExecTest> sched_exec_test;
@@ -430,39 +468,34 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   RpcServer<SchedDBTest> sched_db_test;
   uint16_t sched_db_port = sched_db_test.start_server(0);
 
-  TestEventAggregator event_server;
-  TestEventAggregatorExecServer event_server_exec_server =
-      TestEventAggregatorExecServer(event_server);
-  TestEventAggregatorSchedServer event_server_sched_server =
-      TestEventAggregatorSchedServer(event_server);
-
-  uint16_t event_server_exec_port = event_server_exec_server.start_server(0);
-  uint16_t event_server_sched_port = event_server_sched_server.start_server(0);
-
-  std::string hostname;
-  CHECK_EQ(get_hostname(hostname), 0);
-
-  sched_exec_test->impl()->register_event_card(EventCard{
-      .protocol = version::kHogdProtocol,
-      .upid = {},
-      .address_for_exec =
-          std::format("{}:{}", hostname, event_server_exec_port).c_str(),
-      .address_for_sched =
-          std::format("{}:{}", hostname, event_server_sched_port).c_str()});
+  RpcServer<SchedEventTest> sched_event_test;
+  uint16_t sched_event_port = sched_event_test.start_server(0);
 
   auto work_dir = control_server_handles[0].ci_client.query_work_dir();
   if (work_dir.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
     throw std::runtime_error("Failed to query work dir");
   }
 
+  std::string work_dir_str = std::format("{}", work_dir.work_dir());
+  info("using work dir: {}", work_dir_str);
+
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+
+  size_t server_idx = 0;
+  control_server_handles[server_idx].ci_client.start_server(
+    "hogd/event/event_exec", {
+                         std::format("{}:{}", hostname, sched_event_port),
+                         work_dir_str});
+  server_idx++;
+
+  EventCard event_card = sched_event_test->impl()->await_event_card();
+  sched_exec_test->impl()->register_event_card(event_card);
+
   for (auto &control_server_handle : control_server_handles) {
     control_server_handle.ci_client.clear_work_dir();
   }
 
-  std::string work_dir_str = std::format("{}", work_dir.work_dir());
-  info("using work dir: {}", work_dir_str);
-
-  size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hogdb/hogdb", {work_dir_str, "10000000000",
                            std::format("{}:{}", hostname, sched_db_port)});
@@ -480,7 +513,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 1);
 
   auto event_sched_client =
-      connect_to_event_sched_server(event_server_sched_port);
+      connect_to_event_sched_server(event_card.address_for_sched);
   assert(db_cards.size() == 1);
   auto db_sched_client = connect_to_db_server(db_cards[0]);
 
