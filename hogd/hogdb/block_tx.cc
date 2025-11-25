@@ -1,7 +1,6 @@
 #include "hogd/hogdb/block_tx.h"
 
 #include <cassert>
-#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -11,7 +10,6 @@
 #include "auth_rpc.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
@@ -29,8 +27,6 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
-#include "types.hh"
-#include "x23/async.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -198,24 +194,6 @@ BlockTX::read_balance_base(const Address &addr)
   return base.has_value() ? *base : 0;
 }
 
-namespace {
-x23::Detached
-async_dispatch_balance_deltas(
-    BlockHeight block_height, PerThread<std::vector<Delta>> balance_deltas,
-    std::shared_ptr<BlockTX::sched_db_client_t> sched_db_client)
-{
-  co_await default_threadpool().bg();
-
-  HogsTransferred transferred{.block = block_height, .deltas = {}};
-  auto ul = balance_deltas.lock_threads();
-  balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
-    transferred.deltas.append_range(deltas);
-  });
-  co_await sched_db_client->scheddb_hogs_transferred(std::move(transferred));
-  co_return;
-}
-} // namespace
-
 HogDBStatus<void>
 BlockTX::commit(WorkerPool &pool)
 {
@@ -291,14 +269,9 @@ BlockTX::commit(WorkerPool &pool)
                   .has_value());
       },
       1024, pool);
+  background_commit_worker_.submit_job(block_height_, std::move(key_changes),
+                                       std::move(balance_deltas));
 
-  if (sched_db_client_) {
-    async_dispatch_balance_deltas(block_height_, std::move(balance_deltas),
-                                  sched_db_client_);
-  }
-
-  auth_change_subscription_manager_.detached_publish_auth_changes(
-      block_height_, std::move(key_changes));
   return ret;
 }
 

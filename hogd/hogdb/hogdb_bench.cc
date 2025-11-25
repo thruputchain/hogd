@@ -22,6 +22,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -311,8 +312,10 @@ Benchmark::run()
   // swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
   // trace("trace logging enabled");
 
-  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_, nullptr,
-                              subscription_manager_, 1);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block(db_, *trie_, cost_model_,
+                              background_commit_worker, 1);
 
   DbTip tip{.height = 0, .id = std::numeric_limits<BlockTXID>::max()};
   if (HogDBStatus<void> ret = db_.write_dbtip(tip); !ret)

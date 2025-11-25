@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -88,9 +89,7 @@ protected:
 TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
 {
   // Subscribe to auth changes
-  [this]() -> x23::Async<void> {
-    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card_);
-  }()();
+  subscription_manager_.add_full_auth_change_subscriber(auth_card_)();
 
   // Create 3 addresses
   Address addr1 = make_address(0x1111);
@@ -107,8 +106,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -188,9 +189,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
 TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 {
   // Subscribe to auth changes
-  [this]() -> x23::Async<void> {
-    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card_);
-  }()();
+  subscription_manager_.add_full_auth_change_subscriber(auth_card_)();
 
   // Create an address
   Address addr = make_address(0x4444);
@@ -210,8 +209,10 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -248,9 +249,7 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 {
   // Subscribe to auth changes
-  [this]() -> x23::Async<void> {
-    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card_);
-  }()();
+  subscription_manager_.add_full_auth_change_subscriber(auth_card_)();
 
   {
     // Create another auth server that is then deleted
@@ -260,10 +259,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
     AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocol,
                                    .upid = {},
                                    .address = server_address2.c_str()};
-    [this, auth_card2]() -> x23::Async<void> {
-      co_await subscription_manager_.add_full_auth_change_subscriber(
-          auth_card2);
-    }()();
+    subscription_manager_.add_full_auth_change_subscriber(auth_card2)();
   }
 
   // create one auth server that does receive the updates
@@ -273,9 +269,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocol,
                                  .upid = {},
                                  .address = server_address3.c_str()};
-  [this, auth_card3]() -> x23::Async<void> {
-    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card3);
-  }()();
+  subscription_manager_.add_full_auth_change_subscriber(auth_card3)();
 
   // Create an address
   Address addr = make_address(0x5555);
@@ -288,8 +282,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -345,12 +341,10 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
                                 .upid = {},
                                 .address = "unparseable_nonsense"};
   // Subscribe to auth changes
-  [this, bad_card, bad_card2, bad_card3]() -> x23::Async<void> {
-    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card);
-    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card2);
-    co_await subscription_manager_.add_full_auth_change_subscriber(bad_card3);
-    co_await subscription_manager_.add_full_auth_change_subscriber(auth_card_);
-  }()();
+  subscription_manager_.add_full_auth_change_subscriber(bad_card)();
+  subscription_manager_.add_full_auth_change_subscriber(bad_card2)();
+  subscription_manager_.add_full_auth_change_subscriber(bad_card3)();
+  subscription_manager_.add_full_auth_change_subscriber(auth_card_)();
 
   // Create an address
   Address addr = make_address(0x5555);
@@ -363,8 +357,11 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   db_.load_trie(trie_);
 
   // Create PerThreadARC<BlockTX> and InvokeTX
-  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel, nullptr,
-                                 subscription_manager_, height);
+  BackgroundCommitWorker background_commit_worker(subscription_manager_,
+                                                  nullptr);
+
+  PerThreadARC<BlockTX> block_tx(db_, trie_, kTestCostModel,
+                                 background_commit_worker, height);
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
