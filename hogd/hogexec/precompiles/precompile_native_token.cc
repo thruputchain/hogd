@@ -1,5 +1,6 @@
 #include "hogd/hogexec/precompiles/precompile_native_token.h"
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
@@ -236,6 +237,38 @@ adjust_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
   return {Result<void, itc_erc20::ERC20Error>::make_ok()};
 }
 
+InvokeStatus<Result<amount_t, itc_erc20::ERC20Error>>
+get_allowance_impl(SystemCallHandler &handler, NativeRuntime &runtime,
+                   ContractAddress owner, ContractAddress spender)
+{
+  trace("native token get_allowance: owner {} spender {}", x23::show(owner),
+        x23::show(spender));
+  if (!runtime.consume_gas(1)) {
+
+    return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+  }
+
+  auto allow_key = allowance_key(owner, spender);
+  auto r = handler.get_nnint(allow_key, true);
+  if (!r.has_value()) {
+    return r.error().to_invoke_error();
+  }
+  if (!r.value().has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  // TODO(geoff): what is the correct overflow behavior on get_allowance?
+  auto [set, add] = r.value().value();
+  if (!set.has_value()) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  auto [total, of] = overflowing_add(*set, add);
+  if (of) {
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+  }
+  uint128_t utotal = std::max<int128_t>(total, 0);
+  return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(utotal))};
+}
+
 } // namespace
 
 std::unique_ptr<NativeContract>
@@ -252,6 +285,9 @@ make_native_token_contract()
 
   // transfer_from
   builder.add<itc_erc20::ERC20, "transfer_from">(transfer_from_impl);
+
+  // allowance
+  builder.add<itc_erc20::ERC20, "allowance">(get_allowance_impl);
 
   // adjust_allowance
   builder.add<itc_erc20::ERC20, "adjust_allowance">(adjust_allowance_impl);

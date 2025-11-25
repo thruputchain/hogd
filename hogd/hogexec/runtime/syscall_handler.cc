@@ -506,8 +506,8 @@ SystemCallHandler::emit_events()
 }
 
 SyscallStatus<void>
-SystemCallHandler::log_event(SHA256Hash const *topic0, SHA256Hash const *topic1,
-                             SHA256Hash const *topic2,
+SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
+                             Topic const *topic2,
                              std::span<const std::byte> data)
 {
   assert(!invocation_frame_stack_.empty());

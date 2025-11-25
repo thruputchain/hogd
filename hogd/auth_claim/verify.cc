@@ -40,8 +40,8 @@ bitmap_accepts_key(BitMap bitmap, size_t idx)
 }
 
 static_assert(valid_pk_claim(0));
-static_assert(valid_pk_claim(19));
-static_assert(!valid_pk_claim(20));
+static_assert(valid_pk_claim(20));
+static_assert(!valid_pk_claim(21));
 
 static_assert(valid_pk_bitmap(0));
 static_assert(!valid_pk_bitmap(0xFFFF'FFFF));
