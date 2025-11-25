@@ -473,6 +473,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   auto work_dir = control_server_handles[0].ci_client.query_work_dir();
   if (work_dir.error_code() != CIServerErrorCode::kCIServerErrorCodeOK) {
+    error("Failed to query work dir: {}", work_dir.error_code());
     throw std::runtime_error("Failed to query work dir");
   }
 

@@ -17,10 +17,10 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh
 
 echo 'build (1 of 2)'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build (2 of 2)'
-make -C release -j$(nproc) control_server hogdb_exec hogexec event_exec
+make -C release -j$(nproc) control_server hogdb_exec hogexec event_exec > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clear hogdb file directory'
 mkdir -p ci_work_dir/
