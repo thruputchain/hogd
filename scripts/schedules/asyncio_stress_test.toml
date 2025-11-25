@@ -1,0 +1,47 @@
+name = "sanitizer_ci"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+host = ["hog8"]
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# Google benchmark seems to add Werror in release builds, which for some reason interacts badly with asan 
+# (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
+# We disable it overall just to save build time, but it's required for the gcc release build with asan.
+
+echo 'build gcc release'
+./scripts/build.sh -d build/gcc_release -c gcc -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+export X23_SNDBUF=1
+export X23_RCVBUF=1
+
+echo 'run gcc tests'
+ctest --test-dir build/gcc_release --parallel --timeout 100 --output-on-failure
+
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
