@@ -62,6 +62,8 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   for (const ContractAddress &address : addresses) {
     HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
     if (!status) {
+      warn("Failed to read hog age for address {}: {}", address,
+           status.error());
       co_return HogAgeResult(DbSchedResult::DbSchedResultError);
     }
     // TODO(jhumphri): Include the address in each index.
