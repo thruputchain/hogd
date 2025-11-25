@@ -661,6 +661,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   co_await scheduler_->transfer_finished_.acquire();
 
+  // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
+  // correctly when we use the helper functions above to send txs to the
+  // executors.
   PendingBlock cache{};
   cache.block_id = get_ns_since_epoch();
   cache.db_tip = db_tip;
