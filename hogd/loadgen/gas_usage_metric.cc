@@ -1,11 +1,11 @@
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <print>
 #include <stdexcept>
 #include <string>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -135,7 +135,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   try {
     hogd::run_gas_usage_metric(num_accounts);
   } catch (std::exception const &e) {
-    std::println(stderr, "Error: {}", e.what());
+    hogd::error("{}", e.what());
     return EXIT_FAILURE;
   }
 
