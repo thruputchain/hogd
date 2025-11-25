@@ -158,7 +158,7 @@ public:
       : Location(other), v_(other.v_)
     {}
 
-    value_type &operator*() const noexcept
+    value_type *operator->() const noexcept
     {
       return v_->get_location(this->loc());
     }
@@ -476,16 +476,16 @@ private:
     return c;
   }
 
-  T &get_location(Location l) const noexcept
+  T *get_location(Location l) const noexcept
   {
     // The assumption is that you got the index you are looking up
     // from somewhere, so you are synchronized and don't need acquire
     // memory order here.
-    return chunks_[l.chunk()].load(std::memory_order_relaxed)[l.item()];
+    return chunks_[l.chunk()].load(std::memory_order_relaxed) + l.item();
   }
   T &get_index(size_t i) const noexcept
   {
-    return get_location(Location::from_index(i));
+    return *get_location(Location::from_index(i));
   }
 };
 
