@@ -256,8 +256,7 @@ public:
   void resize(size_t n) { grow_or_resize<false>(n); }
   void grow(size_t n) { grow_or_resize<true>(n); }
 
-  template<bool GrowOnly>
-  void grow_or_resize(size_t n)
+  template<bool GrowOnly> void grow_or_resize(size_t n)
   {
     size_t size = take_size();
     Defer _unlock([this, &size] { put_size(size); });

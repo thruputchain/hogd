@@ -167,6 +167,9 @@ public:
     return *self.ptr_;
   }
 
+  // It's okay to call container.end().operator->() with contiguous
+  // iterators, so we can't rely on AccessIterMixin::operator->
+  // which might dereference a NULL pointer.
   constexpr pointer operator->() const noexcept { return ptr_; }
 
   constexpr auto &operator+=(this auto &self, difference_type offset) noexcept
