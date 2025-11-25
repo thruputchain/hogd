@@ -1,11 +1,11 @@
-name: C++ CI
+name: C++ CI (hog_sched)
 
 on:
     workflow_dispatch:
-#   push:
-#     branches: [ "main" ]
-#   pull_request:
-#     branches: [ "main" ]
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main"]
 
 jobs:
     build:
@@ -34,13 +34,10 @@ jobs:
                       ${{ secrets.HOGD_TO_PROTOCOL_GO }}
                       ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
             - uses: actions/checkout@v4
-              with:
-                  submodules: recursive
-            - uses: ./.github/actions/prepare_env
-            - name: check
-              run: ./scripts/check.sh -p -b
-            - name: save core dumps and binaries
-              if: failure()
+            - name: Run hog schedule
               run: |
-                  echo "Saving core dumps and associated binaries"
-                  ./scripts/save_core_dumps.sh ../core_dumps
+                  hog_sched \
+                    --i="github-${{ github.run_id }}" \
+                    --key=github_repo --value=${{ github.repository }} \
+                    --key=git_commit --value=${{ github.sha }} \
+                    ./scripts/schedules/cpp.toml
