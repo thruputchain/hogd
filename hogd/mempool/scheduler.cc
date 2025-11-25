@@ -661,7 +661,6 @@ x23::Async<void>
 Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
-  info("remove_from_scheduler validated_block is {}", validated_block);
   static SynchronizedMap<ContractAddress, char> accounts;
   accounts.clear();
 

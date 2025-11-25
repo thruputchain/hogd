@@ -252,6 +252,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
 
+  // Validate a block.
   x23::Vec<SignedTransactionHash> hashes;
   hashes.push_back(sha256(txs[0]));
   scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
@@ -260,13 +261,21 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   EXPECT_EQ(scheduler->size(), 1UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
 
+  // Nominate a block.
   x23::Vec<SignedTransactionHash> scheduled_hashes;
   x23::Vec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(sha256(scheduled.front()), sha256(txs[1]));
-  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  hashes = {sha256(txs[1])};
+  scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
+                                       hashes),
+                                   /*validated_block=*/false)();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 }
 
 TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
