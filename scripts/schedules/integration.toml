@@ -69,7 +69,7 @@ echo 'build scpd'
 source ./groundhog-go/chuckd/scripts/setup_cargo.sh
 ./groundhog-go/chuckd/scripts/build_scpd.sh
 
-hog_wait loadgen_is_up
+hog_wait loadgen_is_up mempool_is_up
 
 echo 'start coordinator_loadgen'
 sed \
@@ -132,6 +132,8 @@ server_pid=$!
 
 hog_signal mempool_is_up
 
+hog_wait done
+
 """
 
 # db
@@ -177,6 +179,8 @@ server_pid=$!
 
 hog_signal db_is_up
 
+hog_wait done
+
 """
 
 # exec
@@ -214,6 +218,8 @@ server_pid=$!
 ./scripts/wait-port localhost 8090
 
 hog_signal exec_is_up/{{ .hog_host_index }}
+
+hog_wait done
 
 """
 
