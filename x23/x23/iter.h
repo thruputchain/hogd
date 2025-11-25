@@ -66,9 +66,15 @@ struct PlusMinusMixin {
   }
 };
 
-// Define operator[] in terms of operator* and
+// Define operator[] and operator-> in terms of operator* and
 // operator+=.
 struct AccessMixin {
+  constexpr auto operator->(this const auto &self) noexcept
+  {
+    auto p = &*self;
+    x23assert(p);
+    return p;
+  }
   constexpr decltype(auto) operator[](this auto self, ptrdiff_t d) noexcept
   {
     self += d;

@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <x23/cleanup.h>
-#include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/iter.h>
 #include <x23/utility.h>
@@ -254,7 +253,10 @@ public:
     return size++;
   }
 
-  void resize(size_t n)
+  void resize(size_t n) { grow_or_resize<false>(n); }
+  void grow(size_t n) { grow_or_resize<true>(n); }
+
+  template<bool GrowOnly> void grow_or_resize(size_t n)
   {
     size_t size = take_size();
     Defer _unlock([this, &size] { put_size(size); });
@@ -271,7 +273,7 @@ public:
           break;
         std::ranges::uninitialized_value_construct(s);
       }
-    else {
+    else if constexpr (!GrowOnly) {
       for (;;) {
         auto s = prevspan(cur, target);
         if (s.empty())
