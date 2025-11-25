@@ -364,13 +364,14 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
     sched_nomination.chunk.block_id = cache.block_id;
     Nomination &nomination = sched_nomination.chunk.nomination;
+    // TODO(jhumphri): Fill in the [proposer] field.
     nomination.block_height = cache.db_tip.height + 1;
     nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transaction_hashes.clear();
     nomination.transaction_nominations.clear();
     // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
-    // [nomination.transaction_hashes] and [nomination.transaction_nominations]
-    // are filled in below.
+    // [nomination.transaction_hashes] is written in [process_tx_outcomes] and
+    // [nomination.transaction_nominations] is filled in below.
   }
 
   x23::Vec<x23::Async<void>> handles;
