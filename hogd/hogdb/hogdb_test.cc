@@ -9,10 +9,17 @@
 
 // xdr types
 #include "account.hh"
+#include "contract.hh"
 #include "db_sched.hh"
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/auth_change_subscription_manager.h"
+#include "hogd/hogdb/background_commit_worker.h"
+#include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/invoke_tx.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
@@ -59,6 +66,10 @@ protected:
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
   });
+
+  AuthChangeSubscriptionManager subscription_manager_;
+  BackgroundCommitWorker background_commit_worker_ =
+      BackgroundCommitWorker(subscription_manager_, nullptr);
 };
 
 namespace {
@@ -187,6 +198,67 @@ TEST_F(HogDBTest, ItemLockCacheData)
   int128_t base;
   std::memcpy(&base, rsize->second.data() + 1, sizeof(int128_t));
   EXPECT_EQ(0xABCD'EF01'2345'6789, base);
+}
+
+TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
+{
+  Address addr = make_address(kAddress);
+  Address addr2 = make_address(kAddress + 1);
+  Address addr3 = make_address(kAddress + 2);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 1;
+
+  ASSERT_TRUE(
+      db_.write_address_metadata(addr,
+                                 DeployedContractHash{.hash = sha256(contract),
+                                                      .contract_size = 10}));
+  ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
+
+  db_.load_trie(trie_);
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                 background_commit_worker_, height);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  ASSERT_TRUE(invoke_tx.request_deploy_contract(
+      addr2,
+      DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(addr), -100000,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(addr2), 100000,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+
+  ASSERT_TRUE(invoke_tx.request_deploy_contract(
+      addr3,
+      DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
+  int128_t cost = cost_model_.get_contract_size_cost(10);
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(addr3), -cost,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(addr3), cost,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto res = db_.read_address_balance(addr3);
+  ASSERT_TRUE(res);
+  EXPECT_EQ(0, *res);
+
+  // Creating the new contract should force the creation of the hog age entry
+  // for the address.
+  ASSERT_TRUE(db_.read_address_average_hog_age(addr2));
+  ASSERT_TRUE(db_.read_address_average_hog_age(addr3));
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
