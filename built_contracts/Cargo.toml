@@ -25,6 +25,7 @@ groundhog_xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git" }
 groundhog-erc20-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 groundhog-erc1271-if = {  git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 erc20-bottle-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
+erc20-native-test = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 
 [profile.dev]
