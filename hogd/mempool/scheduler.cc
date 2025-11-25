@@ -165,6 +165,10 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, *value);
 }
 
+// TODO(jhumphri): Use [make_chunks()] below. Remember that there may be fewer
+// chunks than [kNumThreads], so only [co_await] awaitables for coroutines that
+// have a chunk. If we [co_await] awaitables for coroutines that do not have a
+// chunk, we will deadlock.
 x23::Async<void>
 Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 {
@@ -668,7 +672,6 @@ Scheduler::remove_from_scheduler(
       make_chunks(tx_hashes.size(), kNumThreads);
   std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
 
-  info("remove_from_scheduler");
   for (size_t i = 0; i < chunks.size(); i++) {
     [](const ChunkRange &chunk, auto cb,
        x23::span<const SignedTransactionHash> tx_hashes,
@@ -719,12 +722,15 @@ Scheduler::remove_from_scheduler(
     }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts,
                              validated_block, *this);
   }
-  info("remove_from_scheduler");
   size_t total_removed_from_runqueue = 0;
-  for (x23::Awaitable<size_t> &awaitable : awaitables) {
+  // There may be fewer chunks that [kNumThreads], so we iterate through the
+  // number of chunks. If we were to iterate through all of the awaitables,
+  // we would deadlock waiting on awaitables for coroutines that do not have a
+  // chunk.
+  for (size_t i = 0; i < chunks.size(); i++) {
+    x23::Awaitable<size_t> &awaitable = awaitables[i];
     total_removed_from_runqueue += co_await awaitable;
   }
-  info("remove_from_scheduler");
   double a = timer.elapsed();
 
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
