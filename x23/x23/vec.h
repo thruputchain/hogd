@@ -162,14 +162,6 @@ public:
   constexpr PtrIterator(const PtrIterator<U> &other) noexcept : ptr_(other.ptr_)
   {}
 
-  constexpr decltype(auto) operator*(this const auto &self) noexcept
-  {
-    return *self.ptr_;
-  }
-
-  // It's okay to call container.end().operator->() with contiguous
-  // iterators, so we can't rely on AccessIterMixin::operator->
-  // which might dereference a NULL pointer.
   constexpr pointer operator->() const noexcept { return ptr_; }
 
   constexpr auto &operator+=(this auto &self, difference_type offset) noexcept
