@@ -67,8 +67,8 @@ std::array<SigState, NSIG> sig_state;
 MVar<std::multimap<int, SigCB>>::Ptr
 take_sig_cbs()
 {
-  static auto &sig_cbs = make_nodestroy(new MVar<std::multimap<int, SigCB>>);
-  return sig_cbs.take();
+  static NoDestroy<MVar<std::multimap<int, SigCB>>> sig_cbs;
+  return sig_cbs->take();
 }
 
 // We wake up the service loop by writing to a pipe.  This function

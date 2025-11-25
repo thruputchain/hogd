@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <x23/cleanup.h>
-#include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/iter.h>
 #include <x23/utility.h>
@@ -159,7 +158,7 @@ public:
       : Location(other), v_(other.v_)
     {}
 
-    value_type &operator*() const noexcept
+    value_type *operator->() const noexcept
     {
       return v_->get_location(this->loc());
     }
@@ -254,7 +253,10 @@ public:
     return size++;
   }
 
-  void resize(size_t n)
+  void resize(size_t n) { grow_or_resize<false>(n); }
+  void grow(size_t n) { grow_or_resize<true>(n); }
+
+  template<bool GrowOnly> void grow_or_resize(size_t n)
   {
     size_t size = take_size();
     Defer _unlock([this, &size] { put_size(size); });
@@ -271,7 +273,7 @@ public:
           break;
         std::ranges::uninitialized_value_construct(s);
       }
-    else {
+    else if constexpr (!GrowOnly) {
       for (;;) {
         auto s = prevspan(cur, target);
         if (s.empty())
@@ -474,16 +476,16 @@ private:
     return c;
   }
 
-  T &get_location(Location l) const noexcept
+  T *get_location(Location l) const noexcept
   {
     // The assumption is that you got the index you are looking up
     // from somewhere, so you are synchronized and don't need acquire
     // memory order here.
-    return chunks_[l.chunk()].load(std::memory_order_relaxed)[l.item()];
+    return chunks_[l.chunk()].load(std::memory_order_relaxed) + l.item();
   }
   T &get_index(size_t i) const noexcept
   {
-    return get_location(Location::from_index(i));
+    return *get_location(Location::from_index(i));
   }
 };
 

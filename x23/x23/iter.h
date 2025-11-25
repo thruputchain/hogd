@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <concepts>
+
 #include <x23/utility.h>
 
 namespace x23::detail {
@@ -64,13 +66,14 @@ struct PlusMinusMixin {
   }
 };
 
-// Define operator[] and operator-> in terms of operator* and
+// Define operator[] and operator* in terms of operator-> and
 // operator+=.
 struct AccessMixin {
-  constexpr auto operator->(this const auto &self) noexcept
+  constexpr decltype(auto) operator*(this const auto &self) noexcept
   {
-    return std::addressof(*self);
+    return *self.operator->();
   }
+
   constexpr decltype(auto) operator[](this auto self, ptrdiff_t d) noexcept
   {
     self += d;
@@ -79,7 +82,7 @@ struct AccessMixin {
 };
 
 // Define random access iterator methods if you define:
-//    - operator*
+//    - operator->
 //    - operator+=
 //    - friend difference_type operator-(iter, iter)
 //    - operator==
@@ -87,6 +90,6 @@ struct AccessMixin {
 //
 // Note: make operator- a friend rather than a method to avoid
 // shadowing PlusMinuxMixin::operator-.
-struct RandomAcessIterMixin : PlusMinusMixin, AccessMixin {};
+struct RandomAccessIterMixin : PlusMinusMixin, AccessMixin {};
 
 } // namespace x23::detail

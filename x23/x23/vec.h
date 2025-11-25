@@ -110,6 +110,7 @@ namespace detail {
 // std::allocator<T>::allocate is.  Of course, since as of this
 // writing gcc currently has slightly broken if consteval support, the
 // constexpr stuff will need to evolve anyway.
+// NOLINTNEXTLINE(readability-identifier-naming)
 template<typename T> struct merged_allocator {
   using type = std::allocator<T>;
 };
@@ -144,7 +145,7 @@ strlen(const char *s)
   }
 }
 
-template<typename T> class PtrIterator : public RandomAcessIterMixin {
+template<typename T> class PtrIterator : public RandomAccessIterMixin {
 public:
   using iterator_concept = std::contiguous_iterator_tag;
   using difference_type = std::ptrdiff_t;
@@ -161,10 +162,7 @@ public:
   constexpr PtrIterator(const PtrIterator<U> &other) noexcept : ptr_(other.ptr_)
   {}
 
-  constexpr decltype(auto) operator*(this const auto &self) noexcept
-  {
-    return *self.ptr_;
-  }
+  constexpr pointer operator->() const noexcept { return ptr_; }
 
   constexpr auto &operator+=(this auto &self, difference_type offset) noexcept
   {
@@ -204,6 +202,7 @@ private:
 // span<T, std::dynamic_extent>, the dynamic first/last/subspan return
 // the derived type instead of span.
 template<typename T, size_t E = std::dynamic_extent>
+// NOLINTNEXTLINE(readability-identifier-naming)
 struct span : std::span<T, E> {
   using super = std::span<T, E>;
   using typename super::element_type;
@@ -279,9 +278,11 @@ public:
   using const_reference = const T &;
   using pointer = T *;
   using const_pointer = const T *;
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct iterator : detail::PtrIterator<value_type> {
     using detail::PtrIterator<value_type>::PtrIterator;
   };
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct const_iterator : detail::PtrIterator<const value_type> {
     using detail::PtrIterator<const value_type>::PtrIterator;
   };
@@ -332,7 +333,8 @@ public:
     : Vec(std::from_range, std::ranges::subrange(first, last))
   {}
   constexpr Vec(std::initializer_list<value_type> init) { append_range(init); }
-  template<std::ranges::range R> constexpr Vec(std::from_range_t, R &&r)
+  template<std::ranges::range R>
+  constexpr Vec(std::from_range_t /*unused*/, R &&r)
   {
     try {
       append_range(std::forward<R>(r));
@@ -999,10 +1001,10 @@ Str
 hexdump(const is_range_of<uint8_t> auto &r)
 {
   Str out;
-  constexpr char hexbytes[] = "0123456789abcdef";
+  constexpr static char kHexBytes[] = "0123456789abcdef";
   for (auto c : r) {
-    out.push_back(hexbytes[c >> 4 & 0xf]);
-    out.push_back(hexbytes[c & 0xf]);
+    out.push_back(kHexBytes[c >> 4 & 0xf]);
+    out.push_back(kHexBytes[c & 0xf]);
   }
   return out;
 }
@@ -1011,11 +1013,11 @@ Str
 hexdump(const is_range_of<std::byte> auto &r)
 {
   Str out;
-  constexpr char hexbytes[] = "0123456789abcdef";
+  constexpr static char kHexBytes[] = "0123456789abcdef";
   for (auto c : r) {
     auto val = static_cast<uint8_t>(c);
-    out.push_back(hexbytes[val >> 4 & 0xf]);
-    out.push_back(hexbytes[val & 0xf]);
+    out.push_back(kHexBytes[val >> 4 & 0xf]);
+    out.push_back(kHexBytes[val & 0xf]);
   }
   return out;
 }

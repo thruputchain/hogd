@@ -1,3 +1,4 @@
+#include "event.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -26,9 +27,8 @@ syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer)
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_LogEvent_inner(SystemCallHandler &syscall_handler,
-                       SHA256Hash const *topic0, SHA256Hash const *topic1,
-                       SHA256Hash const *topic2,
+syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
+                       Topic const *topic1, Topic const *topic2,
                        std::span<const std::byte> data)
 {
   if ((topic1 && !topic0) || (topic2 && (!topic1 || !topic0))) {

@@ -82,6 +82,7 @@ cat >config-hog8.json <<EOF
         }
     },
     "baton_config": {
+        "skew_msec": "10",
         "heartbeat_msec": "600",
         "patience_msec": "3000",
         "max_catchup_height": 10000
@@ -112,7 +113,8 @@ $1 -l info --stack --config config-hog8.json \
   --storage-dir ./storage-hog8 \
   --out-addr :50000 \
   --wallet-addr :40000 \
-  --loadgen-addr localhost:44400 \
+  --loadgen-addr hog7:44400 \
+  --sched-addr hog9:8070 \
   --scpd-path $2 \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400 \

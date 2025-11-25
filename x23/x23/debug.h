@@ -49,7 +49,7 @@ int make_debug_fd(const std::string &env_val);
 
 // A comple-time string that's suitable as a non-type template
 // argument.
-template<std::size_t N> requires (N > 0)
+template<size_t N> requires (N > 0)
 struct FixedStr {
   char value[N];
   consteval FixedStr(const char (&v)[N]) noexcept { std::copy_n(v, N, value); }
