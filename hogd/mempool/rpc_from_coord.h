@@ -182,7 +182,7 @@ public:
     double c = timer.elapsed();
     co_await scheduler_->remove_from_scheduler(
         x23::span<const SignedTransactionHash>(*remove_from_scheduler),
-        /*validated_block=*/!nominated_block_cache_.block_id ||
+        /*validated_block=*/(nominated_block_cache_.block_id == 0UL) ||
             nominated_block_cache_.block_id != block_id);
     double d = timer.elapsed();
 
