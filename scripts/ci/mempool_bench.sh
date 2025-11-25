@@ -50,12 +50,12 @@ echo 'launch first hogexec'
 
 echo 'launch second hogexec'
 # the mempool runs on hog10
-run: ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'launch third hogexec'
 # the mempool runs on hog10
-run: ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'check hogexec is running'
