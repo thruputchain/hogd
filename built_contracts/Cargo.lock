@@ -210,6 +210,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "erc20-native-test"
+version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#fe38f9b69fcefb5261cf17b686d6caef905925e8"
+dependencies = [
+ "erc20-test",
+ "groundhog-erc20-if",
+ "sdk",
+ "thiserror",
+]
+
+[[package]]
 name = "erc20-test"
 version = "0.1.0"
 source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#fe38f9b69fcefb5261cf17b686d6caef905925e8"
@@ -365,6 +376,7 @@ name = "itc_erc20"
 version = "0.1.1"
 dependencies = [
  "erc20-bottle-test",
+ "erc20-native-test",
  "groundhog-erc20-if",
  "itc_erc20",
  "sdk",
