@@ -20,14 +20,14 @@ source ./scripts/ci/prepare_env.sh
 # (some kind of uninitialized variable in stdlib), so we disable benchmark builds in release mode.
 # We disable it overall just to save build time, but it's required for the gcc release build with asan.
 
-echo 'build gcc release'
-./scripts/build.sh -d build/gcc_release -c gcc -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+echo 'build gcc debug'
+./scripts/build.sh -d build/gcc_debug -c gcc -t Debug -x "-DBUILD_BENCHMARKS=OFF"
 
 export X23_SNDBUF=1
 export X23_RCVBUF=1
 
 echo 'run gcc tests'
-ctest --test-dir build/gcc_release --parallel --timeout 100 --output-on-failure
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure
 
 
 """
