@@ -180,7 +180,6 @@ public:
     scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                               return_to_runqueue.cend());
     double c = timer.elapsed();
-    // 50ms
     co_await scheduler_->remove_from_scheduler(
         x23::span<const SignedTransactionHash>(*remove_from_scheduler),
         /*validated_block=*/!nominated_block_cache_.block_id ||
@@ -192,7 +191,10 @@ public:
     }
     double e = timer.elapsed();
 
-    // 20ms
+    // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
+    // elements in the vectors in [nominated_block_cache_], so if we clear those
+    // vectors, we will experience segfaults because we will later attempt to
+    // read/write indices that do not exist.
     nominated_block_cache_.block_id = 0;
     validated_block_cache_.clear();
     double f = timer.elapsed();
