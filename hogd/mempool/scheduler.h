@@ -74,7 +74,8 @@ public:
   }
 
   x23::Async<void>
-  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
+  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes,
+                        bool validated_block);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -110,6 +111,7 @@ public:
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   size_t size() const { return size_.load(std::memory_order_relaxed); }
+  size_t tx_cache_size() { return txs_.size(); }
 
   // Debug.
   void dump_runqueue();

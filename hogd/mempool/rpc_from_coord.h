@@ -121,7 +121,8 @@ public:
     x23::Vec<x23::Async<void>> handles;
     handles.reserve(validated_block_cache_.size());
 
-    if (nominated_block_cache_.block_id == block_id) {
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id == block_id) {
       handles.push_back(commit_block(nominated_block_cache_));
       last_committed_block_ = nominated_block_cache_.db_tip;
     }
@@ -179,8 +180,11 @@ public:
     scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
                               return_to_runqueue.cend());
     double c = timer.elapsed();
+    // 50ms
     co_await scheduler_->remove_from_scheduler(
-        x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+        x23::span<const SignedTransactionHash>(*remove_from_scheduler),
+        /*validated_block=*/!nominated_block_cache_.block_id ||
+            nominated_block_cache_.block_id != block_id);
     double d = timer.elapsed();
 
     for (x23::Async<void> &handle : handles) {
@@ -188,6 +192,7 @@ public:
     }
     double e = timer.elapsed();
 
+    // 20ms
     nominated_block_cache_ = {};
     validated_block_cache_.clear();
     double f = timer.elapsed();

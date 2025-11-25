@@ -154,9 +154,9 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
     // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during validation by
-    // [find_and_remove_from_runqueue()], then validation failed, and then the
-    // tx was added back to the scheduler.
+    // added to the scheduler, then the tx was removed during nomination by
+    // [schedule()], then a validated block was committed rather than the
+    // nominated block, and then the tx was added back to the scheduler.
     const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
     CHECK_PTR(tx_ptr);
     value = tx_ptr;
@@ -655,9 +655,12 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
 
 x23::Async<void>
 Scheduler::remove_from_scheduler(
-    x23::span<const SignedTransactionHash> tx_hashes)
+    x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
-  SynchronizedMap<ContractAddress, char> accounts;
+  info("remove_from_scheduler validated_block is {}", validated_block);
+  static SynchronizedMap<ContractAddress, char> accounts;
+  accounts.clear();
+
   ElapsedTimer timer;
 
   constexpr size_t kNumThreads = 120;
@@ -665,10 +668,11 @@ Scheduler::remove_from_scheduler(
       make_chunks(tx_hashes.size(), kNumThreads);
   std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
 
+  info("remove_from_scheduler");
   for (size_t i = 0; i < chunks.size(); i++) {
     [](const ChunkRange &chunk, auto cb,
        x23::span<const SignedTransactionHash> tx_hashes,
-       SynchronizedMap<ContractAddress, char> &accounts,
+       SynchronizedMap<ContractAddress, char> &accounts, bool validated_block,
        Scheduler &scheduler) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
 
@@ -676,39 +680,51 @@ Scheduler::remove_from_scheduler(
           tx_hashes.begin() + chunk.start, tx_hashes.begin() + chunk.end);
       size_t num_removed_from_runqueue = 0;
       for (const SignedTransactionHash &tx_hash : hash_chunk) {
-        auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-        CHECK_PTR(tx_value_ptr);
+        if (validated_block) {
+          auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+          CHECK_PTR(tx_value_ptr);
 
-        const SignedTransaction &tx = tx_value_ptr->tx;
-        const ContractAddress &account = tx.tx.invocation.invoked_address;
-        const TxKey key = {.expiry_block_height =
-                               tx.tx.uniquifier.block_expiry_height,
-                           .tx_hash = tx_hash};
-        {
-          auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
-          // The tx may or may not be on the runqueue. If the tx is included in
-          // a block we are *nominating*, then it has already been taken off of
-          // the runqueue. If the tx is included in a block we are *validating*,
-          // then it is still on the runqueue.
-          if (txs.erase(key)) {
-            num_removed_from_runqueue++;
+          const SignedTransaction &tx = tx_value_ptr->tx;
+          const ContractAddress &account = tx.tx.invocation.invoked_address;
+          const TxKey key = {.expiry_block_height =
+                                 tx.tx.uniquifier.block_expiry_height,
+                             .tx_hash = tx_hash};
+          {
+            // We only need to remove txs from the runqueue when committing a
+            // validated block. Txs in a nominated block were already removed
+            // from the runqueue in [schedule()]. Thus, we can skip this for
+            // nominated block to save on overhead.
+            auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
+            // The tx may or may not be on the runqueue. If the tx is included
+            // in a block we are *nominating*, then it has already been taken
+            // off of the runqueue. If the tx is included in a block we are
+            // *validating*, then it is still on the runqueue.
+            if (txs.erase(key)) {
+              num_removed_from_runqueue++;
+            }
           }
-        }
-        accounts.insert(account, 0);
+          accounts.insert(account, 0);
 
-        // Careful! We remove the tx from [txs_] at the bottom here because once
-        // we remove it, the references above become invalidated.
-        CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
+          // Careful! We remove the tx from [txs_] at the bottom here because
+          // once we remove it, the references above become invalidated.
+          CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
+        }
+        else {
+          CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+        }
       }
 
       cb(num_removed_from_runqueue);
       co_return;
-    }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts, *this);
+    }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts,
+                             validated_block, *this);
   }
+  info("remove_from_scheduler");
   size_t total_removed_from_runqueue = 0;
   for (x23::Awaitable<size_t> &awaitable : awaitables) {
     total_removed_from_runqueue += co_await awaitable;
   }
+  info("remove_from_scheduler");
   double a = timer.elapsed();
 
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
