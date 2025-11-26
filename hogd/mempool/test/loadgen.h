@@ -69,10 +69,13 @@ public:
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = coord_sched_rpc.get_nomination();
+        nomination = coord_sched_rpc.get_nomination()();
         CHECK_EQ(res_nominate.block_id(), nomination.block_id);
-
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
+
+        CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
+                     res_nominate.block_id())(),
+                 SchedulerCommitOutcome::SchedulerCommitOK);
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
 
@@ -205,12 +208,21 @@ public:
       submit_vetted(txs, x23::CoroCB<void>(submit_vetted_handle));
 
       SchedulerNominationResult res_nominate = co_await nominate_handle;
-      co_await submit_vetted_handle;
-
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
+      x23::Async<SchedulerCommitOutcome> commit_handle =
+          sched_coord_clients_[0].schedulercoord_commit_block(
+              res_nominate.block_id());
+
+      co_await submit_vetted_handle;
+
+      ElapsedTimer timer;
+      CHECK_EQ(co_await commit_handle,
+               SchedulerCommitOutcome::SchedulerCommitOK);
+      info("commit handle took {} seconds", timer.elapsed());
+
       const auto &[nomination, num_txs] =
-          coord_sched_rpc_.get_nomination_no_txs();
+          coord_sched_rpc_.get_nomination_no_txs()();
       CHECK_EQ(res_nominate.block_id(), nomination.block_id);
 
       db_tip = {.height = nomination.nomination.block_height,

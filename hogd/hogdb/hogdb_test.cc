@@ -10,7 +10,6 @@
 // xdr types
 #include "account.hh"
 #include "contract.hh"
-#include "db_sched.hh"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"

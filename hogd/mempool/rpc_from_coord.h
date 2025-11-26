@@ -16,7 +16,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -52,6 +51,15 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
+  ~MempoolCoordinatorRpc()
+  {
+    size_t current_val;
+    while ((current_val = pending_detached_coroutines_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_detached_coroutines_.wait(/*old=*/current_val);
+    }
+  }
+
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
@@ -59,7 +67,6 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
-  Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client()
   {
@@ -101,20 +108,113 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  static x23::Async<SchedulerCommitOutcome>
+  x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id)
   {
-    // TODO(jhumphri): Implement.
-    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+    ElapsedTimer timer;
+
+    if (nominated_block_cache_.block_id != block_id &&
+        !validated_block_cache_.contains(block_id)) {
+      co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+    }
+
+    x23::Vec<x23::Async<void>> handles;
+    handles.reserve(validated_block_cache_.size());
+
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id == block_id) {
+      handles.push_back(commit_block(nominated_block_cache_));
+      last_committed_block_ = nominated_block_cache_.db_tip;
+    }
+    else {
+      handles.push_back(commit_block(validated_block_cache_[block_id]));
+      handles.push_back(abandon_block(nominated_block_cache_));
+      last_committed_block_ = validated_block_cache_[block_id].db_tip;
+    }
+    for (const auto &[_, cache] : validated_block_cache_) {
+      if (cache.block_id != block_id) {
+        handles.push_back(abandon_block(cache));
+      }
+    }
+    double a = timer.elapsed();
+
+    // TODO(jhumphri): I need to do two things:
+    // 1. If the nominated block is not the committed block, I need to return
+    // the nominated block's txs to the scheduler.
+    //
+    // 2. Next, I need to remove the committed block's txs from the scheduler.
+    // Note that some of these txs may overlap with the txs in the nominated
+    // block, so I can optimize this by only returning to the scheduler the
+    // txs in the nominated block that are not in the committed block. Then I
+    // can remove all of the committed block's txs from the scheduler.
+
+    static std::unordered_set<SignedTransactionHash> return_to_runqueue;
+    return_to_runqueue.clear();
+    const x23::Vec<SignedTransactionHash> *remove_from_scheduler = nullptr;
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id == block_id) {
+      remove_from_scheduler = &nominated_block_cache_.tx_hashes;
+    }
+    else {
+      if (nominated_block_cache_.block_id &&
+          nominated_block_cache_.block_id != block_id) {
+        return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
+                                  nominated_block_cache_.tx_hashes.end());
+      }
+      for (const auto &[_, cache] : validated_block_cache_) {
+        if (cache.block_id == block_id) {
+          remove_from_scheduler = &cache.tx_hashes;
+        }
+      }
+      CHECK_CONST_PTR(remove_from_scheduler);
+      for (const SignedTransactionHash &hash : *remove_from_scheduler) {
+        if (return_to_runqueue.empty()) {
+          break;
+        }
+        return_to_runqueue.erase(hash);
+      }
+    }
+    double b = timer.elapsed();
+
+    CHECK_CONST_PTR(remove_from_scheduler);
+    scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
+                              return_to_runqueue.cend());
+    double c = timer.elapsed();
+    co_await scheduler_->remove_from_scheduler(
+        x23::span<const SignedTransactionHash>(*remove_from_scheduler),
+        /*validated_block=*/(nominated_block_cache_.block_id == 0UL) ||
+            nominated_block_cache_.block_id != block_id);
+    double d = timer.elapsed();
+
+    for (x23::Async<void> &handle : handles) {
+      co_await handle;
+    }
+    double e = timer.elapsed();
+
+    // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
+    // elements in the vectors in [nominated_block_cache_], so if we clear those
+    // vectors, we will experience segfaults because we will later attempt to
+    // read/write indices that do not exist.
+    nominated_block_cache_.block_id = 0;
+    validated_block_cache_.clear();
+    double f = timer.elapsed();
+
+    info("commit a {}, b-a {}, c-b {}, d-c {}, e-d {}, f-e {}", a, b - a, c - b,
+         d - c, e - d, f - e);
+    co_return SchedulerCommitOutcome::SchedulerCommitOK;
   }
 
   // These are just stubs that pass through the calls from the coordinator to
   // hogdb.
-  x23::Async<DbTipResult> schedcoord_get_tip();
+  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> schedulercoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown()
+  {
+    shutdown_flag_.store(true, std::memory_order_release);
+    co_return;
+  }
 
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
@@ -122,10 +222,20 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
-  static x23::Async<OptSignedTransactionBatch>
-  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    panic("unimplemented");
+    x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
+    ret.reserve(tx_hashes.size());
+    for (const SignedTransactionHash &tx_hash : tx_hashes) {
+      x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
+      ret.push_back(tx);
+    }
+    // [OptSignedTransactionBatch] is an
+    // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
+    // which are not the same as [Ptrs], but they serialize the same way. So we
+    // return a span of [BorrowedPtr]s.
+    co_return ret;
   }
 
   static SHA256Hash
@@ -145,7 +255,10 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  struct NominationData {
+  // clang-tidy complains that an exception may be thrown in the function
+  // [operator=].
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
     x23::Vec<SignedTransaction> txs;
@@ -158,11 +271,6 @@ private:
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
     x23::Vec<SignedTransaction> failed_txs;
-  };
-
-  const std::function<x23::Async<bool>(const SignedTransaction &tx)>
-      auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
-    co_return co_await authentication_->authenticate(tx);
   };
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
@@ -194,9 +302,7 @@ private:
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
-    // [current_block_id_] with it.
-    authentication_ =
-        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    // [current_block_id_] with it in the scheduler.
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     db_rpc_->register_scheduler(scheduler_);
 
@@ -233,11 +339,13 @@ private:
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
 
-  x23::Async<bool> initialize_block(const NominationData &cache);
-  x23::Async<void> schedule(NominationData &cache);
-  static void process_tx_outcomes(NominationData &cache);
+  x23::Async<bool> initialize_block(const PendingBlock &cache);
+  x23::Async<void> schedule(PendingBlock &cache);
+  static void process_tx_outcomes(PendingBlock &cache);
   x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
-  x23::Async<void> finish_nominating_block(NominationData &cache);
+  x23::Detached finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> abandon_block(const PendingBlock &cache);
+  x23::Async<void> commit_block(const PendingBlock &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
@@ -245,8 +353,6 @@ private:
 
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
-
-  x23::Async<void> mark_block_committed(BlockID block_id);
 
   MempoolDbRpc *db_rpc_;
 
@@ -256,9 +362,12 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_ = 0;
   std::shared_ptr<Scheduler> scheduler_;
-  std::unique_ptr<Authentication> authentication_;
+
+  PendingBlock nominated_block_cache_ = {};
+  std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  DbTip last_committed_block_{};
+  std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;

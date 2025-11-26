@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 

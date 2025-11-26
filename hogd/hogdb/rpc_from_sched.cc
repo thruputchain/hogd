@@ -113,14 +113,6 @@ HogDBSchedRpc::dbsched_get_account_auth_data(BlockID block_id,
   co_return ret;
 }
 
-x23::Async<DbTipResult>
-HogDBSchedRpc::dbsched_get_tip()
-{
-  DbTipResult ret(DbSchedResult::DbSchedResultOK);
-  ret.db_tip() = ctx_.get_tip();
-  co_return ret;
-}
-
 HogDBStatus<void>
 HogDBSchedRpc::commit_block(BlockID id, PerThreadARC<BlockTX> *btx)
 {

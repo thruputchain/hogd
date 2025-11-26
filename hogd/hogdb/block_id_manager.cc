@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "hogd/base/log.h"
-#include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
