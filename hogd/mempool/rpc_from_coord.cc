@@ -536,6 +536,11 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  // TODO(jhumphri): Is the shared lock released on a co_await?
+  auto commit_lock_holder = co_await commit_lock_.coro_lock_shared();
+  x23::CoroGuard cg;
+  co_await cg(nominated_block_cache_lock_);
+
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
@@ -551,7 +556,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await scheduler_->transfer_finished_.acquire();
 
   nominated_block_cache_.db_tip = db_tip;
-  nominated_block_cache_.block_id = get_ns_since_epoch();
+  nominated_block_cache_.block_id = generate_block_id();
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
@@ -659,13 +664,16 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
+  // TODO(jhumphri): Is the shared lock released on a co_await?
+  auto commit_lock_holder = co_await commit_lock_.coro_lock_shared();
+
   co_await scheduler_->transfer_finished_.acquire();
 
   // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
   // correctly when we use the helper functions above to send txs to the
   // executors.
   PendingBlock cache{};
-  cache.block_id = get_ns_since_epoch();
+  cache.block_id = generate_block_id();
   cache.db_tip = db_tip;
   cache.tx_hashes = nomination.transaction_hashes;
   if (co_await create_snapshot(
@@ -757,14 +765,24 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.db_tip() = cache.db_tip;
 
-  CHECK(!validated_block_cache_.contains(cache.block_id));
-  validated_block_cache_[cache.block_id] = std::move(cache);
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    CHECK(!validated_block_cache_.contains(cache.block_id));
+    validated_block_cache_[cache.block_id] = std::move(cache);
+  }
   co_return result;
 }
 
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
+  // We acquire [commit_lock_] in exclusive mode. We do not need to acquire
+  // [nominated_block_cache_lock_] or [validated_block_cache_lock_] when we hold
+  // [commit_lock_] in exclusive mode.
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+
   if ((!nominated_block_cache_.block_id ||
        nominated_block_cache_.block_id != block_id) &&
       !validated_block_cache_.contains(block_id)) {

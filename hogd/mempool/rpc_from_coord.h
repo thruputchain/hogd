@@ -49,7 +49,9 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc)
+    : db_rpc_(db_rpc), commit_lock_(default_coropoll().pool_)
+  {}
 
   ~MempoolCoordinatorRpc()
   {
@@ -180,15 +182,26 @@ private:
     x23::Vec<SignedTransaction> failed_txs;
   };
 
-  // TODO(jhumphri): We are using this function to generate unique block IDs.
-  // This will need to be reworked if/when we have multiple threads processing
-  // blocks.
-  static uint64_t get_ns_since_epoch()
+  // Generates a new block ID. This block ID is guaranteed to be unique for the
+  // lifetime of this process. This function is thread-safe.
+  static uint64_t generate_block_id()
   {
-    auto now = std::chrono::system_clock::now();
-    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now.time_since_epoch());
-    return ns.count();
+    static std::atomic<uint64_t> last_ns = 0;
+    while (true) {
+      auto now = std::chrono::system_clock::now();
+      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        now.time_since_epoch())
+                        .count();
+      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
+      if (ns == last_ns_relaxed) {
+        continue;
+      }
+      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
+                                        /*desired=*/ns,
+                                        /*order=*/std::memory_order_relaxed)) {
+        return ns;
+      }
+    }
   }
 
   void finish_init()
@@ -271,6 +284,16 @@ private:
   // TODO(jhumphri): Make the mempool work with multiple threads.
   std::shared_ptr<Scheduler> scheduler_;
 
+  // Ensures only one block is nominated at a time.
+  x23::CoroLock nominated_block_cache_lock_;
+  // Protects [validated_block_cache_].
+  x23::CoroLock validated_block_cache_lock_;
+  // Ensures that a commit does not occur while a block is being nominated or
+  // validated, and vice versa.
+  // This lock is acquired in shared mode when a block is being nominated or
+  // validated. This lock is acquired in exclusive mode when a block is being
+  // committed.
+  x23::CoroSharedLock<> commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
