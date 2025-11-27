@@ -38,10 +38,12 @@ jobs:
               run: |
                   echo "github.ref: ${{ github.ref }}"
                   echo $GITHUB_REF
+                  echo $GITHUB_BASE_REF
                   echo $GITHUB_REPOSITORY
+                  REPOSITORY=$(basename "$GITHUB_REPOSITORY")
                   hog_sched \
                     --i="github-${{ github.run_id }}" \
-                    --key=github_repo --value=${{ github.repository }} \
+                    --key=github_repo --value=$REPOSITORY \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=git_branch --value=$GITHUB_REF \
+                    --key=git_branch --value=$GITHUB_BASE_REF \
                     ./scripts/schedules/cpp.toml
