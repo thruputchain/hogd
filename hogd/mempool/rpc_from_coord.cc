@@ -536,8 +536,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
-  // TODO(jhumphri): Is the shared lock released on a co_await?
-  auto commit_lock_holder = co_await commit_lock_.coro_lock_shared();
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
@@ -647,11 +645,15 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
+  co_await increment_num_validations_in_progress();
+
   if (db_tip.height + 1 != nomination.block_height) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (db_tip.hash != nomination.prev_block_hash) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -660,6 +662,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // following the expected scheduling policy.
   if (nomination.transaction_nominations.empty()) {
     // Empty nomination.
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -680,6 +683,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -705,6 +709,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       }
     }
     co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -721,6 +726,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       if (!tx) {
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
+        co_await decrement_num_validations_in_progress();
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
@@ -752,6 +758,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -770,6 +777,12 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await cg(validated_block_cache_lock_);
     CHECK(!validated_block_cache_.contains(cache.block_id));
     validated_block_cache_[cache.block_id] = std::move(cache);
+
+    // We already hold [validated_block_cache_lock_], so I decrement
+    // [num_validations_in_progress_] directly rather than call
+    // [decrement_num_validations_in_progress()].
+    CHECK_GT(num_validations_in_progress_, 0UL);
+    num_validations_in_progress_--;
   }
   co_return result;
 }
@@ -777,11 +790,13 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
-  // We acquire [commit_lock_] in exclusive mode. We do not need to acquire
-  // [nominated_block_cache_lock_] or [validated_block_cache_lock_] when we hold
-  // [commit_lock_] in exclusive mode.
-  x23::CoroGuard cg;
-  co_await cg(commit_lock_);
+  x23::CoroGuard validate_cg;
+  co_await validate_cg(validated_block_cache_lock_);
+  if (num_validations_in_progress_) {
+    co_return SchedulerCommitOutcome::SchedulerCommitRace;
+  }
+  x23::CoroGuard nominate_cg;
+  co_await nominate_cg(nominated_block_cache_lock_);
 
   if ((!nominated_block_cache_.block_id ||
        nominated_block_cache_.block_id != block_id) &&

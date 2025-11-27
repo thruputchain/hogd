@@ -49,9 +49,7 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc)
-    : db_rpc_(db_rpc), commit_lock_(default_coropoll().pool_)
-  {}
+  MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
   ~MempoolCoordinatorRpc()
   {
@@ -147,6 +145,28 @@ public:
     co_return ret;
   }
 
+  // Generates a new block ID. This block ID is guaranteed to be unique for the
+  // lifetime of this process. This function is thread-safe.
+  static uint64_t generate_block_id()
+  {
+    static std::atomic<uint64_t> last_ns = 0;
+    while (true) {
+      auto now = std::chrono::system_clock::now();
+      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        now.time_since_epoch())
+                        .count();
+      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
+      if (ns == last_ns_relaxed) {
+        continue;
+      }
+      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
+                                        /*desired=*/ns,
+                                        /*order=*/std::memory_order_relaxed)) {
+        return ns;
+      }
+    }
+  }
+
   static SHA256Hash
   get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
                  const BlockHash &prev_block_hash);
@@ -181,28 +201,6 @@ private:
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
     x23::Vec<SignedTransaction> failed_txs;
   };
-
-  // Generates a new block ID. This block ID is guaranteed to be unique for the
-  // lifetime of this process. This function is thread-safe.
-  static uint64_t generate_block_id()
-  {
-    static std::atomic<uint64_t> last_ns = 0;
-    while (true) {
-      auto now = std::chrono::system_clock::now();
-      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        now.time_since_epoch())
-                        .count();
-      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
-      if (ns == last_ns_relaxed) {
-        continue;
-      }
-      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
-                                        /*desired=*/ns,
-                                        /*order=*/std::memory_order_relaxed)) {
-        return ns;
-      }
-    }
-  }
 
   void finish_init()
   {
@@ -274,6 +272,20 @@ private:
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
 
+  x23::Async<void> increment_num_validations_in_progress()
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    num_validations_in_progress_++;
+  }
+  x23::Async<void> decrement_num_validations_in_progress()
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    CHECK_GT(num_validations_in_progress_, 0UL);
+    num_validations_in_progress_--;
+  }
+
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -288,12 +300,12 @@ private:
   x23::CoroLock nominated_block_cache_lock_;
   // Protects [validated_block_cache_].
   x23::CoroLock validated_block_cache_lock_;
+  size_t num_validations_in_progress_ = 0;
   // Ensures that a commit does not occur while a block is being nominated or
   // validated, and vice versa.
   // This lock is acquired in shared mode when a block is being nominated or
   // validated. This lock is acquired in exclusive mode when a block is being
   // committed.
-  x23::CoroSharedLock<> commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
