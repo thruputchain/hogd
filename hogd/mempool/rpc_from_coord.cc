@@ -667,9 +667,6 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  // TODO(jhumphri): Is the shared lock released on a co_await?
-  auto commit_lock_holder = co_await commit_lock_.coro_lock_shared();
-
   co_await scheduler_->transfer_finished_.acquire();
 
   // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
