@@ -70,7 +70,7 @@ public:
     co_await cg(nominations_lock_);
     CHECK(!nominations_.empty());
     // We acquired the [nominations_finished_] semaphore so therefore
-    // [nominations_[0] is guaranteed to exist.
+    // [nominations_[0]] is guaranteed to exist.
     CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
 
     // The block hash is in the last chunk.
@@ -95,7 +95,7 @@ public:
     co_await cg(nominations_lock_);
     CHECK(!nominations_.empty());
     // We acquired the [nominations_finished_] semaphore so therefore
-    // [nominations_[0] is guaranteed to exist.
+    // [nominations_[0]] is guaranteed to exist.
     CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
 
     // The block hash is in the last chunk.
