@@ -414,6 +414,16 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(res_tip, res_validate.db_tip());
 }
 
+TEST(Mempool, GenerateBlockId)
+{
+  uint64_t first = MempoolCoordinatorRpc::generate_block_id();
+  EXPECT_NE(first, 0UL);
+
+  uint64_t second = MempoolCoordinatorRpc::generate_block_id();
+  EXPECT_NE(second, 0UL);
+  EXPECT_NE(first, second);
+}
+
 // [kMaxBlockSize] is 10,000, which causes this test to time out. We should
 // re-enable this test once we add performance improvements.
 // NOLINTNEXTLINE

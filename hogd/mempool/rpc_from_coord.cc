@@ -8,6 +8,7 @@
 #include <future>
 #include <memory>
 #include <span>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -536,6 +537,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  x23::CoroGuard cg;
+  co_await cg(nominated_block_cache_lock_);
+
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
@@ -551,7 +555,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   co_await scheduler_->transfer_finished_.acquire();
 
   nominated_block_cache_.db_tip = db_tip;
-  nominated_block_cache_.block_id = get_ns_since_epoch();
+  nominated_block_cache_.block_id = generate_block_id();
   // We place the block txs and tx hashes into these vectors. We mark these
   // vectors static and clear them on each call to [nominate()] so to avoid
   // memory allocation/free overhead.
@@ -642,11 +646,15 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
+  co_await increment_num_validations_in_progress();
+
   if (db_tip.height + 1 != nomination.block_height) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (db_tip.hash != nomination.prev_block_hash) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -655,6 +663,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // following the expected scheduling policy.
   if (nomination.transaction_nominations.empty()) {
     // Empty nomination.
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -665,13 +674,14 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // correctly when we use the helper functions above to send txs to the
   // executors.
   PendingBlock cache{};
-  cache.block_id = get_ns_since_epoch();
+  cache.block_id = generate_block_id();
   cache.db_tip = db_tip;
   cache.tx_hashes = nomination.transaction_hashes;
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -697,6 +707,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       }
     }
     co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -713,6 +724,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       if (!tx) {
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
+        co_await decrement_num_validations_in_progress();
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
@@ -744,6 +756,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
+    co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -757,9 +770,124 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       SchedulerValidationOutcome::SchedulerValidationOK);
   result.db_tip() = cache.db_tip;
 
-  CHECK(!validated_block_cache_.contains(cache.block_id));
-  validated_block_cache_[cache.block_id] = std::move(cache);
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    CHECK(!validated_block_cache_.contains(cache.block_id));
+    validated_block_cache_[cache.block_id] = std::move(cache);
+
+    // We already hold [validated_block_cache_lock_], so I decrement
+    // [num_validations_in_progress_] directly rather than call
+    // [decrement_num_validations_in_progress()].
+    CHECK_GT(num_validations_in_progress_, 0UL);
+    num_validations_in_progress_--;
+  }
   co_return result;
+}
+
+x23::Async<SchedulerCommitOutcome>
+MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
+{
+  x23::CoroGuard validate_cg;
+  co_await validate_cg(validated_block_cache_lock_);
+  if (num_validations_in_progress_) {
+    co_return SchedulerCommitOutcome::SchedulerCommitRace;
+  }
+  x23::CoroGuard nominate_cg;
+  co_await nominate_cg(nominated_block_cache_lock_);
+
+  if ((!nominated_block_cache_.block_id ||
+       nominated_block_cache_.block_id != block_id) &&
+      !validated_block_cache_.contains(block_id)) {
+    // A block with ID [block_id] was neither nominated nor validated, so it
+    // cannot be committed.
+    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
+  }
+
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(validated_block_cache_.size());
+  if (nominated_block_cache_.block_id &&
+      nominated_block_cache_.block_id == block_id) {
+    // We are committing the block that we nominated.
+    handles.push_back(commit_block(nominated_block_cache_));
+    last_committed_block_ = nominated_block_cache_.db_tip;
+  }
+  else {
+    // We are committing a block that we validated.
+    handles.push_back(commit_block(validated_block_cache_[block_id]));
+    if (nominated_block_cache_.block_id) {
+      // We nominated a block, so we need to abandon the block.
+      handles.push_back(abandon_block(nominated_block_cache_));
+    }
+    last_committed_block_ = validated_block_cache_[block_id].db_tip;
+  }
+  for (const auto &[_, cache] : validated_block_cache_) {
+    if (cache.block_id != block_id) {
+      handles.push_back(abandon_block(cache));
+    }
+  }
+
+  // We need to do two things:
+  // 1. If the nominated block is not the committed block, we need to return
+  // the nominated block's txs to the scheduler.
+  //
+  // 2. Next, we need to remove the committed block's txs from the scheduler.
+  // Note that some of these txs may overlap with the txs in the nominated
+  // block, so we can optimize this by only returning to the scheduler the
+  // txs in the nominated block that are not in the committed block. Then we
+  // can remove all of the committed block's txs from the scheduler.
+  static std::unordered_set<SignedTransactionHash> return_to_runqueue;
+  return_to_runqueue.clear();
+  const x23::Vec<SignedTransactionHash> *remove_from_scheduler = nullptr;
+  if (nominated_block_cache_.block_id &&
+      nominated_block_cache_.block_id == block_id) {
+    // The committed block is the block we nominated.
+    remove_from_scheduler = &nominated_block_cache_.tx_hashes;
+  }
+  else {
+    // The committed block is a block we validated.
+    if (nominated_block_cache_.block_id &&
+        nominated_block_cache_.block_id != block_id) {
+      // Return the nominated block's txs to the runqueue so they can be
+      // scheduled again.
+      return_to_runqueue.insert(nominated_block_cache_.tx_hashes.begin(),
+                                nominated_block_cache_.tx_hashes.end());
+    }
+    for (const auto &[_, cache] : validated_block_cache_) {
+      if (cache.block_id == block_id) {
+        remove_from_scheduler = &cache.tx_hashes;
+      }
+    }
+    CHECK_CONST_PTR(remove_from_scheduler);
+    // Any of the txs in the committed (validated) block that were also in the
+    // nominated block should not be returned to the runqueue.
+    for (const SignedTransactionHash &hash : *remove_from_scheduler) {
+      if (return_to_runqueue.empty()) {
+        break;
+      }
+      return_to_runqueue.erase(hash);
+    }
+  }
+
+  CHECK_CONST_PTR(remove_from_scheduler);
+  scheduler_->reenqueue_txs(return_to_runqueue.cbegin(),
+                            return_to_runqueue.cend());
+  co_await scheduler_->remove_from_scheduler(
+      x23::span<const SignedTransactionHash>(*remove_from_scheduler),
+      /*validated_block=*/(nominated_block_cache_.block_id == 0UL) ||
+          nominated_block_cache_.block_id != block_id);
+
+  for (x23::Async<void> &handle : handles) {
+    co_await handle;
+  }
+
+  // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
+  // elements in the vectors in [nominated_block_cache_], so if we clear those
+  // vectors, we will experience segfaults because we will later attempt to
+  // read/write indices that do not exist.
+  nominated_block_cache_.block_id = 0;
+  validated_block_cache_.clear();
+  co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
 } // namespace hogd
