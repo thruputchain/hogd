@@ -35,6 +35,6 @@ fi
 """
 
 [jobs.env]
-GIT_REPO = "{{ .git_repo }}"
+GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
