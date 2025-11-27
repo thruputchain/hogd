@@ -36,9 +36,12 @@ jobs:
             - uses: actions/checkout@v4
             - name: Run hog schedule
               run: |
+                  echo "github.ref: ${{ github.ref }}"
+                  echo $GITHUB_REF
+                  echo $GITHUB_REPOSITORY
                   hog_sched \
                     --i="github-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=git_branch --value=${{ github.ref_name }} \
+                    --key=git_branch --value=$GITHUB_REF \
                     ./scripts/schedules/cpp.toml
