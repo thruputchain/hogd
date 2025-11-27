@@ -10,11 +10,11 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} -c progress=false -c remote.origin.sideband=0
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
@@ -38,8 +38,9 @@ fi
 
 """
 [jobs.env]
-GIT_REPO = "{{ .git_repo }}"
+GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 
 [[jobs]]
@@ -52,11 +53,11 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} -c progress=false -c remote.origin.sideband=0
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
@@ -110,5 +111,6 @@ fi
 
 """
 [jobs.env]
-GIT_REPO = "{{ .git_repo }}"
+GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
