@@ -208,6 +208,7 @@ public:
   {
     std::unique_lock lk(mtx_);
     cv_.wait(lk, [this] { return event_card_.has_value(); });
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return event_card_.value();
   }
 
