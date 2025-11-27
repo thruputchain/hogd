@@ -10,7 +10,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git --no-progress --quiet fetch --depth 1 origin {{ .git_commit }} 
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
