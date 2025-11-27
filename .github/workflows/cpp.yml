@@ -39,11 +39,17 @@ jobs:
                   echo "github.ref: ${{ github.ref }}"
                   echo $GITHUB_REF
                   echo $GITHUB_BASE_REF
+                  echo $GITHUB_HEAD_REF
                   echo $GITHUB_REPOSITORY
                   REPOSITORY=$(basename "$GITHUB_REPOSITORY")
+                  # For pull requests, use the PR branch name (github.head_ref)
+                  # For push/workflow_dispatch, use the branch from github.ref_name
+                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+                  echo "Branch name: $BRANCH_NAME"
+                  echo "Repository: $REPOSITORY"
                   hog_sched \
                     --i="github-${{ github.run_id }}" \
                     --key=github_repo --value=$REPOSITORY \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=git_branch --value=$GITHUB_BASE_REF \
+                    --key=git_branch --value=$BRANCH_NAME \
                     ./scripts/schedules/cpp.toml
