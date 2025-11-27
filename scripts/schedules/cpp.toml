@@ -10,9 +10,13 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} -c progress=false -c remote.origin.sideband=0
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
+
+echo $GIT_REPO
+echo $GIT_COMMIT
+echo $GIT_BRANCH
 
 source ./scripts/ci/prepare_env.sh
 
@@ -33,3 +37,4 @@ fi
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"

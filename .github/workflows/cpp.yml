@@ -40,4 +40,5 @@ jobs:
                     --i="github-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
+                    --key=git_branch --value=${{ github.ref_name }} \
                     ./scripts/schedules/cpp.toml
