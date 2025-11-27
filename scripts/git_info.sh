@@ -1,9 +1,11 @@
 # Get current branch name
-if [[ -z ${GITHUB_HEAD_REF} ]]; then
+if [[ -z ${GIT_BRANCH} ]]; then
   GIT_branch=$(git rev-parse --abbrev-ref HEAD)
 else
-  GIT_branch=${GITHUB_HEAD_REF}
+  GIT_branch=${GIT_BRANCH}
 fi
+
+echo "GIT_branch: $GIT_branch"
 
 # Get current commit hash
 GIT_commit=$(git rev-parse HEAD)

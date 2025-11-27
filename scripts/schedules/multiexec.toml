@@ -14,7 +14,7 @@ git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'build (1 of 2)'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
@@ -30,9 +30,9 @@ echo 'run bench server'
 
 """
 [jobs.env]
-GIT_REPO = "{{ .git_repo }}"
+GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
-
+GIT_BRANCH = "{{ .git_branch }}"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_metrics"
@@ -48,7 +48,7 @@ git fetch --depth 1 origin {{ .git_commit }}
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
@@ -82,5 +82,6 @@ echo 'cleanup control servers'
 
 """
 [jobs.env]
-GIT_REPO = "{{ .git_repo }}"
+GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
