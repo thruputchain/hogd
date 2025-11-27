@@ -2,6 +2,7 @@
 
 #include "event.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 

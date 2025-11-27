@@ -5,15 +5,11 @@
 #include <print>
 #include <string>
 
-#include "account.hh"
-#include "auth_claim.hh"
-#include "db_sched.hh"
 #include "discovery.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/test/infra.h"
 #include "hogd/mempool/test/loadgen.h"
@@ -65,40 +61,11 @@ private:
   std::unique_ptr<LoadgenClient> client_;
 };
 
-constexpr AuthClaim
-make_self_sign_claim(uint32_t key_id)
-{
-  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-  claim.invoked_address_signature_id() = key_id;
-  return claim;
-}
-
 SignedTransactionBatch
-generate_signed_txs(fib_client_t &fib_client, MempoolTestInfra &server,
-                    size_t num_txs)
+generate_signed_txs(fib_client_t &fib_client, size_t num_txs)
 {
-  SignedTransactionBatch unsigned_txs =
-      generate_unsigned_txs(fib_client, num_txs);
-  AccountAuthData auth_data = get_default_account();
-  auth_data.nonce_config.required_weight = 1;
-  set_nonce_key(auth_data, /*idx=*/0);
-  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
-                 /*required_weight=*/1);
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-
-  SignedTransactionBatch txs;
-  for (SignedTransaction &unsigned_tx : unsigned_txs) {
-    unsigned_tx.tx.auth_claims.push_back(make_self_sign_claim(0));
-    txs.push_back(
-        hogd::Authentication::sign_claims(unsigned_tx.tx, {{0, private_key}},
-                                          /*auxiliary_private_keys=*/{}));
-  }
-  return txs;
+  // TODO(jhumphri): Sign the txs once we handle authentication.
+  return generate_unsigned_txs(fib_client, num_txs);
 }
 
 void
@@ -108,8 +75,7 @@ submit_unvetted(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, server, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
@@ -124,8 +90,7 @@ submit_vetted(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, server, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     state.ResumeTiming();
 
     ValidatorID validator_id{};
@@ -142,8 +107,7 @@ nominate(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, server, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     // Submit unvetted transactions so there's something to nominate
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
@@ -164,8 +128,7 @@ validate(benchmark::State &state)
     state.PauseTiming();
     fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
     MempoolTestInfra server;
-    const SignedTransactionBatch txs =
-        generate_signed_txs(fib_client, server, kNumTxs);
+    const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
 
@@ -178,7 +141,7 @@ validate(benchmark::State &state)
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -291,7 +254,7 @@ loadgen_validate(benchmark::State &state)
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -344,7 +307,7 @@ loadgen_nominate_throughput(benchmark::State &state)
                SchedulerNominationOutcome::SchedulerNominationOK);
 
       SchedulerNomination nomination =
-          server.coord_sched_rpc().get_nomination();
+          server.coord_sched_rpc().get_nomination()();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
@@ -380,7 +343,7 @@ loadgen_validate_throughput(benchmark::State &state)
 
     size_t txs_so_far = 0;
     Nomination nomination =
-        server.coord_sched_rpc().get_nomination().nomination;
+        server.coord_sched_rpc().get_nomination()().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);

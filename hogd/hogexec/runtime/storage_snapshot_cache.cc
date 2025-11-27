@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 

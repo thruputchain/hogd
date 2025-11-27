@@ -3,6 +3,7 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {

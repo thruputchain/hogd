@@ -56,11 +56,26 @@ public:
   // committed to a block already, so we do not want to schedule the txs. But
   // the validator still needs to get the tx state because it needs to
   // re-execute the txs to verify the block.
-  //
-  // This method fills in [ret] with the [SignedTransaction]s to verify.
-  bool
-  find_and_remove_from_runqueue(const x23::Vec<SignedTransactionHash> &hashes,
-                                x23::Vec<SignedTransaction> &txs);
+  SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
+  {
+    auto [tx_value_ptr, _] = txs_.find(tx_hash);
+    return &tx_value_ptr->tx;
+  }
+
+  void reenqueue_txs(const auto &begin, const auto &end)
+  {
+    for (auto it = begin; it != end; it++) {
+      const SignedTransactionHash &tx_hash = *it;
+      const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+      CHECK_PTR(tx_value_ptr);
+      CHECK(insert_tx_into_runqueue(tx_hash, *tx_value_ptr));
+    }
+    size_.fetch_add(std::distance(begin, end), std::memory_order_release);
+  }
+
+  x23::Async<void>
+  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes,
+                        bool validated_block);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -96,6 +111,7 @@ public:
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   size_t size() const { return size_.load(std::memory_order_relaxed); }
+  size_t tx_cache_size() { return txs_.size(); }
 
   // Debug.
   void dump_runqueue();
@@ -142,6 +158,16 @@ private:
   bool account_is_ready(const ContractAddress &account,
                         bool remove_expired_txs);
 
+  // Inserts the tx with [tx_hash] into the runqueue. Returns true if the
+  // insertion succeeded and false otherwise.
+  //
+  // This method does *not* modify [size_]! The caller must do this. Generally,
+  // the caller will often want to add multiple txs to the runqueue, so it is
+  // more efficient for the caller to do a single [fetch_add()] to [size_]
+  // rather than have [insert_tx_into_runqueue()] increment [size_] for every
+  // single tx.
+  bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+                               TxValue &tx_value);
   bool add_txs_helper(const SignedTransaction &tx);
 
   // TODO(jhumphri): Give this a better name.

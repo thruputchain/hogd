@@ -62,6 +62,8 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   for (const ContractAddress &address : addresses) {
     HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
     if (!status) {
+      warn("Failed to read hog age for address {}: {}", address,
+           status.error());
       co_return HogAgeResult(DbSchedResult::DbSchedResultError);
     }
     // TODO(jhumphri): Include the address in each index.
@@ -108,14 +110,6 @@ HogDBSchedRpc::dbsched_get_account_auth_data(BlockID block_id,
     }
     ret.account_auth_data_batch().push_back(status.value());
   }
-  co_return ret;
-}
-
-x23::Async<DbTipResult>
-HogDBSchedRpc::dbsched_get_tip()
-{
-  DbTipResult ret(DbSchedResult::DbSchedResultOK);
-  ret.db_tip() = ctx_.get_tip();
   co_return ret;
 }
 

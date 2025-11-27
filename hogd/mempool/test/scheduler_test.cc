@@ -221,7 +221,128 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }
 
-TEST(Scheduler, FindAndRemoveFromRunqueue)
+TEST(Scheduler, FindTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  SignedTransactionHash hash = sha256(txs[0]);
+  SignedTransaction *tx = scheduler->find_tx(hash);
+  ASSERT_NE(tx, nullptr);
+  EXPECT_EQ(sha256(*tx), hash);
+  EXPECT_EQ(tx->tx.invocation.invoked_address,
+            MempoolTestInfra::kAccountAddresses[0]);
+}
+
+TEST(Scheduler, RemoveFromRunqueueSingleTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+
+  // Validate a block.
+  x23::Vec<SignedTransactionHash> hashes;
+  hashes.push_back(sha256(txs[0]));
+  scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
+                                       hashes),
+                                   /*validated_block=*/true)();
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // Nominate a block.
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(sha256(scheduled.front()), sha256(txs[1]));
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  hashes = {sha256(txs[1])};
+  scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
+                                       hashes),
+                                   /*validated_block=*/false)();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+
+  x23::Vec<SignedTransactionHash> hashes;
+  hashes.push_back(sha256(txs[0]));
+  hashes.push_back(sha256(txs[1]));
+  scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
+                                       hashes),
+                                   /*validated_block=*/true)();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]})();
+  EXPECT_EQ(scheduler->size(), 2UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  EXPECT_EQ(scheduled_hashes.size(), 2UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+
+  x23::Vec<SignedTransactionHash> hashes;
+  hashes.push_back(sha256(txs[0]));
+  hashes.push_back(sha256(txs[1]));
+  scheduler->remove_from_scheduler(x23::span<const SignedTransactionHash>(
+                                       hashes),
+                                   /*validated_block=*/false)();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, ReenqueueTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
@@ -232,36 +353,18 @@ TEST(Scheduler, FindAndRemoveFromRunqueue)
   scheduler->add_txs({txs[0], txs[1]})();
   EXPECT_EQ(scheduler->size(), 2UL);
 
-  {
-    x23::Vec<SignedTransactionHash> hashes;
-    hashes.push_back(sha256(txs[0]));
-    x23::Vec<SignedTransaction> removed;
-    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
-    ASSERT_EQ(removed.size(), 1UL);
-    EXPECT_EQ(removed.front().tx.invocation.invoked_address,
-              MempoolTestInfra::kAccountAddresses[0]);
-    EXPECT_EQ(scheduler->size(), 1UL);
-  }
+  x23::Vec<SignedTransactionHash> scheduled_hashes;
+  x23::Vec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled.size(), 2UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
 
-  {
-    SignedTransactionHash fake_hash{};
-    fake_hash.fill(0xAA);
-    x23::Vec<SignedTransactionHash> hashes;
-    hashes.push_back(sha256(txs[1]));
-    hashes.push_back(fake_hash);
-    x23::Vec<SignedTransaction> removed;
-    EXPECT_FALSE(scheduler->find_and_remove_from_runqueue(hashes, removed));
-    EXPECT_TRUE(removed.empty());
-    EXPECT_EQ(scheduler->size(), 1UL);
-  }
+  scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
+  EXPECT_EQ(scheduler->size(), 2UL);
 
-  {
-    x23::Vec<SignedTransactionHash> hashes;
-    hashes.push_back(sha256(txs[1]));
-    x23::Vec<SignedTransaction> removed;
-    EXPECT_TRUE(scheduler->find_and_remove_from_runqueue(hashes, removed));
-    ASSERT_EQ(removed.size(), 1UL);
-    EXPECT_EQ(scheduler->size(), 0UL);
+  for (const SignedTransactionHash &hash : scheduled_hashes) {
+    SignedTransaction *reenqueued_tx = scheduler->find_tx(hash);
+    ASSERT_NE(reenqueued_tx, nullptr);
   }
 }
 
@@ -311,6 +414,10 @@ TEST(Scheduler, Fairness)
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
+
+    // We simulate committing the block by increment the current block number in
+    // the scheduler.
+    scheduler->increment_current_block();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -379,6 +486,10 @@ TEST(Scheduler, FairnessAcrossBlocks)
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
+
+    // We simulate committing the block by increment the current block number in
+    // the scheduler.
+    scheduler->increment_current_block();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {

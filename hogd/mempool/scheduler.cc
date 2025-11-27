@@ -15,9 +15,12 @@
 #include "db_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/mempool/shared.h"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -133,6 +136,20 @@ Scheduler::get_account_key(const ContractAddress &account)
 }
 
 bool
+Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+                                   TxValue &tx_value)
+{
+  const ContractAddress &account = tx_value.tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height =
+                      tx_value.tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_txs, lock] = account_to_tx_[account];
+  // Check if the tx is already present in [account_to_tx_[account]]. If it
+  // is, we are adding a duplicate tx, so we do not want to increment [size_].
+  return account_txs.insert({key, &tx_value}).second;
+}
+
+bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
   const SignedTransactionHash &tx_hash = sha256(tx);
@@ -140,23 +157,21 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
     // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during validation by
-    // [find_and_remove_from_runqueue()], then validation failed, and then the
-    // tx was added back to the scheduler.
+    // added to the scheduler, then the tx was removed during nomination by
+    // [schedule()], then a validated block was committed rather than the
+    // nominated block, and then the tx was added back to the scheduler.
     const auto [tx_ptr, lock] = txs_.find_or_insert(tx_hash, {.tx = tx});
     CHECK_PTR(tx_ptr);
     value = tx_ptr;
   }
 
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_txs, lock] = account_to_tx_[account];
-  // Check if the tx is already present in [account_to_tx_[account]]. If it
-  // is, we are adding a duplicate tx, so we do not want to increment [size_].
-  return account_txs.insert({key, value}).second;
+  return insert_tx_into_runqueue(tx_hash, *value);
 }
 
+// TODO(jhumphri): Use [make_chunks()] below. Remember that there may be fewer
+// chunks than [kNumThreads], so only [co_await] awaitables for coroutines that
+// have a chunk. If we [co_await] awaitables for coroutines that do not have a
+// chunk, we will deadlock.
 x23::Async<void>
 Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 {
@@ -643,63 +658,94 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
-
-  increment_current_block();
 }
 
-bool
-Scheduler::find_and_remove_from_runqueue(
-    const x23::Vec<SignedTransactionHash> &hashes,
-    x23::Vec<SignedTransaction> &txs)
+x23::Async<void>
+Scheduler::remove_from_scheduler(
+    x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
-  CHECK(txs.empty());
+  static SynchronizedMap<ContractAddress, char> accounts;
+  accounts.clear();
 
-  std::vector<TxKey> keys;
-  std::vector<TxValue *> values;
-  keys.reserve(hashes.size());
-  values.reserve(values.size());
-  txs.reserve(hashes.size());
+  ElapsedTimer timer;
 
-  std::unordered_set<ContractAddress> accounts;
-  for (const SignedTransactionHash &tx_hash : hashes) {
-    auto [tx_value_ptr, lock] = txs_.find(tx_hash);
-    if (!tx_value_ptr) {
-      // We could not find all of the txs, so we put the txs we did find back
-      // and return false.
-      CHECK_EQ(keys.size(), values.size());
-      CHECK_EQ(keys.size(), txs.size());
-      CHECK_LT(keys.size(), hashes.size());
-      for (size_t i = 0; i < keys.size(); i++) {
-        auto [per_account_txs, lock] =
-            account_to_tx_[txs[i].tx.invocation.invoked_address];
-        CHECK(per_account_txs.insert({keys[i], values[i]}).second);
+  constexpr size_t kNumThreads = 120;
+  const std::vector<ChunkRange> chunks =
+      make_chunks(tx_hashes.size(), kNumThreads);
+  std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
+
+  for (size_t i = 0; i < chunks.size(); i++) {
+    [](const ChunkRange &chunk, auto cb,
+       x23::span<const SignedTransactionHash> tx_hashes,
+       SynchronizedMap<ContractAddress, char> &accounts, bool validated_block,
+       Scheduler &scheduler) -> x23::Detached {
+      co_await default_coropoll().pool_.bg();
+
+      x23::span<const SignedTransactionHash> hash_chunk(
+          tx_hashes.begin() + chunk.start, tx_hashes.begin() + chunk.end);
+      size_t num_removed_from_runqueue = 0;
+      for (const SignedTransactionHash &tx_hash : hash_chunk) {
+        if (validated_block) {
+          auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
+          CHECK_PTR(tx_value_ptr);
+
+          const SignedTransaction &tx = tx_value_ptr->tx;
+          const ContractAddress &account = tx.tx.invocation.invoked_address;
+          const TxKey key = {.expiry_block_height =
+                                 tx.tx.uniquifier.block_expiry_height,
+                             .tx_hash = tx_hash};
+          {
+            // We only need to remove txs from the runqueue when committing a
+            // validated block. Txs in a nominated block were already removed
+            // from the runqueue in [schedule()]. Thus, we can skip this for
+            // nominated block to save on overhead.
+            auto [txs, account_to_tx_lock] = scheduler.account_to_tx_[account];
+            // The tx may or may not be on the runqueue. If the tx is included
+            // in a block we are *nominating*, then it has already been taken
+            // off of the runqueue. If the tx is included in a block we are
+            // *validating*, then it is still on the runqueue.
+            if (txs.erase(key)) {
+              num_removed_from_runqueue++;
+            }
+          }
+          accounts.insert(account, 0);
+
+          // Careful! We remove the tx from [txs_] at the bottom here because
+          // once we remove it, the references above become invalidated.
+          CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
+        }
+        else {
+          CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+        }
       }
-      size_ += keys.size();
-      txs.clear();
-      return false;
-    }
 
-    const SignedTransaction &tx = tx_value_ptr->tx;
-    const ContractAddress &account = tx.tx.invocation.invoked_address;
-    const TxKey key = {.expiry_block_height =
-                           tx.tx.uniquifier.block_expiry_height,
-                       .tx_hash = tx_hash};
-    keys.push_back(key);
-    values.push_back(tx_value_ptr);
-    txs.push_back(tx);
-    {
-      auto [txs, lock] = account_to_tx_[account];
-      CHECK_EQ(txs.erase(key), 1UL);
-    }
-    size_.fetch_sub(1, std::memory_order_relaxed);
-    accounts.insert(account);
+      cb(num_removed_from_runqueue);
+      co_return;
+    }(chunks[i], /*cb=*/x23::CoroCB(awaitables[i]), tx_hashes, accounts,
+                             validated_block, *this);
   }
-  for (const ContractAddress &account : accounts) {
+  size_t total_removed_from_runqueue = 0;
+  // There may be fewer chunks that [kNumThreads], so we iterate through the
+  // number of chunks. If we were to iterate through all of the awaitables,
+  // we would deadlock waiting on awaitables for coroutines that do not have a
+  // chunk.
+  for (size_t i = 0; i < chunks.size(); i++) {
+    x23::Awaitable<size_t> &awaitable = awaitables[i];
+    total_removed_from_runqueue += co_await awaitable;
+  }
+  double a = timer.elapsed();
+
+  accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
+    const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
-  }
-  return true;
+  });
+  double b = timer.elapsed();
+  size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
+  double c = timer.elapsed();
+
+  info("remove_from_scheduler a {}, b-a {}, c-b {}", a, b - a, c - b);
 }
 
 } // namespace hogd

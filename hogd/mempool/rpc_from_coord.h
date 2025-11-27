@@ -16,7 +16,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/mempool/authentication.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_db.h"
 #include "hogd/mempool/rpc_from_event.h"
@@ -52,6 +51,15 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
+  ~MempoolCoordinatorRpc()
+  {
+    size_t current_val;
+    while ((current_val = pending_detached_coroutines_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_detached_coroutines_.wait(/*old=*/current_val);
+    }
+  }
+
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
   MempoolCoordinatorRpc &operator=(const MempoolCoordinatorRpc &) = delete;
@@ -59,7 +67,6 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
-  Authentication &authentication() { return *authentication_; }
 
   static coord_sched_client_t get_client()
   {
@@ -101,20 +108,20 @@ public:
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
-  static x23::Async<SchedulerCommitOutcome>
-  schedulercoord_commit_block(BlockID block_id)
-  {
-    // TODO(jhumphri): Implement.
-    co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
-  }
+  // Commits the block with ID [block_id].
+  x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block(BlockID block_id);
 
-  // These are just stubs that pass through the calls from the coordinator to
-  // hogdb.
-  x23::Async<DbTipResult> schedcoord_get_tip();
+  // Returns the db tip of the last committed block.
+  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> schedulercoord_shutdown();
+  x23::Async<void> schedulercoord_shutdown()
+  {
+    shutdown_flag_.store(true, std::memory_order_release);
+    co_return;
+  }
 
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
@@ -122,10 +129,42 @@ public:
     return db_sched_client_->dbsched_load_genesis_block(genesis_block);
   }
 
-  static x23::Async<OptSignedTransactionBatch>
-  schedcoord_lookup_transactions(const SignedTransactionHashBatch & /*unused*/)
+  x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
+  schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    panic("unimplemented");
+    x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
+    ret.reserve(tx_hashes.size());
+    for (const SignedTransactionHash &tx_hash : tx_hashes) {
+      x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
+      ret.push_back(tx);
+    }
+    // [OptSignedTransactionBatch] is an
+    // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
+    // which are not the same as [Ptrs], but they serialize the same way. So we
+    // return a span of [BorrowedPtr]s.
+    co_return ret;
+  }
+
+  // Generates a new block ID. This block ID is guaranteed to be unique for the
+  // lifetime of this process. This function is thread-safe.
+  static uint64_t generate_block_id()
+  {
+    static std::atomic<uint64_t> last_ns = 0;
+    while (true) {
+      auto now = std::chrono::system_clock::now();
+      uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        now.time_since_epoch())
+                        .count();
+      uint64_t last_ns_relaxed = last_ns.load(std::memory_order_relaxed);
+      if (ns == last_ns_relaxed) {
+        continue;
+      }
+      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
+                                        /*desired=*/ns,
+                                        /*order=*/std::memory_order_relaxed)) {
+        return ns;
+      }
+    }
   }
 
   static SHA256Hash
@@ -145,7 +184,10 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
-  struct NominationData {
+  // clang-tidy complains that an exception may be thrown in the function
+  // [operator=].
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
     x23::Vec<SignedTransaction> txs;
@@ -159,22 +201,6 @@ private:
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
     x23::Vec<SignedTransaction> failed_txs;
   };
-
-  const std::function<x23::Async<bool>(const SignedTransaction &tx)>
-      auth_filter_ = [&](const SignedTransaction &tx) -> x23::Async<bool> {
-    co_return co_await authentication_->authenticate(tx);
-  };
-
-  // TODO(jhumphri): We are using this function to generate unique block IDs.
-  // This will need to be reworked if/when we have multiple threads processing
-  // blocks.
-  static uint64_t get_ns_since_epoch()
-  {
-    auto now = std::chrono::system_clock::now();
-    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now.time_since_epoch());
-    return ns.count();
-  }
 
   void finish_init()
   {
@@ -194,9 +220,7 @@ private:
         std::make_unique<event_sched_client_t>(MempoolEventRpc::get_client());
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
-    // [current_block_id_] with it.
-    authentication_ =
-        std::make_unique<Authentication>(current_block_id_, db_sched_client_);
+    // [current_block_id_] with it in the scheduler.
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     db_rpc_->register_scheduler(scheduler_);
 
@@ -233,11 +257,13 @@ private:
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
                                              size_t executor_idx);
 
-  x23::Async<bool> initialize_block(const NominationData &cache);
-  x23::Async<void> schedule(NominationData &cache);
-  static void process_tx_outcomes(NominationData &cache);
+  x23::Async<bool> initialize_block(const PendingBlock &cache);
+  x23::Async<void> schedule(PendingBlock &cache);
+  static void process_tx_outcomes(PendingBlock &cache);
   x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
-  x23::Async<void> finish_nominating_block(NominationData &cache);
+  x23::Detached finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> abandon_block(const PendingBlock &cache);
+  x23::Async<void> commit_block(const PendingBlock &cache);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
@@ -246,7 +272,19 @@ private:
   x23::Async<ExecResult> open_validation_block(BlockID block_id,
                                                size_t executor_idx);
 
-  x23::Async<void> mark_block_committed(BlockID block_id);
+  x23::Async<void> increment_num_validations_in_progress()
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    num_validations_in_progress_++;
+  }
+  x23::Async<void> decrement_num_validations_in_progress()
+  {
+    x23::CoroGuard cg;
+    co_await cg(validated_block_cache_lock_);
+    CHECK_GT(num_validations_in_progress_, 0UL);
+    num_validations_in_progress_--;
+  }
 
   MempoolDbRpc *db_rpc_;
 
@@ -256,9 +294,22 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
-  BlockID current_block_id_ = 0;
   std::shared_ptr<Scheduler> scheduler_;
-  std::unique_ptr<Authentication> authentication_;
+
+  // Ensures only one block is nominated at a time.
+  x23::CoroLock nominated_block_cache_lock_;
+  // Protects [validated_block_cache_].
+  x23::CoroLock validated_block_cache_lock_;
+  size_t num_validations_in_progress_ = 0;
+  // Ensures that a commit does not occur while a block is being nominated or
+  // validated, and vice versa.
+  // This lock is acquired in shared mode when a block is being nominated or
+  // validated. This lock is acquired in exclusive mode when a block is being
+  // committed.
+  PendingBlock nominated_block_cache_ = {};
+  std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  DbTip last_committed_block_{};
+  std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
   std::atomic<bool> shutdown_flag_ = false;

@@ -24,14 +24,22 @@ public:
 
   static x23::Async<void> coordscheduler_null() { co_return; }
 
+  // We do not pass [txs] by reference just in case we call [co_await] in the
+  // function. If the coroutine gets paused and another RPC of the same name is
+  // delivered, a reference would become invalidated.
   static x23::Async<void>
-  coordscheduler_notify_vetted(const SignedTransactionBatch &txs)
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  coordscheduler_notify_vetted(const SignedTransactionBatch txs)
   {
     co_return;
   }
 
+  // We do not pass [chunk] by reference because we call [co_await] in the
+  // function. If the coroutine gets paused and another RPC of the same name is
+  // delivered, a reference would become invalidated.
   x23::Async<void>
-  coordscheduler_finish_nomination(const SchedulerNominationChunk &chunk)
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  coordscheduler_finish_nomination(const SchedulerNominationChunk chunk)
   {
     x23::CoroGuard cg;
     co_await cg(nominations_lock_);
@@ -42,16 +50,20 @@ public:
       CHECK_EQ(chunk.chunk.block_id, existing.chunk.block_id);
     }
     CHECK_LT(nominations_.size(), chunk.total_chunks);
-    nominations_[chunk.chunk_idx] = {};
-    cg.reset();
-
     nominations_[chunk.chunk_idx] = chunk;
   }
 
-  SchedulerNomination get_nomination()
+  x23::Async<SchedulerNomination> get_nomination()
   {
-    CHECK(!nominations_.empty());
-    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+    x23::CoroGuard cg;
+    while (true) {
+      co_await cg(nominations_lock_);
+      if (!nominations_.empty() &&
+          nominations_.size() == nominations_[0].total_chunks) {
+        break;
+      }
+      cg.reset();
+    }
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
@@ -64,13 +76,20 @@ public:
     }
 
     nominations_.clear();
-    return ret;
+    co_return ret;
   }
 
-  std::pair<SchedulerNomination, size_t> get_nomination_no_txs()
+  x23::Async<std::pair<SchedulerNomination, size_t>> get_nomination_no_txs()
   {
-    CHECK(!nominations_.empty());
-    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
+    x23::CoroGuard cg;
+    while (true) {
+      co_await cg(nominations_lock_);
+      if (!nominations_.empty() &&
+          nominations_.size() == nominations_[0].total_chunks) {
+        break;
+      }
+      cg.reset();
+    }
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
@@ -89,7 +108,7 @@ public:
     }
 
     nominations_.clear();
-    return {ret, num_txs};
+    co_return std::make_pair(std::move(ret), num_txs);
   }
 
   void shut_down()
