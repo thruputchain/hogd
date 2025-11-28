@@ -22,11 +22,13 @@ class CoordinatorSchedRpc {
 public:
   using rpc_service = CoordScheduler1;
 
+  CoordinatorSchedRpc() : nominations_finished_(/*count=*/0) {}
+
   static x23::Async<void> coordscheduler_null() { co_return; }
 
   // We do not pass [txs] by reference just in case we call [co_await] in the
   // function. If the coroutine gets paused and another RPC of the same name is
-  // delivered, a reference would become invalidated.
+  // delivered, the reference would become invalidated.
   static x23::Async<void>
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   coordscheduler_notify_vetted(const SignedTransactionBatch txs)
@@ -36,7 +38,7 @@ public:
 
   // We do not pass [chunk] by reference because we call [co_await] in the
   // function. If the coroutine gets paused and another RPC of the same name is
-  // delivered, a reference would become invalidated.
+  // delivered, the reference would become invalidated.
   x23::Async<void>
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   coordscheduler_finish_nomination(const SchedulerNominationChunk chunk)
@@ -51,19 +53,25 @@ public:
     }
     CHECK_LT(nominations_.size(), chunk.total_chunks);
     nominations_[chunk.chunk_idx] = chunk;
+
+    // We access [nominations_.begin()] rather than [nominations_[0]] because
+    // the chunks are not necessarily received in order. Thus, it is possible
+    // that we have received another chunk other than chunk 0 and thus
+    // [nominations_[0]] does not yet exist.
+    if (nominations_.size() == nominations_.begin()->second.total_chunks) {
+      nominations_finished_.release();
+    }
   }
 
   x23::Async<SchedulerNomination> get_nomination()
   {
+    co_await nominations_finished_.acquire();
     x23::CoroGuard cg;
-    while (true) {
-      co_await cg(nominations_lock_);
-      if (!nominations_.empty() &&
-          nominations_.size() == nominations_[0].total_chunks) {
-        break;
-      }
-      cg.reset();
-    }
+    co_await cg(nominations_lock_);
+    CHECK(!nominations_.empty());
+    // We acquired the [nominations_finished_] semaphore so therefore
+    // [nominations_[0]] is guaranteed to exist.
+    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
@@ -76,20 +84,19 @@ public:
     }
 
     nominations_.clear();
+    nominations_finished_.release();
     co_return ret;
   }
 
   x23::Async<std::pair<SchedulerNomination, size_t>> get_nomination_no_txs()
   {
+    co_await nominations_finished_.acquire();
     x23::CoroGuard cg;
-    while (true) {
-      co_await cg(nominations_lock_);
-      if (!nominations_.empty() &&
-          nominations_.size() == nominations_[0].total_chunks) {
-        break;
-      }
-      cg.reset();
-    }
+    co_await cg(nominations_lock_);
+    CHECK(!nominations_.empty());
+    // We acquired the [nominations_finished_] semaphore so therefore
+    // [nominations_[0]] is guaranteed to exist.
+    CHECK_EQ(nominations_.size(), nominations_[0].total_chunks);
 
     // The block hash is in the last chunk.
     size_t last_chunk = nominations_[0].total_chunks - 1;
@@ -108,6 +115,7 @@ public:
     }
 
     nominations_.clear();
+    nominations_finished_.release();
     co_return std::make_pair(std::move(ret), num_txs);
   }
 
@@ -123,6 +131,7 @@ public:
 
 private:
   x23::CoroLock nominations_lock_;
+  x23::CoroSem nominations_finished_;
   std::unordered_map<unsigned int, SchedulerNominationChunk> nominations_;
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
