@@ -16,8 +16,11 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+
 echo 'build'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
@@ -59,8 +62,11 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" > build1.log 2>&1 || (cat build1.log && exit 1)
+
 echo 'build'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh
