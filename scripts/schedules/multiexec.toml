@@ -2,7 +2,7 @@ name = "multiexec_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_bench_servers"
-host = ["hog6", "hog7", "hog8", "hog11"]
+host = ["hog6", "hog7", "hog8", "hog11", "hog1"]
 script = """
 
 set -x
@@ -17,10 +17,10 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'build (1 of 2)'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build (2 of 2)'
-make -C release -j$(nproc) control_server hogdb_exec hogexec
+make -C release -j$(nproc) control_server hogdb_exec hogexec event_exec > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clear hogdb file directory'
 mkdir -p ci_work_dir/
@@ -51,25 +51,26 @@ git submodule update --init --recursive
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-make -C release -j$(nproc) multiexec_runner control_cli
+make -C release -j$(nproc) multiexec_runner control_cli > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'wait for bench servers'
 ./scripts/wait-port.sh hog7 11111
 ./scripts/wait-port.sh hog8 11111
 ./scripts/wait-port.sh hog11 11111
 ./scripts/wait-port.sh hog6 11111
+./scripts/wait-port.sh hog1 11111
 
 echo 'launch multiexec runner one exec'
-./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -a 100
+./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog1 -a 100
 
 echo 'launch multiexec runner two exec'
-./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -a 100
+./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog1 -a 100
 
 echo 'launch multiexec runner three exec'
-./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -a 100
+./release/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog11 -s hog6 -s hog1 -a 100
 
 """
 after = """
@@ -79,6 +80,7 @@ echo 'cleanup control servers'
 ./release/hogd/hogexec/bench/control_cli hog8 11111 shutdown
 ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 11111 shutdown
+./release/hogd/hogexec/bench/control_cli hog1 11111 shutdown
 
 """
 [jobs.env]
