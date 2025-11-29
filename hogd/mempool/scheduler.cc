@@ -590,7 +590,6 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
         it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
       }
       if (it == txs_to_schedule.end()) {
-        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         account_it++;
         break;
       }
