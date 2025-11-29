@@ -29,8 +29,10 @@
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -45,7 +47,7 @@ public:
     : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
       coord_port_(coord_port)
   {
-    CHECK_EQ(server_addrs_.size(), 2);
+    CHECK_EQ(server_addrs_.size(), 2U);
 
     hogdb_handle_ = std::make_unique<ControlServerHandle>(hogdb_addr());
     event_server_handle_ =
@@ -131,7 +133,7 @@ private:
   EventCard start_event_server(uint16_t event_server_port)
   {
     std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
+    CHECK_EQ(get_hostname(hostname), 0U);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
