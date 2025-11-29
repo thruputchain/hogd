@@ -102,7 +102,7 @@ void
 usage(char *argv[])
 {
   std::println("Usage: {} [-a <num_accounts>]", argv[0]);
-  std::println("  -a <num_accounts>  Number of accounts (default: 100)");
+  std::println("  -a <num_accounts>  Number of accounts (default: 2)");
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -114,7 +114,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (ret)
     return ret;
 
-  uint32_t num_accounts = 100; // default
+  uint32_t num_accounts = 2; // default
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)

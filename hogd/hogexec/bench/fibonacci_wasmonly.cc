@@ -21,7 +21,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
-#include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/init.h"
@@ -33,10 +32,9 @@ namespace hogd {
 namespace {
 
 struct BenchmarkState : public CommonBenchState {
-  BenchmarkState(std::string server_addr, uint16_t exec_port,
+  BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port)
-    : CommonBenchState(std::move(server_addr), exec_port, coord_port,
-                       kControlServerPort)
+    : CommonBenchState(std::move(server_addrs), exec_port, coord_port)
   {}
 
   ContractAddress contract_addr_;
@@ -172,10 +170,10 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 }
 
 void
-run_fibonacci_client(std::string const &server_addr, uint32_t exec_port,
+run_fibonacci_client(std::vector<std::string> const &server_addrs, uint32_t exec_port,
                      uint32_t coord_port)
 {
-  BenchmarkState bs(server_addr, exec_port, coord_port);
+  BenchmarkState bs(server_addrs, exec_port, coord_port);
   bs.initialize();
 
   // strong scaling
@@ -221,7 +219,7 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr>",
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addrs, repeated (2 required)>",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -235,7 +233,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::optional<int> exec_port;
   std::optional<int> coord_port;
-  std::optional<std::string> server_addr;
+  std::vector<std::string> server_addrs;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
@@ -248,19 +246,19 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coord_port = std::stoi(optarg);
       break;
     case 's':
-      server_addr = std::string(optarg);
+      server_addrs.push_back(std::string(optarg));
       break;
     default:
       usage(argv);
     }
   }
   // NOLINTEND(misc-include-cleaner)
-  if (!server_addr || !exec_port || !coord_port) {
+  if (server_addrs.size() != 2 || !exec_port || !coord_port) {
     usage(argv);
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_fibonacci_client(*server_addr, *exec_port, *coord_port);
+  hogd::run_fibonacci_client(server_addrs, *exec_port, *coord_port);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
