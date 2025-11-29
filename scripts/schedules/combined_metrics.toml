@@ -101,8 +101,9 @@ metrics_exit=$?
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
 
-echo 'shut down bench server'
+echo 'shut down hog11 and hog8'
 (./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown)
+(./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown)
 
 echo 'check for failures'
 if [ "$exec_scaling_exit" -ne 0 ] || \
