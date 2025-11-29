@@ -129,7 +129,7 @@ private:
       if (expiry_block_height != other.expiry_block_height) {
         return expiry_block_height < other.expiry_block_height;
       }
-      // std::array defines lexicographic comparison.
+      // [std::array] implements lexicographic comparison.
       return tx_hash < other.tx_hash;
     }
   };
@@ -148,7 +148,7 @@ private:
       if (average_hog_age != other.average_hog_age) {
         return average_hog_age < other.average_hog_age;
       }
-      // std::array defines lexicographic comparison.
+      // [std::array] implements lexicographic comparison.
       return account < other.account;
     }
   };
@@ -192,7 +192,7 @@ private:
   // Maps an account to the txs it has submitted.
   // TODO(jhumphri): Is [account_to_tx_] mostly only read rather than written
   // (i.e., are we inserting new accounts into it rarely)? Would it be better to
-  // make it an [std::unordered_map<>] and protect it with a rw lock?
+  // make it an [std::unordered_map<>] and protect it with an rw lock?
   SynchronizedMap<ContractAddress, std::map<TxKey, TxValue *>> account_to_tx_;
   std::set<AccountKey> ready_accounts_;
 
@@ -203,7 +203,7 @@ private:
   SynchronizedMap<SignedTransactionHash, TxValue> txs_;
   // Account cache.
   // TODO(jhumphri): Similarly, is this read heavy? Would it be better to make
-  // it an [std::unordered_map] and protect it with a rw lock?
+  // it an [std::unordered_map] and protect it with an rw lock?
   SynchronizedMap<ContractAddress, HogAge> accounts_;
 
   // The number of txs on the runqueue.
