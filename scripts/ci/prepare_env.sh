@@ -3,8 +3,6 @@ echo "prepare the environment for building hogd"
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
-rustup toolchain list
-
 echo 'installing cbindgen'
 cargo install --force cbindgen
 
