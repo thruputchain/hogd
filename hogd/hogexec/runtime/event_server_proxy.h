@@ -37,7 +37,7 @@ public:
 
 private:
   using client_t =
-      EventExecutor1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+      EventExecutor1::client<x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
   client_t client_;
 };
 
