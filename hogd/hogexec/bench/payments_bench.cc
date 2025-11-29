@@ -16,7 +16,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
-#include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
@@ -29,10 +28,9 @@ namespace hogd {
 namespace {
 
 struct BenchmarkState : public CommonBenchState {
-  BenchmarkState(std::string server_addr, uint16_t exec_port,
+  BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port, uint32_t num_accounts)
-    : CommonBenchState(std::move(server_addr), exec_port, coord_port,
-                       kControlServerPort),
+    : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
       num_accounts_(num_accounts)
   {}
 
@@ -133,15 +131,16 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 }
 
 void
-run_payments_bench(std::string const &server_addr, uint32_t exec_port,
-                   uint32_t coord_port, uint32_t num_accounts)
+run_payments_bench(std::vector<std::string> const &server_addrs,
+                   uint32_t exec_port, uint32_t coord_port,
+                   uint32_t num_accounts)
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
   size_t num_reps = 10;
   uint32_t num_total_txs =
       std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
-  BenchmarkState bs(server_addr, exec_port, coord_port, num_accounts);
+  BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
 
@@ -172,7 +171,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr> -a "
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr, "
+               "repeated (2 required)> -a "
                "<num_accounts>",
                argv[0]);
   exit(EXIT_FAILURE);
@@ -187,7 +187,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::optional<int> exec_port;
   std::optional<int> coord_port;
-  std::optional<std::string> server_addr;
+  std::vector<std::string> server_addrs;
   std::optional<int> num_accounts;
 
   int opt;
@@ -201,7 +201,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coord_port = std::stoi(optarg);
       break;
     case 's':
-      server_addr = std::string(optarg);
+      server_addrs.emplace_back(optarg);
       break;
     case 'a':
       num_accounts = std::stoi(optarg);
@@ -211,12 +211,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     }
   }
   // NOLINTEND(misc-include-cleaner)
-  if (!server_addr || !exec_port || !coord_port || !num_accounts) {
+  if (server_addrs.size() != 2 || !exec_port || !coord_port || !num_accounts) {
     usage(argv);
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_payments_bench(*server_addr, *exec_port, *coord_port,
+  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port,
                            *num_accounts);
   // NOLINTEND(bugprone-unchecked-optional-access)
 

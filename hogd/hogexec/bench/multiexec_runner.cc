@@ -14,7 +14,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,6 +29,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/bench/control_client.h"
+#include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
@@ -48,25 +48,6 @@
 #include "x23/vec.h"
 
 namespace hogd {
-
-class ControlServerHandle {
-public:
-  ControlServerHandle(std::string const &server_addr)
-    : ci_client(connect_to_control_server(server_addr,
-                                          std::to_string(kControlServerPort)))
-  {}
-
-  ControlClientWrapper ci_client;
-
-  ~ControlServerHandle()
-  {
-    try {
-      ci_client.stop_server();
-    } catch (...) {
-      panic("Failed to stop control server");
-    }
-  }
-};
 
 class SchedExecTest {
 public:
@@ -143,81 +124,6 @@ private:
 };
 
 static_assert(is_SchedExec1<SchedExecTest *, x23::MaybeAsync>);
-
-class SchedDBTest {
-public:
-  using rpc_service = SchedDb1;
-
-  SchedDBTest() = default;
-
-  // Disable copy and move.
-  SchedDBTest(const SchedDBTest &) = delete;
-  SchedDBTest &operator=(const SchedDBTest &) = delete;
-  SchedDBTest(SchedDBTest &&) = delete;
-  SchedDBTest &operator=(SchedDBTest &&) = delete;
-
-  void scheddb_intro_shard(const ShardCard &card)
-  {
-    std::unique_lock lk(mtx_);
-    shard_cards_.push_back(card);
-    cv_.notify_all();
-  }
-
-  static void scheddb_hogs_transferred(const HogsTransferred &hogs) {}
-  static void scheddb_changed_accounts(BlockHeight height,
-                                       ContractAddressBatch const &addresses)
-  {}
-
-  x23::Vec<ShardCard> await_shard_cards(unsigned int num_cards)
-  {
-    std::unique_lock lk(mtx_);
-    cv_.wait(lk,
-             [this, num_cards] { return shard_cards_.size() == num_cards; });
-    return shard_cards_;
-  }
-
-private:
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  x23::Vec<ShardCard> shard_cards_;
-};
-
-static_assert(is_SchedDb1<SchedDBTest *, std::type_identity_t>);
-
-class SchedEventTest {
-public:
-  using rpc_service = SchedEvent1;
-
-  SchedEventTest() = default;
-
-  // Disable copy and move.
-  SchedEventTest(const SchedEventTest &) = delete;
-  SchedEventTest &operator=(const SchedEventTest &) = delete;
-  SchedEventTest(SchedEventTest &&) = delete;
-  SchedEventTest &operator=(SchedEventTest &&) = delete;
-
-  RPCError schedevent_intro_event(const EventCard &card)
-  {
-    std::unique_lock lk(mtx_);
-    event_card_ = std::move(card);
-    cv_.notify_all();
-    return RPCError::kRPCNone;
-  }
-
-  EventCard await_event_card()
-  {
-    std::unique_lock lk(mtx_);
-    cv_.wait(lk, [this] { return event_card_.has_value(); });
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return event_card_.value();
-  }
-
-  std::mutex mtx_;
-  std::condition_variable cv_;
-  std::optional<EventCard> event_card_;
-};
-
-static_assert(is_SchedEvent1<SchedEventTest *, std::type_identity_t>);
 
 namespace {
 auto
@@ -466,10 +372,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   RpcServer<SchedExecTest> sched_exec_test;
   uint16_t sched_exec_port = sched_exec_test.start_server(0);
 
-  RpcServer<SchedDBTest> sched_db_test;
+  RpcServer<MockSchedDB> sched_db_test;
   uint16_t sched_db_port = sched_db_test.start_server(0);
 
-  RpcServer<SchedEventTest> sched_event_test;
+  RpcServer<MockSchedEvent> sched_event_test;
   uint16_t sched_event_port = sched_event_test.start_server(0);
 
   auto work_dir = control_server_handles[0].ci_client.query_work_dir();

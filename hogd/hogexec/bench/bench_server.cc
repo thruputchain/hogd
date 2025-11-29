@@ -1,5 +1,6 @@
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -18,7 +19,6 @@
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -26,10 +26,8 @@ namespace {
 
 // runs a db server to support an executor benchmark.
 void
-run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
+run_bench_server(uint32_t exec_port, uint32_t coord_port)
 {
-  x23::ThreadPool db_pool = x23::ThreadPool(nthreads);
-
   // Create a temporary directory for the database
   Directory dir = Directory::open_temporary().value();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
@@ -54,6 +52,8 @@ run_bench_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   std::println("Starting executor server on port {}", exec_port);
   HogDBExecutorServer db_executor_server(ctx);
   db_executor_server.start_server(exec_port);
+
+  std::fflush(stdout);
 
   while (true) {
     std::this_thread::sleep_for(std::chrono::seconds(100));
@@ -101,7 +101,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  hogd::run_bench_server(1, *exec_port, *coord_port);
+  hogd::run_bench_server(*exec_port, *coord_port);
   std::println("bench_server finished with orderly shutdown");
   return 0;
 }
