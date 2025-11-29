@@ -18,7 +18,7 @@ auto
 connect_to_event_server(x23::HostPort const &host_port)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  return make_rpc_multiclient<EventExecutor1>(host_port, false);
+  return make_rpc_multiclient<EventExecutor1>(host_port, true);
 }
 
 } // namespace
