@@ -201,7 +201,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coord_port = std::stoi(optarg);
       break;
     case 's':
-      server_addrs.push_back(std::string(optarg));
+      server_addrs.emplace_back(optarg);
       break;
     case 'a':
       num_accounts = std::stoi(optarg);
