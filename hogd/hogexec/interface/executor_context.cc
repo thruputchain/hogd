@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <utility>
+#include <vector>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
@@ -74,7 +75,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   assert(mode_ == ExecutionMode::kProposing);
   auto [async, cb] = x23::make_async<ExecProposeResult>();
   worker_pool_.submit([this, &signed_tx, tx_id, cb]() {
-    auto res = run_propose_transaction(signed_tx, tx_id);
+    auto res = run_propose_transaction(signed_tx, tx_id)();
     cb(res);
   });
   co_return co_await async;
@@ -88,9 +89,14 @@ ExecutorContext::propose_transaction_batch(
   auto [async, cb] = x23::make_async<ExecProposeBatchResult>();
   worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
+    std::vector<x23::Async<ExecProposeResult>> promises;
+    promises.reserve(signed_txs.size());
     for (size_t i = 0; i < signed_txs.size(); i++) {
-      auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
-      batch_res.push_back(res);
+      promises.emplace_back(
+          run_propose_transaction(signed_txs[i], first_tx_id + i));
+    }
+    for (auto &promise : promises) {
+      batch_res.push_back(promise());
     }
     cb(std::move(batch_res));
   });
@@ -107,9 +113,14 @@ ExecutorContext::validate_transaction_batch(
   auto [async, cb] = x23::make_async<ExecValidateBatchResult>();
   worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
     ExecValidateBatchResult batch_res;
+    std::vector<x23::Async<ExecResult>> promises;
+    promises.reserve(proposed_txs.size());
     for (size_t i = 0; i < proposed_txs.size(); i++) {
-      auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
-      batch_res.push_back(res);
+      promises.emplace_back(
+          run_validate_transaction(proposed_txs[i], first_tx_id + i));
+    }
+    for (auto &promise : promises) {
+      batch_res.push_back(promise());
     }
     cb(std::move(batch_res));
   });
@@ -125,14 +136,14 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   auto [async, cb] = x23::make_async<ExecResult>();
 
   worker_pool_.submit([this, &proposed_tx, tx_id, cb]() {
-    auto res = run_validate_transaction(proposed_tx, tx_id);
+    auto res = run_validate_transaction(proposed_tx, tx_id)();
     cb(res);
   });
 
   co_return co_await async;
 }
 
-ExecProposeResult
+x23::Async<ExecProposeResult>
 ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
                                          TransactionID tx_id)
 {
@@ -146,7 +157,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   if (!invoke_res.is_root_success()) {
     auto st = proxy.abort_transaction();
     if (!st.has_value()) {
-      return ExecProposeResult(make_exec_result(st.error().code()));
+      co_return ExecProposeResult(make_exec_result(st.error().code()));
     }
     assert(!invoke_res.result_.has_value());
 
@@ -157,7 +168,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
         InvokeErrorCode::kInvokeDeterministic) {
       out.proposal_data() = syscall_handler.get_proposal_data();
     }
-    return out;
+    co_return out;
   }
 
   auto commit_res = syscall_handler.try_commit_transaction();
@@ -165,18 +176,22 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     // this error code should not be returned by the try_commit_transaction
     // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    return ExecProposeResult(make_exec_result(commit_res.error().code()));
+    co_return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
   if (commit_res.value()) {
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data();
-    return out;
+    auto events_res = co_await syscall_handler.emit_events();
+    if (!events_res.has_value()) {
+      co_return ExecProposeResult(make_exec_result(events_res.error().code()));
+    }
+    co_return out;
   }
-  return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+  co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                           TransactionID tx_id)
 {
@@ -192,10 +207,10 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   if (!invoke_res.is_root_success()) {
     auto res = proxy.abort_transaction();
     if (!res.has_value()) {
-      return make_exec_result(res.error().code());
+      co_return make_exec_result(res.error().code());
     }
     assert(!invoke_res.result_.has_value());
-    return make_exec_result(invoke_res.result_.error().code());
+    co_return make_exec_result(invoke_res.result_.error().code());
   }
 
   auto commit_res = syscall_handler.try_commit_transaction();
@@ -203,13 +218,17 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // this error code should not be returned by the try_commit_transaction
     // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    return make_exec_result(commit_res.error().code());
+    co_return make_exec_result(commit_res.error().code());
   }
 
   if (commit_res.value()) {
-    return ExecResult::ExecResultOK;
+    auto events_res = co_await syscall_handler.emit_events();
+    if (!events_res.has_value()) {
+      co_return make_exec_result(events_res.error().code());
+    }
+    co_return ExecResult::ExecResultOK;
   }
-  return ExecResult::ExecResultTxNonDeterministicError;
+  co_return ExecResult::ExecResultTxNonDeterministicError;
 }
 
 } // namespace hogd

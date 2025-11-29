@@ -65,10 +65,10 @@ private:
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
   DispatchPool &worker_pool_;
 
-  ExecProposeResult run_propose_transaction(SignedTransaction const &tx,
-                                            TransactionID tx_id);
-  ExecResult run_validate_transaction(ProposedTransaction const &tx,
-                                      TransactionID tx_id);
+  x23::Async<ExecProposeResult>
+  run_propose_transaction(SignedTransaction const &tx, TransactionID tx_id);
+  x23::Async<ExecResult> run_validate_transaction(ProposedTransaction const &tx,
+                                                  TransactionID tx_id);
 };
 
 } // namespace hogd

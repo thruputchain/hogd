@@ -38,6 +38,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/vec.h"
 
@@ -278,11 +279,6 @@ SystemCallHandler::try_commit_transaction()
 
   // This is past the point of successful commitment;
   // now we can safely emit the events to the event server
-  auto emit_events_status = emit_events();
-  if (!emit_events_status.has_value()) {
-    error("emit_events failed: {}", emit_events_status.error());
-    return emit_events_status.error();
-  }
 
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
                                   get_block_execution_mode());
@@ -488,7 +484,7 @@ SystemCallHandler::get_proposed_tx_hash() const
   return sha256(proposed_tx);
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events()
 {
   assert(last_frame_.has_value());
@@ -497,9 +493,9 @@ SystemCallHandler::emit_events()
   auto events = last_frame_.value().extract_events();
   if (events.empty()) {
     trace("No events to emit, skipping emit_events RPC");
-    return {};
+    co_return SystemStatus<void>{};
   }
-  return event_server_proxy_.emit_events(TxEventLog{
+  co_return co_await event_server_proxy_.emit_events(TxEventLog{
       .proposed_tx_hash = get_proposed_tx_hash(),
       .events = std::move(events),
   });

@@ -168,6 +168,7 @@ TEST_F(EventTest, EventSuccess)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -286,6 +287,7 @@ TEST_F(EventTest, BadEventInputs)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -552,6 +554,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+  ASSERT_TRUE(handler.emit_events()());
 
   EphemeralTxIdentifier tx_id_2;
   auto handler2 = make_new_system_call_handler(
@@ -572,6 +575,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   auto r2 = handler2.try_commit_transaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(*r2);
+  ASSERT_TRUE(handler2.emit_events()());
 
   advance_block();
 

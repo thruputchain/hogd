@@ -13,6 +13,8 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -29,6 +31,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -68,6 +71,21 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
+  ~SystemCallHandler()
+  {
+    if constexpr (is_debug_build()) {
+      if (!transaction_committed_or_aborted_) {
+        warn("SystemCallHandler destroyed without committing or aborting "
+             "transaction");
+      }
+      if (last_frame_.has_value() &&
+          !last_frame_.value().extract_events().empty() &&
+          root_invoke_succeeded_) {
+        panic("SystemCallHandler destroyed with events to emit");
+      }
+    }
+  }
+
   // Debug management operations
   void enable_transaction_stats()
   {
@@ -90,6 +108,8 @@ public:
   // the root_invoke earlier had an error.
   SystemStatus<bool> try_commit_transaction();
   SystemStatus<void> abort_transaction();
+  // If the transaction succeeds, the events can be emitted to the event server.
+  x23::Async<SystemStatus<void>> emit_events();
 
   // Get the proposal data.
   // Can only be called after root_invoke()
@@ -252,8 +272,6 @@ private:
   // Can only be called after root_invoke()
   // (as otherwise the proposal data is not available)
   SHA256Hash get_proposed_tx_hash() const;
-
-  SystemStatus<void> emit_events();
 };
 
 } // namespace hogd
