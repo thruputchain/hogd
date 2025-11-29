@@ -4,4 +4,3 @@ echo 'setting up cargo'
 ln -s "$USER_HOME/.cargo" "$HOME/.cargo"
 . "$HOME/.cargo/env"
 
-rustup default stable

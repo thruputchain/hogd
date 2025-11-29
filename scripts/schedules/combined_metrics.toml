@@ -60,7 +60,7 @@ git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_env.sh
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
