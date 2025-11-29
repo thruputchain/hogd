@@ -8,6 +8,7 @@ script = """
 set -x
 
 echo 'cloning hogd'
+git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
@@ -16,8 +17,11 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+
 echo 'build'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
@@ -51,16 +55,20 @@ script = """
 set -x
 
 echo 'cloning hogd'
+git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_env.sh
+
+echo 'configure'
+./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -x "-DBUILD_BENCHMARKS=OFF" -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
 
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh
@@ -79,11 +87,10 @@ echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
 
-echo 'release hog1, hog6, hog7, and hog8'
+echo 'release hog1, hog6, and hog7'
 ./release/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
 
 echo 'run event server benchmarks'
 (./scripts/ci/event_bench.sh) || true
@@ -96,8 +103,9 @@ metrics_exit=$?
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
 
-echo 'shut down bench server'
+echo 'shut down hog11 and hog8'
 (./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown)
+(./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown)
 
 echo 'check for failures'
 if [ "$exec_scaling_exit" -ne 0 ] || \

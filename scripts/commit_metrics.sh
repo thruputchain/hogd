@@ -25,15 +25,15 @@ git add metrics/
 
 GIT_COMMITTER_NAME="$committer_name" \
   GIT_COMMITTER_EMAIL="$committer_email" \
-  git commit -m "Add metrics for $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>"
+  git commit -m "Add metrics for $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>" --quiet
 
 while true; do
-  if git push; then
+  if git push --quiet; then
     break
   else
     echo "Push failed, attempting pull --rebase and retry..."
     GIT_COMMITTER_NAME="$committer_name" \
       GIT_COMMITTER_EMAIL="$committer_email" \
-      git pull --rebase
+      git pull --rebase --quiet
   fi
 done
