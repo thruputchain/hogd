@@ -8,6 +8,7 @@ script = """
 set -x
 
 echo 'cloning hogd'
+git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
@@ -54,6 +55,7 @@ script = """
 set -x
 
 echo 'cloning hogd'
+git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
