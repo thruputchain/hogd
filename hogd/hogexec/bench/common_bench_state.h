@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <format>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -11,7 +12,10 @@
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "genesis.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
@@ -21,7 +25,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -31,29 +34,36 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+#include "hogd/hogexec/bench/mock_scheduler.h"
 
 namespace hogd {
 
 class CommonBenchState {
 public:
-  CommonBenchState(std::string server_addr, uint16_t exec_port,
-                   uint16_t coord_port, uint16_t ci_server_port)
-    : server_addr_(std::move(server_addr)), exec_port_(exec_port),
-      coord_port_(coord_port), ci_server_port_(ci_server_port)
+  CommonBenchState(std::vector<std::string> server_addrs, uint16_t exec_port,
+                   uint16_t coord_port)
+    : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
+      coord_port_(coord_port)
   {
+    CHECK_EQ(server_addrs_.size(), 2);
+
+    hogdb_handle_ = std::make_unique<ControlServerHandle>(hogdb_addr());
+    event_server_handle_ = std::make_unique<ControlServerHandle>(event_server_addr());
+
+    uint16_t event_server_port = mock_sched_event_server_.start_server(0);
+
     start_db_server();
+    event_card_ = start_event_server(event_server_port);
     connect_coord();
     connect_exec();
-    event_server_port_ = event_server_exec_server_.start_server(0);
-    event_sched_server_port_ = event_server_sched_server_.start_server(0);
     connect_event();
+
     connect_event_sched();
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
   ~CommonBenchState()
   {
-    stop_db_server();
     close_event_block(block_number_);
   }
   // NOLINTEND(bugprone-exception-escape)
@@ -83,27 +93,30 @@ private:
   void connect_coord()
   {
     coord_client_ = std::make_unique<coord_client_t>(
-        make_srpc_client<DbSched1>(x23::HostPort{server_addr_, coord_port_},
+        make_srpc_client<DbSched1>(x23::HostPort{hogdb_addr(), coord_port_},
                                    true));
   }
 
   void connect_event_sched()
   {
+    x23::HostPort host_port;
+    CHECK(host_port.parse(event_card_.address_for_sched));
     event_sched_client_ =
         std::make_unique<event_sched_client_t>(make_srpc_client<EventSched1>(
-            x23::HostPort{"localhost", event_sched_server_port_}, true));
+            host_port, true));
   }
 
   void connect_event()
   {
-    event_server_proxy_ = std::make_unique<EventServerProxy>(
-        x23::HostPort{"localhost", event_server_port_});
+    x23::HostPort host_port;
+    CHECK(host_port.parse(event_card_.address_for_exec));
+    event_server_proxy_ = std::make_unique<EventServerProxy>(host_port);
   }
 
   void connect_exec()
   {
     std::string server_addrport =
-        server_addr_ + ":" + std::to_string(exec_port_);
+        hogdb_addr() + ":" + std::to_string(exec_port_);
     db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(IntroExecResult{
         .exec_id = 0,
         .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
@@ -111,18 +124,23 @@ private:
 
   void start_db_server()
   {
-    auto ci_client = connect_to_control_server(server_addr_,
-                                               std::to_string(ci_server_port_));
-    ci_client.start_server("hogd/hogexec/bench/bench_server",
+    CHECK_PTR(hogdb_handle_.get());
+
+    hogdb_handle_->ci_client.start_server("hogd/hogexec/bench/bench_server",
                            {"-e", std::to_string(exec_port_), "-c",
                             std::to_string(coord_port_)});
   }
 
-  void stop_db_server()
-  {
-    auto ci_client = connect_to_control_server(server_addr_,
-                                               std::to_string(ci_server_port_));
-    ci_client.stop_server();
+  EventCard start_event_server(uint16_t event_server_port) {
+    std::string hostname;
+    CHECK_EQ(get_hostname(hostname), 0);
+
+    auto work_dir = event_server_handle_->ci_client.query_work_dir();
+
+    event_server_handle_->ci_client.start_server("hogd/event/event_exec",
+                           {std::format("{}:{}", hostname, event_server_port), std::format("{}", work_dir.work_dir())});
+  
+    return mock_sched_event_server_->impl()->await_event_card();
   }
 
   void open_event_block(BlockID block_number)
@@ -140,13 +158,19 @@ private:
     }
   }
 
-  std::string server_addr_;
+  std::string hogdb_addr() const { return server_addrs_[0]; }
+  std::string event_server_addr() const { return server_addrs_[1]; }
+
+  std::vector<std::string> server_addrs_;
+
+  std::unique_ptr<ControlServerHandle> hogdb_handle_;
+  std::unique_ptr<ControlServerHandle> event_server_handle_;
+
+  EventCard event_card_;
+
   uint16_t exec_port_;
   uint16_t coord_port_;
-  uint16_t event_server_port_;
-  uint16_t event_sched_server_port_;
 
-  uint16_t ci_server_port_;
 
   TransactionID allocate_txid()
   {
@@ -158,14 +182,9 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-
-  // TODO(geoff): replace with proper event server connection
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  TestEventAggregator event_server_;
-  TestEventAggregatorExecServer event_server_exec_server_ =
-      TestEventAggregatorExecServer(event_server_);
-  TestEventAggregatorSchedServer event_server_sched_server_ =
-      TestEventAggregatorSchedServer(event_server_);
+
+  RpcServer<MockSchedEvent> mock_sched_event_server_;
 
   using coord_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
