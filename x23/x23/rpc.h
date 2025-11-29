@@ -522,7 +522,10 @@ protected:
   {
     super2::populate([&cp, &ss, logfd](const CpuSet & /*unused*/)
                          -> RpcStream<Logger>::ClientRef {
-      auto *stream = new RpcStream<Logger>(cp, tcpconnect(ss), Logger{logfd});
+
+      UniqueFd fd = tcpconnect(ss);
+      std::println("Connected to RPC server at {}, fd = {}", show_ipaddr(ss), fd.get());
+      auto *stream = new RpcStream<Logger>(cp, std::move(fd), Logger{logfd});
       stream->go();
       return typename RpcStream<Logger>::ClientRef(*stream);
     });
