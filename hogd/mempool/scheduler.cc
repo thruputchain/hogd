@@ -474,15 +474,19 @@ Scheduler::account_is_ready(const ContractAddress &account,
 {
   auto [txs, lock] = account_to_tx_[account];
   const TxKey lower_bound{.expiry_block_height = current_block_, .tx_hash = {}};
-  auto it = txs.lower_bound(lower_bound);
+  auto lower_it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check if
   // the account has enough gas units to run the tx.
-  bool ret = (it != txs.end());
+  bool ret = (lower_it != txs.end());
   if (remove_expired_txs) {
-    size_t to_remove = std::distance(txs.begin(), it);
+    for (auto it = txs.begin(); it != lower_it; it++) {
+      const SignedTransactionHash &tx_hash = it->first.tx_hash;
+      CHECK_EQ(txs_.remove(tx_hash), 1UL);
+    }
+    size_t to_remove = std::distance(txs.begin(), lower_it);
     CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
     size_ -= to_remove;
-    txs.erase(txs.begin(), it);
+    txs.erase(txs.begin(), lower_it);
   }
   return ret;
 }
@@ -575,13 +579,17 @@ Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
       auto it = txs_to_schedule.lower_bound(lower_bound);
       if (it != txs_to_schedule.begin()) {
         // This removes expired txs.
+        for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
+             it_remove++) {
+          const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
+          CHECK_EQ(txs_.remove(tx_hash), 1UL);
+        }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
         CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
         size_ -= to_remove;
         it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
       }
       if (it == txs_to_schedule.end()) {
-        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         account_it++;
         break;
       }
