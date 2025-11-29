@@ -85,11 +85,10 @@ echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
 
-echo 'release hog1, hog6, hog7, and hog8'
+echo 'release hog1, hog6, and hog7'
 ./release/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
 
 echo 'run event server benchmarks'
 (./scripts/ci/event_bench.sh) || true
