@@ -30,7 +30,7 @@ namespace {
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port, uint32_t num_accounts)
-    : CommonBenchState(std::move(server_addrs), exec_port, coord_port ),
+    : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
       num_accounts_(num_accounts)
   {}
 
@@ -131,8 +131,9 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 }
 
 void
-run_payments_bench(std::vector<std::string> const &server_addrs, uint32_t exec_port,
-                   uint32_t coord_port, uint32_t num_accounts)
+run_payments_bench(std::vector<std::string> const &server_addrs,
+                   uint32_t exec_port, uint32_t coord_port,
+                   uint32_t num_accounts)
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
@@ -170,7 +171,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr, repeated (2 required)> -a "
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr, "
+               "repeated (2 required)> -a "
                "<num_accounts>",
                argv[0]);
   exit(EXIT_FAILURE);

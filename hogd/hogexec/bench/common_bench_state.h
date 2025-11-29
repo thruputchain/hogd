@@ -19,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/hogexec/bench/control_client.h"
+#include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -34,7 +35,6 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
-#include "hogd/hogexec/bench/mock_scheduler.h"
 
 namespace hogd {
 
@@ -48,7 +48,8 @@ public:
     CHECK_EQ(server_addrs_.size(), 2);
 
     hogdb_handle_ = std::make_unique<ControlServerHandle>(hogdb_addr());
-    event_server_handle_ = std::make_unique<ControlServerHandle>(event_server_addr());
+    event_server_handle_ =
+        std::make_unique<ControlServerHandle>(event_server_addr());
 
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
@@ -62,10 +63,7 @@ public:
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
-  ~CommonBenchState()
-  {
-    close_event_block(block_number_);
-  }
+  ~CommonBenchState() { close_event_block(block_number_); }
   // NOLINTEND(bugprone-exception-escape)
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
@@ -101,9 +99,8 @@ private:
   {
     x23::HostPort host_port;
     CHECK(host_port.parse(event_card_.address_for_sched));
-    event_sched_client_ =
-        std::make_unique<event_sched_client_t>(make_srpc_client<EventSched1>(
-            host_port, true));
+    event_sched_client_ = std::make_unique<event_sched_client_t>(
+        make_srpc_client<EventSched1>(host_port, true));
   }
 
   void connect_event()
@@ -127,19 +124,22 @@ private:
     CHECK_PTR(hogdb_handle_.get());
 
     hogdb_handle_->ci_client.start_server("hogd/hogexec/bench/bench_server",
-                           {"-e", std::to_string(exec_port_), "-c",
-                            std::to_string(coord_port_)});
+                                          {"-e", std::to_string(exec_port_),
+                                           "-c", std::to_string(coord_port_)});
   }
 
-  EventCard start_event_server(uint16_t event_server_port) {
+  EventCard start_event_server(uint16_t event_server_port)
+  {
     std::string hostname;
     CHECK_EQ(get_hostname(hostname), 0);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
-    event_server_handle_->ci_client.start_server("hogd/event/event_exec",
-                           {std::format("{}:{}", hostname, event_server_port), std::format("{}", work_dir.work_dir())});
-  
+    event_server_handle_->ci_client.start_server(
+        "hogd/event/event_exec",
+        {std::format("{}:{}", hostname, event_server_port),
+         std::format("{}", work_dir.work_dir())});
+
     return mock_sched_event_server_->impl()->await_event_card();
   }
 
@@ -170,7 +170,6 @@ private:
 
   uint16_t exec_port_;
   uint16_t coord_port_;
-
 
   TransactionID allocate_txid()
   {

@@ -170,8 +170,8 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 }
 
 void
-run_fibonacci_client(std::vector<std::string> const &server_addrs, uint32_t exec_port,
-                     uint32_t coord_port)
+run_fibonacci_client(std::vector<std::string> const &server_addrs,
+                     uint32_t exec_port, uint32_t coord_port)
 {
   BenchmarkState bs(server_addrs, exec_port, coord_port);
   bs.initialize();
@@ -219,7 +219,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addrs, repeated (2 required)>",
+  std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addrs, "
+               "repeated (2 required)>",
                argv[0]);
   exit(EXIT_FAILURE);
 }
