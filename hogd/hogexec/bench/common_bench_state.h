@@ -133,7 +133,7 @@ private:
   EventCard start_event_server(uint16_t event_server_port)
   {
     std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0U);
+    CHECK_EQ(get_hostname(hostname), 0);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
