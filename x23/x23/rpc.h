@@ -362,20 +362,14 @@ struct RpcStream : public detail::RpcStreamImpl {
     using super::get;
     ClientRef(RpcStream &s) : super(s)
     {
-      std::println("ClientRef constructor: nclients before = {} this = {}", get()->nclients_.load(std::memory_order_relaxed), static_cast<const void*>(this));
       get()->nclients_.fetch_add(1, std::memory_order_relaxed);
-      std::println("ClientRef constructor: nclients after = {}", get()->nclients_.load(std::memory_order_relaxed));
     }
     ClientRef(const ClientRef &s) : super(s)
     {
-      std::println("ClientRef copy constructor: nclients_ = {} this = {}", get()->nclients_.load(std::memory_order_relaxed), static_cast<const void*>(this));
       get()->nclients_.fetch_add(1, std::memory_order_relaxed);
-      std::println("ClientRef copy constructor: nclients after = {}", get()->nclients_.load(std::memory_order_relaxed));
     }
     ~ClientRef()
     {
-      std::println("ClientRef dtor {}", static_cast<const void*>(this));
-      std::println("ClientRef destructor: nclients_ = {}", get()->nclients_.load(std::memory_order_relaxed));
       if (get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
         get()->fail();
     }
