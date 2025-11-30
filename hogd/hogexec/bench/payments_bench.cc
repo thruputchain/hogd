@@ -114,6 +114,9 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
                   !r.has_value() || !r.value()) {
                 throw std::runtime_error("failed to perform commit operation");
               }
+              if (auto r = handler.emit_events()(); !r.has_value()) {
+                throw std::runtime_error("failed to emit events");
+              }
             }
           }));
     }

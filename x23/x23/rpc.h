@@ -490,7 +490,8 @@ using RpcClient =
                               ExtraArgs...>;
 
 template<typename Logger>
-struct RpcMulticlient : RefCount, PerCpuSet<typename RpcStream<Logger>::ClientRef, true> {
+struct RpcMulticlient : RefCount,
+                        PerCpuSet<typename RpcStream<Logger>::ClientRef, true> {
   using super1 = RefCount;
   using super2 = PerCpuSet<typename RpcStream<Logger>::ClientRef, true>;
   using ClientRef = RefPtr<RpcMulticlient>;
@@ -523,10 +524,10 @@ protected:
   {
     super2::populate([&cp, &ss, logfd](const CpuSet & /*unused*/)
                          -> RpcStream<Logger>::ClientRef {
-
       UniqueFd fd = tcpconnect(ss);
       int socketfd = fd.get();
-      typename super2::value_type stream = *new RpcStream<Logger>(cp, std::move(fd), Logger{socketfd, logfd});
+      typename super2::value_type stream =
+          *new RpcStream<Logger>(cp, std::move(fd), Logger{socketfd, logfd});
       stream->go();
       return stream;
     });
