@@ -4,7 +4,6 @@
 #include <cassert>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"

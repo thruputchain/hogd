@@ -11,8 +11,8 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
