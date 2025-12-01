@@ -112,7 +112,7 @@ ExecutorContext::validate_transaction_batch(
 
     for (size_t i = 0; i < proposed_txs.size(); i++) {
       batch_res.push_back(
-        run_validate_transaction(proposed_txs[i], first_tx_id + i));
+          run_validate_transaction(proposed_txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
@@ -175,10 +175,11 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data();
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
-    syscall_handler.emit_events()([this](this auto, SystemStatus<void> res) -> x23::Detached {
-      log_event_return(res.error());
-      co_return;
-    });
+    syscall_handler.emit_events()(
+        [this](this auto, SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res.error());
+          co_return;
+        });
     return out;
   }
   return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
@@ -216,10 +217,11 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
 
   if (commit_res.value()) {
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
-    syscall_handler.emit_events()([this](this auto, SystemStatus<void> res) -> x23::Detached {
-      log_event_return(res.error());
-      co_return;
-    });
+    syscall_handler.emit_events()(
+        [this](this auto, SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res.error());
+          co_return;
+        });
     return ExecResult::ExecResultOK;
   }
   return ExecResult::ExecResultTxNonDeterministicError;
@@ -243,7 +245,8 @@ std::optional<SystemErrorCode>
 ExecutorContext::await_event_return()
 {
   std::unique_lock lock(event_accumulate_mutex_);
-  event_accumulate_cv_.wait(lock, [this]() { return pending_event_calls_ == 0; });
+  event_accumulate_cv_.wait(lock,
+                            [this]() { return pending_event_calls_ == 0; });
   return event_error_;
 }
 

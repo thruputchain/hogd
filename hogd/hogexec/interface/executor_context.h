@@ -1,16 +1,24 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <utility>
+
 #include "exec_sched.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
-#include <memory>
-#include <utility>
 
 namespace hogd {
 
@@ -61,10 +69,10 @@ private:
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
-  ExecProposeResult
-  run_propose_transaction(SignedTransaction const &tx, TransactionID tx_id);
+  ExecProposeResult run_propose_transaction(SignedTransaction const &tx,
+                                            TransactionID tx_id);
   ExecResult run_validate_transaction(ProposedTransaction const &tx,
-                                                  TransactionID tx_id);
+                                      TransactionID tx_id);
 
   void log_event_return(SystemStatus<void> error);
 
