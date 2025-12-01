@@ -316,6 +316,15 @@ try_commit_transaction(void *syscall_handler) noexcept
                                     .panic =
                                         std::to_underlying(res.error().code())};
     }
+    if (*res) {
+      auto events_res = context->to_handler().emit_events()();
+      if (!events_res.has_value()) {
+        error("failed to emit events: {}", events_res.error());
+        return ForeignTryCommitResult{.result_code = 0,
+                                      .panic = std::to_underlying(
+                                          res.error().code())};
+      }
+    }
     auto out = ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
     ffi_trace("FFI: try_commit_transaction(syscall_handler={}) -> (result={})",
               syscall_handler, format_foreign_try_commit_result(out));
