@@ -134,7 +134,7 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
                   events_done.notify_one();
                 }
                 co_return;
-              });
+              })();
           if (auto r = handler.emit_events()(); !r.has_value()) {
             throw std::runtime_error("failed to emit events");
           }

@@ -16,7 +16,7 @@
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -41,7 +41,7 @@ public:
   ExecResult open_proposal(BlockID new_proposal_id);
   ExecResult open_validation(BlockID new_validation_id);
   // Decreases the reference count of the executor context.
-  void remove_block(BlockID block_id);
+  ExecResult remove_block(BlockID block_id);
 
   // All references to the executor context must be released before calling
   // this.

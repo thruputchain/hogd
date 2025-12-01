@@ -12,6 +12,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -101,22 +102,37 @@ ExecutorStateManager::open_validation(BlockID new_validation_id)
   return open_block(new_validation_id, ExecutionMode::kValidating);
 }
 
-void
+ExecResult
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
+  ExecResult result = ExecResult::ExecResultOK;
   bool do_gc = false;
   {
     std::scoped_lock g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
-      return;
+      return ExecResult::ExecResultSystemError;
     }
     it->second.open_block_count--;
     if (it->second.open_block_count == 0) {
       if (it->second.context.initiate_shutdown()) {
         do_gc = true;
+      }
+      auto event_error = it->second.context.get().await_event_return();
+      if (!event_error.has_value()) [[unlikely]] {
+        switch(event_error.value()) {
+        case SystemErrorCode::kAbortTransaction:
+          result = ExecResult::ExecResultSystemError;
+          break;
+        case SystemErrorCode::kValidationFailure:
+          result = ExecResult::ExecResultTxValidationFailure;
+          break;
+        case SystemErrorCode::kUnrecoverable:
+          result = ExecResult::ExecResultUnrecoverable;
+          break;
+        }
       }
     }
   }
@@ -125,6 +141,7 @@ ExecutorStateManager::remove_block(BlockID block_id)
     worker_pool_.print_stats();
     gc_executor_context(block_id);
   }
+  return result;
 }
 
 void

@@ -53,10 +53,20 @@ public:
     return std::move(snapshot_cache_);
   }
 
+  // Block until all event calls have returned.
+  std::optional<SystemErrorCode> await_event_return();
+
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
+
+  ExecProposeResult
+  run_propose_transaction(SignedTransaction const &tx, TransactionID tx_id);
+  ExecResult run_validate_transaction(ProposedTransaction const &tx,
+                                                  TransactionID tx_id);
+
+  void log_event_return(SystemStatus<void> error);
 
   const ExecutionMode mode_;
   const BlockID block_id_;
@@ -65,10 +75,10 @@ private:
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
   DispatchPool &worker_pool_;
 
-  x23::Async<ExecProposeResult>
-  run_propose_transaction(SignedTransaction const &tx, TransactionID tx_id);
-  x23::Async<ExecResult> run_validate_transaction(ProposedTransaction const &tx,
-                                                  TransactionID tx_id);
+  std::mutex event_accumulate_mutex_;
+  std::condition_variable event_accumulate_cv_;
+  std::optional<SystemErrorCode> event_error_ = std::nullopt;
+  std::atomic<uint32_t> pending_event_calls_ = 0;
 };
 
 } // namespace hogd
