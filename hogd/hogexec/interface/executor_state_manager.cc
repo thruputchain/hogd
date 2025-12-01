@@ -121,7 +121,7 @@ ExecutorStateManager::remove_block(BlockID block_id)
         do_gc = true;
       }
       auto event_error = it->second.context.get().await_event_return();
-      if (!event_error.has_value()) [[unlikely]] {
+      if (event_error.has_value()) [[unlikely]] {
         switch (event_error.value()) {
         case SystemErrorCode::kAbortTransaction:
           result = ExecResult::ExecResultSystemError;
