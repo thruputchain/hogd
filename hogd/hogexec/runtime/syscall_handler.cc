@@ -237,6 +237,10 @@ SystemCallHandler::try_commit_transaction()
       return res.error();
     }
 
+    // extract the events, so that they cannot be sent later to the event server
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    last_frame_.value().extract_events();
+
     transaction_committed_or_aborted_ = true;
     return true;
   }

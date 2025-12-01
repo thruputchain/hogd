@@ -324,6 +324,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   advance_block();
