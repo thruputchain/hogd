@@ -109,8 +109,10 @@ MempoolCoordinatorRpc::commit_snapshot(BlockID block_id)
 x23::Async<void>
 MempoolCoordinatorRpc::finish_block(BlockID block_id, size_t executor_idx)
 {
-  co_return co_await exec_clients_[executor_idx].executorsched_finish_block(
+  auto r = co_await exec_clients_[executor_idx].executorsched_finish_block(
       block_id);
+  CHECK_EQ(r, ExecResult::ExecResultOK);
+  co_return;
 }
 
 x23::Async<void>
