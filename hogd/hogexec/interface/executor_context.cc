@@ -8,6 +8,7 @@
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -229,15 +230,17 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
 }
 
 void
-ExecutorContext::log_event_return(SystemStatus<void> error)
+ExecutorContext::log_event_return(SystemStatus<void> err)
 {
-  if (!error.has_value()) {
+  if (!err.has_value()) {
     std::unique_lock lock(event_accumulate_mutex_);
-    event_error_ = error.error().code();
+    event_error_ = err.error().code();
+    error("event error: {}", err.error().raw_code());
     event_accumulate_cv_.notify_one();
   }
   auto r = pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
   if (r == 1) {
+    std::lock_guard lock(event_accumulate_mutex_);
     event_accumulate_cv_.notify_one();
   }
 }
