@@ -98,10 +98,10 @@ ExecutorMempoolRpc::executorsched_validate_batch(
                                       ExecResult::ExecResultSystemError);
   }
 
-  auto r = co_await ctx->get().validate_transaction_batch(
+  auto r = ctx->get().validate_transaction_batch(
       proposed_txs, allocate_tx_ids(proposed_txs.size()));
   release_context(block_id, ctx);
-  co_return r;
+  co_return co_await r;
 }
 
 ExecResult
