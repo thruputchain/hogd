@@ -180,7 +180,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res.error());
+          log_event_return(res);
           co_return;
         });
     return out;
@@ -222,7 +222,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res.error());
+          log_event_return(res);
           co_return;
         });
     return ExecResult::ExecResultOK;
@@ -236,7 +236,7 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
   if (!err.has_value()) {
     std::unique_lock lock(event_accumulate_mutex_);
     event_error_ = err.error().code();
-    error("event error: {}", err.error().raw_code());
+    error("event error: {}", std::to_underlying(event_error_.value()));
   }
   pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
 }
