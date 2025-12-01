@@ -51,14 +51,7 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
-  ~MempoolCoordinatorRpc()
-  {
-    size_t current_val;
-    while ((current_val = pending_detached_coroutines_.load(
-                std::memory_order_acquire)) != 0) {
-      pending_detached_coroutines_.wait(/*old=*/current_val);
-    }
-  }
+  ~MempoolCoordinatorRpc() { shut_down(); }
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -119,34 +112,46 @@ public:
   // are still running.
   x23::Async<void> schedulercoord_shutdown()
   {
-    shutdown_flag_.store(true, std::memory_order_release);
+    // TODO(jhumphri): Implement.
     co_return;
   }
 
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
   {
-    return db_sched_client_->dbsched_load_genesis_block(genesis_block);
+    if (!increment_in_progress_rpcs()) {
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    auto ret =
+        co_await db_sched_client_->dbsched_load_genesis_block(genesis_block);
+    decrement_in_progress_rpcs();
+    co_return ret;
   }
 
   x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
+    if (!increment_in_progress_rpcs()) {
+      co_return x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>{};
+    }
+
     x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
       x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
       ret.push_back(tx);
     }
+
+    decrement_in_progress_rpcs();
     // [OptSignedTransactionBatch] is an
     // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
-    // which are not the same as [Ptrs], but they serialize the same way. So we
-    // return a span of [BorrowedPtr]s.
+    // which are not the same as [Ptrs], but they serialize the same way. So
+    // we return a span of [BorrowedPtr]s.
     co_return ret;
   }
 
-  // Generates a new block ID. This block ID is guaranteed to be unique for the
-  // lifetime of this process. This function is thread-safe.
+  // Generates a new block ID. This block ID is guaranteed to be unique for
+  // the lifetime of this process. This function is thread-safe.
   static uint64_t generate_block_id()
   {
     static std::atomic<uint64_t> last_ns = 0;
@@ -159,9 +164,10 @@ public:
       if (ns == last_ns_relaxed) {
         continue;
       }
-      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
-                                        /*desired=*/ns,
-                                        /*order=*/std::memory_order_relaxed)) {
+      if (last_ns.compare_exchange_weak(
+              /*expected=*/last_ns_relaxed,
+              /*desired=*/ns,
+              /*order=*/std::memory_order_relaxed)) {
         return ns;
       }
     }
@@ -177,11 +183,20 @@ public:
 
   void shut_down()
   {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
-  }
+    ssize_t in_progress_expected;
+    do {
+      in_progress_expected = 0;
+    } while (!in_progress_rpcs_.compare_exchange_weak(
+        /*expected=*/in_progress_expected, /*desired=*/-1,
+        /*success=*/std::memory_order_acquire,
+        /*failure=*/std::memory_order_relaxed));
 
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
+    size_t current_val;
+    while ((current_val = pending_detached_coroutines_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_detached_coroutines_.wait(/*old=*/current_val);
+    }
+  }
 
 private:
   // clang-tidy complains that an exception may be thrown in the function
@@ -286,6 +301,26 @@ private:
     num_validations_in_progress_--;
   }
 
+  bool increment_in_progress_rpcs()
+  {
+    while (true) {
+      ssize_t in_progress = in_progress_rpcs_.load(std::memory_order_relaxed);
+      if (in_progress == -1) {
+        return false;
+      }
+      if (in_progress_rpcs_.compare_exchange_weak(
+              /*expected=*/in_progress, /*desired=*/in_progress + 1,
+              /*success=*/std::memory_order_acquire,
+              /*failure=*/std::memory_order_relaxed)) {
+        return true;
+      }
+    }
+  }
+  void decrement_in_progress_rpcs()
+  {
+    in_progress_rpcs_.fetch_sub(1, std::memory_order_release);
+  }
+
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -310,9 +345,9 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   std::atomic<size_t> pending_detached_coroutines_ = 0;
+  std::atomic<ssize_t> in_progress_rpcs_ = 0;
 
   std::atomic<bool> ready_ = false;
-  std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 

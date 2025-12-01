@@ -122,11 +122,6 @@ public:
     // TODO(jhumphri): Implement.
   }
 
-  void await_shutdown_request()
-  {
-    // TODO(jhumphri): Implement.
-  }
-
 private:
   x23::CoroLock nominations_lock_;
   x23::CoroSem nominations_finished_;

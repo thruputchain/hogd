@@ -45,18 +45,33 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     SignedTransactionBatch batch)
 {
+  if (!increment_in_progress_rpcs()) {
+    co_return;
+  }
+
   // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
   co_await scheduler_->add_txs(batch);
-  co_return co_await coord_client_->coordscheduler_notify_vetted(batch);
+  co_await coord_client_->coordscheduler_notify_vetted(batch);
+
+  decrement_in_progress_rpcs();
+  co_return;
 }
 
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch batch)
 {
-  // We [co_await] rather than [return] because [add_txs] takes the txs as a
-  // const reference, so we need [batch] to stay in scope.
-  co_return co_await scheduler_->add_txs(batch);
+  if (!increment_in_progress_rpcs()) {
+    co_return;
+  }
+
+  // We [co_await] rather than [return scheduler_->add_txs(batch)] directly
+  // because [add_txs] takes the txs as a const reference, so we need [batch] to
+  // stay in scope.
+  co_await scheduler_->add_txs(batch);
+
+  decrement_in_progress_rpcs();
+  co_return;
 }
 
 x23::Async<DbSchedResult>
@@ -537,10 +552,16 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  if (!increment_in_progress_rpcs()) {
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
+  }
+
   x23::CoroGuard cg;
   co_await cg(nominated_block_cache_lock_);
 
   if (nominated_block_cache_.block_id) {
+    decrement_in_progress_rpcs();
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
@@ -589,6 +610,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // adding complexity and overhead in the common case to for full recovery
     // from a rare event.
     co_await scheduler_->add_txs(nominated_block_cache_.txs);
+    decrement_in_progress_rpcs();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -607,6 +629,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // There are no txs for the block, so we cannot propose a block.
     co_await finish_all_executors(nominated_block_cache_.block_id);
     co_await abandon_block(nominated_block_cache_);
+    decrement_in_progress_rpcs();
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -617,6 +640,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.block_id() = nominated_block_cache_.block_id;
+  decrement_in_progress_rpcs();
   co_return result;
 }
 
@@ -646,15 +670,22 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
                                                Nomination nomination)
 {
+  if (!increment_in_progress_rpcs()) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+
   co_await increment_num_validations_in_progress();
 
   if (db_tip.height + 1 != nomination.block_height) {
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (db_tip.hash != nomination.prev_block_hash) {
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -664,6 +695,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   if (nomination.transaction_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -682,6 +714,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
       DbSchedResult::DbSchedResultOK) {
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
@@ -708,6 +741,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     }
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -725,6 +759,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
         co_await finish_all_executors(cache.block_id);
         co_await abandon_block(cache);
         co_await decrement_num_validations_in_progress();
+        decrement_in_progress_rpcs();
         co_return SchedulerValidationResult(
             SchedulerValidationOutcome::SchedulerValidationMissingTxs);
       }
@@ -757,6 +792,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     co_await finish_all_executors(cache.block_id);
     co_await abandon_block(cache);
     co_await decrement_num_validations_in_progress();
+    decrement_in_progress_rpcs();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -782,15 +818,21 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
     CHECK_GT(num_validations_in_progress_, 0UL);
     num_validations_in_progress_--;
   }
+  decrement_in_progress_rpcs();
   co_return result;
 }
 
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
+  if (!increment_in_progress_rpcs()) {
+    co_return SchedulerCommitOutcome::SchedulerCommitRace;
+  }
+
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
+    decrement_in_progress_rpcs();
     co_return SchedulerCommitOutcome::SchedulerCommitRace;
   }
   x23::CoroGuard nominate_cg;
@@ -799,6 +841,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   if ((!nominated_block_cache_.block_id ||
        nominated_block_cache_.block_id != block_id) &&
       !validated_block_cache_.contains(block_id)) {
+    decrement_in_progress_rpcs();
     // A block with ID [block_id] was neither nominated nor validated, so it
     // cannot be committed.
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
@@ -887,6 +930,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // read/write indices that do not exist.
   nominated_block_cache_.block_id = 0;
   validated_block_cache_.clear();
+  decrement_in_progress_rpcs();
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
 }
 
