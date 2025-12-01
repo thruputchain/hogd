@@ -73,6 +73,7 @@ TEST_P(ERC20ExperimentTest, Basic)
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res.has_value());
       ASSERT_TRUE(*res);
+      ASSERT_TRUE(handler.emit_events()());
     }
 
     advance_block();
@@ -96,6 +97,7 @@ TEST_P(ERC20ExperimentTest, Basic)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+    ASSERT_TRUE(handler.emit_events()());
   }
 }
 
@@ -119,6 +121,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res.has_value());
       ASSERT_TRUE(*res);
+      ASSERT_TRUE(handler.emit_events()());
     }
 
     advance_block();
@@ -141,6 +144,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
       gas_used = invoke_res.gas_consumed_;
     }
     ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+    ASSERT_TRUE(handler.emit_events()());
   }
 }
 

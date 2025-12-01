@@ -148,4 +148,37 @@ make_srpc_multiclient(x23::HostPort host_port, bool retry = false)
   return make_srpc_multiclient<RpcService>(*ss, retry);
 }
 
+template<typename RpcService>
+auto
+make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
+                     bool retry = false)
+{
+  while (true) {
+    try {
+      auto client = x23::RpcMulticlient<x23::RpcLogger>::make(cp, ss);
+      return client->template client<RpcService>();
+    } catch (const std::system_error &e) {
+      if (retry && e.code() == std::errc::connection_refused) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        warn_every_n_sec(5.0F, "RPC client on {} is not ready",
+                         x23::show_ipaddr(ss));
+        continue;
+      }
+      error("caught system error: {} {}", e.what(), e.code().message());
+      throw;
+    }
+  }
+}
+
+template<typename RpcService>
+auto
+make_rpc_multiclient(x23::HostPort host_port, bool retry = false)
+{
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+  }
+  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry);
+}
+
 } // namespace hogd

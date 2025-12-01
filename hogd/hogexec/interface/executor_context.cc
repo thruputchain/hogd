@@ -1,10 +1,15 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
+#include <atomic>
 #include <cassert>
+#include <mutex>
+#include <optional>
 #include <utility>
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -89,8 +94,8 @@ ExecutorContext::propose_transaction_batch(
   worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
     ExecProposeBatchResult batch_res;
     for (size_t i = 0; i < signed_txs.size(); i++) {
-      auto res = run_propose_transaction(signed_txs[i], first_tx_id + i);
-      batch_res.push_back(res);
+      batch_res.push_back(
+          run_propose_transaction(signed_txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
@@ -107,9 +112,10 @@ ExecutorContext::validate_transaction_batch(
   auto [async, cb] = x23::make_async<ExecValidateBatchResult>();
   worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
     ExecValidateBatchResult batch_res;
+
     for (size_t i = 0; i < proposed_txs.size(); i++) {
-      auto res = run_validate_transaction(proposed_txs[i], first_tx_id + i);
-      batch_res.push_back(res);
+      batch_res.push_back(
+          run_validate_transaction(proposed_txs[i], first_tx_id + i));
     }
     cb(std::move(batch_res));
   });
@@ -171,6 +177,12 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   if (commit_res.value()) {
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data();
+    pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
+    syscall_handler.emit_events()(
+        [this](SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res);
+          co_return;
+        });
     return out;
   }
   return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
@@ -207,9 +219,35 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   }
 
   if (commit_res.value()) {
+    pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
+    syscall_handler.emit_events()(
+        [this](SystemStatus<void> res) -> x23::Detached {
+          log_event_return(res);
+          co_return;
+        });
     return ExecResult::ExecResultOK;
   }
   return ExecResult::ExecResultTxNonDeterministicError;
+}
+
+void
+ExecutorContext::log_event_return(SystemStatus<void> err)
+{
+  if (!err.has_value()) {
+    std::unique_lock lock(event_accumulate_mutex_);
+    event_error_ = err.error().code();
+    error("event error: {}", std::to_underlying(event_error_.value()));
+  }
+  pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
+}
+
+std::optional<SystemErrorCode>
+ExecutorContext::await_event_return()
+{
+  while (pending_event_calls_.load(std::memory_order_relaxed) > 0) {
+    cpu_relax();
+  }
+  return event_error_;
 }
 
 } // namespace hogd

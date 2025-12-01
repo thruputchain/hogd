@@ -55,6 +55,7 @@ endif()
 
 add_x23_gtest(cxs_serialize_test)
 add_x23_gtest(deserialize)
+add_x23_gtest(multiclient)
 add_x23_gtest(nmvec)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)

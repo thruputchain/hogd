@@ -33,6 +33,7 @@ ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
     warn("Expected executor context for block {} to be in {} mode, but found "
          "in {} mode",
          block_id, mode, ctx->get().mode());
+    release_context(block_id, ctx);
     return nullptr;
   }
 
@@ -97,10 +98,11 @@ ExecutorMempoolRpc::executorsched_validate_batch(
                                       ExecResult::ExecResultSystemError);
   }
 
-  auto r = co_await ctx->get().validate_transaction_batch(
-      proposed_txs, allocate_tx_ids(proposed_txs.size()));
+  auto r = ctx->get().validate_transaction_batch(proposed_txs,
+                                                 allocate_tx_ids(
+                                                     proposed_txs.size()));
   release_context(block_id, ctx);
-  co_return r;
+  co_return co_await r;
 }
 
 ExecResult
@@ -121,13 +123,13 @@ ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
   return executor_states_->open_validation(id);
 }
 
-void
+ExecResult
 ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 {
   if (!initialize_check()) [[unlikely]] {
-    return;
+    return ExecResult::ExecResultSystemError;
   }
-  executor_states_->remove_block(id);
+  return executor_states_->remove_block(id);
 }
 
 TransactionID
