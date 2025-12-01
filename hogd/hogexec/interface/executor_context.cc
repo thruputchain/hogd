@@ -8,6 +8,7 @@
 
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -236,21 +237,16 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
     std::unique_lock lock(event_accumulate_mutex_);
     event_error_ = err.error().code();
     error("event error: {}", err.error().raw_code());
-    event_accumulate_cv_.notify_one();
   }
-  auto r = pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
-  if (r == 1) {
-    std::lock_guard lock(event_accumulate_mutex_);
-    event_accumulate_cv_.notify_one();
-  }
+  pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
 }
 
 std::optional<SystemErrorCode>
 ExecutorContext::await_event_return()
 {
-  std::unique_lock lock(event_accumulate_mutex_);
-  event_accumulate_cv_.wait(lock,
-                            [this]() { return pending_event_calls_ == 0; });
+  while (pending_event_calls_.load(std::memory_order_relaxed) > 0) {
+    cpu_relax();
+  }
   return event_error_;
 }
 
