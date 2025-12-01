@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 #include <mutex>
+#include <optional>
 #include <utility>
 
 #include "exec_sched.hh"
@@ -176,7 +177,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     out.proposal_data() = syscall_handler.get_proposal_data();
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
-        [this](this auto, SystemStatus<void> res) -> x23::Detached {
+        [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res.error());
           co_return;
         });
@@ -218,7 +219,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   if (commit_res.value()) {
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
-        [this](this auto, SystemStatus<void> res) -> x23::Detached {
+        [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res.error());
           co_return;
         });
