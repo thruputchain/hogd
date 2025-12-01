@@ -84,7 +84,6 @@ public:
     }
 
     nominations_.clear();
-    nominations_finished_.release();
     co_return ret;
   }
 
@@ -115,7 +114,6 @@ public:
     }
 
     nominations_.clear();
-    nominations_finished_.release();
     co_return std::make_pair(std::move(ret), num_txs);
   }
 
