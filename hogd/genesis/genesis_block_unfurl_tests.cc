@@ -106,6 +106,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   advance_block();
@@ -127,6 +128,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   // check the storage
@@ -216,6 +218,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -232,6 +235,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   advance_block();
@@ -256,6 +260,7 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 }
 
@@ -319,6 +324,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   advance_block();
@@ -343,6 +349,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 }
 
@@ -381,6 +388,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(handler.emit_events()());
   }
 
   advance_block();

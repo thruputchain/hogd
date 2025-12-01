@@ -80,6 +80,7 @@
 
 #pragma once
 
+#include "x23/cpumap.h"
 #include <atomic>
 #include <cassert>
 #include <concepts>
@@ -487,6 +488,51 @@ template<typename VersMeta, typename Logger = RpcNoLogger,
 using RpcClient =
     VersMeta::template client<typename RpcStream<Logger>::ClientRef,
                               ExtraArgs...>;
+
+template<typename Logger>
+struct RpcMulticlient : RefCount,
+                        PerCpuSet<typename RpcStream<Logger>::ClientRef, true> {
+  using super1 = RefCount;
+  using super2 = PerCpuSet<typename RpcStream<Logger>::ClientRef, true>;
+  using ClientRef = RefPtr<RpcMulticlient>;
+
+  template<typename VersMeta>
+  requires requires { typename VersMeta::template client<ClientRef>; }
+  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  {
+    return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
+  }
+
+  template<typename ProcMeta>
+  Async<typename ProcMeta::return_type>
+  send_call(const is_xdr_type auto &...args)
+  {
+    return this->lookup()->template send_call<ProcMeta>(args...);
+  }
+
+  static ClientRef make(CoroPoll &cp, const struct sockaddr_storage &ss,
+                        const CpuMap &map = *llc_map,
+                        int logfd = RpcLogger::default_logfd)
+  {
+    return *new RpcMulticlient(cp, ss, map, logfd);
+  }
+
+protected:
+  RpcMulticlient(CoroPoll &cp, const struct sockaddr_storage &ss,
+                 const CpuMap &map, int logfd)
+    : super2(map)
+  {
+    super2::populate([&cp, &ss, logfd](const CpuSet & /*unused*/)
+                         -> RpcStream<Logger>::ClientRef {
+      UniqueFd fd = tcpconnect(ss);
+      int socketfd = fd.get();
+      typename super2::value_type stream =
+          *new RpcStream<Logger>(cp, std::move(fd), Logger{socketfd, logfd});
+      stream->go();
+      return stream;
+    });
+  }
+};
 
 // Create an RPC Stream attached to a file descriptor.  Returns a
 // Configurator object with which you can add servers and create

@@ -1,13 +1,21 @@
 
 #include <atomic>
+#include <cassert>
+#include <cstdint>
 #include <print>
-#include <stop_token>
+#include <thread>
+#include <utility>
 
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <x23/async.h>
+#include <x23/cleanup.h>
 #include <x23/event.h>
+#include <x23/refcnt.h>
 #include <x23/sockio.h>
+#include <x23/threadpool.h>
+#include <x23/vec.h>
 
 using namespace x23;
 

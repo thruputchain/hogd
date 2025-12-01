@@ -7,7 +7,6 @@
 #include <concepts>
 #include <cstring>
 #include <filesystem>
-#include <format>
 #include <functional>
 #include <memory>
 #include <string>

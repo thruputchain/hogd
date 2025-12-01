@@ -7,6 +7,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -17,7 +18,7 @@ auto
 connect_to_event_server(x23::HostPort const &host_port)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  return make_srpc_multiclient<EventExecutor1>(host_port, false);
+  return make_rpc_multiclient<EventExecutor1>(host_port, true);
 }
 
 } // namespace
@@ -31,29 +32,35 @@ PerTransactionEventServerProxy::PerTransactionEventServerProxy(
   : event_server_proxy_(event_server_proxy), block_id_(block_id), tx_id_(tx_id)
 {}
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
                              TxEventLog const &tx_event_log)
 {
-  auto r = client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log);
+  auto r =
+      co_await client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log);
+  if (r != RPCError::kRPCNone) {
+    error("emit_event failed: {}", r);
+  }
   switch (r) {
   case RPCError::kRPCNone:
-    return {};
+    co_return SystemStatus<void>{};
   case RPCError::kRPCBadBlockID:
-    return SystemError{SystemErrorCode::kAbortTransaction};
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kAbortTransaction}};
   default:
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::kUnrecoverable}};
   }
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log)
 {
   if (emitted_event_) {
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::kUnrecoverable}};
   }
   emitted_event_ = true;
-  return event_server_proxy_.emit_event(block_id_, tx_id_, tx_event_log);
+  co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,
+                                                    tx_event_log);
 }
 
 } // namespace hogd

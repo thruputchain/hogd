@@ -181,6 +181,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -201,6 +202,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   auto r2 = handler2.try_commit_transaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(*r2);
+  ASSERT_TRUE(handler2.emit_events()());
 }
 
 TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
@@ -273,7 +275,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
-
+  ASSERT_TRUE(handler.emit_events()());
   advance_block();
 
   auto read_res = lookup_storage_item_from_db(
@@ -416,7 +418,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
-
+    ASSERT_TRUE(handler.emit_events()());
     advance_block();
     // Check that the last write was "world"
     auto read_res = lookup_storage_item_from_db(
@@ -481,6 +483,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(handler.emit_events()());
     advance_block();
     // Storage should be updated to "world"
     auto read_res = lookup_storage_item_from_db(
@@ -1303,6 +1306,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto commit_res = tc1_handler3.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(tc1_handler3.emit_events()());
   }
 
   advance_block();
@@ -1337,6 +1341,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto commit_res = tc2_handler1.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(tc2_handler1.emit_events()());
   }
 
   // Step 3 & 4: Invoke M1({false, true}) and commit.
@@ -1357,6 +1362,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto commit_res = tc2_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(tc2_handler2.emit_events()());
   }
 
   advance_block();
@@ -1473,6 +1479,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(commit_res.value());
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -1626,6 +1633,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -1794,6 +1802,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -1914,6 +1923,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -2060,6 +2070,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -2215,6 +2226,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 
@@ -2447,6 +2459,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
       auto commit_res = handler.try_commit_transaction();
       ASSERT_TRUE(commit_res.has_value());
       ASSERT_TRUE(*commit_res);
+      ASSERT_TRUE(handler.emit_events()());
     }
 
     advance_block();
@@ -2649,6 +2662,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 }
 
 TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
@@ -2771,6 +2785,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
 

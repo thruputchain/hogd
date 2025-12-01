@@ -68,7 +68,13 @@ public:
   // add a log message to the output of the transaction, associated with the
   // current call frame.
   void log_event(TxEmittedEvent event);
-  x23::Vec<TxEmittedEvent> extract_events() { return std::move(events_); }
+
+  x23::Vec<TxEmittedEvent> extract_events()
+  {
+    auto out = std::move(events_);
+    events_.clear();
+    return out;
+  }
 
   bool is_try_invoke() const
   {

@@ -6,7 +6,10 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
+#include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include <stdexcept>
@@ -28,12 +31,13 @@ public:
     return EventServerProxy(host_port);
   }
 
-  SystemStatus<void> emit_event(BlockID block_id, TransactionID tx_id,
-                                TxEventLog const &tx_event_log);
+  x23::Async<SystemStatus<void>> emit_event(BlockID block_id,
+                                            TransactionID tx_id,
+                                            TxEventLog const &tx_event_log);
 
 private:
   using client_t =
-      EventExecutor1::client<x23::SRpcMulticlient<x23::RpcLogger>::ClientRef>;
+      EventExecutor1::client<x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
   client_t client_;
 };
 
@@ -52,7 +56,7 @@ public:
   PerTransactionEventServerProxy &
   operator=(PerTransactionEventServerProxy &&) = delete;
 
-  SystemStatus<void> emit_events(TxEventLog const &tx_event_log);
+  x23::Async<SystemStatus<void>> emit_events(TxEventLog const &tx_event_log);
 
 private:
   EventServerProxy &event_server_proxy_;

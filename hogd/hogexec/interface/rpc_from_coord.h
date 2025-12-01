@@ -18,6 +18,7 @@
 #include "rpc_types.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -79,7 +80,7 @@ public:
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all
   // transactions on this block have been committed or aborted.
-  void executorsched_finish_block(BlockID id);
+  ExecResult executorsched_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.
