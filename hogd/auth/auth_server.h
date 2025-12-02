@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unistd.h>
 #include <utility>
 
 #include "account.hh"
@@ -15,7 +16,9 @@
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
 #include "hogd/version.h"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -29,6 +32,11 @@ public:
     : auth_data_cache_(bucket_size),
       dbauth_client_(std::move(intro_auth_result))
   {}
+
+  x23::Async<AuthErrorCodeBatch>
+  verify_transactions(BlockHeight height, SignedTransactionBatch txs);
+  x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
+                                         SignedTransactionBatch txs);
 
   x23::Async<AuthStatus<
       std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
@@ -86,21 +94,52 @@ private:
 
 static_assert(is_AuthDB1<AuthDBRpc *, x23::Async>);
 
-class AuthDBServer : public RpcServer<AuthDBRpc> {
+class AuthMempoolRpc {
 public:
-  explicit AuthDBServer(AuthServer &auth_server) : RpcServer(auth_server) {}
+  using rpc_service = AuthMempool1;
+  explicit AuthMempoolRpc(AuthServer &auth_server) : auth_server_(auth_server)
+  {}
 
-  x23::Async<void> subscribe_to_auth_data_changes(std::string self_address)
+  x23::Async<AuthErrorCodeBatch>
+  authmempool_verify_transactions(BlockHeight height,
+                                  SignedTransactionBatch txs)
   {
-    auto port = RpcServer::port();
-    // must start the auth db server before you can subscribe to updates
-    CHECK(port != 0);
-    auto addr = std::format("{}:{}", self_address, port);
-    AuthCard self_card = {.protocol = version::kHogdProtocol,
-                          .upid = {},
-                          .address = addr.c_str()};
-    return impl()->subscribe_to_auth_data_changes(self_card);
+    return auth_server_.verify_transactions(height, std::move(txs));
   }
+
+  x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
+                                                     SignedTransactionBatch txs)
+  {
+    return auth_server_.verify_batch(height, std::move(txs));
+  }
+
+private:
+  AuthServer &auth_server_;
+};
+static_assert(is_AuthMempool1<AuthMempoolRpc *, x23::Async>);
+
+class AuthRpcServers {
+  public:
+  explicit AuthRpcServers(AuthServer &auth_server) : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server) {}
+
+  std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db, uint16_t port_for_mempool)
+  {
+    return {auth_db_rpc_.start_server(port_for_db), auth_mempool_rpc_.start_server(port_for_mempool)};
+  }
+
+  AuthCard make_auth_card(std::string hostname = "") {
+    if (hostname.empty()) {
+      CHECK_EQ(gethostname(hostname.data(), hostname.size()), 0);
+    }
+    return {.protocol = version::kHogdProtocol,
+            .upid = {},
+            .address_for_db = std::format("{}:{}", hostname, auth_db_rpc_.port()).c_str(),
+            .address_for_mempool = std::format("{}:{}", hostname, auth_mempool_rpc_.port()).c_str()};
+  }
+
+private:
+  RpcServer<AuthDBRpc> auth_db_rpc_;
+  RpcServer<AuthMempoolRpc> auth_mempool_rpc_;
 };
 
 } // namespace hogd
