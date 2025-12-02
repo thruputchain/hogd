@@ -168,7 +168,7 @@ public:
   }
 
   static SHA256Hash
-  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes,
+  get_block_hash(const x23::XdrVec<SignedTransactionHash> &hashes,
                  const BlockHash &prev_block_hash);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
@@ -190,8 +190,8 @@ private:
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
-    x23::Vec<SignedTransaction> txs;
-    x23::Vec<SignedTransactionHash> tx_hashes;
+    x23::XdrVec<SignedTransaction> txs;
+    x23::XdrVec<SignedTransactionHash> tx_hashes;
 
     x23::Vec<SchedulerNominationChunk> sched_nominations =
         x23::Vec<SchedulerNominationChunk>(kNumSchedulerIterations, {});
@@ -199,7 +199,7 @@ private:
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
-    x23::Vec<SignedTransaction> failed_txs;
+    x23::XdrVec<SignedTransaction> failed_txs;
   };
 
   void finish_init()

@@ -46,7 +46,7 @@ struct BenchmarkState : public CommonBenchState {
   // benchmark, and set the expiry time to be that reps top block height.
 
   // returns the work transactions
-  x23::Vec<SignedTransaction> initialize(uint32_t num_txs)
+  x23::XdrVec<SignedTransaction> initialize(uint32_t num_txs)
   {
     HogexecMetrics::launch_log_worker();
 

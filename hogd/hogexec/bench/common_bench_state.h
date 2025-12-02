@@ -87,7 +87,7 @@ public:
   void run_genesis_block(GenesisBlockBuilder const &genesis_builder);
   void
   run_genesis_block(GenesisBlock const &genesis_block,
-                    x23::Vec<InitializationBlock> const &initialization_txs);
+                    x23::XdrVec<InitializationBlock> const &initialization_txs);
 
 private:
   void connect_coord()
@@ -239,7 +239,7 @@ CommonBenchState::run_genesis_block(GenesisBlockBuilder const &genesis_builder)
 inline void
 CommonBenchState::run_genesis_block(
     GenesisBlock const &genesis_block,
-    x23::Vec<InitializationBlock> const &initialization_txs)
+    x23::XdrVec<InitializationBlock> const &initialization_txs)
 {
 
   assert(block_number_ == 0);

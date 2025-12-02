@@ -40,7 +40,7 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const x23::Vec<SignedTransaction> &txs);
+  x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 
@@ -48,8 +48,8 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
-                x23::Vec<SignedTransaction> &txs);
+  void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
+                x23::XdrVec<SignedTransaction> &txs);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been
@@ -84,9 +84,9 @@ public:
   get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>
-  read_average_hog_ages(const x23::Vec<ContractAddress> &accounts);
+  read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
   x23::Async<std::unordered_set<ContractAddress>>
-  read_average_hog_ages(const x23::Vec<SignedTransaction> &txs);
+  read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
   x23::Async<std::unordered_set<ContractAddress>>
   read_average_hog_ages(const HogsTransferred &transfers);
 

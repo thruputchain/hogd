@@ -50,7 +50,7 @@ public:
     // We need to nominate and commit the initialization transactions. So first,
     // we start by adding them to the mempool with
     // [schedulercoord_submit_vetted()].
-    const x23::Vec<InitializationBlock> &init_txs =
+    const x23::XdrVec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};

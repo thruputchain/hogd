@@ -96,7 +96,7 @@ public:
     shard_cards_.push_back(card);
     return shard_cards_.size() - 1;
   }
-  size_t shards_registered(x23::Vec<ShardCard> *cards)
+  size_t shards_registered(x23::XdrVec<ShardCard> *cards)
   {
     std::unique_lock lk(shard_cards_mutex_);
     if (cards) {
