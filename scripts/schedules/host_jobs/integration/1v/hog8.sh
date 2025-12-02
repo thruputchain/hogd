@@ -13,14 +13,14 @@ cat >config-hog8.json <<EOF
         "private_info": {
             "public_info": {
                 "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
-                "address": "hog8:50000"
+                "address": "hog3:50000"
             },
             "secret_key": "b9cb6de12b73f1969adeeb7c1102d9420f692da1c977cdeb15271c6a090d06b8970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
         },
         "known_validators": [
             {
                 "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
-                "address": "hog8:50000"
+                "address": "hog3:50000"
             }
         ]
     },
@@ -101,7 +101,7 @@ cat >config-hog8.json <<EOF
 }
 EOF
 rm -rf ./storage-hog8
-$1 -l info --stack --config config-hog8.json \
+$1 -l debug --stack --config config-hog8.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
@@ -113,8 +113,8 @@ $1 -l info --stack --config config-hog8.json \
   --storage-dir ./storage-hog8 \
   --out-addr :50000 \
   --wallet-addr :40000 \
-  --loadgen-addr hog7:44400 \
-  --sched-addr hog9:8070 \
+  --loadgen-addr hog3:11222 \
+  --sched-addr hog3:8070 \
   --scpd-path $2 \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400 \

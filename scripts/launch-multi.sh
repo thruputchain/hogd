@@ -3,7 +3,7 @@
 # These parameters are CONFIGURABLE.
 # -------------------------------
 HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
-HOGD_BUILD_DIR="/home/local/$(whoami)/build"
+HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
@@ -247,8 +247,8 @@ for s in "${hogdb_servers[@]}"; do
 done
 
 # Start fake coordinator.
-remote_launch "$fake_coordinator_server" "$FAKE_COORDINATOR_BINARY" \
-  "$mempool_server":8070 "$loadgen_server":11222
+# remote_launch "$fake_coordinator_server" "$FAKE_COORDINATOR_BINARY" \
+#   "$mempool_server":8070 "$loadgen_server":11222
 
 # Start mempool.
 echo "Start mempool..."
@@ -271,7 +271,7 @@ for s in "${hogdb_servers[@]}"; do
 done
 
 # Wait for fake coordinator (port 7888).
-wait_port "$fake_coordinator_server" 7888
+# wait_port "$fake_coordinator_server" 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070
