@@ -1,8 +1,10 @@
 #pragma once
 
 #include <expected>
+#include <format>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "hogd/base/status.h"
 
@@ -44,3 +46,13 @@ operator==(const AuthVerifyErrorCode &lhs, const std::error_code &rhs)
 template<typename T> using AuthVerifyStatus = std::expected<T, AuthVerifyError>;
 
 } // namespace hogd
+
+template<> struct std::formatter<hogd::AuthVerifyErrorCode> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const hogd::AuthVerifyErrorCode code, auto &ctx)
+  {
+    static hogd::AuthVerifyErrorCategory category;
+    return format_to(ctx.out(), "{}",
+                     category.message(std::to_underlying(code)));
+  }
+};

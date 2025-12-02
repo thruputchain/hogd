@@ -166,6 +166,7 @@ AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs)
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address,
                                       source_auth_data);
       if (error != AuthErrorCode::kAuthSuccess) {
+        trace("Populate auth data error: {}", std::to_underlying(error));
         result.push_back(error);
         continue;
       }
@@ -185,7 +186,6 @@ AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs)
     }
 
     auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
-
     if (!verify_result.has_value()) {
       result.push_back(AuthErrorCode::kAuthFailed);
       continue;
@@ -230,6 +230,7 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
   if (signature_verifier.verify()) {
     co_return AuthErrorCode::kAuthSuccess;
   }
+  trace("Signature verification failed");
   co_return AuthErrorCode::kAuthFailed;
 }
 } // namespace hogd

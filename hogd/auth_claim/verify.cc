@@ -96,6 +96,9 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
     }
     auto r =
         ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(), tx_hash);
+    if (!r) {
+      trace("Signature verification failed");
+    }
     return r ? AuthVerifyStatus<void>{}
              : AuthVerifyError{
                    AuthVerifyErrorCode::kSignatureVerificationFailed};
@@ -133,15 +136,19 @@ verify_individual_key_claim_internal(
     SHA256Hash const &tx_hash, Ed25519SignatureVerifier *signature_verifier)
 {
   if (sigs.size() != 1) {
+    trace("Auth malformed: expected 1 signature, got {}", sigs.size());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
   if (sigs[0].public_key_id != key_id) {
+    trace("Auth malformed: signature id mismatch: expected {}, got {}", key_id,
+          sigs[0].public_key_id);
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     if (!has_public_key(*auth_data, key_id)) {
+      trace("Auth malformed: public key {} not found in auth data", key_id);
       return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
   }
@@ -398,6 +405,8 @@ verify_auth_claims_internal(
   // from the source account should be implicit.
   for (const GasClaim &gas_claim : stx.tx.gas_claims) {
     if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
+      trace("Auth malformed: gas_claim.sponsored_contract == "
+            "stx.tx.invocation.invoked_address");
       return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
     }
   }
