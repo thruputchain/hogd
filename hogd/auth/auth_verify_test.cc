@@ -176,6 +176,14 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
   EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
   EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+
+  // batch verify
+  EXPECT_EQ(auth_server().verify_batch(1, {stx1, stx2, stx3})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(1, {stx2, stx3})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(1, {stx2, stx2, stx2})(),
+            AuthErrorCode::kAuthSuccess);
 }
 
 } // namespace hogd
