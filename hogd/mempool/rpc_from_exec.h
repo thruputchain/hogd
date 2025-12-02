@@ -45,7 +45,7 @@ public:
              1);
 
     size_t exec_id = Registration::registration().register_executor(card);
-    x23::Vec<ShardCard> shard_cards;
+    x23::XdrVec<ShardCard> shard_cards;
     CHECK_GT(Registration::registration().shards_registered(&shard_cards), 0UL);
     EventCard event_card;
     CHECK(Registration::registration().event_registered(&event_card));

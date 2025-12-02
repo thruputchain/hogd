@@ -57,7 +57,7 @@ Scheduler::get_cached_hog_age(const ContractAddress &address)
 }
 
 x23::Async<void>
-Scheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
+Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 {
   auto res = co_await db_sched_client_->dbsched_get_hog_ages(accounts);
   CHECK_EQ(res.result(), DbSchedResult::DbSchedResultOK);
@@ -68,13 +68,13 @@ Scheduler::read_average_hog_ages(const x23::Vec<ContractAddress> &accounts)
 }
 
 x23::Async<std::unordered_set<ContractAddress>>
-Scheduler::read_average_hog_ages(const x23::Vec<SignedTransaction> &txs)
+Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress> accounts;
   for (const SignedTransaction &tx : txs) {
     accounts.insert(tx.tx.invocation.invoked_address);
   }
-  x23::Vec<ContractAddress> accounts_vec;
+  x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -105,7 +105,7 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   }
 
   // TODO(jhumphri): This is the same as the code above.
-  x23::Vec<ContractAddress> accounts_vec;
+  x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -173,7 +173,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
 // have a chunk. If we [co_await] awaitables for coroutines that do not have a
 // chunk, we will deadlock.
 x23::Async<void>
-Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot hide
   // its overhead by removing the [co_await] below, doing other work, and then
@@ -200,8 +200,9 @@ Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
 
   std::array<x23::Awaitable<void>, kNumThreads> awaitables;
   for (size_t i = 0; i < kNumThreads; i++) {
-    [](size_t coro_idx, auto cb, const x23::Vec<hogd::SignedTransaction> &txs,
-       size_t txs_per_thread, Scheduler &scheduler) -> x23::Detached {
+    [](size_t coro_idx, auto cb,
+       const x23::XdrVec<hogd::SignedTransaction> &txs, size_t txs_per_thread,
+       Scheduler &scheduler) -> x23::Detached {
       co_await default_coropoll().pool_.bg();
       size_t start = coro_idx * txs_per_thread;
       size_t possible_end = (coro_idx + 1) * txs_per_thread;
@@ -217,7 +218,7 @@ Scheduler::add_txs(const x23::Vec<SignedTransaction> &txs)
       cb();
       co_return;
     }(/*coro_idx=*/i, /*cb=*/x23::CoroCB(awaitables[i]), txs, txs_per_thread,
-                                                    *this);
+                             *this);
   }
   for (x23::Awaitable<void> &awaitable : awaitables) {
     co_await awaitable;
@@ -544,8 +545,9 @@ Scheduler::cycle_accounts_during_schedule_helper(
 }
 
 void
-Scheduler::schedule(size_t num_txs, x23::Vec<SignedTransactionHash> &tx_hashes,
-                    x23::Vec<SignedTransaction> &txs)
+Scheduler::schedule(size_t num_txs,
+                    x23::XdrVec<SignedTransactionHash> &tx_hashes,
+                    x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
   static std::unordered_set<ContractAddress> removed_accounts;

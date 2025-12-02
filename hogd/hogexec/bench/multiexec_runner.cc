@@ -82,7 +82,7 @@ public:
           info("shard_cards is not empty: returning IntroExecResult");
 
           return IntroExecResult{.exec_id = exec_id++,
-                                 .shards = shard_cards,
+                                 .shards = x23::XdrVec{shard_cards},
                                  .event = event_card};
         },
         card, std::ref(mtx_), std::ref(cv_), std::ref(exec_cards_),
@@ -309,7 +309,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
 };
 
 void
-run_block(x23::Vec<SignedTransaction> const &txs,
+run_block(x23::XdrVec<SignedTransaction> const &txs,
           db_sched_client_t &db_sched_client,
           event_sched_client_t &event_sched_client,
           std::vector<exec_client_t> &exec_clients,

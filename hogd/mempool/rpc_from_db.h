@@ -82,7 +82,7 @@ public:
 
   static x23::Vec<db_sched_client_t> get_clients()
   {
-    x23::Vec<ShardCard> cards;
+    x23::XdrVec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);
 
     x23::Vec<db_sched_client_t> ret;

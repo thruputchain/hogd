@@ -116,8 +116,8 @@ TEST(Scheduler, Single)
             5'000'000'000 * 10);
   EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
 
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
@@ -207,8 +207,8 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   scheduler->add_txs({txs[0]})();
 
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
 
   ASSERT_EQ(scheduled.size(), 1UL);
@@ -262,8 +262,8 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
 
   // Nominate a block.
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(sha256(scheduled.front()), sha256(txs[1]));
@@ -299,8 +299,8 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -318,8 +318,8 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   scheduler->add_txs({txs[0], txs[1]})();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
   EXPECT_EQ(scheduled_hashes.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -353,8 +353,8 @@ TEST(Scheduler, ReenqueueTxs)
   scheduler->add_txs({txs[0], txs[1]})();
   EXPECT_EQ(scheduler->size(), 2UL);
 
-  x23::Vec<SignedTransactionHash> scheduled_hashes;
-  x23::Vec<SignedTransaction> scheduled;
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
   scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
   ASSERT_EQ(scheduled.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -408,8 +408,8 @@ TEST(Scheduler, Fairness)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    x23::Vec<SignedTransactionHash> scheduled_hashes;
-    x23::Vec<SignedTransaction> scheduled;
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
     scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
@@ -481,8 +481,8 @@ TEST(Scheduler, FairnessAcrossBlocks)
 
   std::unordered_map<ContractAddress, size_t> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
-    x23::Vec<SignedTransactionHash> scheduled_hashes;
-    x23::Vec<SignedTransaction> scheduled;
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
