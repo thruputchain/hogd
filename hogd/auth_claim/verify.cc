@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <unordered_map>
+#include <vector>
 
 #include "account.hh"
 #include "auth_claim.hh"
@@ -16,6 +18,22 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+void
+Ed25519SignatureVerifier::add_signature(const Ed25519PublicKey &public_key,
+                                        const Ed25519Signature &signature,
+                                        SHA256Hash const &tx_hash)
+{
+  public_keys_.push_back(public_key);
+  signatures_.push_back(signature);
+  tx_hashes_.push_back(tx_hash);
+}
+
+bool
+Ed25519SignatureVerifier::verify()
+{
+  return ed25519_verify_batch(public_keys_, signatures_, tx_hashes_);
+}
 
 namespace {
 
@@ -60,7 +78,8 @@ has_public_key(const AccountAuthData &auth_data, size_t idx)
 AuthVerifyStatus<void>
 verify_decorated_signature(const DecoratedSignature &dec_sig,
                            const AccountAuthData &auth_data,
-                           SHA256Hash const &tx_hash)
+                           SHA256Hash const &tx_hash,
+                           Ed25519SignatureVerifier *signature_verifier)
 {
   assert(has_public_key(auth_data, dec_sig.public_key_id));
 
@@ -70,8 +89,16 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
   switch (pk->key.scheme()) {
   case CryptographicScheme::Ed25519:
   {
+    if (signature_verifier) {
+      signature_verifier->add_signature(pk->key.ed25519(),
+                                        dec_sig.signature.ed25519(), tx_hash);
+      return {};
+    }
     auto r =
         ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(), tx_hash);
+    if (!r) {
+      trace("Signature verification failed");
+    }
     return r ? AuthVerifyStatus<void>{}
              : AuthVerifyError{
                    AuthVerifyErrorCode::kSignatureVerificationFailed};
@@ -106,25 +133,30 @@ AuthVerifyStatus<void>
 verify_individual_key_claim_internal(
     uint32_t key_id, const AccountAuthData *auth_data,
     x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
-    SHA256Hash const &tx_hash)
+    SHA256Hash const &tx_hash, Ed25519SignatureVerifier *signature_verifier)
 {
   if (sigs.size() != 1) {
+    trace("Auth malformed: expected 1 signature, got {}", sigs.size());
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
   if (sigs[0].public_key_id != key_id) {
+    trace("Auth malformed: signature id mismatch: expected {}, got {}", key_id,
+          sigs[0].public_key_id);
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
     if (!has_public_key(*auth_data, key_id)) {
+      trace("Auth malformed: public key {} not found in auth data", key_id);
       return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
     }
   }
 
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
-    return verify_decorated_signature(sigs[0], *auth_data, tx_hash);
+    return verify_decorated_signature(sigs[0], *auth_data, tx_hash,
+                                      signature_verifier);
   }
   return {};
 }
@@ -135,7 +167,7 @@ verify_weight_key_claim_internal(
     BitMap accepted_keys, Weight required_weight,
     const AccountAuthData *auth_data,
     x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
-    SHA256Hash const &tx_hash)
+    SHA256Hash const &tx_hash, Ed25519SignatureVerifier *signature_verifier)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
@@ -165,7 +197,9 @@ verify_weight_key_claim_internal(
     assert(auth_data);
 
     for (const DecoratedSignature &sig : sigs) {
-      if (auto r = verify_decorated_signature(sig, *auth_data, tx_hash); !r) {
+      if (auto r = verify_decorated_signature(sig, *auth_data, tx_hash,
+                                              signature_verifier);
+          !r) {
         return r;
       }
     }
@@ -178,7 +212,8 @@ AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
                            DecoratedSignatureList const &sigs,
                            const AccountAuthData *auth_data,
-                           SHA256Hash const &tx_hash)
+                           SHA256Hash const &tx_hash,
+                           Ed25519SignatureVerifier *signature_verifier)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
     assert(!auth_data);
@@ -190,21 +225,22 @@ verify_auth_claim_internal(AuthClaim const &claim,
   switch (claim.claim_type()) {
   case AuthClaimType::kInvokedAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
-        claim.invoked_address_signature_id(), auth_data, sigs.list, tx_hash);
+        claim.invoked_address_signature_id(), auth_data, sigs.list, tx_hash,
+        signature_verifier);
   case AuthClaimType::kInvokedAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.invoked_address_signed_weight().accepted_keys,
         claim.invoked_address_signed_weight().required_weight, auth_data,
-        sigs.list, tx_hash);
+        sigs.list, tx_hash, signature_verifier);
   case AuthClaimType::kOtherAddressSignature:
     return verify_individual_key_claim_internal<VerfType>(
         claim.other_address_signature_id().key_id, auth_data, sigs.list,
-        tx_hash);
+        tx_hash, signature_verifier);
   case AuthClaimType::kOtherAddressSignedWeight:
     return verify_weight_key_claim_internal<VerfType>(
         claim.other_address_signed_weight().accepted_keys,
         claim.other_address_signed_weight().required_weight, auth_data,
-        sigs.list, tx_hash);
+        sigs.list, tx_hash, signature_verifier);
   default:
     // This kind of claim should not have been parseable
     panic("Unsupported auth claim type: {}", claim.claim_type());
@@ -309,7 +345,8 @@ AuthVerifyStatus<void>
 verify_auth_claims_internal(
     const SignedTransaction &stx, const AccountAuthData *source_auth_data,
     std::unordered_map<ContractAddress, const AccountAuthData *> const
-        &aux_auth_data)
+        &aux_auth_data,
+    Ed25519SignatureVerifier *signature_verifier)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
     assert(!source_auth_data);
@@ -317,6 +354,10 @@ verify_auth_claims_internal(
   }
   else {
     assert(source_auth_data);
+  }
+
+  if constexpr (VerfType != VerificationType::kSignaturesValid) {
+    assert(signature_verifier == nullptr);
   }
 
   SHA256Hash tx_hash = sha256(stx.tx);
@@ -352,8 +393,9 @@ verify_auth_claims_internal(
         panic("Unsupported auth claim type: {}", auth_claim.claim_type());
       }
     }
-    if (auto r = verify_auth_claim_internal<VerfType>(auth_claim, sigs,
-                                                      auth_data, tx_hash);
+    if (auto r =
+            verify_auth_claim_internal<VerfType>(auth_claim, sigs, auth_data,
+                                                 tx_hash, signature_verifier);
         !r) {
       return r;
     }
@@ -363,6 +405,8 @@ verify_auth_claims_internal(
   // from the source account should be implicit.
   for (const GasClaim &gas_claim : stx.tx.gas_claims) {
     if (gas_claim.sponsored_contract == stx.tx.invocation.invoked_address) {
+      trace("Auth malformed: gas_claim.sponsored_contract == "
+            "stx.tx.invocation.invoked_address");
       return AuthVerifyError(AuthVerifyErrorCode::kAuthMalformed);
     }
   }
@@ -408,10 +452,11 @@ AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AccountAuthData &source_auth_data,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
-                &aux_auth_data)
+                &aux_auth_data,
+            Ed25519SignatureVerifier *signature_verifier)
 {
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
-      stx, &source_auth_data, aux_auth_data);
+      stx, &source_auth_data, aux_auth_data, signature_verifier);
 }
 
 AuthVerifyStatus<void>
@@ -421,7 +466,7 @@ lightweight_validate_auth_claims(
         &aux_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
-      stx, &source_auth_data, aux_auth_data);
+      stx, &source_auth_data, aux_auth_data, nullptr);
 }
 
 AuthVerifyStatus<void>
@@ -429,7 +474,7 @@ auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
       stx, nullptr,
-      std::unordered_map<ContractAddress, const AccountAuthData *>{});
+      std::unordered_map<ContractAddress, const AccountAuthData *>{}, nullptr);
 }
 
 } // namespace hogd

@@ -3,14 +3,17 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 #include "account.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
+#include "hogd/auth_claim/verify.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -131,4 +134,103 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard const &card)
   return dbauth_client_.subscribe_to_auth_data_changes(card);
 }
 
+x23::Async<AuthErrorCode>
+AuthServer::populate_auth_data(BlockHeight height,
+                               ContractAddress const &address,
+                               const AccountAuthData *&auth_data)
+{
+  auto entry = co_await lookup_auth_data(height, address);
+  if (!entry.has_value()) {
+    co_return entry.error().code();
+  }
+
+  CHECK(entry.value().get() != nullptr);
+
+  if (!entry.value()->second.has_value()) {
+    co_return AuthErrorCode::kAuthFailed;
+  }
+
+  auth_data = &(entry.value()->second.value());
+  co_return AuthErrorCode::kAuthSuccess;
+}
+
+x23::Async<AuthErrorCodeBatch>
+AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs)
+{
+  AuthErrorCodeBatch result;
+  result.reserve(txs.size());
+  for (const auto &tx : txs) {
+    const AccountAuthData *source_auth_data;
+    {
+      auto error =
+          co_await populate_auth_data(height, tx.tx.invocation.invoked_address,
+                                      source_auth_data);
+      if (error != AuthErrorCode::kAuthSuccess) {
+        trace("Populate auth data error: {}", std::to_underlying(error));
+        result.push_back(error);
+        continue;
+      }
+    }
+
+    CHECK(source_auth_data != nullptr);
+
+    auto relevant_contracts = get_aux_addresses(tx.tx);
+    std::unordered_map<ContractAddress, const AccountAuthData *> aux_auth_data;
+    for (const auto &contract : relevant_contracts) {
+      auto error = co_await populate_auth_data(height, contract,
+                                               aux_auth_data[contract]);
+      if (error != AuthErrorCode::kAuthSuccess) {
+        result.push_back(error);
+        continue;
+      }
+    }
+
+    auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
+    if (!verify_result.has_value()) {
+      result.push_back(AuthErrorCode::kAuthFailed);
+      continue;
+    }
+
+    result.push_back(AuthErrorCode::kAuthSuccess);
+  }
+  co_return result;
+}
+
+x23::Async<AuthErrorCode>
+AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
+{
+  Ed25519SignatureVerifier signature_verifier;
+  for (const auto &tx : txs) {
+    auto source_addr =
+        co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
+    if (!source_addr.has_value()) {
+      co_return source_addr.error().code();
+    }
+    CHECK(source_addr.value().get() != nullptr);
+    if (!source_addr.value()->second.has_value()) {
+      co_return AuthErrorCode::kAuthFailed;
+    }
+    const AccountAuthData *source_auth_data =
+        &(source_addr.value()->second.value());
+    auto relevant_contracts = get_aux_addresses(tx.tx);
+    std::unordered_map<ContractAddress, const AccountAuthData *> aux_auth_data;
+    for (const auto &contract : relevant_contracts) {
+      auto error = co_await populate_auth_data(height, contract,
+                                               aux_auth_data[contract]);
+      if (error != AuthErrorCode::kAuthSuccess) {
+        co_return error;
+      }
+    }
+
+    auto verify_result = verify_auth(tx, *source_auth_data, aux_auth_data);
+    if (!verify_result.has_value()) {
+      co_return AuthErrorCode::kAuthFailed;
+    }
+  }
+  if (signature_verifier.verify()) {
+    co_return AuthErrorCode::kAuthSuccess;
+  }
+  trace("Signature verification failed");
+  co_return AuthErrorCode::kAuthFailed;
+}
 } // namespace hogd

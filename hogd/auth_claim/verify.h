@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "account.hh"
 #include "auth_claim.hh"
@@ -11,6 +12,20 @@
 #include "types.hh"
 
 namespace hogd {
+
+// Accumulates a set of signatures and public keys to verify as a batch.
+class Ed25519SignatureVerifier {
+public:
+  void add_signature(const Ed25519PublicKey &public_key,
+                     const Ed25519Signature &signature,
+                     SHA256Hash const &tx_hash);
+  bool verify();
+
+private:
+  std::vector<Ed25519PublicKey> public_keys_;
+  std::vector<Ed25519Signature> signatures_;
+  std::vector<SHA256Hash> tx_hashes_;
+};
 
 // There are three steps to validating a transaction for scheduling:
 // 1. Verification that the transaction is well-formed.  This requires
@@ -48,7 +63,8 @@ AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AccountAuthData &source_auth_data,
             std::unordered_map<ContractAddress, const AccountAuthData *> const
-                &aux_auth_data);
+                &aux_auth_data,
+            Ed25519SignatureVerifier *signature_verifier = nullptr);
 
 // Returns the implicit gas claim for the source address.
 // This is calculated as the amount of gas that is not covered by sponsored
