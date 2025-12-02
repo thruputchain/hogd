@@ -160,7 +160,8 @@ connect_to_exec_server(const ExecCard &card)
 
 struct BlockValidationQueue {
 
-  BlockValidationQueue(const x23::Vec<SignedTransaction, 0xffffffff> *txs, size_t batch_size)
+  BlockValidationQueue(const x23::Vec<SignedTransaction, 0xffffffff> *txs,
+                       size_t batch_size)
     : txs_(txs->data(), txs->size()), batch_size(batch_size)
   {}
 
@@ -309,7 +310,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
 };
 
 void
-run_block(const x23::Vec<SignedTransaction, 0xffffffff>* txs,
+run_block(const x23::Vec<SignedTransaction, 0xffffffff> *txs,
           db_sched_client_t &db_sched_client,
           event_sched_client_t &event_sched_client,
           std::vector<exec_client_t> &exec_clients,
