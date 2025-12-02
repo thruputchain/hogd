@@ -182,10 +182,11 @@ ed25519_keygen()
   return {pk, sk};
 }
 
+template<x23::is_bytespan T>
 inline bool
 ed25519_verify_batch(std::vector<Ed25519PublicKey> public_keys,
                      std::vector<Ed25519Signature> signatures,
-                     std::vector<std::span<const std::byte>> msgs)
+                     std::vector<T> msgs)
 {
   if (public_keys.size() != signatures.size() ||
       public_keys.size() != msgs.size()) {

@@ -216,6 +216,53 @@ TEST_F(AuthClaimTests, GasSponsorInsufficient)
             AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
+TEST_F(AuthClaimTests, BatchSignatureVerification)
+{
+  AuthClaim claim = make_individual_key_claim(0);
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction({claim});
+  DecoratedSignature sig = make_signature(sk, tx, 0);
+
+  SignedTransaction stx =
+      SignedTransaction{.tx = make_transaction({claim}),
+                        .signatures = {DecoratedSignatureList{.list = {sig}}}};
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+
+  AccountAuthData good_data =
+      AccountAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk,
+                                              .max_weight = Weight{1}})},
+                      .nonce_config = kAnyKeyNonceConfig};
+
+  {
+    Ed25519SignatureVerifier signature_verifier;
+    EXPECT_TRUE(
+        verify_auth(stx, good_data, {}, &signature_verifier).has_value());
+
+    EXPECT_TRUE(signature_verifier.verify());
+  }
+  auto [pk2, sk2] = make_key_pair();
+  DecoratedSignature sig2 = make_signature(sk2, tx, 0);
+
+  SignedTransaction stx2 =
+      SignedTransaction{.tx = make_transaction({claim}),
+                        .signatures = {DecoratedSignatureList{.list = {sig2}}}};
+
+  EXPECT_TRUE(auth_claim_is_well_formed(stx2).has_value());
+
+  {
+    Ed25519SignatureVerifier signature_verifier;
+    // If we pass in the batch signature verifier, then signatures aren't
+    // checked during verify_auth; they're instead checked when verify() is
+    // called on the verifier.
+    EXPECT_TRUE(
+        verify_auth(stx2, good_data, {}, &signature_verifier).has_value());
+    EXPECT_FALSE(signature_verifier.verify());
+  }
+}
+
 } // namespace hogd
 
 int

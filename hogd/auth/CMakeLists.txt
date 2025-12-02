@@ -6,6 +6,7 @@ add_library(auth
 
 target_link_libraries(auth
     hogd
+    auth_claim
 )
 
 add_executable(auth_test

@@ -55,6 +55,12 @@ public:
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
+  // If this returns AuthErrorCode::kAuthSuccess, then auth_data will be
+  // populated with the auth data for the given address.
+  x23::Async<AuthErrorCode>
+  populate_auth_data(BlockHeight height, ContractAddress const &address,
+                     const AccountAuthData *&auth_data);
+
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
   AuthDataCache auth_data_cache_;
