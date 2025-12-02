@@ -119,22 +119,30 @@ private:
 static_assert(is_AuthMempool1<AuthMempoolRpc *, x23::Async>);
 
 class AuthRpcServers {
-  public:
-  explicit AuthRpcServers(AuthServer &auth_server) : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server) {}
+public:
+  explicit AuthRpcServers(AuthServer &auth_server)
+    : auth_db_rpc_(auth_server), auth_mempool_rpc_(auth_server)
+  {}
 
-  std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db, uint16_t port_for_mempool)
+  std::pair<uint16_t, uint16_t> start_servers(uint16_t port_for_db,
+                                              uint16_t port_for_mempool)
   {
-    return {auth_db_rpc_.start_server(port_for_db), auth_mempool_rpc_.start_server(port_for_mempool)};
+    return {auth_db_rpc_.start_server(port_for_db),
+            auth_mempool_rpc_.start_server(port_for_mempool)};
   }
 
-  AuthCard make_auth_card(std::string hostname = "") {
+  AuthCard make_auth_card(std::string hostname = "")
+  {
     if (hostname.empty()) {
       CHECK_EQ(gethostname(hostname.data(), hostname.size()), 0);
     }
-    return {.protocol = version::kHogdProtocol,
-            .upid = {},
-            .address_for_db = std::format("{}:{}", hostname, auth_db_rpc_.port()).c_str(),
-            .address_for_mempool = std::format("{}:{}", hostname, auth_mempool_rpc_.port()).c_str()};
+    return {
+        .protocol = version::kHogdProtocol,
+        .upid = {},
+        .address_for_db =
+            std::format("{}:{}", hostname, auth_db_rpc_.port()).c_str(),
+        .address_for_mempool =
+            std::format("{}:{}", hostname, auth_mempool_rpc_.port()).c_str()};
   }
 
 private:
