@@ -1,6 +1,6 @@
 #pragma once
 
-#include <array>
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <functional>
@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
@@ -30,9 +31,12 @@ public:
   // Create a DispatchPool with nthreads total worker threads distributed
   // across kBucketCount WorkerPools.
   explicit DispatchPool(int nthreads)
+    : pools_(std::min<int>(kBucketCount, nthreads)), job_counts_(pools_.size())
   {
-    int threads_per_pool = divide_up(nthreads, kBucketCount); // round up
-    for (int i = 0; i < kBucketCount; ++i) {
+    int bucket_count = pools_.size();
+    int threads_per_pool = divide_up(nthreads, bucket_count); // round up
+
+    for (int i = 0; i < bucket_count; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
       job_counts_[i].store(0, std::memory_order_relaxed);
     }
@@ -62,6 +66,13 @@ public:
   requires std::is_invocable_r_v<Ret, Func>
   std::future<Ret> submit(Func &&func)
   {
+    assert(!pools_.empty());
+
+    // Only relevant for stress tests where DEFAULT_THREADPOOL_SIZE == 1
+    if (pools_.size() == 1) [[unlikely]] {
+      job_counts_[0].fetch_add(1, std::memory_order_relaxed);
+      return pools_[0]->submit(std::forward<Func>(func));
+    }
     // Pick a random other pool to compare (excluding affinity_pool)
     static thread_local uint64_t rnd_seed{
         (std::hash<std::thread::id>{}(std::this_thread::get_id()) &
@@ -77,12 +88,12 @@ public:
       return seed = x;
     };
 
-    int r1 = rnd(rnd_seed) % kBucketCount;
+    int r1 = rnd(rnd_seed) % pools_.size();
 
     // Pick random pool excluding r1
     // Generate r2 in range [0, kBucketCount-2], then map to [0, kBucketCount-1]
     // excluding r1
-    int r2 = rnd(rnd_seed) % (kBucketCount - 1); // 0-(kBucketCount-2)
+    int r2 = rnd(rnd_seed) % (pools_.size() - 1); // 0-(pools_.size()-2)
     if (r2 >= r1) {
       r2 = r2 + 1; // Skip r1 by adding 1
     }
@@ -102,11 +113,11 @@ public:
   // print_stats prints per-pool job counts and resets them.
   void print_stats()
   {
-    std::array<size_t, kBucketCount> counts;
-    std::array<size_t, kBucketCount> pending;
+    std::vector<size_t> counts(pools_.size());
+    std::vector<size_t> pending(pools_.size());
     size_t total = 0;
     size_t total_pending = 0;
-    for (int i = 0; i < kBucketCount; ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       counts[i] = job_counts_[i].load(std::memory_order_relaxed);
       pending[i] = pools_[i]->pending_jobs();
       total += counts[i];
@@ -116,20 +127,20 @@ public:
       return;
     }
     info("DispatchPool stats: total={}, pending={}", total, total_pending);
-    for (int i = 0; i < kBucketCount; ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       double pct = total > 0 ? (100.0 * counts[i] / total) : 0.0;
       info("  pool[{}]: {} jobs ({:.1f}%), {} pending", i, counts[i], pct,
            pending[i]);
     }
     // Reset counters after printing
-    for (int i = 0; i < kBucketCount; ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       job_counts_[i].store(0, std::memory_order_relaxed);
     }
   }
 
 private:
-  std::array<std::unique_ptr<WorkerPool>, kBucketCount> pools_;
-  std::array<std::atomic<size_t>, kBucketCount> job_counts_;
+  std::vector<std::unique_ptr<WorkerPool>> pools_;
+  std::vector<std::atomic<size_t>> job_counts_;
 };
 
 } // namespace hogd

@@ -9,6 +9,7 @@
 #include "hogd/base/rpc_client.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -22,9 +23,7 @@ public:
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
-  // clang-tidy bizarre false positive
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(0));
+  using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
 
   // Sharded DB is not yet implemented.
   dbauth_client_t client_;

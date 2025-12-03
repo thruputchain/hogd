@@ -63,7 +63,7 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
   return std::make_unique<
       SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>(
-      make_rpc_client<SchedDb1>(host_port, cp, true));
+      make_rpc_client<SchedDb1>(host_port, cp, true)());
 }
 
 int

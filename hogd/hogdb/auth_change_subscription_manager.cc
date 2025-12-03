@@ -114,7 +114,7 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   std::optional<auth_db_client_t> client =
       [&]() -> std::optional<auth_db_client_t> {
     try {
-      return make_rpc_client<AuthDB1>(*addr, false);
+      return make_rpc_client<AuthDB1>(*addr, false)();
     } catch (const std::exception &e) {
       error("AuthChangeSubscriptionManager: Failed to create RPC client for "
             "{}: {}",

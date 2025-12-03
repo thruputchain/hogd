@@ -3,11 +3,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cerrno>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <memory>
+#include <mutex>
 #include <stop_token>
 #include <string>
 #include <sys/socket.h>
@@ -30,6 +33,7 @@
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
 #include <x23/uiobuf.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 #if USE_EPOLL

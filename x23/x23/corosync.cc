@@ -1,5 +1,6 @@
 
 #include "x23/corosync.h"
+#include "x23/corotrace.h"
 #include "x23/threadpool.h"
 
 namespace x23 {

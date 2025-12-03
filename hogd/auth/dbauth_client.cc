@@ -32,7 +32,7 @@ make_dbauth_client(IntroAuthResult intro_auth_result)
 } // namespace
 
 DBAuthClient::DBAuthClient(IntroAuthResult intro_auth_result)
-  : client_(make_dbauth_client(std::move(intro_auth_result)))
+  : client_(make_dbauth_client(std::move(intro_auth_result))())
 {}
 
 x23::Async<AuthStatus<std::optional<AccountAuthData>>>
