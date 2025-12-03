@@ -57,7 +57,7 @@ public:
     // descriptor in the scheduler and will throw an exception if it attempts to
     // use the fd after the fd has been poisoned. Thus, to avoid this, we reset
     // the scheduler pointer in [db_rpc_].
-    db_rpc_.reset_scheduler();
+    db_rpc_->reset_scheduler();
 
     size_t current_val;
     while ((current_val = pending_detached_coroutines_.load(

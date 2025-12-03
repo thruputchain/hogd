@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <utility>
 
 #include "db_sched.hh"
@@ -48,13 +49,13 @@ public:
   // want to remove the const reference.
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
-    shutdown_.lock_shared();
+    scheduler_lock_.lock_shared();
     if (scheduler_.get()) {
       // See the comment above if you change this.
       handle_transfer(transfers);
     }
     else {
-      shutdown_.unlock();
+      scheduler_lock_.unlock();
       info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
@@ -65,13 +66,13 @@ public:
   x23::Async<void> scheddb_changed_accounts(BlockHeight height,
                                             ContractAddressBatch addresses)
   {
-    shutdown_.lock_shared();
+    scheduler_lock_.lock_shared();
     if (scheduler_.get()) {
       // TODO(geoff): implement invalidation of cached auth checks
-      shutdown_.unlock();
+      scheduler_lock_.unlock();
     }
     else {
-      shutdown_.unlock();
+      scheduler_lock_.unlock();
       info("[MempoolDbRpc::scheddb_changed_accounts] failed. This is ok and "
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
@@ -87,24 +88,23 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    shutdown_.unlock();
+    scheduler_lock_.unlock();
   }
 
   void register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
-    shutdown_.lock();
+    scheduler_lock_.lock();
     CHECK_PTR(scheduler.get());
     scheduler_ = std::move(scheduler);
-    shutdown_.unlock();
+    scheduler_lock_.unlock();
   }
 
   void reset_scheduler()
   {
-    shutdown_.lock();
-    // TODO(jhumphri): Wait for all detached coroutines to finish.
+    scheduler_lock_.lock();
     CHECK_PTR(scheduler_.get());
     scheduler_.reset();
-    shutdown_.unlock();
+    scheduler_lock_.unlock();
   }
 
   static x23::Vec<db_sched_client_t> get_clients()
@@ -130,7 +130,7 @@ public:
   }
 
 private:
-  std::shared_mutex shutdown_;
+  std::shared_mutex scheduler_lock_;
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);
