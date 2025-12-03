@@ -47,6 +47,7 @@ public:
   WorkerPool(int n = available_parallelism())
     : target_workers_(n), active_workers_(n)
   {
+    info("Creating worker pool with {} workers", n);
     workers_.reserve(n);
     for (int i = 0; i < n; ++i) {
       workers_.emplace_back(

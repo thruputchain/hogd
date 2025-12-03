@@ -1,10 +1,31 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <format>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "coord_sched.hh"
+#include "db_sched.hh"
+#include "discovery.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"
+#include "hogd/base/types.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/shared.h"
+#include "hogd/mempool/test/coordinator.h"
+#include "loadgen.hh"
+#include "sched_coord.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -24,7 +45,7 @@ public:
     client_ =
         std::make_unique<loadgen_client_t>(create_client<LoadgenInterfaceV1>(
             host_port, /*retry=*/true,
-            /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
+            /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)());
   }
 
   // TODO(jhumphri): Add flag to infra.h to disable existing setup for tests. We
