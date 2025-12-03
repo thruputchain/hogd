@@ -15,6 +15,11 @@ target_link_libraries(
 )
 add_library(base STATIC $<TARGET_OBJECTS:base_objects>)
 
+target_link_libraries(
+  base
+  x23
+)
+
 add_library(base_test_objects OBJECT
   base_test.cc
   bits_test.cc
