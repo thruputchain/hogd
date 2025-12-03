@@ -2,6 +2,11 @@
 
 #pragma once
 
+#include "hogd/base/os.h"
+#include <cstddef>
+
+#include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/event.h>
 #include <x23/threadpool.h>
 
@@ -10,7 +15,7 @@ namespace hogd {
 inline x23::ThreadPool &
 default_threadpool()
 {
-  static x23::ThreadPool pool;
+  static x23::ThreadPool pool{available_parallelism()};
   return pool;
 }
 

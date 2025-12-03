@@ -2,7 +2,7 @@ name = "sanitizer_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
-host = ["hog8"]
+host = ["hog7"]
 script = """
 
 set -x
@@ -23,12 +23,17 @@ source ./scripts/ci/prepare_env.sh
 echo 'build gcc debug'
 ./scripts/build.sh -d build/gcc_debug -c gcc -t Debug -x "-DBUILD_BENCHMARKS=OFF"
 
-export X23_SNDBUF=1
 export X23_RCVBUF=1
 
-echo 'run gcc tests'
+echo 'run gcc tests RCVBUF=1'
 ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure
 
+unset X23_RCVBUF
+
+export X23_SNDBUF=1
+echo 'run gcc tests SNDBUF=1'
+ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure
+unset X23_SNDBUF
 
 """
 after = """

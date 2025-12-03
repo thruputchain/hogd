@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+
 #include <utility>
 
 #include "account.hh"
