@@ -66,8 +66,9 @@ public:
   requires std::is_invocable_r_v<Ret, Func>
   std::future<Ret> submit(Func &&func)
   {
-    assert(pools_.size() > 0);
+    assert(!pools_.empty());
 
+    // Only relevant for stress tests where DEFAULT_THREADPOOL_SIZE == 1
     if (pools_.size() == 1) [[unlikely]] {
       job_counts_[0].fetch_add(1, std::memory_order_relaxed);
       return pools_[0]->submit(std::forward<Func>(func));
