@@ -116,7 +116,7 @@ public:
     std::vector<size_t> pending(pools_.size());
     size_t total = 0;
     size_t total_pending = 0;
-    for (int i = 0; i < pools_.size(); ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       counts[i] = job_counts_[i].load(std::memory_order_relaxed);
       pending[i] = pools_[i]->pending_jobs();
       total += counts[i];
@@ -126,13 +126,13 @@ public:
       return;
     }
     info("DispatchPool stats: total={}, pending={}", total, total_pending);
-    for (int i = 0; i < pools_.size(); ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       double pct = total > 0 ? (100.0 * counts[i] / total) : 0.0;
       info("  pool[{}]: {} jobs ({:.1f}%), {} pending", i, counts[i], pct,
            pending[i]);
     }
     // Reset counters after printing
-    for (int i = 0; i < pools_.size(); ++i) {
+    for (auto i = 0U; i < pools_.size(); ++i) {
       job_counts_[i].store(0, std::memory_order_relaxed);
     }
   }
