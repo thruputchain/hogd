@@ -77,6 +77,12 @@ public:
     // I print the exception description followed by a [CHECK(false)]. This will
     // bring more attention to an exception when it is thrown.
     try {
+      // [mempool_coord_server_] is destructed before [sched_db_server_].
+      // [sched_db_server_] relies on [db_sched_client_] within
+      // [mempool_coord_server_], so we reset the scheduler (which accesses
+      // [db_sched_client_]) before [mempool_coord_server_] is destructed so
+      // that [sched_db_server_] does not access and invalid client.
+      sched_db_server_.impl()->reset_scheduler();
       Scheduler::shut_down()();
       // mempool_coord_server_.shut_down();
 

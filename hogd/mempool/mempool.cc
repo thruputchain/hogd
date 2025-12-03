@@ -67,6 +67,12 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   info("mempool initialization complete.");
   std::promise<void>().get_future().wait();
 
+  // [coord] is destructed before [db]. [db] relies on [db_sched_client_] within
+  // [coord], so we reset the scheduler (which accesses [db_sched_client_])
+  // before [coord] is destructed so that [db] does not access and invalid
+  // client.
+  db.impl()->reset_scheduler();
+
   // TODO(jhumphri): Implement shutdown path.
   // coord.shut_down();
   // exec.shut_down();
