@@ -50,7 +50,7 @@ public:
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
     scheduler_lock_.lock_shared();
-    if (scheduler_.get()) {
+    if (scheduler_) {
       // See the comment above if you change this.
       handle_transfer(transfers);
     }
@@ -67,7 +67,7 @@ public:
                                             ContractAddressBatch addresses)
   {
     scheduler_lock_.lock_shared();
-    if (scheduler_.get()) {
+    if (scheduler_) {
       // TODO(geoff): implement invalidation of cached auth checks
       scheduler_lock_.unlock_shared();
     }
