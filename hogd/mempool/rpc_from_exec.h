@@ -14,11 +14,7 @@
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
 #include "x23/format.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -54,7 +50,7 @@ public:
                               .event = event_card};
   }
 
-  static x23::Vec<exec_sched_client_t> get_clients()
+  static x23::Async<x23::Vec<exec_sched_client_t>> get_clients()
   {
     x23::Vec<ExecCard> cards;
     Registration::registration().executors_registered(&cards);
@@ -63,11 +59,11 @@ public:
     ret.reserve(cards.size());
 
     for (const ExecCard &card : cards) {
-      ret.push_back(create_client<ExecutorSched1>(
+      ret.push_back(co_await create_client<ExecutorSched1>(
           server_address_to_sockaddr(card.address), /*retry=*/false,
           /*max_message_size=*/Executor::kMessageSize));
     }
-    return ret;
+    co_return ret;
   }
 
   void shut_down()

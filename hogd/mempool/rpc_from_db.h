@@ -107,7 +107,7 @@ public:
     scheduler_lock_.unlock();
   }
 
-  static x23::Vec<db_sched_client_t> get_clients()
+  static x23::Async<x23::Vec<db_sched_client_t>> get_clients()
   {
     x23::XdrVec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);
@@ -116,12 +116,12 @@ public:
     ret.reserve(cards.size());
 
     for (const ShardCard &card : cards) {
-      ret.push_back(create_client<DbSched1>(
+      ret.push_back(co_await create_client<DbSched1>(
           server_address_to_sockaddr(card.address_for_sched),
           /*retry=*/false,
           /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
     }
-    return ret;
+    co_return ret;
   }
 
   void shut_down()

@@ -53,7 +53,7 @@ coordinator_init(const std::string &mempool_address,
   for (size_t i = 0; i < LoadgenClientManager::kNumSchedClients; i++) {
     clients.push_back(create_client<SchedulerCoord1>(
         host_port, /*retry=*/true,
-        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
+        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)());
   }
   std::string address_for_sched = create_address(kSchedulerServerPort);
   CoordCard card{.protocol = version::kHogdProtocol,

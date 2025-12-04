@@ -127,6 +127,9 @@ stcplisten(std::uint16_t port, int backlog)
 UniqueFd
 tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
 {
+  extern bool in_thread_pool();
+  x23assert(!in_thread_pool());
+
   UniqueFd fd(socket(ss.ss_family, SOCK_STREAM, 0));
   if (!fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
