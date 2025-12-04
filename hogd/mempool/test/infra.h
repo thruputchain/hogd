@@ -78,6 +78,12 @@ public:
     // I print the exception description followed by a [CHECK(false)]. This will
     // bring more attention to an exception when it is thrown.
     try {
+      // [sched_db_server_] sends RPCs to [db_scheduler_server_] (via the
+      // scheduler). We reset the scheduler pointer in [sched_db_server_] before
+      // we destruct [db_scheduler_server_] below so that [sched_db_server_]
+      // does not send an RPC to a stopped server and then throw an exception
+      // when the RPC fails.
+      sched_db_server_.impl()->reset_scheduler()();
       Scheduler::shut_down()();
       // mempool_coord_server_.shut_down();
 
