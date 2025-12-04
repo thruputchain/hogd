@@ -12,7 +12,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -44,6 +44,9 @@ hog_signal loadgen_is_up
 hog_wait done
 
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 # coordinator_loadgen
 
@@ -57,7 +60,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -72,13 +75,13 @@ source ./groundhog-go/chuckd/scripts/setup_cargo.sh
 hog_wait loadgen_is_up mempool_is_up
 
 echo 'start coordinator_loadgen'
-sed \
-    -e "s/{--METRIC--}/integration/g" \
-    -e "s/{--LABEL--}/1v/g" \
-    -e "s/{--HOST--}/{{ .hog_host }}/g" \
-    -e "s/{--NODE--}/{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}/g" \
-    ./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh | \
-    HOST_JOBS_DIR="./scripts/schedules/host_jobs" bash -s -- ./chuckd.dev ./scpd.dev
+
+METRIC="integration" \
+LABEL="1v" \
+HOST="${HOG_HOST}" \
+NODE="{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}" \
+HOST_JOBS_DIR="./scripts/schedules/host_jobs" \
+./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh ./chuckd.dev ./scpd.dev
 
 hog_signal done
 
@@ -86,6 +89,9 @@ hog_signal done
 after = """
 killall scpd.dev chuckd.dev || true
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 # scheduler
 
@@ -99,7 +105,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -135,6 +141,9 @@ hog_signal mempool_is_up
 hog_wait done
 
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 # db
 
@@ -148,7 +157,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -182,6 +191,9 @@ hog_signal db_is_up
 hog_wait done
 
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 # exec
 
@@ -195,7 +207,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -222,6 +234,9 @@ hog_signal exec_is_up/{{ .hog_host_index }}
 hog_wait done
 
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 # event
 
@@ -235,7 +250,7 @@ set -x
 echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }}
+git fetch --depth 1 origin {{ .git_commit }} --quiet --no-progress
 git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
@@ -267,3 +282,6 @@ server_pid=$!
 hog_signal event_is_up
 
 """
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
