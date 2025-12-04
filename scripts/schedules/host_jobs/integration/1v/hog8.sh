@@ -106,7 +106,7 @@ $1 -l debug --stack --config config-hog8.json \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
-  --in-addr 10.10.69.103:7888
+  --in-addr 10.10.69.103:7888 \
   --debug-port 5500 \
   --num-accts 100 \
   --txs-per-block 10000 \
