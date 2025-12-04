@@ -565,7 +565,7 @@ template<typename R> struct [[nodiscard]] Async {
     promise_type &p = callee_.promise();
     if (!p.await_ready()) {
       std::binary_semaphore wait(0);
-      auto h = [&wait] -> Suspended {
+      auto h = [&wait](this auto) -> Suspended {
         wait.release();
         co_return;
       }();
