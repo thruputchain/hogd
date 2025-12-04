@@ -208,7 +208,7 @@ RetrocausalQueueArgs::to_item(
 
   auto make_output = [&](RetrocausalQueue const &parent) {
     uint64_t new_block_number = parent.get_current_block_number() + 1;
-    x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
+    x23::XdrVec<QueueEntry> new_block = make_block(persistable_entries_);
     if (!new_block.empty()) {
       return std::make_shared<const StorageItemWrapper>(
           RetrocausalQueue(parent, consume_delta,

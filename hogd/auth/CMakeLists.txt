@@ -6,11 +6,13 @@ add_library(auth
 
 target_link_libraries(auth
     hogd
+    auth_claim
 )
 
 add_executable(auth_test
     auth_data_cache_test.cc
     auth_server_test.cc
+    auth_verify_test.cc
     mock_dbauth_rpc.cc
 )
 

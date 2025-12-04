@@ -8,21 +8,39 @@ extern "C" {
 
 #include <cerrno>
 #include <exception>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "x23/debug.h"
 
 namespace hogd {
+
+namespace {
+std::optional<size_t>
+get_constrained_threadpool_size()
+{
+  auto threadpool_size = x23::get_debug_env("DEFAULT_THREADPOOL_SIZE");
+  if (threadpool_size.empty())
+    return std::nullopt;
+  info("Restricting threadpool size to {}", threadpool_size);
+  return std::stoi(threadpool_size);
+}
+} // namespace
 
 namespace os_detail {
 size_t
 available_parallelism()
 {
+  if (auto r = get_constrained_threadpool_size())
+    return *r;
+
 #if defined(__linux__)
   // sched_getaffinity() determines the number of cores the program is allowed
   // to run on based on taskset instead of the number of cores in the machine.

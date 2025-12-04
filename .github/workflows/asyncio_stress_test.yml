@@ -1,9 +1,9 @@
 name: Asyncio Stress Test (hog_sched)
 
 on:
+    schedule:
+        - cron: "0 14 * * *" # Daily at 7am PDT/6am PST
     workflow_dispatch:
-    # push:
-    #   branches: [ "main" ]
 
 jobs:
     build:

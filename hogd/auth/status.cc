@@ -12,8 +12,8 @@ AuthErrorCategory::message(int code) const
   switch (static_cast<AuthErrorCode>(code)) {
   case AuthErrorCode::kAuthSuccess:
     return "kAuthSuccess";
-  case AuthErrorCode::kAuthBatchFailed:
-    return "kAuthBatchFailed";
+  case AuthErrorCode::kAuthFailed:
+    return "kAuthFailed";
   case AuthErrorCode::kAuthStaleBlockHeight:
     return "kAuthStaleBlockHeight";
   case AuthErrorCode::kAuthInternal:

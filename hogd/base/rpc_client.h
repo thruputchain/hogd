@@ -17,7 +17,8 @@
 namespace hogd {
 
 template<typename RpcService>
-auto
+x23::Async<typename RpcService::template client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>>
 make_rpc_client(sockaddr_storage &ss, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
@@ -25,7 +26,11 @@ make_rpc_client(sockaddr_storage &ss, x23::CoroPoll &cp, bool retry = false,
     x23::UniqueFd fd;
 
     try {
-      fd = x23::tcpconnect(ss);
+      std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
+      if (!res) {
+        res.error().raise();
+      }
+      fd = x23::UniqueFd(*res);
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -39,7 +44,7 @@ make_rpc_client(sockaddr_storage &ss, x23::CoroPoll &cp, bool retry = false,
 
     auto client_config = x23::rpc_stream_logged(cp, fd.release());
     client_config->max_message_size = max_message_size;
-    return client_config->template client<RpcService>();
+    co_return client_config->template client<RpcService>();
   }
 }
 

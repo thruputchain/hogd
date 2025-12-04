@@ -1,19 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <cstdio>
 #include <cstdlib>
+#include <unordered_map>
+#include <utility>
 
 #include "coord_sched.hh"
-#include "exec_sched.hh"
-#include "hogd/base/rpc_server.h"
-#include "hogd/base/time.h"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "nomination.hh"
+#include "transaction.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 

@@ -142,7 +142,7 @@ MempoolCoordinatorRpc::finish_all_executors(BlockID block_id)
 
 SHA256Hash
 MempoolCoordinatorRpc::get_block_hash(
-    const x23::Vec<SignedTransactionHash> &hashes,
+    const x23::XdrVec<SignedTransactionHash> &hashes,
     const BlockHash &prev_block_hash)
 {
   CHECK(!hashes.empty());
@@ -883,7 +883,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // can remove all of the committed block's txs from the scheduler.
   static std::unordered_set<SignedTransactionHash> return_to_runqueue;
   return_to_runqueue.clear();
-  const x23::Vec<SignedTransactionHash> *remove_from_scheduler = nullptr;
+  const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler = nullptr;
   if (nominated_block_cache_.block_id &&
       nominated_block_cache_.block_id == block_id) {
     // The committed block is the block we nominated.

@@ -69,7 +69,8 @@ protected:
     std::string server_address = std::format("localhost:{}", port);
     auth_card_ = AuthCard{.protocol = version::kHogdProtocol,
                           .upid = {},
-                          .address = server_address.c_str()};
+                          .address_for_db = server_address.c_str(),
+                          .address_for_mempool = ""};
   }
 
   void grant_storage_token(Address const &address, int128_t amount)
@@ -258,7 +259,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
     std::string server_address2 = std::format("localhost:{}", port2);
     AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocol,
                                    .upid = {},
-                                   .address = server_address2.c_str()};
+                                   .address_for_db = server_address2.c_str(),
+                                   .address_for_mempool = ""};
     subscription_manager_.add_full_auth_change_subscriber(auth_card2)();
   }
 
@@ -268,7 +270,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   std::string server_address3 = std::format("localhost:{}", port3);
   AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocol,
                                  .upid = {},
-                                 .address = server_address3.c_str()};
+                                 .address_for_db = server_address3.c_str(),
+                                 .address_for_mempool = ""};
   subscription_manager_.add_full_auth_change_subscriber(auth_card3)();
 
   // Create an address
@@ -333,13 +336,16 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 {
   AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocol,
                                .upid = {},
-                               .address = "localhost:12345"};
+                               .address_for_db = "localhost:12345",
+                               .address_for_mempool = ""};
   AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocol,
                                 .upid = {},
-                                .address = "unresolvable:12345"};
+                                .address_for_db = "unresolvable:12345",
+                                .address_for_mempool = ""};
   AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocol,
                                 .upid = {},
-                                .address = "unparseable_nonsense"};
+                                .address_for_db = "unparseable_nonsense",
+                                .address_for_mempool = ""};
   // Subscribe to auth changes
   subscription_manager_.add_full_auth_change_subscriber(bad_card)();
   subscription_manager_.add_full_auth_change_subscriber(bad_card2)();

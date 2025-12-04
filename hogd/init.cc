@@ -69,12 +69,14 @@ get_self_binary_hash()
 }
 
 void
-print_version(const char *process)
+print_version(const char *process, bool do_print_binary_hash)
 {
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
        version::kHogdGitHash);
   info("hogd protocol: {}", version::kHogdProtocol);
-  info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
+  if (do_print_binary_hash) {
+    info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
+  }
 }
 
 } // namespace
@@ -109,7 +111,10 @@ hogd_init(int argc, char *argv[], bool do_print_version)
   // need to initialize the crypto subsystem first.
   if (do_print_version) {
     CHECK_GT(argc, 0);
-    print_version(argv[0]);
+    print_version(argv[0], true);
+  }
+  else {
+    print_version(nullptr, false);
   }
 
   return EXIT_SUCCESS;

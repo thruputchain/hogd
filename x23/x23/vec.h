@@ -318,8 +318,9 @@ public:
     a_ = std::move(other.a_);
     other.b_ = {};
   }
+
   template<size_t MS>
-  constexpr Vec(const Vec<value_type, MS, allocator_type> &other)
+  constexpr explicit Vec(const Vec<value_type, MS, allocator_type> &other)
     : Vec(std::from_range, other)
   {}
 

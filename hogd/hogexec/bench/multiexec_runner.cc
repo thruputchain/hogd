@@ -82,7 +82,7 @@ public:
           info("shard_cards is not empty: returning IntroExecResult");
 
           return IntroExecResult{.exec_id = exec_id++,
-                                 .shards = shard_cards,
+                                 .shards = x23::XdrVec<ShardCard>{shard_cards},
                                  .event = event_card};
         },
         card, std::ref(mtx_), std::ref(cv_), std::ref(exec_cards_),
@@ -133,7 +133,7 @@ connect_to_event_sched_server(const ServerAddress &address)
   if (!host_port.parse(address)) {
     throw std::runtime_error("Failed to parse event sched server address");
   }
-  return make_rpc_client<EventSched1>(host_port, false);
+  return make_rpc_client<EventSched1>(host_port, false)();
 }
 
 auto
@@ -153,28 +153,29 @@ connect_to_exec_server(const ExecCard &card)
   if (!host_port.parse(card.address)) {
     throw std::runtime_error("Failed to parse exec server address");
   }
-  return make_rpc_client<ExecutorSched1>(host_port, false);
+  return make_rpc_client<ExecutorSched1>(host_port, false)();
 }
 
 } // namespace
 
 struct BlockValidationQueue {
 
-  BlockValidationQueue(const auto &txs, size_t batch_size)
-    : txs(txs), batch_size(batch_size)
+  BlockValidationQueue(const x23::XdrVec<SignedTransaction> *txs,
+                       size_t batch_size)
+    : txs_(txs->data(), txs->size()), batch_size(batch_size)
   {}
 
   void reset_offset() { offset.store(0); }
 
-  const std::span<const SignedTransaction> txs;
+  const std::span<const SignedTransaction> txs_;
   const size_t batch_size;
   std::atomic<uint64_t> offset{0};
 
   std::span<const SignedTransaction> next_batch()
   {
     auto start = offset.fetch_add(batch_size);
-    return {txs.begin() + std::min<size_t>(start, txs.size()),
-            txs.begin() + std::min<size_t>(start + batch_size, txs.size())};
+    return {txs_.begin() + std::min<size_t>(start, txs_.size()),
+            txs_.begin() + std::min<size_t>(start + batch_size, txs_.size())};
   }
 };
 
@@ -309,7 +310,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
 };
 
 void
-run_block(x23::Vec<SignedTransaction> const &txs,
+run_block(x23::XdrVec<SignedTransaction> const *txs,
           db_sched_client_t &db_sched_client,
           event_sched_client_t &event_sched_client,
           std::vector<exec_client_t> &exec_clients,
@@ -341,7 +342,7 @@ run_block(x23::Vec<SignedTransaction> const &txs,
 
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
-  auto inner_tps = txs.size() * 1'000'000'000.0 / elapsed_time;
+  auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
               current_block_number);
 
@@ -473,7 +474,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
-    run_block(init_block, db_sched_client, event_sched_client,
+    run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number);
     parent_block_number = current_block_number;
@@ -498,7 +499,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  n_coros_per_connection, num_accounts, batch_size);
     auto const &work = work_txs.success().work_txs;
     auto ts = x23::fastclock::get_ns();
-    run_block(work, db_sched_client, event_sched_client, coro_exec_clients,
+    run_block(&work, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();

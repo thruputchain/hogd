@@ -97,9 +97,9 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
 {
 
   x23::HostPort helper;
-  if (!helper.parse(card.address)) {
+  if (!helper.parse(card.address_for_db)) {
     error("AuthChangeSubscriptionManager: Failed to parse address {}",
-          card.address);
+          card.address_for_db);
     co_return false;
   }
 
@@ -107,18 +107,18 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   if (!addr) {
     error("AuthChangeSubscriptionManager: Failed to convert address {} to "
           "sockaddr_storage",
-          card.address);
+          card.address_for_db);
     co_return false;
   }
 
   std::optional<auth_db_client_t> client =
       [&]() -> std::optional<auth_db_client_t> {
     try {
-      return make_rpc_client<AuthDB1>(*addr, false);
+      return make_rpc_client<AuthDB1>(*addr, false)();
     } catch (const std::exception &e) {
       error("AuthChangeSubscriptionManager: Failed to create RPC client for "
             "{}: {}",
-            card.address, e.what());
+            card.address_for_db, e.what());
       return std::nullopt;
     }
   }();
