@@ -47,6 +47,7 @@
 #include "sched_event.hh"
 #include "storage_cost.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -77,6 +78,12 @@ public:
     // I print the exception description followed by a [CHECK(false)]. This will
     // bring more attention to an exception when it is thrown.
     try {
+      // [sched_db_server_] sends RPCs to [db_scheduler_server_] (via the
+      // scheduler). We reset the scheduler pointer in [sched_db_server_] before
+      // we destruct [db_scheduler_server_] below so that [sched_db_server_]
+      // does not send an RPC to a stopped server and then throw an exception
+      // when the RPC fails.
+      sched_db_server_.impl()->reset_scheduler()();
       Scheduler::shut_down()();
       // mempool_coord_server_.shut_down();
 
@@ -241,7 +248,7 @@ private:
 
   void register_db_with_mempool()
   {
-    auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port());
+    auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
     std::string exec_address = address(kAddress, db_executor_server_->port());
     std::string sched_address = address(kAddress, db_scheduler_server_->port());
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
@@ -253,7 +260,7 @@ private:
   void register_event_with_mempool()
   {
     auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
-                                             sched_event_server_.port());
+                                             sched_event_server_.port())();
     auto r = client.schedevent_intro_event(
         {.protocol = version::kHogdProtocol,
          .upid = {},
@@ -272,15 +279,16 @@ private:
                     coordinator_sockaddr);
   }
 
-  void register_coordinator_with_mempool()
+  x23::Async<void> register_coordinator_with_mempool()
   {
-    auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
-                                                 mempool_coord_server_.port());
+    auto client =
+        create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                       mempool_coord_server_.port())();
     std::string coord_address =
         address(kAddress, coordinator_sched_server_.port());
     CoordCard card{.protocol = version::kHogdProtocol,
                    .address_for_sched = coord_address.c_str()};
-    CHECK_EQ(client.schedulercoord_intro_coord(card)(),
+    CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 

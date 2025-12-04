@@ -42,6 +42,6 @@ add_executable(
 target_link_libraries(
   db_interface_test
   db_interface
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(db_interface_test)

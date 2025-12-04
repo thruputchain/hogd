@@ -1,20 +1,30 @@
 
 #include <cerrno>
 #include <csignal>
-#include <thread>
-
+#include <cstring>
+#include <expected>
 #include <fcntl.h>
 #include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <string>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <system_error>
+#include <thread>
+#include <utility>
 
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/corotrace.h"
 #include "x23/err.h"
 #include "x23/event.h"
+#include "x23/refcnt.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/uiobuf.h"
+#include "x23/utility.h"
+#include "x23/vec.h"
 
 namespace x23 {
 

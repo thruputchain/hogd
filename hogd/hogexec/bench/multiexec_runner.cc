@@ -133,7 +133,7 @@ connect_to_event_sched_server(const ServerAddress &address)
   if (!host_port.parse(address)) {
     throw std::runtime_error("Failed to parse event sched server address");
   }
-  return make_rpc_client<EventSched1>(host_port, false);
+  return make_rpc_client<EventSched1>(host_port, false)();
 }
 
 auto
@@ -153,7 +153,7 @@ connect_to_exec_server(const ExecCard &card)
   if (!host_port.parse(card.address)) {
     throw std::runtime_error("Failed to parse exec server address");
   }
-  return make_rpc_client<ExecutorSched1>(host_port, false);
+  return make_rpc_client<ExecutorSched1>(host_port, false)();
 }
 
 } // namespace

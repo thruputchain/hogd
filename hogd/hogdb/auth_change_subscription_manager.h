@@ -11,6 +11,7 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/refcnt.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -25,10 +26,8 @@ public:
   ~AuthChangeSubscriptionManager() { inhibit_.destroy_wait(); }
 
 private:
-  // bizarre clang-tidy false positive
-  // NOLINTBEGIN(modernize-use-nullptr)
-  using auth_db_client_t = decltype(make_rpc_client<AuthDB1>(0));
-  // NOLINTEND(modernize-use-nullptr)
+  using auth_db_client_t =
+      decltype(make_rpc_client<AuthDB1>(x23::HostPort{})());
 
   x23::CoroLock lock_;
   std::map<AuthCard, auth_db_client_t> auth_db_clients_;

@@ -1,9 +1,7 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
-#include <condition_variable>
-#include <optional>
-#include <utility>
 
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
@@ -13,10 +11,6 @@
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -44,7 +38,7 @@ public:
     return RPCError::kRPCNone;
   }
 
-  static event_sched_client_t get_client()
+  static x23::Async<event_sched_client_t> get_client()
   {
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <utility>
 
 #include "db_sched.hh"
@@ -48,17 +49,34 @@ public:
   // want to remove the const reference.
   x23::Async<void> scheddb_hogs_transferred(const HogsTransferred &transfers)
   {
-    CHECK_PTR(scheduler_.get());
-    // See the comment above if you change this.
-    handle_transfer(transfers);
+    scheduler_lock_.lock_shared();
+    if (scheduler_) {
+      // See the comment above if you change this.
+      handle_transfer(transfers);
+    }
+    else {
+      scheduler_lock_.unlock_shared();
+      info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
+           "expected if the mempool is shutting down, so only ignore this "
+           "issue in that case.");
+    }
     co_return;
   }
 
   x23::Async<void> scheddb_changed_accounts(BlockHeight height,
                                             ContractAddressBatch addresses)
   {
-    CHECK_PTR(scheduler_.get());
-    // TODO(geoff): implement invalidation of cached auth checks
+    scheduler_lock_.lock_shared();
+    if (scheduler_) {
+      // TODO(geoff): implement invalidation of cached auth checks
+      scheduler_lock_.unlock_shared();
+    }
+    else {
+      scheduler_lock_.unlock_shared();
+      info("[MempoolDbRpc::scheddb_changed_accounts] failed. This is ok and "
+           "expected if the mempool is shutting down, so only ignore this "
+           "issue in that case.");
+    }
     co_return;
   }
 
@@ -66,21 +84,34 @@ public:
   {
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
-    // x23::CoroGuard cg;
-    // co_await cg(scheduler_->global_lock_);
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
+    scheduler_lock_.unlock_shared();
   }
 
-  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
+  x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
-    CHECK_PTR(scheduler.get());
-    scheduler_ = std::move(scheduler);
+    co_await default_coropoll().pool_.async([this, &scheduler]() {
+      scheduler_lock_.lock();
+      CHECK_PTR(scheduler.get());
+      scheduler_ = std::move(scheduler);
+      scheduler_lock_.unlock();
+    });
   }
 
-  static x23::Vec<db_sched_client_t> get_clients()
+  x23::Async<void> reset_scheduler()
+  {
+    co_await default_coropoll().pool_.async([this]() {
+      scheduler_lock_.lock();
+      CHECK_PTR(scheduler_.get());
+      scheduler_.reset();
+      scheduler_lock_.unlock();
+    });
+  }
+
+  static x23::Async<x23::Vec<db_sched_client_t>> get_clients()
   {
     x23::XdrVec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);
@@ -89,24 +120,21 @@ public:
     ret.reserve(cards.size());
 
     for (const ShardCard &card : cards) {
-      ret.push_back(create_client<DbSched1>(
+      ret.push_back(co_await create_client<DbSched1>(
           server_address_to_sockaddr(card.address_for_sched),
           /*retry=*/false,
           /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize));
     }
-    return ret;
+    co_return ret;
   }
 
   void shut_down()
   {
     // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
   }
 
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
 private:
-  std::atomic<bool> shutdown_flag_ = false;
+  std::shared_mutex scheduler_lock_;
   std::shared_ptr<Scheduler> scheduler_;
 };
 static_assert(is_SchedDb1<MempoolDbRpc *, x23::Async>);

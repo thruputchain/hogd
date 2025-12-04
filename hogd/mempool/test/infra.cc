@@ -29,7 +29,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   mempool_coord_server_.start_server(/*port=*/0);
 
   auto sched_db_client = std::make_unique<sched_db_client_t>(
-      create_client<SchedDb1>(kAddress, sched_db_server_.port()));
+      create_client<SchedDb1>(kAddress, sched_db_server_.port())());
   // Initialize backend and blockchain state for tests.
   init_db_backend(std::move(sched_db_client));
   init_contracts();
@@ -61,7 +61,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // The executor must register itself *after* the database and event servers
   // have registered!
   register_executor_with_mempool();
-  register_coordinator_with_mempool();
+  register_coordinator_with_mempool()();
 
   if (!skip_genesis_block) {
     GenesisBlockBuilder builder;
