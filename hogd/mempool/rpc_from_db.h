@@ -55,7 +55,7 @@ public:
       handle_transfer(transfers);
     }
     else {
-      scheduler_lock_.unlock();
+      scheduler_lock_.unlock_shared();
       info("[MempoolDbRpc::scheddb_hogs_transferred] failed. This is ok and "
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
@@ -69,10 +69,10 @@ public:
     scheduler_lock_.lock_shared();
     if (scheduler_.get()) {
       // TODO(geoff): implement invalidation of cached auth checks
-      scheduler_lock_.unlock();
+      scheduler_lock_.unlock_shared();
     }
     else {
-      scheduler_lock_.unlock();
+      scheduler_lock_.unlock_shared();
       info("[MempoolDbRpc::scheddb_changed_accounts] failed. This is ok and "
            "expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
@@ -88,7 +88,7 @@ public:
     co_await scheduler_->process_transfers(transfers);
 
     scheduler_->transfer_finished_.release();
-    scheduler_lock_.unlock();
+    scheduler_lock_.unlock_shared();
   }
 
   x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
