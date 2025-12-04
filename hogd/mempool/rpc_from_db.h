@@ -91,20 +91,24 @@ public:
     scheduler_lock_.unlock();
   }
 
-  void register_scheduler(std::shared_ptr<Scheduler> scheduler)
+  x23::Async<void> register_scheduler(std::shared_ptr<Scheduler> scheduler)
   {
-    scheduler_lock_.lock();
-    CHECK_PTR(scheduler.get());
-    scheduler_ = std::move(scheduler);
-    scheduler_lock_.unlock();
+    co_await default_coropoll().pool_.async([this, &scheduler]() {
+      scheduler_lock_.lock();
+      CHECK_PTR(scheduler.get());
+      scheduler_ = std::move(scheduler);
+      scheduler_lock_.unlock();
+    });
   }
 
-  void reset_scheduler()
+  x23::Async<void> reset_scheduler()
   {
-    scheduler_lock_.lock();
-    CHECK_PTR(scheduler_.get());
-    scheduler_.reset();
-    scheduler_lock_.unlock();
+    co_await default_coropoll().pool_.async([this]() {
+      scheduler_lock_.lock();
+      CHECK_PTR(scheduler_.get());
+      scheduler_.reset();
+      scheduler_lock_.unlock();
+    });
   }
 
   static x23::Async<x23::Vec<db_sched_client_t>> get_clients()

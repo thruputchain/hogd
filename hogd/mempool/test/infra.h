@@ -83,7 +83,7 @@ public:
       // we destruct [db_scheduler_server_] below so that [sched_db_server_]
       // does not send an RPC to a stopped server and then throw an exception
       // when the RPC fails.
-      sched_db_server_.impl()->reset_scheduler();
+      sched_db_server_.impl()->reset_scheduler()();
       Scheduler::shut_down()();
       // mempool_coord_server_.shut_down();
 

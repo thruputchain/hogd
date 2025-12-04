@@ -68,7 +68,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards)
   std::promise<void>().get_future().wait();
 
   // TODO(jhumphri): Implement shutdown path.
-  // db.impl()->reset_scheduler();
+  // db.impl()->reset_scheduler()();
   // coord.shut_down();
   // exec.shut_down();
   // db.shut_down();
