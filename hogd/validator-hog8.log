@@ -1,0 +1,50 @@
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/chuckd/cmd/root.go:83 chuckd version: v0.0.0-20251205165837-f354ab351261+dirty-rev-f354ab3-2025-12-05-dirty, os: linux, arch: amd64
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/runtime/rand.go:28 root randomness seed 1392e4d0c196221b
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/lib/libruntime/stk.go:46 installing stack trace on SIGINT and SIGTERM
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/chuckd/cmd/root.go:112 loading config config-hog8.json
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/runtime/telemetry.go:43 prometheus metrics endpoint started at :2223/metrics
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/system/coordinator/system.go:79 initializing validator vid:970c9b
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/net/debug/service.go:24 debug service is listening on [::]:5500
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/system/coordinator_loadgen/system.go:66 all counterparties are up; starting coordinator benchmark
+2025-12-05T09:52:36-08:00 ERR /home/hog12/jhumphri/chuckd/net/discovery/advertise.go:53 discovery dialing (vid:970c9b address:hog3:50000): dial tcp 10.100.0.103:50000: connect: connection refused
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/sub/loadgen/loadgen.go:53 num_accounts=100, num_txs_per_block=10000
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/system/coordinator/server.go:23 starting server on network tcp at address 10.10.69.103:7888
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/sub/loadgen/loadgen.go:87 delivering genesis block
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/sub/loadgen/loadgen.go:90 delivering init blocks
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/sub/sched/intro.go:47 connected to scheduler at hog3:8070
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/sub/scp/scpd/daemon.go:34 starting scpd, control_address=127.0.0.1:4400, handle_address=127.0.0.1:3300 ...
+[scpd:out] 2025-12-05T17:52:36.473899Z  INFO scp_server/src/main.rs:81: control_addr=127.0.0.1:4400 handle_addr=127.0.0.1:3300
+2025-12-05T09:52:36-08:00 INF /home/hog12/jhumphri/chuckd/system/coordinator/server.go:23 starting server on network tcp at address :50000
+2025-12-05T09:52:36-08:00 DBG /home/hog12/jhumphri/chuckd/net/dogwood/mplex.go:69 dogwood multiplex at vid:970c9b: disseminating 50 routes
+2025-12-05T09:52:37-08:00 INF /home/hog12/jhumphri/chuckd/net/dogwood/dogwood.go:145 dogwood system is ready
+goroutine 1 [running]:
+runtime/debug.Stack()
+	/usr/lib/go/src/runtime/debug/stack.go:26 +0x5e
+github.com/groundhogchain/chuckd/lib/must.mkErr(...)
+	/home/hog12/jhumphri/chuckd/lib/must/error.go:40
+github.com/groundhogchain/chuckd/lib/must.Panic(...)
+	/home/hog12/jhumphri/chuckd/lib/must/must.go:11
+github.com/groundhogchain/chuckd/lib/must.NoError({0xe6cbd0, 0xc0003b1e90}, {0xe612a0, 0xc00041a130})
+	/home/hog12/jhumphri/chuckd/lib/must/must.go:36 +0x4b
+github.com/groundhogchain/chuckd/system/coordinator_loadgen.(*CoordinatorLoadgenSystem).Start(0xc0007099c0, {0xe6cbd0, 0xc0003b1e90}, {{0x7ffcbd879b46, 0xe}, {0x7ffcbd879ba3, 0x9}, 0x157c, {0x7ffcbd879add, 0x11}, ...}, ...)
+	/home/hog12/jhumphri/chuckd/system/coordinator_loadgen/system.go:100 +0x568
+github.com/groundhogchain/chuckd/chuckd/cmd.init.func11.1()
+	/home/hog12/jhumphri/chuckd/chuckd/cmd/bench.go:115 +0x629
+github.com/groundhogchain/chuckd/lib/must.TryThru(0xc0005dd990?)
+	/home/hog12/jhumphri/chuckd/lib/must/must.go:67 +0x50
+github.com/groundhogchain/chuckd/chuckd/api.Invoke({0xe67668, 0x149e4e0}, 0xd90b58)
+	/home/hog12/jhumphri/chuckd/chuckd/api/invoke.go:147 +0x99e
+github.com/groundhogchain/chuckd/chuckd/cmd.init.func11(0xc000454500?, {0xd3d665?, 0x4?, 0xd3d669?})
+	/home/hog12/jhumphri/chuckd/chuckd/cmd/bench.go:81 +0x28
+github.com/spf13/cobra.(*Command).execute(0x146f620, {0xc0006a4788, 0x27, 0x27})
+	/home/hog12/jhumphri/go/pkg/mod/github.com/spf13/cobra@v1.9.1/command.go:1015 +0xb02
+github.com/spf13/cobra.(*Command).ExecuteC(0x146f0a0)
+	/home/hog12/jhumphri/go/pkg/mod/github.com/spf13/cobra@v1.9.1/command.go:1148 +0x465
+github.com/spf13/cobra.(*Command).Execute(...)
+	/home/hog12/jhumphri/go/pkg/mod/github.com/spf13/cobra@v1.9.1/command.go:1071
+github.com/groundhogchain/chuckd/chuckd/cmd.Execute(...)
+	/home/hog12/jhumphri/chuckd/chuckd/cmd/root.go:140
+main.main()
+	/home/hog12/jhumphri/chuckd/chuckd/main.go:12 +0x25
+
+Transport is closed

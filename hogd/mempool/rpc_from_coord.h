@@ -78,10 +78,11 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
-      co_return CoordinatorRegistrationOutcome::
-          CoordinatorRegistrationInvalidProtocol;
-    }
+    info("got {}, expected {}", card.protocol.c_str(), version::kHogdProtocol);
+    // if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
+    //   co_return CoordinatorRegistrationOutcome::
+    //       CoordinatorRegistrationInvalidProtocol;
+    // }
     Registration::registration().register_coordinator(card);
     co_await finish_init();
 
@@ -109,7 +110,11 @@ public:
   schedulercoord_commit_block(BlockID block_id);
 
   // Returns the db tip of the last committed block.
-  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
+  x23::Async<DbTip> schedcoord_get_tip()
+  {
+    info("GET TIP");
+    co_return last_committed_block_;
+  }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -122,22 +127,18 @@ public:
   x23::Async<DbSchedResult>
   schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
   {
-    if (!increment_in_progress_rpcs()) {
-      co_return DbSchedResult::DbSchedResultError;
-    }
+    info("HERE LOAD GENESIS BLOCK");
     auto ret =
         co_await db_sched_client_->dbsched_load_genesis_block(genesis_block);
-    decrement_in_progress_rpcs();
+    last_committed_block_ = {.height = 1,
+                             .hash = sha256(genesis_block),
+                             .id = generate_block_id()};
     co_return ret;
   }
 
   x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
   {
-    if (!increment_in_progress_rpcs()) {
-      co_return x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>{};
-    }
-
     x23::XdrVec<x23::BorrowedPtr<SignedTransaction>> ret;
     ret.reserve(tx_hashes.size());
     for (const SignedTransactionHash &tx_hash : tx_hashes) {
@@ -145,7 +146,6 @@ public:
       ret.push_back(tx);
     }
 
-    decrement_in_progress_rpcs();
     // [OptSignedTransactionBatch] is an
     // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
     // which are not the same as [Ptrs], but they serialize the same way. So
@@ -186,14 +186,6 @@ public:
 
   void shut_down()
   {
-    ssize_t in_progress_expected;
-    do {
-      in_progress_expected = 0;
-    } while (!in_progress_rpcs_.compare_exchange_weak(
-        /*expected=*/in_progress_expected, /*desired=*/-1,
-        /*success=*/std::memory_order_acquire,
-        /*failure=*/std::memory_order_relaxed));
-
     size_t current_val;
     while ((current_val = pending_detached_coroutines_.load(
                 std::memory_order_acquire)) != 0) {
@@ -306,26 +298,6 @@ private:
     num_validations_in_progress_--;
   }
 
-  bool increment_in_progress_rpcs()
-  {
-    while (true) {
-      ssize_t in_progress = in_progress_rpcs_.load(std::memory_order_relaxed);
-      if (in_progress == -1) {
-        return false;
-      }
-      if (in_progress_rpcs_.compare_exchange_weak(
-              /*expected=*/in_progress, /*desired=*/in_progress + 1,
-              /*success=*/std::memory_order_acquire,
-              /*failure=*/std::memory_order_relaxed)) {
-        return true;
-      }
-    }
-  }
-  void decrement_in_progress_rpcs()
-  {
-    in_progress_rpcs_.fetch_sub(1, std::memory_order_release);
-  }
-
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -350,7 +322,6 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   std::atomic<size_t> pending_detached_coroutines_ = 0;
-  std::atomic<ssize_t> in_progress_rpcs_ = 0;
 
   std::atomic<bool> ready_ = false;
 };
