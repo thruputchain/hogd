@@ -110,11 +110,7 @@ public:
   schedulercoord_commit_block(BlockID block_id);
 
   // Returns the db tip of the last committed block.
-  x23::Async<DbTip> schedcoord_get_tip()
-  {
-    info("GET TIP");
-    co_return last_committed_block_;
-  }
+  x23::Async<DbTip> schedcoord_get_tip() { co_return last_committed_block_; }
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -125,9 +121,8 @@ public:
   }
 
   x23::Async<DbSchedResult>
-  schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
+  schedcoord_load_genesis_block(GenesisBlock genesis_block)
   {
-    info("HERE LOAD GENESIS BLOCK");
     auto ret =
         co_await db_sched_client_->dbsched_load_genesis_block(genesis_block);
     last_committed_block_ = {.height = 1,
@@ -227,7 +222,6 @@ private:
         exec_clients_.push_back(client);
       }
     }
-    info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
 
