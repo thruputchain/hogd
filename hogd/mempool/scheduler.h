@@ -1,20 +1,20 @@
 #pragma once
 
-#include <iostream>
+#include <atomic>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 #include "db_sched.hh"
-#include "exec_sched.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/synchronized_map.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/mempool/shared.h"
+#include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
@@ -59,7 +59,10 @@ public:
   SignedTransaction *find_tx(const SignedTransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
-    return &tx_value_ptr->tx;
+    if (tx_value_ptr) {
+      return &tx_value_ptr->tx;
+    }
+    return nullptr;
   }
 
   void reenqueue_txs(const auto &begin, const auto &end)
