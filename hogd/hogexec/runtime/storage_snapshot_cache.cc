@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -26,7 +27,7 @@ StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
 
 StorageSnapshotCache::~StorageSnapshotCache() = default;
 
-SystemStatus<std::optional<SHA256Hash>>
+SystemStatus<std::optional<DeployedContractHash>>
 StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {

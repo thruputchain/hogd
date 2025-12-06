@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -238,7 +239,7 @@ InvocationFrameStack::get_msg_sender() const
              : std::nullopt;
 }
 
-std::optional<SHA256Hash>
+std::optional<DeployedContractHash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {

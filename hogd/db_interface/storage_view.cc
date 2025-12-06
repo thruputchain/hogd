@@ -8,6 +8,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -169,7 +170,7 @@ StorageView::commit_to_database()
   base_database->update_height(current_height_);
 }
 
-std::optional<SHA256Hash>
+std::optional<DeployedContractHash>
 SnapshotStorageView::get_snapshot_deployment(ContractAddress const &addr)
 {
   std::shared_lock lock(mtx_);
@@ -190,7 +191,7 @@ SnapshotStorageView::get_snapshot_contract(SHA256Hash const &hash)
 // Read from post block snapshot data, after all operations in the block
 // are applied.
 // Cannot be called before the block is closed.
-std::optional<SHA256Hash>
+std::optional<DeployedContractHash>
 ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
 {
   assert(closed_);
@@ -202,8 +203,7 @@ ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
       return std::nullopt;
     }
     assert(item->type() == StorageItemType::kItemTypeDeployedContractHash);
-    return item->deployed_contract_hash().hash;
-    ;
+    return item->deployed_contract_hash();
   }
 }
 

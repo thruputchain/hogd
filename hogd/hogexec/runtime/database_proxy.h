@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
@@ -58,7 +59,7 @@ public:
   SystemStatus<std::shared_ptr<const Contract>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
-  SystemStatus<std::optional<SHA256Hash>>
+  SystemStatus<std::optional<DeployedContractHash>>
   get_deployment(BlockID block_id, ContractAddress const &addr);
 
   SystemStatus<std::optional<RetrocausalQueueBlock>>

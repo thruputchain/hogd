@@ -3,27 +3,22 @@
 #include <cerrno>
 #include <cstddef>
 #include <set>
-#include <stop_token>
 #include <sys/socket.h>
-#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
 #include "x23/mvar.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -68,7 +63,8 @@ public:
 
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
-  void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
+  void setup_create_deployment(ContractAddress addr,
+                               DeployedContractHash deployed_contract_hash);
   void setup_create_item(AddressAndKey const &addrkey, StorageItemWrapper item);
   void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
                                      QueueEntry entry);
@@ -90,7 +86,8 @@ private:
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
-  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
+  x23::MVar<std::unordered_map<ContractAddress, DeployedContractHash>>
+      deployments_;
   x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
       concurrent_rcq_items_;
 

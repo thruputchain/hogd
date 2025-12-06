@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
@@ -160,10 +161,10 @@ BlockSnapshotRpc::setup_create_contract(Contract const &contract)
 }
 
 void
-BlockSnapshotRpc::setup_create_deployment(ContractAddress addr,
-                                          SHA256Hash contract_hash)
+BlockSnapshotRpc::setup_create_deployment(
+    ContractAddress addr, DeployedContractHash deployed_contract_hash)
 {
-  deployments_->emplace(addr, contract_hash);
+  deployments_->emplace(addr, deployed_contract_hash);
 }
 
 void
