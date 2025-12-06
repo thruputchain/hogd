@@ -2,6 +2,7 @@
 *.a
 *.core
 *.d
+*.log
 *.o
 *.out
 *~
