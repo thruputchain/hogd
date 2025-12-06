@@ -63,9 +63,9 @@ public:
     CHECK_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
     context_id_ = result.success().context_id;
 
-    // Pass the genesis block to the db.
-    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_block(
-                 result.success().genesis_block)(),
+    // Pass the genesis configuration to the db.
+    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_configuration(
+                 result.success().genesis_configuration)(),
              DbSchedResult::DbSchedResultOK);
 
     // We need to nominate and commit the initialization transactions. So first,

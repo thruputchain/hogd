@@ -1,5 +1,4 @@
-#include "account.hh"
-#include "hogd/genesis/genesis_block.h"
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -7,14 +6,15 @@
 #include <memory>
 #include <vector>
 
+#include "account.hh"
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "types.hh"
-#include "gtest/gtest.h"
 
 namespace hogd {
 
@@ -50,10 +50,10 @@ protected:
     return it->second;
   }
 
-  // Helper to create a test genesis block
-  static GenesisBlock create_test_genesis_block()
+  // Helper to create a test genesis configuration
+  static GenesisConfiguration create_test_genesis_configuration()
   {
-    GenesisBlock genesis_block{};
+    GenesisConfiguration genesis_configuration{};
 
     // Add a preset contract entry
     InitialConfigurationEntry preset_entry;
@@ -71,7 +71,7 @@ protected:
     preset_entry.config.calldata = {0x01, 0x02, 0x03, 0x04};
     preset_entry.amount = to_xdr(int128_t{1000000}); // 1 million tokens
 
-    genesis_block.initial_config.push_back(preset_entry);
+    genesis_configuration.initial_config.push_back(preset_entry);
 
     // Add another preset contract entry
     InitialConfigurationEntry preset_entry2;
@@ -88,9 +88,9 @@ protected:
     preset_entry2.config.calldata = {0x05, 0x06, 0x07, 0x08};
     preset_entry2.amount = to_xdr(int128_t{500000}); // 500k tokens
 
-    genesis_block.initial_config.push_back(preset_entry2);
+    genesis_configuration.initial_config.push_back(preset_entry2);
 
-    return genesis_block;
+    return genesis_configuration;
   }
 
   std::map<StorageKey, int128_t> storage_map_;
@@ -101,11 +101,11 @@ protected:
 TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
 {
   // Create test genesis block
-  auto genesis_block = create_test_genesis_block();
+  auto genesis_configuration = create_test_genesis_configuration();
 
-  // Create loader and load genesis block
-  GenesisBlockLoader loader(genesis_block);
-  loader.load_genesis_block(
+  // Create loader and load genesis configuration
+  GenesisConfigurationLoader loader(genesis_configuration);
+  loader.load_genesis_configuration(
       [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
         return 100;
@@ -120,7 +120,7 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
   EXPECT_EQ(get_initial_balance(),
-            GenesisBlockLoader::initial_hog_token_supply() - 200);
+            GenesisConfigurationLoader::initial_hog_token_supply() - 200);
 }
 
 TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
@@ -136,8 +136,9 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
 
   std::vector<std::uint8_t> calldata = {0x01, 0x02, 0x03, 0x04};
 
-  auto result = GenesisBlockLoader::calculate_storage_key(contract_hash, nonce,
-                                                          entrypoint, calldata);
+  auto result =
+      GenesisConfigurationLoader::calculate_storage_key(contract_hash, nonce,
+                                                        entrypoint, calldata);
 
   // Verify the storage key is of the correct type
   EXPECT_EQ(result.key_type(), StorageKeyType::kStorageKeyTypeContractData);
@@ -156,11 +157,11 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
 TEST_F(GenesisBlockTest, EmptyGenesisBlock)
 {
   // Create empty genesis block
-  GenesisBlock genesis_block{};
+  GenesisConfiguration genesis_configuration{};
 
   // Create loader and load genesis block
-  GenesisBlockLoader loader(genesis_block);
-  loader.load_genesis_block(
+  GenesisConfigurationLoader loader(genesis_configuration);
+  loader.load_genesis_configuration(
       [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
         return 100;
@@ -175,17 +176,17 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
   EXPECT_EQ(contract_map_.size(), 2);
   EXPECT_EQ(deployment_map_.size(), 2);
   EXPECT_EQ(get_initial_balance(),
-            GenesisBlockLoader::initial_hog_token_supply());
+            GenesisConfigurationLoader::initial_hog_token_supply());
 }
 
 TEST_F(GenesisBlockTest, MultipleEntries)
 {
   // Create test genesis block with multiple entries
-  auto genesis_block = create_test_genesis_block();
+  auto genesis_configuration = create_test_genesis_configuration();
 
   // Create loader and load genesis block
-  GenesisBlockLoader loader(genesis_block);
-  loader.load_genesis_block(
+  GenesisConfigurationLoader loader(genesis_configuration);
+  loader.load_genesis_configuration(
       [this](StorageKey const &key, int128_t value) -> int128_t {
         mock_write_storage(key, value);
         return 100;
@@ -208,7 +209,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
 
   EXPECT_NE(keys[0], keys[1]);
   EXPECT_EQ(get_initial_balance(),
-            GenesisBlockLoader::initial_hog_token_supply() - 200);
+            GenesisConfigurationLoader::initial_hog_token_supply() - 200);
 }
 
 } // namespace hogd

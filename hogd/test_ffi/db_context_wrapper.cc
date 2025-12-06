@@ -26,12 +26,14 @@ DBContext::DBContext() : db_proxy_(nullptr), snapshot_cache_(nullptr)
   db_sched_client_ = make_srpc_client<DbSched1>(
       x23::HostPort{"localhost", hogdb_wrapper_.coord_port()}, false);
 
-  auto res = db_sched_client_.dbsched_load_genesis_block(GenesisBlock{
-      .initial_config = {},
-      .storage_cost_model = get_default_cost_model_xdr(),
-  });
+  auto res =
+      db_sched_client_.dbsched_load_genesis_configuration(GenesisConfiguration{
+          .initial_config = {},
+          .storage_cost_model = get_default_cost_model_xdr(),
+      });
   if (res != DbSchedResult::DbSchedResultOK) {
-    throw std::runtime_error("DBContext: dbsched_load_genesis_block failed");
+    throw std::runtime_error(
+        "DBContext: dbsched_load_genesis_configuration failed");
   }
 
   advance_new_block();

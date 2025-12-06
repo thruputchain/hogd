@@ -14,7 +14,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"
@@ -42,9 +42,8 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,
-        .address =
-            GenesisBlockLoader::calculate_deployed_address(wallet_contract_hash,
-                                                           make_nonce(i)),
+        .address = GenesisConfigurationLoader::calculate_deployed_address(
+            wallet_contract_hash, make_nonce(i)),
         .initial_nonce = make_nonce(i),
     });
   }
@@ -69,16 +68,15 @@ ERC20ExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
-  GenesisBlockBuilder builder;
+  GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
                              erc20_meta::entrypoint<"initialize">(),
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              int128_t{500'000} * config_.num_accounts);
-  erc20_address_ =
-      GenesisBlockLoader::calculate_deployed_address(sha256(*erc20_contract),
-                                                     make_nonce(0));
+  erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
+      sha256(*erc20_contract), make_nonce(0));
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -137,7 +135,7 @@ ERC20ExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(mint_txs));
 
   return LoadgenSuccessResult{
-      .genesis_block = builder.build(),
+      .genesis_configuration = builder.build(),
       .initialization_txs = std::move(initialization_txs),
   };
 }

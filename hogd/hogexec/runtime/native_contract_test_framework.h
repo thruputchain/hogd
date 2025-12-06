@@ -462,7 +462,7 @@ public:
   }
 
   void run_genesis_initialization(
-      GenesisBlock const &genesis_block,
+      GenesisConfiguration const &genesis_configuration,
       BlockExecutionMode mode =
           BlockExecutionMode::kBlockExecutionModeProposal);
 
@@ -554,12 +554,13 @@ private:
     }
 
     {
-      auto r = coord_wrapper_->client().dbsched_load_genesis_block(GenesisBlock{
-          .storage_cost_model = get_default_cost_model_xdr(),
-      });
+      auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
+          GenesisConfiguration{
+              .storage_cost_model = get_default_cost_model_xdr(),
+          });
       if (r != DbSchedResult::DbSchedResultOK) {
         throw std::runtime_error(
-            "initialize: dbsched_load_genesis_block failed");
+            "initialize: dbsched_load_genesis_configuration failed");
       }
     }
 

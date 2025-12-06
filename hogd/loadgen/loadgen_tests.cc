@@ -4,7 +4,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -25,40 +25,40 @@ public:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(LoadgenTests, EmptyGenesisBlock)
+TEST_P(LoadgenTests, EmptyGenesisConfiguration)
 {
-  run_genesis_initialization(GenesisBlock{});
+  run_genesis_initialization(GenesisConfiguration{});
 
   auto bal = lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-      GenesisBlockLoader::kDeployContractAddress));
+      GenesisConfigurationLoader::kDeployContractAddress));
   ASSERT_TRUE(bal.has_value());
   ASSERT_EQ(from_xdr(bal.value().nnint()),
-            GenesisBlockLoader::initial_hog_token_supply());
+            GenesisConfigurationLoader::initial_hog_token_supply());
 }
 
 TEST_P(LoadgenTests, OneInitialConfig)
 {
-  GenesisBlock genesis_block{};
-  genesis_block.initial_config.emplace_back(InitialConfigurationEntry{
+  GenesisConfiguration genesis_configuration{};
+  genesis_configuration.initial_config.emplace_back(InitialConfigurationEntry{
       .config = PresetDeploymentConfig{.initial_nonce = sha256(Bytestring{}),
                                        .contract_hash = sha256(Bytestring{}),
                                        .entrypoint = {},
                                        .calldata = Calldata{}},
       .amount = to_xdr(int128_t{1'000'000})});
-  genesis_block.storage_cost_model = {
+  genesis_configuration.storage_cost_model = {
       .ext = ExtensionPoint(0),
       .base_data_item_cost = to_xdr(int128_t{12000}),
       .bytestring_cost_per_byte = 10,
       .base_contract_deployment_cost = to_xdr(int128_t{12000}),
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
   };
-  run_genesis_initialization(genesis_block);
+  run_genesis_initialization(genesis_configuration);
 
   auto bal = lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-      GenesisBlockLoader::kDeployContractAddress));
+      GenesisConfigurationLoader::kDeployContractAddress));
   ASSERT_TRUE(bal.has_value());
   EXPECT_LT(from_xdr(bal.value().nnint()),
-            GenesisBlockLoader::initial_hog_token_supply());
+            GenesisConfigurationLoader::initial_hog_token_supply());
   // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
 }
 

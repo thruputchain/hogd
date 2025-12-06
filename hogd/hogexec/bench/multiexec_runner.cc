@@ -441,12 +441,14 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     await_ready(exec_card);
   }
 
-  auto write_genesis_block = [&](const GenesisBlock &genesis_block) {
-    auto res = db_sched_client.dbsched_load_genesis_block(genesis_block);
-    if (res != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to write genesis block");
-    }
-  };
+  auto write_genesis_configuration =
+      [&](const GenesisConfiguration &genesis_configuration) {
+        auto res = db_sched_client.dbsched_load_genesis_configuration(
+            genesis_configuration);
+        if (res != DbSchedResult::DbSchedResultOK) {
+          throw std::runtime_error("Failed to write genesis block");
+        }
+      };
 
   uint64_t parent_block_number = 0;
   uint64_t current_block_number = 1;
@@ -461,8 +463,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   if (loadgen_result.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     throw std::runtime_error("Failed to generate loadgen experiment");
   }
-  auto genesis_block = loadgen_result.success().genesis_block;
-  write_genesis_block(genesis_block);
+  auto genesis_configuration = loadgen_result.success().genesis_configuration;
+  write_genesis_configuration(genesis_configuration);
 
   const size_t n_connections = n_connections_per_executor * exec_cards.size();
 
