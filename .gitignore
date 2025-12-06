@@ -2,9 +2,11 @@
 *.a
 *.core
 *.d
+*.json
 *.log
 *.o
 *.out
+*.report
 *~
 .cache
 .cproject
