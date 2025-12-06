@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "types.hh"
