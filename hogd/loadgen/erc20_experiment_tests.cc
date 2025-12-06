@@ -5,7 +5,7 @@
 #include <set>
 
 #include "hogd/base/xdr_util.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -40,10 +40,10 @@ protected:
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     auto bal =
         lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-            GenesisBlockLoader::kDeployContractAddress));
+            GenesisConfigurationLoader::kDeployContractAddress));
     ASSERT_TRUE(bal.has_value());
     EXPECT_LT(from_xdr(bal.value().nnint()),
-              GenesisBlockLoader::initial_hog_token_supply());
+              GenesisConfigurationLoader::initial_hog_token_supply());
     // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
@@ -61,7 +61,7 @@ TEST_P(ERC20ExperimentTest, Basic)
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_block);
+  run_genesis_initialization(result.value().genesis_configuration);
   check_initial_balance();
 
   for (auto &init_block : result.value().initialization_txs) {
@@ -109,7 +109,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_block);
+  run_genesis_initialization(result.value().genesis_configuration);
   check_initial_balance();
 
   for (auto &init_block : result.value().initialization_txs) {

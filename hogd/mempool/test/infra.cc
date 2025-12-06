@@ -5,7 +5,7 @@
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/loadgen/loadgen_server.h"
@@ -64,9 +64,9 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   register_coordinator_with_mempool()();
 
   if (!skip_genesis_block) {
-    GenesisBlockBuilder builder;
-    CHECK_EQ(mempool_coord_server_->impl()->schedcoord_load_genesis_block(
-                 builder.build())(),
+    GenesisConfigurationBuilder builder;
+    CHECK_EQ(mempool_coord_server_->impl()
+                 ->schedcoord_load_genesis_configuration(builder.build())(),
              DbSchedResult::DbSchedResultOK);
   }
 }

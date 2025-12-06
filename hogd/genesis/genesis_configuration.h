@@ -29,14 +29,14 @@ make_precompile_address(GenesisContractAddresses addr_enum)
   return addr;
 }
 
-class GenesisBlockBuilder {
+class GenesisConfigurationBuilder {
 public:
   void add_initial_config(std::shared_ptr<const Contract> const &contract,
                           SHA256Hash const &nonce,
                           ContractEntrypointID entrypoint, Calldata calldata,
                           int128_t amount);
 
-  GenesisBlock build() const;
+  GenesisConfiguration build() const;
 
   // The set of transactions that claim the balances that are set up
   // in the genesis block.
@@ -54,14 +54,15 @@ private:
   int128_t allocated_hogs_ = 0;
 };
 
-class GenesisBlockLoader {
+class GenesisConfigurationLoader {
 public:
-  // Constructor takes the genesis block
-  explicit GenesisBlockLoader(GenesisBlock genesis_block);
+  // Constructor takes the genesis configuration
+  explicit GenesisConfigurationLoader(
+      GenesisConfiguration genesis_configuration);
 
-  // Load genesis block data into storage
+  // Load genesis configuration data into storage
   // This calculates storage keys and stores allocation amounts as int128s
-  void load_genesis_block(
+  void load_genesis_configuration(
       // Returned amount is the amount of storage used by the item
       std::function<int128_t(StorageKey const &, int128_t const &)> const
           &write_storage,
@@ -94,7 +95,7 @@ public:
   static int128_t initial_hog_token_supply();
 
 private:
-  GenesisBlock genesis_block_;
+  GenesisConfiguration genesis_configuration_;
 };
 
 } // namespace hogd

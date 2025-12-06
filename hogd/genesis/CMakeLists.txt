@@ -1,5 +1,5 @@
 add_library(genesis
-  genesis_block.cc
+  genesis_configuration.cc
 )
 
 add_dependencies(
@@ -23,8 +23,8 @@ target_include_directories(genesis PRIVATE
 
 # Add test objects
 add_library(genesis_test_objects OBJECT
-  genesis_block_test.cc
-  genesis_block_unfurl_tests.cc
+  genesis_configuration_test.cc
+  genesis_configuration_unfurl_tests.cc
 )
 
 target_link_libraries(genesis_test_objects

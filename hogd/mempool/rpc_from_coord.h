@@ -126,10 +126,11 @@ public:
     co_return;
   }
 
-  x23::Async<DbSchedResult>
-  schedcoord_load_genesis_block(const GenesisBlock &genesis_block)
+  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
+      const GenesisConfiguration &genesis_configuration)
   {
-    return db_sched_client_->dbsched_load_genesis_block(genesis_block);
+    return db_sched_client_->dbsched_load_genesis_configuration(
+        genesis_configuration);
   }
 
   x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
