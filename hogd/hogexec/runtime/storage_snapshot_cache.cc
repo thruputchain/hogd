@@ -26,7 +26,7 @@ StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
 
 StorageSnapshotCache::~StorageSnapshotCache() = default;
 
-SystemStatus<std::optional<SHA256Hash>>
+SystemStatus<std::optional<DeployedContractHash>>
 StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {

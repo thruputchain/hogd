@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -52,7 +53,7 @@ public:
   // just method duplication?
   // Read from snapshot data, not data created by concurrent operations.
   // Should not be called after the block is closed.
-  std::optional<SHA256Hash>
+  std::optional<DeployedContractHash>
   get_snapshot_deployment(ContractAddress const &addr);
   std::shared_ptr<const Contract> get_snapshot_contract(SHA256Hash const &hash);
 
@@ -129,7 +130,7 @@ public:
   // Read from post block snapshot data, after all operations in the block
   // are applied.
   // Cannot be called before the block is closed.
-  std::optional<SHA256Hash>
+  std::optional<DeployedContractHash>
   get_post_block_deployment(ContractAddress const &addr);
   std::shared_ptr<const Contract>
   get_post_block_contract(SHA256Hash const &hash);

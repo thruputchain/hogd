@@ -113,12 +113,12 @@ public:
     assert(inserted);
   }
 
-  std::optional<SHA256Hash>
+  std::optional<DeployedContractHash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const
   {
     auto it = new_contract_deployments_.find(addr);
     if (it != new_contract_deployments_.end()) {
-      return it->second.hash;
+      return it->second;
     }
     return std::nullopt;
   }
@@ -192,7 +192,7 @@ public:
   //
   // Also usable to check whether a deployment was rolled back by a reverted
   // call frame.
-  std::optional<SHA256Hash>
+  std::optional<DeployedContractHash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
   // Reference invalidated by any other call to get_item_view

@@ -256,6 +256,10 @@ private:
   SystemStatus<std::unique_ptr<Runtime>>
   resolve_runtime(ContractAddress const &addr);
 
+  // returns nullptr if the contract does not exist
+  SystemStatus<std::shared_ptr<const Contract>>
+  resolve_contract(SHA256Hash const &hash) const;
+
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.

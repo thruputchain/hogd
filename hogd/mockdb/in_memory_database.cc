@@ -22,7 +22,7 @@ InMemoryDatabase::get_post_block_storage_item(AddressAndKey const &addrkey)
   return nullptr;
 }
 
-std::optional<SHA256Hash>
+std::optional<DeployedContractHash>
 InMemoryDatabase::get_post_block_deployment(ContractAddress const &addr)
 {
   auto addrkey =
@@ -31,7 +31,7 @@ InMemoryDatabase::get_post_block_deployment(ContractAddress const &addr)
                         StorageKeyType::kStorageKeyTypeAddressMetadata)};
   auto m = items_.take();
   if (auto it = m->find(addrkey); it != m->end()) {
-    return it->second->deployed_contract_hash().hash;
+    return it->second->deployed_contract_hash();
   }
 
   return std::nullopt;

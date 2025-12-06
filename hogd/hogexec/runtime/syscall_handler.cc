@@ -409,6 +409,26 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
   }
 }
 
+SystemStatus<std::shared_ptr<const Contract>>
+SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
+{
+  auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
+  if (!snapshot_res.has_value()) {
+    return snapshot_res.error();
+  }
+  auto &snapshot_contract = *snapshot_res;
+  if (snapshot_contract != nullptr) {
+    return snapshot_contract;
+  }
+
+  auto it = newly_created_contracts_.find(hash);
+  if (it != newly_created_contracts_.end()) {
+    assert(it->second != nullptr);
+    return it->second;
+  }
+  return nullptr;
+}
+
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
@@ -433,32 +453,21 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     return nullptr;
   }
 
-  // At this point, we have a deployment and the hash of the contract.
-  // We now resolve the actual contract code from the snapshot.
-  auto load_contract_expect =
-      snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
-  if (!load_contract_expect) {
-    return load_contract_expect.error();
-  }
-  auto &load_contract = *load_contract_expect;
-
-  if (!load_contract) {
-    // Not found committed contract in the snapshot.
-    // Try loading from local context
-    auto it = newly_created_contracts_.find(*deployed_hash);
-
-    // contract deployment checks to see that a new deployment of a specific
-    // hash always is a hash of a contract that the runtime can access.
-    assert(it != newly_created_contracts_.end());
-
-    load_contract = it->second;
+  auto contract_res = resolve_contract(deployed_hash->hash);
+  if (!contract_res.has_value()) {
+    // handles SystemErrors in the lookup of the contract
+    return contract_res.error();
   }
 
+  // It should not be possible for a contract to be deployed but for it not to
+  // exist.
+  if (contract_res.value() == nullptr) {
+    return SystemError{SystemErrorCode::kUnrecoverable};
+  }
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  assert(load_contract);
-  return runtime_context_->make_new_runtime(*load_contract, *deployed_hash,
-                                            this, false);
+  return runtime_context_->make_new_runtime(*contract_res.value(),
+                                            deployed_hash->hash, this, false);
 }
 
 Calldata const &
@@ -584,25 +593,16 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor
-  auto load_contract_status =
-      snapshot_cache_.try_get_contract_by_hash(contract_hash);
-  if (!load_contract_status) {
-    return load_contract_status.error();
+  auto contract_res = resolve_contract(contract_hash);
+  if (!contract_res.has_value()) {
+    return contract_res.error();
   }
-  auto &load_contract = *load_contract_status;
-
-  if (!load_contract) {
-    // try loading from local context
-    auto it = newly_created_contracts_.find(contract_hash);
-    if (it == newly_created_contracts_.end()) {
-      // cannot find the contract in question, in either snapshot
-      // or in local context.
-      return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
-    }
-    load_contract = it->second;
+  if (contract_res.value() == nullptr) {
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
   }
-  assert(load_contract != nullptr);
+  assert(contract_res.value() != nullptr);
+  auto const &contract = *contract_res.value();
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
@@ -627,12 +627,12 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto &frame = invocation_frame_stack_.get_active_frame();
 
   auto contract_size = [&] -> uint32_t {
-    switch (load_contract->contract_type()) {
+    switch (contract.contract_type()) {
     case ContractType::kNative:
     case ContractType::kMockTest:
       return 0LU;
     case ContractType::kWasmi:
-      return load_contract->wasmi_contract().wasm.size();
+      return contract.wasmi_contract().wasm.size();
     default:
       assert(false);
       return 0LU;
@@ -642,7 +642,9 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // deploy new contract
   frame.deploy_contract(deploy_addr,
                         DeployedContractHash{.hash = contract_hash,
-                                             .contract_size = contract_size});
+                                             .contract_size = contract_size,
+                                             .contract_type =
+                                                 contract.contract_type()});
 
   return deploy_addr;
 }

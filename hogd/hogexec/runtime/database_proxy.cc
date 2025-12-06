@@ -10,6 +10,7 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
@@ -161,12 +162,12 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
   });
 }
 
-SystemStatus<std::optional<SHA256Hash>>
+SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res = client_.get_deployment(block_id, addr);
-  return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
-    return std::make_optional<SHA256Hash>(std::move(x));
+  return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
+    return std::make_optional<DeployedContractHash>(std::move(x));
   });
 }
 
