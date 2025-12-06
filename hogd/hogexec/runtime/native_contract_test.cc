@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -250,7 +251,11 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(kAddress, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddress,
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 0,
+                           .contract_type = contract.contract_type()});
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -332,7 +337,10 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(address, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
   snapshot_server_->impl()->setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
@@ -450,7 +458,10 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(address, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
   snapshot_server_->impl()->setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
