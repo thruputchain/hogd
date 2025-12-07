@@ -532,9 +532,20 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
         "Attempt to deploy contract that has not been created in the database");
     return kTestFFIErrorCodeDeployNonexistentContract;
   }
+  Contract contract;
+  try {
+    x23::deserialize(&contract,
+                     x23::BufView{res.value().data(), res.value().size()});
+  } catch (x23::XdrException &e) {
+    log_error("unrecoverable: error deserializing contract from db: {}", e);
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
 
   db_cast->get_base_db().write_deployment(
-      addr, DeployedContractHash{.hash = h, .contract_size = contract_size},
+      addr,
+      DeployedContractHash{.hash = h,
+                           .contract_size = contract_size,
+                           .contract_type = contract.contract_type()},
       &kCostModel);
 
   return kTestFFIErrorCodeNone;
