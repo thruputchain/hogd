@@ -15,17 +15,7 @@ std::string
 SystemErrorCategory::message(int code) const
 {
   assert(SystemError::is_in_enum_range(code));
-  switch (static_cast<SystemErrorCode>(code)) {
-  case SystemErrorCode::kUnrecoverable:
-    return "kUnrecoverable";
-  case SystemErrorCode::kAbortTransaction:
-    return "kAbortTransaction";
-  case SystemErrorCode::kValidationFailure:
-    return "kValidationFailure";
-  default:
-    assert(false);
-    std::unreachable();
-  }
+  return x23::show(static_cast<SystemErrorCode>(code));
 }
 
 std::string

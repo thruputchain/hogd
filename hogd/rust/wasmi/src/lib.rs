@@ -2,8 +2,6 @@ use core::ffi::c_void;
 
 pub mod context;
 mod external_call;
-#[rustfmt::skip]
-pub mod ffi_enums;
 pub mod invoke_result;
 pub mod module_cache;
 pub mod runtime;

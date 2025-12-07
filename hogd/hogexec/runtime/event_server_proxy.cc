@@ -2,6 +2,7 @@
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -46,9 +47,10 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
     co_return SystemStatus<void>{};
   case RPCError::kRPCBadBlockID:
     co_return SystemStatus<void>{
-        SystemError{SystemErrorCode::kAbortTransaction}};
+        SystemError{SystemErrorCode::kSystemAbortTransaction}};
   default:
-    co_return SystemStatus<void>{SystemError{SystemErrorCode::kUnrecoverable}};
+    error("Unrecoverable: Received unhandled error type from event server: {}", r);
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::kSystemUnrecoverable}};
   }
 }
 
@@ -56,7 +58,7 @@ x23::Async<SystemStatus<void>>
 PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log)
 {
   if (emitted_event_) {
-    co_return SystemStatus<void>{SystemError{SystemErrorCode::kUnrecoverable}};
+    co_return SystemStatus<void>{SystemError{SystemErrorCode::kSystemUnrecoverable}};
   }
   emitted_event_ = true;
   co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,

@@ -6,6 +6,7 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -51,14 +52,14 @@ MockRuntimeContext::make_new_runtime(
     if (contract.value() == nullptr) {
       error("Unrecoverable: Contract lookup failed: {}",
             deployed_contract_hash.hash);
-      return SystemError{SystemErrorCode::kUnrecoverable};
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
 
     if (contract.value()->contract_type() != ContractType::kMockTest) {
       error("Unrecoverable: Attempt made to access a non-mock test contract "
             "from MockRuntimeContext: {}",
             contract.value()->contract_type());
-      return SystemError{SystemErrorCode::kUnrecoverable};
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
 
     int32_t mock_contract = contract.value()->mock_contract_id();
