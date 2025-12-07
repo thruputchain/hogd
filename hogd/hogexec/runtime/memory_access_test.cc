@@ -1,19 +1,22 @@
-#include <cstdint>
-#include <memory>
-
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <memory>
+#include <utility>
+
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasm_test_framework.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
-class MemoryAccessTest : public ::testing::Test {
+class MemoryAccessTest : public ::testing::Test, public WasmTestFramework {
 protected:
   void SetUp() override
   {
@@ -21,9 +24,19 @@ protected:
     // this wasm just invokes an external call.  We're just reusing it here.
     contract.wasmi_contract() =
         test::load_wasm_from_file("test_set_memory.wasm");
+    make_syscall_handler(contract);
+    auto deployed_contract_hash = DeployedContractHash{
+        .hash = sha256(contract),
+        .contract_size =
+            static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+        .contract_type = ContractType::kWasmi,
+    };
     WasmiContext context;
-    runtime_ =
-        context.make_new_runtime(contract, sha256(contract), nullptr, true);
+    auto runtime_res = context.make_new_runtime(deployed_contract_hash,
+                                                syscall_handler_.get(), true);
+    ASSERT_TRUE(runtime_res.has_value());
+    runtime_ = std::move(runtime_res.value());
+
     ASSERT_TRUE(!!runtime_);
   }
 

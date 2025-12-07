@@ -28,19 +28,39 @@ NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
   return it->second(syscall_handler, runtime);
 }
 
-std::unique_ptr<Runtime>
-NativeContext::make_new_runtime(Contract const &contract,
-                                SHA256Hash const & /*unused*/,
-                                SystemCallHandler *syscall_handler,
-                                bool /*unused*/)
+SystemStatus<std::unique_ptr<Runtime>>
+NativeContext::make_new_runtime(
+    DeployedContractHash const &deployed_contract_hash,
+    SystemCallHandler *syscall_handler, bool /*unused*/)
 {
-  if (contract.contract_type() != ContractType::kNative) {
-    warn("Attempt made to access a non-native contract from NativeContext: {}",
-         contract.contract_type());
-    return nullptr;
+  if (deployed_contract_hash.contract_type != ContractType::kNative) {
+    error("Unrecoverable: Attempt made to access a non-native contract from "
+          "NativeContext: {}",
+          deployed_contract_hash.contract_type);
+    return SystemError{SystemErrorCode::kUnrecoverable};
+  }
+  assert(syscall_handler != nullptr);
+
+  auto contract =
+      syscall_handler->resolve_contract(deployed_contract_hash.hash);
+  if (!contract.has_value()) {
+    return contract.error();
+  }
+  if (contract.value() == nullptr) {
+    error("Unrecoverable: Contract lookup failed: {}",
+          deployed_contract_hash.hash);
+    return SystemError(SystemErrorCode::kUnrecoverable);
   }
 
-  auto host_index = contract.native_contract_id();
+  if (contract.value()->contract_type() !=
+      deployed_contract_hash.contract_type) {
+    error("Unrecoverable: Mismatch in contract type: {} != {}",
+          contract.value()->contract_type(),
+          deployed_contract_hash.contract_type);
+    return SystemError{SystemErrorCode::kUnrecoverable};
+  }
+
+  auto host_index = contract.value()->native_contract_id();
 
   auto it = contracts_.find(host_index);
   if (it == contracts_.end()) {

@@ -24,7 +24,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/transaction_stats.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_delta_flags.hh"
@@ -213,6 +212,12 @@ public:
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
+  // == General access methods ==
+  //
+  // returns nullptr if the contract does not exist
+  SystemStatus<std::shared_ptr<const Contract>>
+  resolve_contract(SHA256Hash const &hash) const;
+
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
@@ -255,10 +260,6 @@ private:
   // not rolled back by a revert).
   SystemStatus<std::unique_ptr<Runtime>>
   resolve_runtime(ContractAddress const &addr);
-
-  // returns nullptr if the contract does not exist
-  SystemStatus<std::shared_ptr<const Contract>>
-  resolve_contract(SHA256Hash const &hash) const;
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
