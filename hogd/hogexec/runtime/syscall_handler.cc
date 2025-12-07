@@ -453,19 +453,6 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     return nullptr;
   }
 
-  auto contract_res = resolve_contract(deployed_hash->hash);
-  if (!contract_res.has_value()) {
-    // handles SystemErrors in the lookup of the contract
-    return contract_res.error();
-  }
-
-  // It should not be possible for a contract to be deployed but for it not to
-  // exist.
-  if (contract_res.value() == nullptr) {
-    error("Unrecoverable: unable to recover a deployed contract for {}",
-          x23::show(*deployed_hash));
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
-  }
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
   return runtime_context_->make_new_runtime(*deployed_hash, this, false);

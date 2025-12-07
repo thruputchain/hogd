@@ -42,16 +42,16 @@ WasmiContext::make_new_runtime(
 
   auto contract =
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
-  if (!contract.has_value()) {
+  if (!contract.has_value()) [[unlikely]] {
     return contract.error();
   }
-  if (contract.value() == nullptr) {
+  if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
           deployed_contract_hash.hash);
     return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
-  if (contract.value()->contract_type() != ContractType::kWasmi) {
+  if (contract.value()->contract_type() != ContractType::kWasmi) [[unlikely]] {
     error("Unrecoverable: Attempt made to access a non-wasmi contract from "
           "WasmiContext: {}",
           contract.value()->contract_type());
