@@ -464,7 +464,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (contract_res.value() == nullptr) {
     error("Unrecoverable: unable to recover a deployed contract for {}",
           x23::show(*deployed_hash));
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.

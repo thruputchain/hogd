@@ -1,3 +1,5 @@
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -14,7 +16,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/rust/wasmi/bindings.h"
 #include "x23/format.h"
 
@@ -47,14 +48,14 @@ WasmiContext::make_new_runtime(
   if (contract.value() == nullptr) {
     error("Unrecoverable: Contract lookup failed: {}",
           deployed_contract_hash.hash);
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
   if (contract.value()->contract_type() != ContractType::kWasmi) {
     error("Unrecoverable: Attempt made to access a non-wasmi contract from "
           "WasmiContext: {}",
           contract.value()->contract_type());
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
   if (do_contract_verify && !verify_contract(*contract.value())) {

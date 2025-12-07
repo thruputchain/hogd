@@ -3,7 +3,7 @@ add_subdirectory(wasmi)
 add_subdirectory(contract_types)
 
 set_source_files_properties(
-    ${CMAKE_CURRENT_SOURCE_DIR}/wasmi/src/ffi_enums.rs
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs
     PROPERTIES GENERATED TRUE)
 
 # Import targets defined in the workspace manifest `Cargo.toml` file
@@ -30,7 +30,7 @@ add_dependencies(
 target_sources(
   unified_lib
   PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/wasmi/src/ffi_enums.rs)
+  ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs)
 
 target_link_libraries(
   unified_lib

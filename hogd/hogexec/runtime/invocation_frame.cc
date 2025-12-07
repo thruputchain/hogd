@@ -163,7 +163,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
-          return SystemError{SystemErrorCode::kValidationFailure};
+          return SystemError{SystemErrorCode::kSystemValidationFailure};
         }
         acq_success = res.value().get();
       }

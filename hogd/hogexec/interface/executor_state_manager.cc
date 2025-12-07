@@ -7,11 +7,11 @@
 #include <utility>
 
 #include "exec_sched.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
-#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "types.hh"
 
@@ -123,13 +123,21 @@ ExecutorStateManager::remove_block(BlockID block_id)
       auto event_error = it->second.context.get().await_event_return();
       if (event_error.has_value()) [[unlikely]] {
         switch (event_error.value()) {
-        case SystemErrorCode::kAbortTransaction:
+        case SystemErrorCode::kSystemAbortTransaction:
           result = ExecResult::ExecResultSystemError;
           break;
-        case SystemErrorCode::kValidationFailure:
+        case SystemErrorCode::kSystemValidationFailure:
           result = ExecResult::ExecResultTxValidationFailure;
           break;
-        case SystemErrorCode::kUnrecoverable:
+        case SystemErrorCode::kSystemUnrecoverable:
+          error("Unrecoverable: Received system unrecoverable error code from "
+                "event server");
+          result = ExecResult::ExecResultUnrecoverable;
+          break;
+        default:
+          error("Unrecoverable: Received unhandled system error code from "
+                "event server: {}",
+                event_error.value());
           result = ExecResult::ExecResultUnrecoverable;
           break;
         }

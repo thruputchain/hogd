@@ -38,7 +38,7 @@ NativeContext::make_new_runtime(
     error("Unrecoverable: Attempt made to access a non-native contract from "
           "NativeContext: {}",
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
   assert(syscall_handler != nullptr);
 
@@ -50,7 +50,7 @@ NativeContext::make_new_runtime(
   if (contract.value() == nullptr) {
     error("Unrecoverable: Contract lookup failed: {}",
           deployed_contract_hash.hash);
-    return SystemError(SystemErrorCode::kUnrecoverable);
+    return SystemError(SystemErrorCode::kSystemUnrecoverable);
   }
 
   if (contract.value()->contract_type() !=
@@ -58,7 +58,7 @@ NativeContext::make_new_runtime(
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::kUnrecoverable};
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
   auto host_index = contract.value()->native_contract_id();

@@ -13,6 +13,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
@@ -90,13 +91,17 @@ to_system_error_code(auto err, auto &&f)
         // This should never happen -- none of the rpc errors that have a return
         // type of void should return this kind of error code.
         assert(false);
-        return SystemError{SystemErrorCode::kUnrecoverable};
+        error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
+              "unexpected rpc: {}",
+              err_code);
+        return SystemError{SystemErrorCode::kSystemUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::kAbortTransaction};
+      return SystemError{SystemErrorCode::kSystemAbortTransaction};
     default:
-      error("Received unhandled error type from RPC: {}", err_code);
-      return SystemError{SystemErrorCode::kUnrecoverable};
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            err_code);
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
   }();
 }
