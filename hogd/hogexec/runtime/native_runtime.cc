@@ -53,8 +53,8 @@ NativeContext::make_new_runtime(
     return SystemError(SystemErrorCode::kSystemUnrecoverable);
   }
 
-  if (contract.value()->contract_type() !=
-      deployed_contract_hash.contract_type) [[unlikely]] {
+  if (contract.value()->contract_type() != deployed_contract_hash.contract_type)
+      [[unlikely]] {
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
