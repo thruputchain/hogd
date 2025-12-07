@@ -50,11 +50,14 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
   switch (contract->contract_type()) {
   case ContractType::kNative:
   case ContractType::kMockTest:
-    return DeployedContractHash{.hash = sha256(*contract), .contract_size = 0};
+    return DeployedContractHash{.hash = sha256(*contract),
+                                .contract_size = 0,
+                                .contract_type = contract->contract_type()};
   case ContractType::kWasmi:
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().wasm.size())};
+                                    contract->wasmi_contract().wasm.size()),
+                                .contract_type = ContractType::kWasmi};
   default:
     throw std::runtime_error(
         "make_deployed_contract_hash: unsupported contract type");
