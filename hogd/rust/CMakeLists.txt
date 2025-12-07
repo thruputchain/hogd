@@ -2,6 +2,8 @@ add_subdirectory(crypto)
 add_subdirectory(wasmi)
 add_subdirectory(contract_types)
 
+include(cmake/check_rust_version.cmake)
+
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs
     PROPERTIES GENERATED TRUE)
