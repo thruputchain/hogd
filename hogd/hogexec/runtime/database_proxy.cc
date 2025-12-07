@@ -91,13 +91,16 @@ to_system_error_code(auto err, auto &&f)
         // This should never happen -- none of the rpc errors that have a return
         // type of void should return this kind of error code.
         assert(false);
-        error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on unexpected rpc: {}", err_code);
+        error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
+              "unexpected rpc: {}",
+              err_code);
         return SystemError{SystemErrorCode::kSystemUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kSystemAbortTransaction};
     default:
-      error("Unrecoverable: Received unhandled error type from RPC: {}", err_code);
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            err_code);
       return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
   }();

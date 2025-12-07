@@ -49,8 +49,10 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
     co_return SystemStatus<void>{
         SystemError{SystemErrorCode::kSystemAbortTransaction}};
   default:
-    error("Unrecoverable: Received unhandled error type from event server: {}", r);
-    co_return SystemStatus<void>{SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    error("Unrecoverable: Received unhandled error type from event server: {}",
+          r);
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemUnrecoverable}};
   }
 }
 
@@ -58,7 +60,8 @@ x23::Async<SystemStatus<void>>
 PerTransactionEventServerProxy::emit_events(TxEventLog const &tx_event_log)
 {
   if (emitted_event_) {
-    co_return SystemStatus<void>{SystemError{SystemErrorCode::kSystemUnrecoverable}};
+    co_return SystemStatus<void>{
+        SystemError{SystemErrorCode::kSystemUnrecoverable}};
   }
   emitted_event_ = true;
   co_return co_await event_server_proxy_.emit_event(block_id_, tx_id_,

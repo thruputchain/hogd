@@ -130,11 +130,14 @@ ExecutorStateManager::remove_block(BlockID block_id)
           result = ExecResult::ExecResultTxValidationFailure;
           break;
         case SystemErrorCode::kSystemUnrecoverable:
-          error("Unrecoverable: Received system unrecoverable error code from event server");
+          error("Unrecoverable: Received system unrecoverable error code from "
+                "event server");
           result = ExecResult::ExecResultUnrecoverable;
           break;
         default:
-          error("Unrecoverable: Received unhandled system error code from event server: {}", event_error.value());
+          error("Unrecoverable: Received unhandled system error code from "
+                "event server: {}",
+                event_error.value());
           result = ExecResult::ExecResultUnrecoverable;
           break;
         }

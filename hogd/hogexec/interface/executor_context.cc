@@ -178,7 +178,8 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
-    assert(commit_res.error().code() != SystemErrorCode::kSystemValidationFailure);
+    assert(commit_res.error().code() !=
+           SystemErrorCode::kSystemValidationFailure);
     return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
@@ -222,7 +223,8 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
-    assert(commit_res.error().code() != SystemErrorCode::kSystemValidationFailure);
+    assert(commit_res.error().code() !=
+           SystemErrorCode::kSystemValidationFailure);
     return make_exec_result(commit_res.error().code());
   }
 
