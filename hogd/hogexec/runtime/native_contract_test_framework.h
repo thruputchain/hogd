@@ -490,7 +490,8 @@ public:
     }
 
     return DeployedContractHash{.hash = contract_hash,
-                                .contract_size = contract_size};
+                                .contract_size = contract_size,
+                                .contract_type = contract->contract_type()};
   }
 
   std::optional<TxEventLog> get_tx_event_log(EphemeralTxIdentifier const &tx_id)

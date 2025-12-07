@@ -5,10 +5,11 @@
 #include <unordered_map>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "types.hh"
+#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 
@@ -21,10 +22,10 @@ public:
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
           contexts);
 
-  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
-                                            SHA256Hash const &hash,
-                                            SystemCallHandler *syscall_handler,
-                                            bool do_contract_verify) override;
+  SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
+                   SystemCallHandler *syscall_handler,
+                   bool do_contract_verify) override;
 
   bool verify_contract(Contract const &contract) const override;
 
