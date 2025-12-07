@@ -184,9 +184,12 @@ add_subdirectory(x23)
 include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
 # Enable Corrosion
+# The rust toolchain must be set FIRST!
+set(Rust_TOOLCHAIN "1.90.0" CACHE STRING "Rust toolchain to use")
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
+message(STATUS "Rust version: ${Rust_VERSION}")
 
 # Enable model-checker
 add_subdirectory(external/model-checker)
