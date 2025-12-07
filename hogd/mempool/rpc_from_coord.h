@@ -79,10 +79,10 @@ public:
   schedulercoord_intro_coord(CoordCard card)
   {
     info("got {}, expected {}", card.protocol.c_str(), version::kHogdProtocol);
-    // if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
-    //   co_return CoordinatorRegistrationOutcome::
-    //       CoordinatorRegistrationInvalidProtocol;
-    // }
+    if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationInvalidProtocol;
+    }
     Registration::registration().register_coordinator(card);
     co_await finish_init();
 
