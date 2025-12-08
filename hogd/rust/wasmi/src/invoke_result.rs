@@ -28,9 +28,7 @@ impl WasmiInvokeResult {
             wasmi::core::TrapCode::OutOfFuel => {
                 Self::error(InvokeErrorCode::kInvokeOutOfGas)
             }
-            _ => {
-                Self::error(InvokeErrorCode::kInvokeDeterministic)
-            }
+            _ => Self::error(InvokeErrorCode::kInvokeDeterministic),
         }
     }
 }

@@ -4,10 +4,12 @@ use wasmi::{
 
 use core::ffi::c_void;
 use core::slice;
-use core::str::Utf8Error;
+
+use common::string_from_parts;
 
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -87,11 +89,6 @@ struct BorrowBypass {
 
 unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
-
-fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
-    let slice = unsafe { slice::from_raw_parts(bytes, len as usize) };
-    std::str::from_utf8(slice).map(|s| s.to_owned())
-}
 
 pub fn handle_trampoline_error(
     result: common::TrampolineResult,
