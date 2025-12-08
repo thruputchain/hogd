@@ -10,7 +10,6 @@ use common::string_from_parts;
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 
-
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
 // This structure internally (appears to be) threadsafe.
