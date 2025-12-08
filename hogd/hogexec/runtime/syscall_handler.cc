@@ -647,6 +647,10 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
     return std::as_bytes(std::span(bytestring_item->bytestring_));
   }
 
+  if (item_view->get<DeletedItem>()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+  }
+
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
@@ -720,6 +724,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     }
     return {std::make_pair(snapshot_value.value()->nnint(),
                            nnint_item->add_value_)};
+  }
+
+  if (item_view->get<DeletedItem>()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
