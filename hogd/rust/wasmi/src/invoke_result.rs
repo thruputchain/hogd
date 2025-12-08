@@ -26,10 +26,10 @@ impl WasmiInvokeResult {
         debug_log!(eprintln!("Wasmi trap code: {code:?}"));
         match code {
             wasmi::core::TrapCode::OutOfFuel => {
-                WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas)
+                Self::error(InvokeErrorCode::kInvokeOutOfGas)
             }
             _ => {
-                WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic)
+                Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
         }
     }
