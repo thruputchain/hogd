@@ -45,6 +45,8 @@ protected:
   void SetUp() override {}
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 {
   // A native contract with the following methods:
@@ -565,6 +567,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   auto verify_res = verify_handler.root_invoke();
   ASSERT_TRUE(verify_res.is_root_success());
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DeleteRecreateTest,
                          ::testing::Values(TestDB::kMockInMemory,
