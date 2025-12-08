@@ -2,7 +2,6 @@ name = "event_bench_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_bench_server"
-host = ["hog11"]
 script = """
 
 set -x
@@ -27,14 +26,17 @@ echo 'run bench server'
 ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
 
 """
+
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
+[jobs.host]
+bench_1 = "hog11"
+
 
 [[jobs]]
 name = "{{ .hog_schedule }}_metrics"
-host = ["hog10"]
 script = """
 
 set -x
@@ -70,6 +72,10 @@ echo 'shut down bench server'
 ./release/hogd/hogexec/bench/control_cli hog11 11111 shutdown
 
 """
+
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+
+[jobs.host]
+metrics_1 = "hog10"

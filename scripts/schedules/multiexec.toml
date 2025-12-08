@@ -2,7 +2,6 @@ name = "multiexec_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_bench_servers"
-host = ["hog6", "hog7", "hog8", "hog11", "hog1"]
 script = """
 
 set -x
@@ -29,14 +28,22 @@ echo 'run bench server'
 ./release/hogd/hogexec/bench/control_server -p 11111 -w ci_work_dir/
 
 """
+
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 
+[jobs.host]
+bench_1 = "hog6"
+bench_2 = "hog7"
+bench_3 = "hog8"
+bench_4 = "hog11"
+bench_5 = "hog1"
+
+
 [[jobs]]
 name = "{{ .hog_schedule }}_metrics"
-host = ["hog10"]
 script = """
 
 set -x
@@ -83,7 +90,11 @@ echo 'cleanup control servers'
 ./release/hogd/hogexec/bench/control_cli hog1 11111 shutdown
 
 """
+
 [jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+
+[jobs.host]
+metrics_1 = "hog10"
