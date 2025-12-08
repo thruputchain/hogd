@@ -4,7 +4,7 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     DEPENDS 
       ${CMAKE_CURRENT_SOURCE_DIR}/src/context.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/external_call.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/error.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/module_cache.rs

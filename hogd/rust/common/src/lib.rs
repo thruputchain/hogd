@@ -2,6 +2,9 @@
 mod ffi_enums;
 pub use crate::ffi_enums::*;
 
+pub mod trampoline_bindings;
+pub use trampoline_bindings::*;
+
 impl From<SystemErrorCode> for HostFnErrorCode {
     fn from(error_code: SystemErrorCode) -> Self {
         match error_code {
