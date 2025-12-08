@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 
 pub mod context;
-mod external_call;
+mod error;
 pub mod invoke_result;
 pub mod module_cache;
 pub mod runtime;

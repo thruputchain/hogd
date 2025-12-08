@@ -3,7 +3,7 @@ use std::slice;
 use wasmi::{Instance, Module, Store};
 
 use crate::context::WasmiContext;
-use crate::external_call;
+use crate::error::TrampolineError;
 use crate::invoke_result::WasmiInvokeResult;
 use common::InvokeErrorCode;
 
@@ -30,19 +30,6 @@ pub struct WasmiRuntime {
 }
 
 use crate::debug_log;
-
-fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
-    // all of the wasmi trap codes, in version 0.36,
-    // are raised deterministically.
-    // For now, at least, we handle all as deterministic errors.
-    debug_log!(eprintln!("Wasmi trap code: {code:?}"));
-    match code {
-        wasmi::core::TrapCode::OutOfFuel => {
-            WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas)
-        }
-        _ => WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic),
-    }
-}
 
 // assert that the memory is exported and starts at at most 1 page
 fn check_memory_limit(module: &Module) -> bool {
@@ -143,22 +130,21 @@ impl WasmiRuntime {
             Ok(_) => WasmiInvokeResult::success(),
             Err(err) => {
                 if let Some(trap_code) = err.as_trap_code() {
-                    return handle_trap_code(trap_code);
+                    return WasmiInvokeResult::from_wasmi_trap_code(trap_code);
                 }
-                err.downcast_ref::<external_call::TrampolineError>()
-                    .map_or_else(
-                        || {
-                            debug_log!(eprintln!(
-                                "Unknown error from func.call: {err:?}"
-                            ));
-                            WasmiInvokeResult::error(
-                                InvokeErrorCode::kInvokeUnrecoverable,
-                            )
-                        },
-                        |trampoline_error| {
-                            trampoline_error.to_wasmi_invoke_result()
-                        },
-                    )
+                err.downcast_ref::<TrampolineError>().map_or_else(
+                    || {
+                        debug_log!(eprintln!(
+                            "Unknown error from func.call: {err:?}"
+                        ));
+                        WasmiInvokeResult::error(
+                            InvokeErrorCode::kInvokeUnrecoverable,
+                        )
+                    },
+                    |trampoline_error| {
+                        trampoline_error.to_wasmi_invoke_result()
+                    },
+                )
             }
         }
     }
