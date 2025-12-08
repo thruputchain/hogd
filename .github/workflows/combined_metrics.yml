@@ -31,6 +31,7 @@ jobs:
                       ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
                       ${{ secrets.HOGD_TO_PROTOCOL_GO }}
                       ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+                      ${{ secrets.HOGD_TO_LIB_GO_KEY }}
             - uses: actions/checkout@v4
             - name: Run hog schedule
               run: |
