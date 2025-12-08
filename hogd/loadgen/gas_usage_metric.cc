@@ -32,14 +32,15 @@ run_gas_usage_metric(uint32_t num_accounts)
       .num_accounts = num_accounts,
   });
 
-  // Generate experiment (creates genesis block and init txs)
+  // Generate experiment (creates genesis configuration and init txs)
   auto init_result = exp.generate_experiment();
   if (!init_result.has_value()) {
     throw std::runtime_error("Failed to generate ERC20 experiment");
   }
 
-  // Run genesis block initialization
-  framework.run_genesis_initialization(init_result.value().genesis_block);
+  // Run genesis configuration initialization
+  framework.run_genesis_initialization(
+      init_result.value().genesis_configuration);
 
   // Run initialization transactions
   for (auto const &init_block : init_result.value().initialization_txs) {

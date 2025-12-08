@@ -43,7 +43,7 @@ public:
 
   const StorageCostModel cost_model_;
 
-  bool initialize_genesis_block(GenesisBlock const &config);
+  bool initialize_genesis_configuration(GenesisConfiguration const &config);
 
 private:
   // One block.

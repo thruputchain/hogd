@@ -14,7 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -201,7 +201,8 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
 }
 
 bool
-BlockManager::initialize_genesis_block(GenesisBlock const &config)
+BlockManager::initialize_genesis_configuration(
+    GenesisConfiguration const &config)
 {
   std::lock_guard lock(mtx_);
   if (initialized_genesis_) {
@@ -209,14 +210,15 @@ BlockManager::initialize_genesis_block(GenesisBlock const &config)
   }
   initialized_genesis_ = true;
 
-  GenesisBlockLoader loader(config);
+  GenesisConfigurationLoader loader(config);
 
-  loader.load_genesis_block(
+  loader.load_genesis_configuration(
       [&](StorageKey const &key, int128_t value) -> int128_t {
         auto item = std::make_shared<StorageItemWrapper>(value, &cost_model_);
         base_database_->write_item(
-            AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
-                          .key = key},
+            AddressAndKey{
+                .address = GenesisConfigurationLoader::kDeployContractAddress,
+                .key = key},
             item);
         return item->storage_cost();
       },

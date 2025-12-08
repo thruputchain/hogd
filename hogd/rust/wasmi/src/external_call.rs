@@ -9,8 +9,8 @@ use core::fmt;
 use wasmi::core::HostError;
 use wasmi::Error;
 
-use crate::ffi_enums::{HostFnErrorCode, InvokeErrorCode};
 use crate::invoke_result::WasmiInvokeResult;
+use common::{HostFnErrorCode, InvokeErrorCode};
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
@@ -55,37 +55,15 @@ impl HostError for TrampolineError {}
 
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
-    match result.panic {
-        x if x == HostFnErrorCode::kHostNoneOrRecoverable as i32 => {
-            Ok(result.result)
-        }
-        x if x == HostFnErrorCode::kHostOutOfGas as i32 => {
-            Err(Error::host(TrampolineError {
-                error: HostFnErrorCode::kHostOutOfGas,
-            }))
-        }
-        x if x == HostFnErrorCode::kHostReturn as i32 => {
-            Err(Error::host(TrampolineError {
-                error: HostFnErrorCode::kHostReturn,
-            }))
-        }
-        x if x == HostFnErrorCode::kHostExit as i32 => {
-            Err(Error::host(TrampolineError {
-                error: HostFnErrorCode::kHostExit,
-            }))
-        }
-        x if x == HostFnErrorCode::kHostValidationFailure as i32 => {
-            Err(Error::host(TrampolineError {
-                error: HostFnErrorCode::kHostValidationFailure,
-            }))
-        }
-        x if x == HostFnErrorCode::kHostAbortTransaction as i32 => {
-            Err(Error::host(TrampolineError {
-                error: HostFnErrorCode::kHostAbortTransaction,
-            }))
-        }
-        _ => Err(Error::host(TrampolineError {
+    let error = result.panic.try_into();
+    if error.is_err() {
+        return Err(Error::host(TrampolineError {
             error: HostFnErrorCode::kHostUnrecoverable,
-        })),
+        }));
+    }
+    let error = error.unwrap();
+    match error {
+        HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
+        _ => Err(Error::host(TrampolineError { error })),
     }
 }

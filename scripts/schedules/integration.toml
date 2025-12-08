@@ -4,7 +4,6 @@ name = "integration_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_loadgen"
-host = ["hog7"]
 script = """
 
 set -x
@@ -44,6 +43,11 @@ hog_signal loadgen_is_up
 hog_wait done
 
 """
+
+[jobs.host]
+1 = "hog7"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -52,7 +56,6 @@ GIT_BRANCH = "{{ .git_branch }}"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_coordinator_loadgen"
-host = ["hog8"]
 script = """
 
 set -x
@@ -79,7 +82,7 @@ echo 'start coordinator_loadgen'
 METRIC="integration" \
 LABEL="1v" \
 HOST="${HOG_HOST}" \
-NODE="{{ .hog_host_index_plus1 }}-of-{{ .hog_host_count }}" \
+NODE="{{ .hog_host_key }}-of-{{ .hog_host_count }}" \
 HOST_JOBS_DIR="./scripts/schedules/host_jobs" \
 ./groundhog-go/chuckd/scripts/schedules/blue/launch_with_metrics.sh ./chuckd.dev ./scpd.dev
 
@@ -89,6 +92,11 @@ hog_signal done
 after = """
 killall scpd.dev chuckd.dev || true
 """
+
+[jobs.host]
+1 = "hog8"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -97,7 +105,6 @@ GIT_BRANCH = "{{ .git_branch }}"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_scheduler"
-host = ["hog9"]
 script = """
 
 set -x
@@ -141,6 +148,11 @@ hog_signal mempool_is_up
 hog_wait done
 
 """
+
+[jobs.host]
+1 = "hog9"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -148,8 +160,7 @@ GIT_BRANCH = "{{ .git_branch }}"
 # db
 
 [[jobs]]
-name = "{{ .hog_schedule }}_db_{{ .hog_host_index }}"
-host = ["hog6"]
+name = "{{ .hog_schedule }}_db_{{ .hog_host_key }}"
 script = """
 
 set -x
@@ -191,6 +202,11 @@ hog_signal db_is_up
 hog_wait done
 
 """
+
+[jobs.host]
+1 = "hog6"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -198,8 +214,7 @@ GIT_BRANCH = "{{ .git_branch }}"
 # exec
 
 [[jobs]]
-name = "{{ .hog_schedule }}_exec_{{ .hog_host_index }}"
-host = ["hog1", "hog2", "hog3"]
+name = "{{ .hog_schedule }}_exec_{{ .hog_host_key }}"
 script = """
 
 set -x
@@ -229,11 +244,18 @@ server_pid=$!
 # Wait for hogexec (port 8090).
 ./scripts/wait-port localhost 8090
 
-hog_signal exec_is_up/{{ .hog_host_index }}
+hog_signal exec_is_up/{{ .hog_host_key }}
 
 hog_wait done
 
 """
+
+[jobs.host]
+1 = "hog1"
+2 = "hog2"
+3 = "hog3"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
@@ -242,7 +264,6 @@ GIT_BRANCH = "{{ .git_branch }}"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_event"
-host = ["hog5"]
 script = """
 
 set -x
@@ -282,6 +303,11 @@ server_pid=$!
 hog_signal event_is_up
 
 """
+
+[jobs.host]
+1 = "hog5"
+
+[jobs.env]
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"

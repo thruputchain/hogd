@@ -305,7 +305,7 @@ HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
 
   ExpectedDeployment out;
   out.error(RPCError::kRPCNone);
-  out.deployed_hash() = hash->hash;
+  out.deployed_hash() = *hash;
   return out;
 }
 

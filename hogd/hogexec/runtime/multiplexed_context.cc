@@ -5,10 +5,11 @@
 #include <unordered_map>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "types.hh"
+#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 
@@ -18,17 +19,17 @@ MultiplexedContext::MultiplexedContext(
   : contexts_(std::move(contexts))
 {}
 
-std::unique_ptr<Runtime>
-MultiplexedContext::make_new_runtime(Contract const &contract,
-                                     SHA256Hash const &hash,
-                                     SystemCallHandler *syscall_handler,
-                                     bool do_contract_verify)
+SystemStatus<std::unique_ptr<Runtime>>
+MultiplexedContext::make_new_runtime(
+    DeployedContractHash const &deployed_contract_hash,
+    SystemCallHandler *syscall_handler, bool do_contract_verify)
 {
-  auto it = contexts_.find(contract.contract_type());
+  auto it = contexts_.find(deployed_contract_hash.contract_type);
   if (it == contexts_.end()) {
     return nullptr;
   }
-  return it->second.first->make_new_runtime(contract, hash, syscall_handler,
+  return it->second.first->make_new_runtime(deployed_contract_hash,
+                                            syscall_handler,
                                             do_contract_verify);
 }
 

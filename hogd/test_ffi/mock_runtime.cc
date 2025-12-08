@@ -4,14 +4,16 @@
 #include <memory>
 #include <string_view>
 
+#include "account.hh"
 #include "contract.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -35,14 +37,32 @@ MockRuntime::invoke_internal(std::string_view method_name)
   return res;
 }
 
-std::unique_ptr<Runtime>
-MockRuntimeContext::make_new_runtime(Contract const &contract,
-                                     SHA256Hash const &hash,
-                                     SystemCallHandler *syscall_handler,
-                                     bool do_contract_verify)
+SystemStatus<std::unique_ptr<Runtime>>
+MockRuntimeContext::make_new_runtime(
+    DeployedContractHash const &deployed_contract_hash,
+    SystemCallHandler *syscall_handler, bool do_contract_verify)
 {
-  if (contract.contract_type() == ContractType::kMockTest) {
-    int32_t mock_contract = contract.mock_contract_id();
+  if (deployed_contract_hash.contract_type == ContractType::kMockTest) {
+
+    auto contract =
+        syscall_handler->resolve_contract(deployed_contract_hash.hash);
+    if (!contract.has_value()) {
+      return contract.error();
+    }
+    if (contract.value() == nullptr) {
+      error("Unrecoverable: Contract lookup failed: {}",
+            deployed_contract_hash.hash);
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    }
+
+    if (contract.value()->contract_type() != ContractType::kMockTest) {
+      error("Unrecoverable: Attempt made to access a non-mock test contract "
+            "from MockRuntimeContext: {}",
+            contract.value()->contract_type());
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    }
+
+    int32_t mock_contract = contract.value()->mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
       return std::make_unique<MockRuntime>(it->second);
@@ -51,8 +71,8 @@ MockRuntimeContext::make_new_runtime(Contract const &contract,
   }
   // otherwise some other contract type; returns whatever the base context
   // wants to do with the contract.
-  return base_context_->make_new_runtime(contract, hash, syscall_handler,
-                                         do_contract_verify);
+  return base_context_->make_new_runtime(deployed_contract_hash,
+                                         syscall_handler, do_contract_verify);
 }
 
 bool

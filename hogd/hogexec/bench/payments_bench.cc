@@ -58,8 +58,9 @@ struct BenchmarkState : public CommonBenchState {
       throw std::runtime_error("Failed to generate erc20 payments experiment");
     }
 
-    auto genesis_block = result.value().genesis_block;
-    run_genesis_block(genesis_block, result.value().initialization_txs);
+    auto genesis_configuration = result.value().genesis_configuration;
+    run_genesis_configuration(genesis_configuration,
+                              result.value().initialization_txs);
 
     auto work_txs = exp.extend_experiment(num_txs, 1'000'000);
     if (!work_txs.has_value()) {

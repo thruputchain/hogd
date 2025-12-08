@@ -3,7 +3,8 @@ members = [
     "crypto",
     "wasmi",
     "unified",
-    "contract_types"
+    "contract_types",
+    "common"
 ]
 resolver = "2"
 

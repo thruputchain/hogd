@@ -2,7 +2,6 @@ name = "cpp_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
-host = ["hog8"]
 script = """
 
 set -x
@@ -34,3 +33,6 @@ fi
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
+
+[jobs.host]
+cpp_1 = "hog8"

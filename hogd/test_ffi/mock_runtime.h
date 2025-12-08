@@ -8,13 +8,13 @@
 #include <string_view>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -39,10 +39,10 @@ public:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
-  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
-                                            SHA256Hash const &hash,
-                                            SystemCallHandler *syscall_handler,
-                                            bool do_contract_verify) override;
+  SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
+                   SystemCallHandler *syscall_handler,
+                   bool do_contract_verify) override;
 
   bool verify_contract(Contract const & /*unused*/) const override
   {

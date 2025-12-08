@@ -1,3 +1,5 @@
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+
 #include <cassert>
 #include <cstddef>
 #include <memory>
@@ -5,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -12,9 +15,8 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmi/bindings.h"
-#include "types.hh"
 #include "x23/format.h"
 
 namespace hogd {
@@ -31,26 +33,39 @@ WasmiContext::~WasmiContext()
   }
 }
 
-std::unique_ptr<Runtime>
-WasmiContext::make_new_runtime(Contract const &contract, SHA256Hash const &hash,
-                               SystemCallHandler *syscall_handler,
-                               bool do_contract_verify)
+SystemStatus<std::unique_ptr<Runtime>>
+WasmiContext::make_new_runtime(
+    DeployedContractHash const &deployed_contract_hash,
+    SystemCallHandler *syscall_handler, bool do_contract_verify)
 {
-  if (do_contract_verify && !verify_contract(contract)) {
+  auto host_call_context = make_new_host_call_context(syscall_handler);
+
+  auto contract =
+      syscall_handler->resolve_contract(deployed_contract_hash.hash);
+  if (!contract.has_value()) [[unlikely]] {
+    return contract.error();
+  }
+  if (contract.value() == nullptr) [[unlikely]] {
+    error("Unrecoverable: Contract lookup failed: {}",
+          deployed_contract_hash.hash);
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+
+  if (contract.value()->contract_type() != ContractType::kWasmi) [[unlikely]] {
+    error("Unrecoverable: Attempt made to access a non-wasmi contract from "
+          "WasmiContext: {}",
+          contract.value()->contract_type());
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+
+  if (do_contract_verify && !verify_contract(*contract.value())) {
     return {};
   }
 
-  auto host_call_context = make_new_host_call_context(syscall_handler);
-
-  if (contract.contract_type() != ContractType::kWasmi) {
-    warn("Attempt made to access a non-wasmi contract from WasmiContext: {}",
-         contract.contract_type());
-    return nullptr;
-  }
-
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.wasmi_contract().wasm.data(),
-                        contract.wasmi_contract().wasm.size(), hash.data(),
+      new_wasmi_runtime(contract.value()->wasmi_contract().wasm.data(),
+                        contract.value()->wasmi_contract().wasm.size(),
+                        deployed_contract_hash.hash.data(),
                         host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};

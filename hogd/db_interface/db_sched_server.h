@@ -8,7 +8,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -61,8 +61,8 @@ public:
   x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id);
   static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id);
 
-  x23::Async<DbSchedResult>
-  dbsched_load_genesis_block(GenesisBlock const &genesis_block);
+  x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
+      GenesisConfiguration const &genesis_configuration);
 
   void shut_down()
   {

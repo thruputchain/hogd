@@ -120,11 +120,11 @@ public:
     co_return;
   }
 
-  x23::Async<DbSchedResult>
-  schedcoord_load_genesis_block(GenesisBlock genesis_block)
+  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
+      const GenesisConfiguration &genesis_configuration)
   {
-    auto ret =
-        co_await db_sched_client_->dbsched_load_genesis_block(genesis_block);
+    auto ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
+        genesis_configuration);
     last_committed_block_ = {.height = 1,
                              .hash = sha256(genesis_block),
                              .id = generate_block_id()};

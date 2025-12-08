@@ -36,7 +36,7 @@ public:
   // and thus any siblings are deactivated.
   std::shared_ptr<const StorageItemWrapper>
   get_post_block_storage_item(AddressAndKey const &addrkey);
-  std::optional<SHA256Hash>
+  std::optional<DeployedContractHash>
   get_post_block_deployment(ContractAddress const &addr);
   std::shared_ptr<const Contract>
   get_post_block_contract(SHA256Hash const &hash);

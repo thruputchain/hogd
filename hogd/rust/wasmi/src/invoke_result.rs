@@ -1,4 +1,4 @@
-use crate::ffi_enums::InvokeErrorCode;
+use common::InvokeErrorCode;
 
 #[repr(C)]
 pub struct WasmiInvokeResult {

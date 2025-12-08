@@ -5,6 +5,7 @@
 #include <utility>
 #include <variant>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -289,14 +290,14 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
-    return SystemError{SystemErrorCode::kValidationFailure};
+    return SystemError{SystemErrorCode::kSystemValidationFailure};
   }
   if (bit_res->get()) {
     auto res =
         validation_data.consume_queue_entry_observation(base_item_.addrkey(),
                                                         index);
     if (!res.has_value()) {
-      return SystemError{SystemErrorCode::kValidationFailure};
+      return SystemError{SystemErrorCode::kSystemValidationFailure};
     }
     return res.value().get();
   }

@@ -17,7 +17,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/hogexec/bench/mock_scheduler.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -84,10 +84,11 @@ public:
 
   void advance_block();
 
-  void run_genesis_block(GenesisBlockBuilder const &genesis_builder);
-  void
-  run_genesis_block(GenesisBlock const &genesis_block,
-                    x23::XdrVec<InitializationBlock> const &initialization_txs);
+  void run_genesis_configuration(
+      GenesisConfigurationBuilder const &genesis_configuration_builder);
+  void run_genesis_configuration(
+      GenesisConfiguration const &genesis_configuration,
+      x23::XdrVec<InitializationBlock> const &initialization_txs);
 
 private:
   void connect_coord()
@@ -228,25 +229,29 @@ CommonBenchState::advance_block()
 
 // leaves the benchmark in a state where it's ready to execute transactions
 inline void
-CommonBenchState::run_genesis_block(GenesisBlockBuilder const &genesis_builder)
+CommonBenchState::run_genesis_configuration(
+    GenesisConfigurationBuilder const &genesis_configuration_builder)
 {
-  auto unfurl_txs = genesis_builder.make_unfurl_genesis_transactions();
+  auto unfurl_txs =
+      genesis_configuration_builder.make_unfurl_genesis_transactions();
   InitializationBlock initialization_txs = {unfurl_txs.begin(),
                                             unfurl_txs.end()};
-  run_genesis_block(genesis_builder.build(), {initialization_txs});
+  run_genesis_configuration(genesis_configuration_builder.build(),
+                            {initialization_txs});
 }
 
 inline void
-CommonBenchState::run_genesis_block(
-    GenesisBlock const &genesis_block,
+CommonBenchState::run_genesis_configuration(
+    GenesisConfiguration const &genesis_configuration,
     x23::XdrVec<InitializationBlock> const &initialization_txs)
 {
 
   assert(block_number_ == 0);
   {
-    auto r = coord_client_->dbsched_load_genesis_block(genesis_block);
+    auto r = coord_client_->dbsched_load_genesis_configuration(
+        genesis_configuration);
     if (r != DbSchedResult::DbSchedResultOK) {
-      throw std::runtime_error("Failed to write genesis block");
+      throw std::runtime_error("Failed to write genesis configuration");
     }
   }
 

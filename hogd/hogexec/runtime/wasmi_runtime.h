@@ -5,10 +5,10 @@
 #include <span>
 #include <string_view>
 
+#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -83,10 +83,10 @@ public:
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
 
-  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
-                                            SHA256Hash const &hash,
-                                            SystemCallHandler *syscall_handler,
-                                            bool do_contract_verify) override;
+  SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
+                   SystemCallHandler *syscall_handler,
+                   bool do_contract_verify) override;
 
   bool verify_contract(Contract const &contract) const override;
 

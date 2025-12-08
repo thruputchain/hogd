@@ -26,7 +26,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -258,7 +258,8 @@ sys_getsockname(int sockfd, T &val)
 } // namespace
 
 x23::Async<DbSchedResult>
-HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
+HogDBSchedRpc::dbsched_load_genesis_configuration(
+    GenesisConfiguration genesis_configuration)
 {
   constexpr static BlockID kGenesisBlockID = 0;
   if (ctx_.get_tip().height != 0) {
@@ -267,7 +268,7 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
   }
 
   ctx_.initialize_cost_model(
-      StorageCostModel(genesis_block.storage_cost_model));
+      StorageCostModel(genesis_configuration.storage_cost_model));
   {
     auto r = ctx_.get_db().write_cost_model(ctx_.get_cost_model());
     if (!r.has_value()) {
@@ -291,12 +292,12 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
   // We should abort the entire run of the hog chain to fix if initialization
   // doesn't work.
 
-  GenesisBlockLoader loader(genesis_block);
-  loader.load_genesis_block(
+  GenesisConfigurationLoader loader(genesis_configuration);
+  loader.load_genesis_configuration(
       [&](StorageKey const &key, int128_t value) -> int128_t {
-        auto item_key = make_item_key(
-            AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
-                          .key = key});
+        auto item_key = make_item_key(AddressAndKey{
+            .address = GenesisConfigurationLoader::kDeployContractAddress,
+            .key = key});
         auto r = itx->request_nnint128(item_key, value,
                                        std::to_underlying(
                                            StorageItemRPCFlags::kStorageNone));
@@ -345,13 +346,13 @@ HogDBSchedRpc::dbsched_load_genesis_block(GenesisBlock genesis_block)
   ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
 
   uint128_t initial_hog_token_supply =
-      GenesisBlockLoader::initial_hog_token_supply();
+      GenesisConfigurationLoader::initial_hog_token_supply();
 
   // Initialize the genesis address with scheduler state
   CHECK(
       ctx_.get_db()
           .write_address_average_hog_age(HogAge{
-              .address = GenesisBlockLoader::kDeployContractAddress,
+              .address = GenesisConfigurationLoader::kDeployContractAddress,
               .num_hogs = {to_xdr(initial_hog_token_supply),
                            to_xdr(uint128_t{0}), to_xdr(uint128_t{0})},
               .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},

@@ -60,11 +60,11 @@ ExecResult
 make_exec_result(SystemErrorCode error_code)
 {
   switch (error_code) {
-  case SystemErrorCode::kUnrecoverable:
+  case SystemErrorCode::kSystemUnrecoverable:
     return ExecResult::ExecResultUnrecoverable;
-  case SystemErrorCode::kAbortTransaction:
+  case SystemErrorCode::kSystemAbortTransaction:
     return ExecResult::ExecResultSystemError;
-  case SystemErrorCode::kValidationFailure:
+  case SystemErrorCode::kSystemValidationFailure:
     return ExecResult::ExecResultTxValidationFailure;
   }
   assert(false);
@@ -178,7 +178,8 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
-    assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
+    assert(commit_res.error().code() !=
+           SystemErrorCode::kSystemValidationFailure);
     return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
@@ -222,7 +223,8 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
-    assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
+    assert(commit_res.error().code() !=
+           SystemErrorCode::kSystemValidationFailure);
     return make_exec_result(commit_res.error().code());
   }
 

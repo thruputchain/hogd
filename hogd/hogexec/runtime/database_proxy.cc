@@ -10,8 +10,10 @@
 #include <utility>
 #include <variant>
 
+#include "account.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
@@ -89,13 +91,17 @@ to_system_error_code(auto err, auto &&f)
         // This should never happen -- none of the rpc errors that have a return
         // type of void should return this kind of error code.
         assert(false);
-        return SystemError{SystemErrorCode::kUnrecoverable};
+        error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
+              "unexpected rpc: {}",
+              err_code);
+        return SystemError{SystemErrorCode::kSystemUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
-      return SystemError{SystemErrorCode::kAbortTransaction};
+      return SystemError{SystemErrorCode::kSystemAbortTransaction};
     default:
-      error("Received unhandled error type from RPC: {}", err_code);
-      return SystemError{SystemErrorCode::kUnrecoverable};
+      error("Unrecoverable: Received unhandled error type from RPC: {}",
+            err_code);
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
     }
   }();
 }
@@ -161,12 +167,12 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
   });
 }
 
-SystemStatus<std::optional<SHA256Hash>>
+SystemStatus<std::optional<DeployedContractHash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res = client_.get_deployment(block_id, addr);
-  return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
-    return std::make_optional<SHA256Hash>(std::move(x));
+  return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
+    return std::make_optional<DeployedContractHash>(std::move(x));
   });
 }
 

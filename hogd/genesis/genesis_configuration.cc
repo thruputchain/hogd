@@ -1,4 +1,4 @@
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 
 #include <algorithm>
 #include <array>
@@ -28,8 +28,9 @@
 
 namespace hogd {
 
-GenesisBlockLoader::GenesisBlockLoader(GenesisBlock genesis_block)
-  : genesis_block_(std::move(genesis_block))
+GenesisConfigurationLoader::GenesisConfigurationLoader(
+    GenesisConfiguration genesis_configuration)
+  : genesis_configuration_(std::move(genesis_configuration))
 {}
 
 namespace {
@@ -49,11 +50,14 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
   switch (contract->contract_type()) {
   case ContractType::kNative:
   case ContractType::kMockTest:
-    return DeployedContractHash{.hash = sha256(*contract), .contract_size = 0};
+    return DeployedContractHash{.hash = sha256(*contract),
+                                .contract_size = 0,
+                                .contract_type = contract->contract_type()};
   case ContractType::kWasmi:
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().wasm.size())};
+                                    contract->wasmi_contract().wasm.size()),
+                                .contract_type = ContractType::kWasmi};
   default:
     throw std::runtime_error(
         "make_deployed_contract_hash: unsupported contract type");
@@ -62,13 +66,13 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
 } // namespace
 
 int128_t
-GenesisBlockLoader::initial_hog_token_supply()
+GenesisConfigurationLoader::initial_hog_token_supply()
 {
   return int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
 }
 
 void
-GenesisBlockLoader::load_genesis_block(
+GenesisConfigurationLoader::load_genesis_configuration(
     std::function<int128_t(StorageKey const &, int128_t const &)> const
         &write_storage,
     std::function<void(std::shared_ptr<const Contract> contract)> const
@@ -90,7 +94,7 @@ GenesisBlockLoader::load_genesis_block(
   int128_t total_storage_costs = 0;
 
   // Process each initial configuration entry
-  for (auto const &entry : genesis_block_.initial_config) {
+  for (auto const &entry : genesis_configuration_.initial_config) {
     // Calculate storage key based on the preset contract configuration
     auto storage_key = calculate_storage_key(entry.config);
 
@@ -114,12 +118,13 @@ GenesisBlockLoader::load_genesis_block(
 }
 
 std::vector<SignedTransaction>
-GenesisBlockBuilder::make_unfurl_genesis_transactions() const
+GenesisConfigurationBuilder::make_unfurl_genesis_transactions() const
 {
   std::vector<SignedTransaction> unfurl_transactions;
   using token_claim_client_t =
       ContractTraitClient<initial_token_claim::InitialTokenClaim>;
-  token_claim_client_t client(GenesisBlockLoader::kDeployContractAddress);
+  token_claim_client_t client(
+      GenesisConfigurationLoader::kDeployContractAddress);
   constexpr static GasAmount kClaimGas = 1'000'000'000;
 
   // This nonce is not checked or read during the unfurl transaction.
@@ -145,7 +150,7 @@ GenesisBlockBuilder::make_unfurl_genesis_transactions() const
 }
 
 StorageKey
-GenesisBlockLoader::calculate_storage_key(
+GenesisConfigurationLoader::calculate_storage_key(
     SHA256Hash const &hash, SHA256Hash const &nonce,
     ContractEntrypointID entrypoint, std::span<const std::uint8_t> calldata)
 {
@@ -180,15 +185,16 @@ GenesisBlockLoader::calculate_storage_key(
 }
 
 StorageKey
-GenesisBlockLoader::calculate_storage_key(PresetDeploymentConfig const &config)
+GenesisConfigurationLoader::calculate_storage_key(
+    PresetDeploymentConfig const &config)
 {
   return calculate_storage_key(config.contract_hash, config.initial_nonce,
                                config.entrypoint, config.calldata);
 }
 
 ContractAddress
-GenesisBlockLoader::calculate_deployed_address(SHA256Hash const &contract_hash,
-                                               SHA256Hash const &nonce)
+GenesisConfigurationLoader::calculate_deployed_address(
+    SHA256Hash const &contract_hash, SHA256Hash const &nonce)
 {
   ContractDeploymentHashPreimage preimage{
       .deployer_address = kDeployContractAddress,
@@ -200,7 +206,7 @@ GenesisBlockLoader::calculate_deployed_address(SHA256Hash const &contract_hash,
 }
 
 void
-GenesisBlockBuilder::add_initial_config(
+GenesisConfigurationBuilder::add_initial_config(
     std::shared_ptr<const Contract> const &contract, SHA256Hash const &nonce,
     ContractEntrypointID entrypoint, Calldata calldata, int128_t amount)
 {
@@ -218,18 +224,18 @@ GenesisBlockBuilder::add_initial_config(
   allocated_hogs_ += amount;
 }
 
-GenesisBlock
-GenesisBlockBuilder::build() const
+GenesisConfiguration
+GenesisConfigurationBuilder::build() const
 {
-  GenesisBlock block;
+  GenesisConfiguration genesis_configuration;
   for (auto const &entry : entries_) {
-    block.initial_config.push_back(InitialConfigurationEntry{
+    genesis_configuration.initial_config.push_back(InitialConfigurationEntry{
         .config = entry.config,
         .amount = to_xdr(entry.amount),
     });
   }
 
-  block.storage_cost_model = {
+  genesis_configuration.storage_cost_model = {
       .ext = ExtensionPoint(0),
       .base_data_item_cost = to_xdr(int128_t{12000}),
       .bytestring_cost_per_byte = 10,
@@ -238,10 +244,12 @@ GenesisBlockBuilder::build() const
       .auth_per_key_cost = to_xdr(int128_t{1111}),
   };
 
-  if (allocated_hogs_ > GenesisBlockLoader::initial_hog_token_supply()) {
-    throw std::runtime_error("GenesisBlockBuilder::build: allocated hogs "
-                             "exceeds initial hog token supply");
+  if (allocated_hogs_ >
+      GenesisConfigurationLoader::initial_hog_token_supply()) {
+    throw std::runtime_error(
+        "GenesisConfigurationBuilder::build: allocated hogs "
+        "exceeds initial hog token supply");
   }
-  return block;
+  return genesis_configuration;
 }
 } // namespace hogd

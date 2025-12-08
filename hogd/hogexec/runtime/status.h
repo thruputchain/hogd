@@ -76,32 +76,17 @@ public:
   std::string message(int code) const override;
 };
 
-enum class SystemErrorCode {
-  // Unrecoverable error (e.g. out of memory, or critical logic error).
-  // Only recourse is to abort entire transaction and possibly crash binary.
-  // Signals serious error, which we should investigate.
-  kUnrecoverable,
-  // Nondeterministic error that occurs during normal course of operation.
-  // E.g. a transaction is being executed concurrently with the whole block
-  // getting cancelled.
-  // Only recourse is to abort the entire transaction.
-  kAbortTransaction,
-  // Failure during validation of a transaction.  Signals that the whole
-  // block must be aborted.
-  kValidationFailure,
-};
-
 struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   explicit SystemError(SystemErrorCode err) : EnumError(err) {}
 
   HostFnError to_host_fn_error() const
   {
     switch (code()) {
-    case SystemErrorCode::kUnrecoverable:
+    case SystemErrorCode::kSystemUnrecoverable:
       return HostFnError{HostFnErrorCode::kHostUnrecoverable};
-    case SystemErrorCode::kAbortTransaction:
+    case SystemErrorCode::kSystemAbortTransaction:
       return HostFnError{HostFnErrorCode::kHostAbortTransaction};
-    case SystemErrorCode::kValidationFailure:
+    case SystemErrorCode::kSystemValidationFailure:
       return HostFnError{HostFnErrorCode::kHostValidationFailure};
     }
     assert(false);
@@ -111,11 +96,11 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   InvokeError to_invoke_error() const
   {
     switch (code()) {
-    case SystemErrorCode::kUnrecoverable:
+    case SystemErrorCode::kSystemUnrecoverable:
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
-    case SystemErrorCode::kAbortTransaction:
+    case SystemErrorCode::kSystemAbortTransaction:
       return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    case SystemErrorCode::kValidationFailure:
+    case SystemErrorCode::kSystemValidationFailure:
       return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
     }
     assert(false);

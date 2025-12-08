@@ -2,7 +2,6 @@ name = "sanitizer_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
-host = ["hog7"]
 script = """
 
 set -x
@@ -50,3 +49,6 @@ fi
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+
+[jobs.host]
+bindings_1 = "hog7"

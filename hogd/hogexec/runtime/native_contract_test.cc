@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "account.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -135,11 +136,23 @@ TEST_F(NativeContractTest, BasicInstantiate)
   auto context = make_context();
   auto *context_ptr = context.get();
 
-  SystemCallHandler handler =
-      make_handler(SignedTransaction{}, snapshot, 0, 0, std::move(context));
+  SignedTransaction signed_tx;
+  signed_tx.tx.contracts_to_deploy.push_back(contract);
 
-  auto runtime =
-      context_ptr->make_new_runtime(contract, sha256(contract), &handler, true);
+  SystemCallHandler handler =
+      make_handler(signed_tx, snapshot, 0, 0, std::move(context));
+
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size = 0,
+      .contract_type = ContractType::kNative,
+  };
+
+  auto runtime_res =
+      context_ptr->make_new_runtime(deployed_contract_hash, &handler, true);
+  ASSERT_TRUE(runtime_res.has_value());
+  auto runtime = std::move(runtime_res.value());
+  ASSERT_TRUE(runtime != nullptr);
 
   auto res = runtime->invoke(0, UINT64_MAX);
 
@@ -250,7 +263,11 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(kAddress, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddress,
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 0,
+                           .contract_type = contract.contract_type()});
 
   SystemCallHandler handler = make_handler(
       SignedTransaction{
@@ -332,7 +349,10 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(address, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
   snapshot_server_->impl()->setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
@@ -450,7 +470,10 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   contract.native_contract_id() = 0;
 
   snapshot_server_->impl()->setup_create_contract(contract);
-  snapshot_server_->impl()->setup_create_deployment(address, sha256(contract));
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
   snapshot_server_->impl()->setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 

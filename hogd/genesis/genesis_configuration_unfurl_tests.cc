@@ -15,7 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -27,10 +27,10 @@
 
 namespace hogd {
 
-class GenesisBlockUnfurlTest : public ::testing::TestWithParam<TestDB>,
-                               public NativeContractTestFramework {
+class GenesisConfigurationUnfurlTest : public ::testing::TestWithParam<TestDB>,
+                                       public NativeContractTestFramework {
 public:
-  GenesisBlockUnfurlTest()
+  GenesisConfigurationUnfurlTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
           false)
@@ -55,7 +55,7 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
+TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
@@ -68,17 +68,16 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
   auto caller_nonce = make_nonce(1);
 
   auto expected_fibonacci_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(
-                                                         *fibonacci_contract),
-                                                     fibonacci_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), fibonacci_nonce);
   auto expected_caller_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(*caller_contract),
-                                                     caller_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*caller_contract), caller_nonce);
 
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
   using caller_meta_t = ContractTraitMeta<fibonacci_call::FibonacciCaller>;
 
-  GenesisBlockBuilder builder;
+  GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
                              fibonacci_meta_t::entrypoint<"fibonacci">(),
                              fibonacci_meta_t::make_calldata<"fibonacci">(
@@ -89,12 +88,12 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
                              caller_meta_t::make_calldata<"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
-  auto block = builder.build();
+  auto genesis_configuration = builder.build();
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
 
-  run_genesis_initialization(block);
+  run_genesis_initialization(genesis_configuration);
 
   // run the unfurl transactions
 
@@ -167,7 +166,7 @@ TEST_P(GenesisBlockUnfurlTest, LaunchFibonacciContractAndCaller)
 // Test that the genesis block unfurls correctly both when proposing and
 // validating. This catches an early bug in which contract deployments and
 // creations were not included in the db blocktx workflow
-TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
+TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
@@ -180,17 +179,16 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
   auto caller_nonce = make_nonce(1);
 
   auto expected_fibonacci_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(
-                                                         *fibonacci_contract),
-                                                     fibonacci_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), fibonacci_nonce);
   auto expected_caller_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(*caller_contract),
-                                                     caller_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*caller_contract), caller_nonce);
 
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
   using caller_meta_t = ContractTraitMeta<fibonacci_call::FibonacciCaller>;
 
-  GenesisBlockBuilder builder;
+  GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
                              fibonacci_meta_t::entrypoint<"fibonacci">(),
                              fibonacci_meta_t::make_calldata<"fibonacci">(
@@ -201,12 +199,12 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
                              caller_meta_t::make_calldata<"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
-  auto block = builder.build();
+  auto genesis_configuration = builder.build();
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 2);
 
-  run_genesis_initialization(block);
+  run_genesis_initialization(genesis_configuration);
 
   // run the unfurl transactions
 
@@ -264,17 +262,20 @@ TEST_P(GenesisBlockUnfurlTest, ProposeThenValidateOK)
   }
 }
 
-TEST_P(GenesisBlockUnfurlTest, DoubleLoadError)
+TEST_P(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
-  GenesisBlock genesis_block{};
+  GenesisConfiguration genesis_configuration{};
 
-  auto r = get_coord_client().dbsched_load_genesis_block(genesis_block);
+  auto r = get_coord_client().dbsched_load_genesis_configuration(
+      genesis_configuration);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
-  r = get_coord_client().dbsched_load_genesis_block(genesis_block);
+  r = get_coord_client().dbsched_load_genesis_configuration(
+      genesis_configuration);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 
-TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
+TEST_P(GenesisConfigurationUnfurlTest,
+       AllocateEntireTokenSupplyMultipleContracts)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
@@ -287,17 +288,16 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
   auto caller_nonce = make_nonce(1);
 
   auto expected_fibonacci_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(
-                                                         *fibonacci_contract),
-                                                     fibonacci_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), fibonacci_nonce);
   auto expected_caller_address =
-      GenesisBlockLoader::calculate_deployed_address(sha256(*caller_contract),
-                                                     caller_nonce);
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*caller_contract), caller_nonce);
 
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
   using caller_meta_t = ContractTraitMeta<fibonacci_call::FibonacciCaller>;
 
-  GenesisBlockBuilder builder;
+  GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
                              fibonacci_meta_t::entrypoint<"fibonacci">(),
                              fibonacci_meta_t::make_calldata<"fibonacci">(
@@ -306,7 +306,8 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
   builder.add_initial_config(
       caller_contract, caller_nonce, caller_meta_t::entrypoint<"initialize">(),
       caller_meta_t::make_calldata<"initialize">(expected_fibonacci_address),
-      GenesisBlockLoader::initial_hog_token_supply() - int128_t{1'000'000'000});
+      GenesisConfigurationLoader::initial_hog_token_supply() -
+          int128_t{1'000'000'000});
   auto block = builder.build();
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
@@ -353,7 +354,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyMultipleContracts)
   }
 }
 
-TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
+TEST_P(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 {
   if (GetParam() == TestDB::kMockInMemory) {
     GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
@@ -365,18 +366,18 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 
   using fibonacci_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
 
-  GenesisBlockBuilder builder;
-  builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
-                                 uint32_t{0}),
-                             GenesisBlockLoader::initial_hog_token_supply());
-  auto block = builder.build();
+  GenesisConfigurationBuilder builder;
+  builder.add_initial_config(
+      fibonacci_contract, fibonacci_nonce,
+      fibonacci_meta_t::entrypoint<"fibonacci">(),
+      fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
+      GenesisConfigurationLoader::initial_hog_token_supply());
+  auto genesis_configuration = builder.build();
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 1);
 
-  run_genesis_initialization(block);
+  run_genesis_initialization(genesis_configuration);
 
   // run the unfurl transactions
 
@@ -397,7 +398,7 @@ TEST_P(GenesisBlockUnfurlTest, AllocateEntireTokenSupplyOneAddress)
   EXPECT_TRUE(lookup_contract_from_db(sha256(*fibonacci_contract)));
 }
 
-TEST_P(GenesisBlockUnfurlTest, InitialTokenClaimPropagatesReverts)
+TEST_P(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
 {
   // Assert that if a contract reverts during the initial token claim's init
   // call, the entire transaction reverts. In the actual implementation
@@ -410,18 +411,18 @@ TEST_P(GenesisBlockUnfurlTest, InitialTokenClaimPropagatesReverts)
   auto manual_revert_contract = manual_revert_meta_t::load_wasm();
   auto manual_revert_nonce = make_nonce(0);
 
-  GenesisBlockBuilder builder;
+  GenesisConfigurationBuilder builder;
   builder.add_initial_config(
       manual_revert_contract, manual_revert_nonce,
       manual_revert_meta_t::entrypoint<"test_basic_manual_revert">(),
       manual_revert_meta_t::make_calldata<"test_basic_manual_revert">(true),
       int128_t{1'000'000'000});
-  auto block = builder.build();
+  auto genesis_configuration = builder.build();
 
   auto unfurl_txns = builder.make_unfurl_genesis_transactions();
   EXPECT_EQ(unfurl_txns.size(), 1);
 
-  run_genesis_initialization(block);
+  run_genesis_initialization(genesis_configuration);
 
   // run the unfurl transactions
 
@@ -433,7 +434,7 @@ TEST_P(GenesisBlockUnfurlTest, InitialTokenClaimPropagatesReverts)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, GenesisBlockUnfurlTest,
+INSTANTIATE_TEST_SUITE_P(TestDBs, GenesisConfigurationUnfurlTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
                          test_db_to_string);

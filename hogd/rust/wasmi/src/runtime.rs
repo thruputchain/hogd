@@ -4,8 +4,8 @@ use wasmi::{Instance, Module, Store};
 
 use crate::context::WasmiContext;
 use crate::external_call;
-use crate::ffi_enums::InvokeErrorCode;
 use crate::invoke_result::WasmiInvokeResult;
+use common::InvokeErrorCode;
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call

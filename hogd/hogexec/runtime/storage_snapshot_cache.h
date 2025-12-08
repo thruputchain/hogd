@@ -5,12 +5,12 @@
 #include <memory>
 #include <optional>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -46,7 +46,7 @@ public:
 
   SystemStatus<std::shared_ptr<const Contract>>
   try_get_contract_by_hash(SHA256Hash const &hash);
-  SystemStatus<std::optional<SHA256Hash>>
+  SystemStatus<std::optional<DeployedContractHash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
   SystemStatus<SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
@@ -68,7 +68,8 @@ private:
   // incorrect to reset it) after every block.
   SynchronizedMap<SHA256Hash, std::shared_ptr<const Contract>> contract_cache_;
   // Neither does the deployment cache
-  SynchronizedMap<ContractAddress, std::optional<SHA256Hash>> deployment_cache_;
+  SynchronizedMap<ContractAddress, std::optional<DeployedContractHash>>
+      deployment_cache_;
 
   SynchronizedMap<AddressAndKey, std::unique_ptr<SnapshotStorageItem>>
       snapshot_item_cache_;

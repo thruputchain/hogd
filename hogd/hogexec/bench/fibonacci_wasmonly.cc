@@ -19,7 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_block.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/metrics.h"
@@ -42,7 +42,7 @@ struct BenchmarkState : public CommonBenchState {
   void initialize()
   {
     HogexecMetrics::launch_log_worker();
-    GenesisBlockBuilder genesis_builder;
+    GenesisConfigurationBuilder genesis_builder;
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     using client_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
     genesis_builder.add_initial_config(
@@ -50,10 +50,10 @@ struct BenchmarkState : public CommonBenchState {
         client_meta_t::entrypoint<"fibonacci">(),
         client_meta_t::make_calldata<"fibonacci">(uint32_t{5}), 1'000'000'000);
 
-    contract_addr_ = GenesisBlockLoader::calculate_deployed_address(
+    contract_addr_ = GenesisConfigurationLoader::calculate_deployed_address(
         sha256(*fibonacci_contract), SHA256Hash{});
 
-    run_genesis_block(genesis_builder);
+    run_genesis_configuration(genesis_builder);
   }
 };
 

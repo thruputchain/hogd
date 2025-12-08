@@ -2,7 +2,6 @@ name = "test_bindings_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
-host = ["hog1"]
 script = """
 
 set -x
@@ -11,10 +10,10 @@ echo 'cloning hogd'
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }}
-git checkout {{ .git_commit }}
+git checkout {{ .git_commit }} --no-progress --quiet
 git submodule update --init --recursive
 
-source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'configure test bindings'
 ./scripts/build.sh -d build -t Debug -c clang -x "-DENABLE_TEST_FFI=ON" -f "-fsanitize=address" -n
@@ -31,3 +30,6 @@ export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+
+[jobs.host]
+bindings_1 = "hog1"

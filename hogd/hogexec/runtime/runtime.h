@@ -13,6 +13,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "account.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -141,8 +142,8 @@ public:
   // In the case of webassembly, this is the webassembly validator.
   virtual bool verify_contract(Contract const &contract) const = 0;
 
-  virtual std::unique_ptr<Runtime>
-  make_new_runtime(Contract const &contract, SHA256Hash const &hash,
+  virtual SystemStatus<std::unique_ptr<Runtime>>
+  make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 

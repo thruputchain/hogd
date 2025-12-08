@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+#include "account.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -162,7 +163,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
-          return SystemError{SystemErrorCode::kValidationFailure};
+          return SystemError{SystemErrorCode::kSystemValidationFailure};
         }
         acq_success = res.value().get();
       }
@@ -238,7 +239,7 @@ InvocationFrameStack::get_msg_sender() const
              : std::nullopt;
 }
 
-std::optional<SHA256Hash>
+std::optional<DeployedContractHash>
 InvocationFrameStack::lookup_locally_deployed_contract(
     ContractAddress const &addr) const
 {
