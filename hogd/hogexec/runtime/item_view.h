@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <optional>
-#include <set>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -15,7 +14,6 @@
 #include "retrocausal_queue.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
-#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
