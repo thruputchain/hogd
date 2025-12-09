@@ -57,26 +57,33 @@ public:
 
   constexpr void destroy() noexcept { val_.~T(); }
 
-  constexpr auto &operator*(this auto &&self) noexcept
+  constexpr auto *get(this auto &&self) noexcept
   {
-    if constexpr (std::is_const_v<value_type>)
-      // in case self is not const but value_type is
-      return std::as_const(self.val_);
-    else
-      return (self.val_);
+    return fix_const(&self.val_);
   }
-
-  constexpr auto *get(this auto &&self) noexcept { return &*self; }
+  constexpr auto &operator*(this auto &&self) noexcept { return *self.get(); }
   constexpr auto *operator->(this auto &&self) noexcept { return self.get(); }
+
+  // Same as get() unless T defines operator&
   constexpr auto *address(this auto &&self) noexcept
   {
-    return std::addressof(*self);
+    return fix_const(std::addressof(self.val_));
   }
 
 protected:
   constexpr void *placement() noexcept
   {
     return const_cast<std::remove_cv_t<value_type> *>(address());
+  }
+
+  // Because we strip const out from val_, this function adds it back
+  // when necessary
+  template<typename U> static auto *fix_const(U *p) noexcept
+  {
+    if constexpr (std::is_const_v<value_type>)
+      return const_cast<const U *>(p);
+    else
+      return p;
   }
 
 private:
