@@ -173,7 +173,7 @@ impl<'a> WasmiContext<'a> {
                 // Previous API:
                 // .set_stack_limits(StackLimits::default())
                 .set_min_stack_height(1024)
-                .set_max_stack_height(16384)
+                //.set_max_stack_height(16384) // currently broken in wasmi 1.0.3
                 .set_max_recursion_depth(1024)
                 // Relevant for concurrent operation:
                 // This is the number of stacks that are cached on one engine.
