@@ -647,6 +647,10 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
     return std::as_bytes(std::span(bytestring_item->bytestring_));
   }
 
+  if (item_view->get<DeletedItem>()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+  }
+
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
@@ -720,6 +724,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     }
     return {std::make_pair(snapshot_value.value()->nnint(),
                            nnint_item->add_value_)};
+  }
+
+  if (item_view->get<DeletedItem>()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
@@ -817,6 +825,26 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     }
     return item_view->get<RetrocausalQueueItem>();
   }
+
+  // Possible that the RCQ was deleted and then re-created in this transaction.
+  // In this case, we need to load the base item from the snapshot and create a
+  // new RCQItem.
+  if (item_view->get<DeletedItem>()) {
+    UnmodifiedItem unmodified_item;
+    assert(!unmodified_item.is_loaded());
+    auto load_status = unmodified_item.load(snapshot_cache, addrkey);
+    if (!load_status.has_value()) {
+      return load_status.error();
+    }
+    RetrocausalQueueItem new_item(unmodified_item.base_item());
+
+    auto set_status = item_view->set(new_item);
+    if (!set_status.has_value()) {
+      return set_status.error();
+    }
+    return item_view->get<RetrocausalQueueItem>();
+  }
+
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 } // namespace
@@ -981,6 +1009,11 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
     account_auth_data_item->change_public_key(key_index, std::move(new_key));
     return {};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
   assert(item_view->get<UnmodifiedItem>());

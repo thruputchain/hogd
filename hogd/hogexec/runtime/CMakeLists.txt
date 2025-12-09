@@ -67,6 +67,7 @@ add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc
+  delete_recreate_tests.cc
   deserialize_test.cc
   direct_auth_data_tests.cc
   direct_bytestring_test.cc
