@@ -37,8 +37,7 @@ EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 
-# procs=("chuckd" "loadgen_server" "mempool_exec" "hogexec" "event_exec" "hogdb")
-procs=("loadgen_server" "coordinator" "mempool_exec" "hogexec" "event_exec" "hogdb")
+procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "hogdb")
 
 binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
 all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
@@ -207,33 +206,6 @@ echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
 wait_port "$loadgen_server" 11222
 
-echo "Start chuckd..."
-ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
-
-# Launch chuckd.
-remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
-  --copy-file "$SCPD_BINARY"
-  -l debug --stack --config "$logdir"/config-chuckd.json \
-  --instance 970c9b \
-  --seed 1410441218572558875 \
-  --metrics :2223 \
-  bench coordinator_loadgen \
-  # TODO: Do not use an IP address.
-  --in-addr 10.10.69.103:7888 \
-  --debug-port 5500 \
-  --num-accts 100 \
-  --txs-per-block 10000 \
-  --num-blocks 1000 \
-  --storage-dir "$logdir"/chuckd-storage \
-  --out-addr :50000 \
-  --wallet-addr :40000 \
-  --loadgen-addr hog3:11222 \
-  --sched-addr hog3:8070 \
-  --scpd-path "$logdir/$SCPD_BINARY" \
-  --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400 \
-  --scp-is-validator true
-
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
@@ -254,14 +226,39 @@ for s in "${hogdb_servers[@]}"; do
     "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
 done
 
-# Start fake coordinator.
-# remote_launch "$fake_coordinator_server" "$FAKE_COORDINATOR_BINARY" \
-#   "$mempool_server":8070 "$loadgen_server":11222
-
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   ${#hogdb_servers[@]} ${#hogexec_servers[@]}
+sleep 1
+
+# Launch chuckd.
+echo "Start chuckd..."
+ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+
+# TODO: Do not use an IP address for [in-addr] or [wait_port] below.
+# TODO: Update config-chuckd.json to not have [hog3] hardcoded.
+remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
+  --copy-file "$SCPD_BINARY" \
+  -l debug --stack --config "$logdir"/config-chuckd.json \
+  --instance 970c9b \
+  --seed 1410441218572558875 \
+  --metrics :2223 \
+  bench coordinator_loadgen \
+  --in-addr 10.10.69.103:7888 \
+  --debug-port 5500 \
+  --num-accts 100 \
+  --txs-per-block 10000 \
+  --num-blocks 1000 \
+  --storage-dir "$logdir"/chuckd-storage \
+  --out-addr :50000 \
+  --wallet-addr :40000 \
+  --loadgen-addr "$loadgen_server":11222 \
+  --sched-addr "$mempool_server":8070 \
+  --scpd-path "$logdir"/scpd.dev \
+  --scp-handle-addr 127.0.0.1:3300 \
+  --scp-control-addr 127.0.0.1:4400 \
+  --scp-is-validator true
 
 # Wait for hogexec (port 8090).
 for s in "${hogexec_servers[@]}"; do
@@ -278,8 +275,10 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8081
 done
 
+echo "chuckd wait"
 # Wait for chuckd (port 7888).
-wait_port "$chuckd_server" 7888
+wait_port 10.10.69.103 7888
+echo "done with chuckd wait"
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070
