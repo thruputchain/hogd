@@ -237,7 +237,6 @@ echo "Start chuckd..."
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
 
 # TODO: Do not use an IP address for [in-addr] or [wait_port] below.
-# TODO: Update config-chuckd.json to not have [hog3] hardcoded.
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \
   -l debug --stack --config "$logdir"/config-chuckd.json \
