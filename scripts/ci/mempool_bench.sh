@@ -4,7 +4,7 @@ set -Eeuo pipefail
 cleanup() {
   local exit_code=$1
 
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT stop
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
@@ -25,7 +25,7 @@ export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServer
 export MEMPOOL_COORDINATOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolCoordinatorServerPort)
 
 echo 'make sure bench servers are running'
-./scripts/wait-port.sh hog1 $CI_CONTROL_PORT
+./scripts/wait-port.sh hog5 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog7 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog8 $CI_CONTROL_PORT
@@ -33,7 +33,7 @@ echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clear work dirs'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT clear_work_dir
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT clear_work_dir
@@ -48,7 +48,7 @@ echo 'wait for loadgen'
 
 echo 'launch first hogexec'
 # the mempool runs on hog10
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'launch second hogexec'
@@ -71,7 +71,7 @@ echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
 
 echo 'make sure procs are running'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running

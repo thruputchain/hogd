@@ -41,7 +41,7 @@ bench_2 = "hog7"
 bench_3 = "hog8"
 bench_4 = "hog9"
 bench_5 = "hog11"
-bench_6 = "hog1"
+bench_6 = "hog5"
 
 
 [[jobs]]
@@ -82,7 +82,7 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'cleanup control servers'
-./release/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
