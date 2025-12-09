@@ -7,8 +7,11 @@
 
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
@@ -23,6 +26,16 @@ make_owning_span(std::vector<uint8_t> bytes)
   return OwningSpan(span, [ref = std::move(bytes)] {});
 }
 
+// Helper to create a dummy LockContext for testing
+inline LockContext
+make_dummy_context()
+{
+  // These are never dereferenced in most lock implementations
+  static HogDBDAO *dummy_dao = nullptr;
+  static ItemKey dummy_key = make_item_key(make_address(0), 0);
+  return LockContext(*dummy_dao, 0, dummy_key);
+}
+
 } // namespace
 
 TEST(BytestringLockTest, BasicUsage)
@@ -32,16 +45,21 @@ TEST(BytestringLockTest, BasicUsage)
   Bytes match(make_owning_span({0, 1, 2, 3}));
   Bytes nomatch(make_owning_span({4, 5, 6, 7}));
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &match, &kTestCostModel)
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &match, &kTestCostModel,
+                                          make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(
-      lock.try_atomic_change_lock(&match, &match, &kTestCostModel).has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(&match, nullptr, &kTestCostModel)
+  EXPECT_TRUE(lock.try_atomic_change_lock(&match, &match, &kTestCostModel,
+                                          make_dummy_context())
+                  .has_value());
+  EXPECT_TRUE(lock.try_atomic_change_lock(&match, nullptr, &kTestCostModel,
+                                          make_dummy_context())
                   .has_value());
 
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &nomatch, &kTestCostModel)
+  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &nomatch, &kTestCostModel,
+                                           make_dummy_context())
                    .has_value());
-  EXPECT_FALSE(lock.try_atomic_change_lock(&match, &nomatch, &kTestCostModel)
+  EXPECT_FALSE(lock.try_atomic_change_lock(&match, &nomatch, &kTestCostModel,
+                                           make_dummy_context())
                    .has_value());
 }
 
@@ -51,9 +69,11 @@ TEST(BytestringLockTest, CommitCost)
 
   Bytes item1(make_owning_span({0, 1, 2, 3}));
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
+                                          make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel)
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
+                                          make_dummy_context())
                   .has_value());
   EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
             kTestCostModel.get_bytestring_cost(4));

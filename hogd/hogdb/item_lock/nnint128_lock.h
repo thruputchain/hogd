@@ -32,7 +32,8 @@ public:
   // If after is nullptr, the storage cost output should be ignored.
   HogDBStatus<int128_t>
   try_atomic_change_lock(const NNInt128 *before, const NNInt128 *after,
-                         const StorageCostModel *cost_model);
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
 
   // Returns the amount of tokens that this commit is responsible for locking,
   // relative to the previously committed set of changes. Positive values
@@ -73,7 +74,7 @@ public:
     return snapshot_value;
   }
 
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
   // For balance items

@@ -11,6 +11,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -55,7 +56,8 @@ AuthLock::count_active_keys() const
 HogDBStatus<int128_t>
 AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
                                  const PointerItem<AuthDataItem> *after,
-                                 const StorageCostModel *cost_model)
+                                 const StorageCostModel *cost_model,
+                                 const LockContext & /*ctx*/)
 {
 
   std::unique_lock<x23::TestLock> ul(lock_);
@@ -126,19 +128,20 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
 }
 
 HogDBStatus<void>
-AuthLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
+AuthLock::write_committed_change(LockContext const &ctx,
                                  MerkleTriePrefix &trie) const
 {
-  assert(key.is_account_auth_data());
+  assert(ctx.key.is_account_auth_data());
 
   auto res = build_result();
-  auto ret = dao.write_address_account_auth_data(key.get_address(), res);
+  auto ret =
+      ctx.dao.write_address_account_auth_data(ctx.key.get_address(), res);
   if (!ret) {
     return ret.error();
   }
 
   auto buf = x23::serialize(res);
-  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+  CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
                                                   std::as_bytes(std::span(buf)))
             .has_value());
   return ret;

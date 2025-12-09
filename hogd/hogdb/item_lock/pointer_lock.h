@@ -23,9 +23,10 @@ public:
 
   HogDBStatus<int128_t>
   try_atomic_change_lock(const change_type *before, const change_type *after,
-                         const StorageCostModel *cost_model)
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx)
   {
-    return this->get()->try_atomic_change_lock(before, after, cost_model);
+    return this->get()->try_atomic_change_lock(before, after, cost_model, ctx);
   }
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const change_type &after,
@@ -34,10 +35,10 @@ public:
     return this->get()->commit_change(did_finalize, snapshot_cost, after,
                                       cost_model);
   }
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const
   {
-    return this->get()->write_committed_change(key, dao, trie);
+    return this->get()->write_committed_change(ctx, trie);
   }
 };
 

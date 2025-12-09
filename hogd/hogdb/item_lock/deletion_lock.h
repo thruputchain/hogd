@@ -17,10 +17,9 @@ public:
 
   DeletionLock() = default;
 
-  static HogDBStatus<int128_t>
-  try_atomic_change_lock(const Deletion * /*unused*/,
-                         const Deletion * /*unused*/,
-                         const StorageCostModel * /*unused*/)
+  static HogDBStatus<int128_t> try_atomic_change_lock(
+      const Deletion * /*unused*/, const Deletion * /*unused*/,
+      const StorageCostModel * /*unused*/, const LockContext & /*ctx*/)
   {
     return {0};
   }
@@ -35,8 +34,7 @@ public:
     return 0;
   }
 
-  static HogDBStatus<void> write_committed_change(ItemKey const &key,
-                                                  HogDBDAO &dao,
+  static HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                                   MerkleTriePrefix &trie);
 };
 
