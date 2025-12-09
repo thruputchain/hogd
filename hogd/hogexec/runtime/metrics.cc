@@ -35,6 +35,7 @@ HogexecMetrics::get_stats()
   MetricsSnapshot snapshot{};
   snapshot.time_ns = x23::fastclock::get_ns();
   for (auto &sample : samples) {
+    info("sample: {} = {}", sample.key, sample.val);
     if (sample.key == "successful_proposed_tx_count") {
       snapshot.successful_proposed_tx_count = sample.val;
     }
@@ -43,6 +44,12 @@ HogexecMetrics::get_stats()
     }
     else if (sample.key == "gas_consumed") {
       snapshot.gas_consumed = sample.val;
+    }
+    else if (sample.key == "module_cache_hits") {
+      snapshot.module_cache_hits = sample.val;
+    }
+    else if (sample.key == "module_cache_misses") {
+      snapshot.module_cache_misses = sample.val;
     }
   }
   return snapshot;
@@ -61,14 +68,20 @@ HogexecMetrics::background_worker(std::stop_token &stoken)
     auto new_snapshot = get_stats();
     auto delta = new_snapshot - snapshot;
     double time_delta_s = delta.time_ns / 1'000'000'000.0;
+    double cache_hits = delta.module_cache_hits;
+    double hitrate = cache_hits /
+                     (delta.module_cache_hits + delta.module_cache_misses) *
+                     100.0;
 
     info("delta: {} ({:.2f}/s) successful proposed txs, {} ({:.2f}/s) failed "
-         "proposed txs, {} ({:.2f}/s) gas consumed, {} duration",
+         "proposed txs, {} ({:.2f}/s) gas consumed, "
+         "{} cache hits (hitrate: {:.2f}%), {} duration",
          delta.successful_proposed_tx_count,
          (delta.successful_proposed_tx_count) / time_delta_s,
          delta.failed_proposed_tx_count,
          delta.failed_proposed_tx_count / time_delta_s, delta.gas_consumed,
-         delta.gas_consumed / time_delta_s, time_delta_s);
+         delta.gas_consumed / time_delta_s, delta.module_cache_hits, hitrate,
+         time_delta_s);
     snapshot = new_snapshot;
   }
 }

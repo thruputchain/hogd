@@ -6,6 +6,7 @@ use core::ffi::c_void;
 use core::slice;
 
 use common::string_from_parts;
+use common::SystemErrorCode;
 
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
@@ -74,9 +75,9 @@ impl LinkEntry {
     }
 }
 
-pub struct WasmiContext<'a> {
+pub struct WasmiContext {
     pub entries: Vec<LinkEntry>,
-    pub module_cache: Option<&'a mut ModuleCache>,
+    pub module_cache: Option<ModuleCache>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -131,8 +132,8 @@ macro_rules! link_function_nargs {
     };
 }
 
-impl<'a> WasmiContext<'a> {
-    fn new(module_cache: Option<&'a mut ModuleCache>) -> WasmiContext<'a> {
+impl WasmiContext {
+    fn new(module_cache: Option<ModuleCache>) -> WasmiContext {
         Self {
             entries: Vec::new(),
             module_cache,
@@ -155,10 +156,11 @@ impl<'a> WasmiContext<'a> {
         hash: &[u8; 32],
         module: &Module,
         linker: &Linker<*mut c_void>,
-    ) {
+    ) -> Result<(), SystemErrorCode> {
         if let Some(cache) = self.module_cache.as_mut() {
-            cache.put(hash, module, linker);
+            return cache.put(hash, module, linker);
         }
+        Ok(())
     }
 
     pub fn add_entry(&mut self, entry: LinkEntry) {
@@ -371,17 +373,19 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
     module_cache: *mut c_void,
+    get_fn: crate::module_cache::ModuleCacheGetFn,
+    put_fn: crate::module_cache::ModuleCachePutFn,
+    entry_ptr_free_fn: crate::module_cache::ModuleCacheEntryPtrFreeFn,
 ) -> *mut c_void {
     let b = if module_cache.is_null() {
         Box::new(WasmiContext::new(None))
     } else {
-        Box::new(WasmiContext::new(unsafe {
-            Some(
-                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
-                    module_cache,
-                )),
-            )
-        }))
+        Box::new(WasmiContext::new(Some(ModuleCache::new(
+            module_cache,
+            get_fn,
+            put_fn,
+            entry_ptr_free_fn,
+        ))))
     };
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }

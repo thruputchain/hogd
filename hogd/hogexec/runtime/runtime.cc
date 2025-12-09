@@ -7,6 +7,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/module_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -16,7 +17,7 @@ namespace hogd {
 
 namespace {
 
-thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
+std::unique_ptr<ModuleCache> module_cache = std::make_unique<ModuleCache>(1024);
 
 } // namespace
 
@@ -24,7 +25,7 @@ namespace test {
 void
 reset_module_cache()
 {
-  module_cache.test_reset_cache(10);
+  module_cache = std::make_unique<ModuleCache>(1024);
 }
 } // namespace test
 
@@ -33,7 +34,7 @@ make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
-    return std::make_unique<WasmiContext>(&module_cache);
+    return std::make_unique<WasmiContext>(module_cache.get());
     break;
   default:
     return nullptr;

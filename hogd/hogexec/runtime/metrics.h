@@ -63,6 +63,15 @@ public:
     // TODO(geoff): unimpl
   }
 
+  static void mark_module_cache_hit()
+  {
+    get_instance().module_cache_hits_.inc();
+  }
+  static void mark_module_cache_miss()
+  {
+    get_instance().module_cache_misses_.inc();
+  }
+
   static void mark_gas_consumed(uint64_t gas)
   {
     get_instance().gas_consumed_.inc(gas);
@@ -84,6 +93,8 @@ private:
     size_t successful_proposed_tx_count = 0;
     size_t failed_proposed_tx_count = 0;
     uint64_t gas_consumed = 0;
+    size_t module_cache_hits = 0;
+    size_t module_cache_misses = 0;
     uint64_t time_ns = 0;
 
     MetricsSnapshot operator-(const MetricsSnapshot &other) const
@@ -94,6 +105,9 @@ private:
               .failed_proposed_tx_count =
                   failed_proposed_tx_count - other.failed_proposed_tx_count,
               .gas_consumed = gas_consumed - other.gas_consumed,
+              .module_cache_hits = module_cache_hits - other.module_cache_hits,
+              .module_cache_misses =
+                  module_cache_misses - other.module_cache_misses,
               .time_ns = time_ns - other.time_ns};
     }
   };
@@ -104,13 +118,17 @@ private:
   PerThreadCounter<size_t> successful_proposed_tx_count_;
   PerThreadCounter<size_t> failed_proposed_tx_count_;
   PerThreadCounter<uint64_t> gas_consumed_;
+  PerThreadCounter<size_t> module_cache_hits_;
+  PerThreadCounter<size_t> module_cache_misses_;
 
-  MetricRegistry registry_ =
-      MetricRegistry({make_counter_metric("successful_proposed_tx_count", "",
-                                          successful_proposed_tx_count_),
-                      make_counter_metric("failed_proposed_tx_count", "",
-                                          failed_proposed_tx_count_),
-                      make_counter_metric("gas_consumed", "", gas_consumed_)});
+  MetricRegistry registry_ = MetricRegistry(
+      {make_counter_metric("successful_proposed_tx_count", "",
+                           successful_proposed_tx_count_),
+       make_counter_metric("failed_proposed_tx_count", "",
+                           failed_proposed_tx_count_),
+       make_counter_metric("gas_consumed", "", gas_consumed_),
+       make_counter_metric("module_cache_hits", "", module_cache_hits_),
+       make_counter_metric("module_cache_misses", "", module_cache_misses_)});
   std::jthread background_worker_;
   std::condition_variable_any cv_;
   std::mutex cv_mutex_;

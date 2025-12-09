@@ -7,6 +7,7 @@ pub use trampoline_bindings::*;
 
 use core::slice;
 use core::str::Utf8Error;
+use std::result::Result;
 
 impl From<SystemErrorCode> for HostFnErrorCode {
     fn from(error_code: SystemErrorCode) -> Self {

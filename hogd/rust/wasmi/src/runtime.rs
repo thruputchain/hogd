@@ -1,11 +1,12 @@
 use core::ffi::c_void;
 use std::slice;
-use wasmi::{Instance, Module, Store};
+use wasmi::{Instance, Linker, Module, Store};
 
 use crate::context::WasmiContext;
 use crate::error::TrampolineError;
 use crate::invoke_result::WasmiInvokeResult;
 use common::InvokeErrorCode;
+use common::SystemErrorCode;
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
@@ -51,68 +52,74 @@ fn check_memory_limit(module: &Module) -> bool {
 }
 
 impl WasmiRuntime {
+    fn create_module(
+        linker: &Linker<*mut c_void>,
+        bytes: &[u8],
+    ) -> Option<Module> {
+        unsafe { Module::new_unchecked(linker.engine(), bytes) }
+        .inspect_err(|_e| {
+            debug_log!(eprintln!("Module new_unchecked error: {_e}"));
+        })
+        .ok()
+        .and_then(|module| {
+            if !check_memory_limit(&module) {
+                debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+                return None;
+            }
+            Some(module)
+        })
+    }
+
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
         hash: &[u8; 32],
         context: &mut WasmiContext,
         userctx: *mut c_void,
-    ) -> Option<WasmiRuntime> {
+    ) -> Result<Option<WasmiRuntime>, SystemErrorCode> {
         let (module, linker) = if context.has_module_cache() {
             if let Some(module) = context.get_cached_module(hash) {
-                (module.module, module.linker)
+                (module.module.clone(), module.linker.clone())
             } else {
                 let linker = context.linker();
 
-                let module =
-                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                        .inspect_err(|_e| {
-                            debug_log!(eprintln!(
-                                "Module new_unchecked error: {_e}"
-                            ))
-                        })
-                        .ok()?;
-
-                if !check_memory_limit(&module) {
-                    debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                    return None;
-                }
-                context.put_cached_module(hash, &module, &linker);
+                let module = match Self::create_module(&linker, bytes) {
+                    Some(module) => module,
+                    None => {
+                        return Ok(None);
+                    }
+                };
+                context.put_cached_module(hash, &module, &linker)?;
                 (module, linker)
             }
         } else {
             let linker = context.linker();
-            let module =
-                unsafe { Module::new_unchecked(linker.engine(), bytes) }
-                    .inspect_err(|_e| {
-                        debug_log!(eprintln!(
-                            "Module new_unchecked error: {_e}"
-                        ))
-                    })
-                    .ok()?;
-
-            if !check_memory_limit(&module) {
-                debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                return None;
-            }
+            let module = match Self::create_module(&linker, bytes) {
+                Some(module) => module,
+                None => {
+                    return Ok(None);
+                }
+            };
             (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker
-            .instantiate(&mut store, &module)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error instantiating store: {_e}"))
-            })
-            .ok()?;
+        let instance_result = match linker.instantiate(&mut store, &module) {
+            Ok(instance_result) => instance_result,
+            Err(_e) => {
+                debug_log!(eprintln!("Error instantiating store: {_e}"));
+                return Ok(None);
+            }
+        };
 
-        let instance = instance_result
-            .ensure_no_start(&mut store)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error ensuring no start: {_e}"))
-            })
-            .ok()?;
-        Some(Self { store, instance })
+        let instance = match instance_result.ensure_no_start(&mut store) {
+            Ok(instance) => instance,
+            Err(_e) => {
+                debug_log!(eprintln!("Error ensuring no start: {_e}"));
+                return Ok(None);
+            }
+        };
+        Ok(Some(Self { store, instance }))
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
@@ -184,10 +191,17 @@ pub unsafe extern "C" fn wasmi_invoke(
     r.invoke(string)
 }
 
+#[repr(C)]
+pub struct NewWasmiRuntimeResult {
+    pub runtime: *mut c_void,
+    pub error: i32, // SystemErrorCode
+}
+
 /// # Safety
 /// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
 /// userctx can be any (null or non-null) pointer.
 /// bytes must be either null or a valid memory slice.
+
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
@@ -195,9 +209,12 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     hash: *const u8, // 32 bytes
     userctx: *mut c_void,
     wasmi_context_ptr: *mut c_void,
-) -> *mut c_void {
+) -> NewWasmiRuntimeResult {
     if bytes.is_null() {
-        return core::ptr::null_mut();
+        return NewWasmiRuntimeResult {
+            runtime: core::ptr::null_mut(),
+            error: 0,
+        };
     }
     debug_assert!(!hash.is_null());
     debug_assert!(!wasmi_context_ptr.is_null());
@@ -213,13 +230,26 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
-        Some(res) => Box::new(res),
-        None => {
-            return core::ptr::null_mut();
+        Ok(Some(res)) => Box::new(res),
+        Ok(None) => {
+            return NewWasmiRuntimeResult {
+                runtime: core::ptr::null_mut(),
+                error: 0,
+            };
+        }
+        Err(error) => {
+            return NewWasmiRuntimeResult {
+                runtime: core::ptr::null_mut(),
+                error: error as i32,
+            };
         }
     };
 
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+    let ptr = unsafe { core::mem::transmute(Box::into_raw(b)) };
+    NewWasmiRuntimeResult {
+        runtime: ptr,
+        error: 0,
+    }
 }
 
 /// # Safety

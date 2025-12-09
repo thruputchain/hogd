@@ -27,7 +27,9 @@ BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
 # Run clippy
 {
+  set -ex
   cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
+  cd ${ROOT_DIR}/hogd/rust/common && cargo clippy --no-deps -- -D warnings
   cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
 } &
 CLIPPY_PID=$!

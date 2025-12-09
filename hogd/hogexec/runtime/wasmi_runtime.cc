@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <new>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -12,18 +13,85 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/module_cache.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmi/bindings.h"
+#include "types.hh"
 #include "x23/format.h"
 
 namespace hogd {
 
-WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
-  : wasmi_context_ptr_(
-        new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
+namespace {
+
+struct FFIModuleCacheEntryDeleter {
+  void operator()(void **ptr)
+  {
+    assert(ptr != nullptr);
+    if (*ptr != nullptr) {
+      free_module_cache_entry(*ptr);
+    }
+  }
+};
+void
+free_external_module_cache_entry(void *ptr)
+{
+  if (ptr != nullptr) {
+    auto *entry = static_cast<std::shared_ptr<void *> *>(ptr);
+    delete entry;
+  }
+}
+
+int32_t
+add_cached_wasmi_module(void *module_cache_ptr, const uint8_t *hash,
+                        void *module_ptr) noexcept
+{
+  void **ptr_alloc = nullptr;
+  try {
+    assert(module_cache_ptr != nullptr);
+    assert(hash != nullptr);
+    assert(module_ptr != nullptr);
+    auto const *h = reinterpret_cast<const SHA256Hash *>(hash);
+    auto *module_cache = reinterpret_cast<ModuleCache *>(module_cache_ptr);
+    ptr_alloc = new void *(module_ptr);
+    module_cache->put(*h, *new std::shared_ptr<void *>(
+                              ptr_alloc, FFIModuleCacheEntryDeleter()));
+  } catch (std::bad_alloc const &e) {
+    delete ptr_alloc;
+    return std::to_underlying(SystemErrorCode::kSystemUnrecoverable);
+  }
+  return 0;
+}
+
+ModuleCacheGetResult
+get_cached_wasmi_module(void *module_cache_ptr, const uint8_t *hash)
+{
+  assert(module_cache_ptr != nullptr);
+  assert(hash != nullptr);
+  auto const *h = reinterpret_cast<const SHA256Hash *>(hash);
+  auto *module_cache = reinterpret_cast<ModuleCache *>(module_cache_ptr);
+  auto r = module_cache->get(*h);
+  if (r == nullptr) {
+    return ModuleCacheGetResult{
+        .entry = nullptr,
+        .free_context = nullptr,
+    };
+  }
+  auto *dup = new std::shared_ptr<void *>(r);
+  return ModuleCacheGetResult{
+      .entry = *r,
+      .free_context = dup,
+  };
+}
+
+} // namespace
+
+WasmiContext::WasmiContext(ModuleCache *module_cache)
+  : wasmi_context_ptr_(new_wasmi_context(module_cache, &get_cached_wasmi_module,
+                                         &add_cached_wasmi_module,
+                                         &free_external_module_cache_entry))
 {}
 
 WasmiContext::~WasmiContext()
@@ -62,11 +130,15 @@ WasmiContext::make_new_runtime(
     return {};
   }
 
-  void *wasmi_runtime_ptr =
+  NewWasmiRuntimeResult result =
       new_wasmi_runtime(contract.value()->wasmi_contract().wasm.data(),
                         contract.value()->wasmi_contract().wasm.size(),
                         deployed_contract_hash.hash.data(),
                         host_call_context.get(), wasmi_context_ptr_);
+  if (result.error != 0) {
+    return SystemError{static_cast<SystemErrorCode>(result.error)};
+  }
+  auto *wasmi_runtime_ptr = result.runtime;
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }
@@ -154,27 +226,6 @@ WasmiRuntime::~WasmiRuntime()
   if (wasmi_runtime_ptr_ != nullptr) {
     free_wasmi_runtime(wasmi_runtime_ptr_);
   }
-}
-
-WasmiModuleCache::WasmiModuleCache(size_t capacity)
-  : wasmi_module_cache_ptr_(new_wasmi_module_cache(capacity))
-{}
-
-WasmiModuleCache::~WasmiModuleCache()
-{
-  if (wasmi_module_cache_ptr_ != nullptr) {
-    free_wasmi_module_cache(wasmi_module_cache_ptr_);
-  }
-}
-
-void
-WasmiModuleCache::test_reset_cache(size_t capacity)
-{
-  assert(capacity > 0);
-  if (wasmi_module_cache_ptr_ != nullptr) {
-    free_wasmi_module_cache(wasmi_module_cache_ptr_);
-  }
-  wasmi_module_cache_ptr_ = new_wasmi_module_cache(capacity);
 }
 
 } // namespace hogd
