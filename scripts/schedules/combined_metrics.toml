@@ -86,10 +86,6 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 export BUILD_DIR=release
 export WORK_DIR=ci_work_dir/
 
-echo 'run multiexec interface benchmarks'
-(./scripts/ci/exec_scaling.sh) || true
-exec_scaling_exit=$?
-
 echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
