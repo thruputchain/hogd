@@ -236,7 +236,6 @@ sleep 1
 echo "Start chuckd..."
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
 
-# TODO: Do not use an IP address for [in-addr] or [wait_port] below.
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \
   -l debug --stack --config "$logdir"/config-chuckd.json \
@@ -244,7 +243,7 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
-  --in-addr 10.10.69.103:7888 \
+  --in-addr hog3:7888 \
   --debug-port 5500 \
   --num-accts 100 \
   --txs-per-block 10000 \
@@ -274,10 +273,8 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8081
 done
 
-echo "chuckd wait"
 # Wait for chuckd (port 7888).
-wait_port 10.10.69.103 7888
-echo "done with chuckd wait"
+wait_port hog3 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070
