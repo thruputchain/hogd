@@ -42,13 +42,22 @@ fn check_memory_limit(module: &Module) -> bool {
     let export_unwrapped = export.unwrap();
 
     if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
-        debug_log!(if memory_type.initial_pages() > 1.into() {
+        debug_log!(if memory_type.minimum() > 1u64 {
             eprintln!("Wasm initial memory exceeds limit: {memory_type:?}")
         });
-        return memory_type.initial_pages() <= 1.into();
+        return memory_type.minimum() <= 1u64;
     }
     debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
     false
+}
+
+fn check_no_start(module: &Module) -> bool {
+    let start = module.get_export("start");
+    if start.is_some() {
+        debug_log!(eprintln!("Module has start function"));
+        return false;
+    }
+    true
 }
 
 impl WasmiRuntime {
@@ -64,6 +73,10 @@ impl WasmiRuntime {
         .and_then(|module| {
             if !check_memory_limit(&module) {
                 debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+                return None;
+            }
+            if !check_no_start(&module) {
+                debug_log!(eprintln!("Module instantiation failed: Start function found"));
                 return None;
             }
             Some(module)
@@ -104,21 +117,14 @@ impl WasmiRuntime {
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = match linker.instantiate(&mut store, &module) {
-            Ok(instance_result) => instance_result,
+        let instance = match linker.instantiate_and_start(&mut store, &module) {
+            Ok(instance) => instance,
             Err(_e) => {
                 debug_log!(eprintln!("Error instantiating store: {_e}"));
                 return Ok(None);
             }
         };
 
-        let instance = match instance_result.ensure_no_start(&mut store) {
-            Ok(instance) => instance,
-            Err(_e) => {
-                debug_log!(eprintln!("Error ensuring no start: {_e}"));
-                return Ok(None);
-            }
-        };
         Ok(Some(Self { store, instance }))
     }
 
@@ -133,7 +139,9 @@ impl WasmiRuntime {
             }
         };
 
-        match func.call(&mut self.store, &[], &mut []) {
+        let mut stack = self.store.engine().new_stack();
+
+        match func.call_with_stack(&mut self.store, &[], &mut [], &mut stack) {
             Ok(_) => WasmiInvokeResult::success(),
             Err(err) => {
                 if let Some(trap_code) = err.as_trap_code() {

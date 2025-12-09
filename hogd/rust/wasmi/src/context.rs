@@ -1,5 +1,5 @@
 use wasmi::{
-    Caller, CompilationMode, Config, Engine, Error, Linker, Module, StackLimits,
+    Caller, CompilationMode, Config, Engine, Error, Linker, Module,
 };
 
 use core::ffi::c_void;
@@ -173,8 +173,9 @@ impl WasmiContext {
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(StackLimits::default())
-                .set_cached_stacks(2048)
+                .set_min_stack_height(1024)
+                .set_max_stack_height(1024)
+                .set_max_recursion_depth(1024)
                 // MUST BE EAGER
                 // This warning is in ALL CAPITALS because if we change that
                 // we will have NONDETERMINISM in gas measurements

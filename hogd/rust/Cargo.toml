@@ -12,7 +12,7 @@ resolver = "2"
 # Common dependencies that crates can inherit
 ed25519-zebra = { version = "4.1" }
 lru = "0.14.0"
-wasmi = "0.36.0"
+wasmi = { git = "ssh://git@github.com/gramseyer/wasmi.git", branch = "geoff/parallel_executor" }
 bindgen = "0.71"
 
 # Shared optimization profiles
