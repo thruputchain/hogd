@@ -168,11 +168,13 @@ impl WasmiContext {
     }
 
     fn new_engine() -> Engine {
+
         Engine::new(
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
                 .set_stack_limits(StackLimits::default())
+                .set_cached_stacks(2048)
                 // MUST BE EAGER
                 // This warning is in ALL CAPITALS because if we change that
                 // we will have NONDETERMINISM in gas measurements
