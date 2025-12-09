@@ -30,6 +30,7 @@ EXPORT_REGEX='^X23'
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
 CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd.dev
+CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
 SCPD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scpd.dev
 MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
@@ -208,12 +209,11 @@ wait_port "$loadgen_server" 11222
 
 echo "Start chuckd..."
 ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
-# TODO: scp the config.
-# TODO: scp the scpd binary.
 
 # Launch chuckd.
-remote_launch "$chuckd_server" "$CHUCKD_BINARY" \
-  -l debug --stack --config config-chuckd.json \
+remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
+  --copy-file "$SCPD_BINARY"
+  -l debug --stack --config "$logdir"/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
@@ -229,7 +229,7 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" \
   --wallet-addr :40000 \
   --loadgen-addr hog3:11222 \
   --sched-addr hog3:8070 \
-  --scpd-path ./"$SCPD_BINARY" \
+  --scpd-path "$logdir/$SCPD_BINARY" \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400 \
   --scp-is-validator true
