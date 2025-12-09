@@ -33,6 +33,7 @@ echo 'run bench server'
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
 bench_1 = "hog6"
