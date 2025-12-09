@@ -28,9 +28,9 @@ EXPORT_REGEX='^X23'
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
-CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd
-CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
-FAKE_COORDINATOR_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/test/coordinator
+CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
+CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd.dev
+SCPD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scpd.dev
 MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
@@ -39,11 +39,8 @@ HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 # procs=("chuckd" "loadgen_server" "mempool_exec" "hogexec" "event_exec" "hogdb")
 procs=("loadgen_server" "coordinator" "mempool_exec" "hogexec" "event_exec" "hogdb")
 
-# binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "EVENT_BINARY" "$HOGDB_BINARY")
-binaries=("$LOADGEN_BINARY" "$FAKE_COORDINATOR_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
-# all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "${event_server}"
-#   "${hogdb_servers[@]}")
-all_servers=("$loadgen_server" "$fake_coordinator_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
+binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
+all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -122,8 +119,10 @@ trap cleanup EXIT INT TERM
 
 build_all() {
   for s in "${all_servers[@]}"; do
-    # ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    #   "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "bash -lc '\"$CHUCKD_BUILD_DIR\"/build_chuckd.sh'" | sed "s/^/[$s] /" &
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
+      "bash -lc '\"$CHUCKD_BUILD_DIR\"/build_scpd.sh'" | sed "s/^/[$s] /" &
     ssh "${COMMON_SSH_OPTS[@]}" "$s" \
       "bash -lc '\"$HOGD_PROJECT_DIR\"/scripts/build.sh -c gcc -d \"$HOGD_BUILD_DIR\" -t Release -x -DHAVE_CXX_STACKTRACE=1'" | sed "s/^/[$s] /" &
   done
@@ -207,24 +206,33 @@ echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
 wait_port "$loadgen_server" 11222
 
-# echo "Start chuckd..."
-# # Start chuckd.
-# ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-#   "$X23ENV;                  \
-#   nohup \"$CHUCKD_BINARY\"                     \
-#   bench loadgen                                \
-#   --stack                                      \
-#   --level info                                 \
-#   --in-addr :7888                              \
-#   --loadgen-addr \"$loadgen_server\":11222     \
-#   --num-accts 10000                            \
-#   --num-txs 20000                              \
-#   --exec-batch 100                             \
-#   --exec-par 10                                \
-#   --num-blocks 100                             \
-#   --max-msg-size 400000000                     \
-#   > $logdir/chuckd.log 2>&1 &"
-# wait_port "$chuckd_server" 7888
+echo "Start chuckd..."
+ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+# TODO: scp the config.
+# TODO: scp the scpd binary.
+
+# Launch chuckd.
+remote_launch "$chuckd_server" "$CHUCKD_BINARY" \
+  -l debug --stack --config config-chuckd.json \
+  --instance 970c9b \
+  --seed 1410441218572558875 \
+  --metrics :2223 \
+  bench coordinator_loadgen \
+  # TODO: Do not use an IP address.
+  --in-addr 10.10.69.103:7888 \
+  --debug-port 5500 \
+  --num-accts 100 \
+  --txs-per-block 10000 \
+  --num-blocks 1000 \
+  --storage-dir "$logdir"/chuckd-storage \
+  --out-addr :50000 \
+  --wallet-addr :40000 \
+  --loadgen-addr hog3:11222 \
+  --sched-addr hog3:8070 \
+  --scpd-path ./"$SCPD_BINARY" \
+  --scp-handle-addr 127.0.0.1:3300 \
+  --scp-control-addr 127.0.0.1:4400 \
+  --scp-is-validator true
 
 # Start hogexec.
 echo "Start hogexec..."
@@ -270,8 +278,8 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8081
 done
 
-# Wait for fake coordinator (port 7888).
-# wait_port "$fake_coordinator_server" 7888
+# Wait for chuckd (port 7888).
+wait_port "$chuckd_server" 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070
@@ -283,21 +291,18 @@ echo "Done with launch."
 
 if $results_only; then
   # Stream only the results.
-  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  #   "tail -n +1 -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
-  #   sed "s/^/[${chuckd_server}\/chuckd] /" &
-  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-    "tail -n +1 -f $logdir/fake_coordinator.log" |
-    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
+    sed "s/^/[${chuckd_server}\/chuckd] /" &
 else
   # Stream the logs from each server.
   ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
     "tail -n +1 -f $logdir/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
-  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  #   "tail -n +1 -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
-  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-    "tail -n +1 -f $logdir/coordinator.log" |
-    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/scpd.log" |
+    sed "s/^/[${fake_coordinator_server}\/scpd] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
     "tail -n +1 -f $logdir/mempool_exec.log" | sed "s/^/[${mempool_server}\/mempool] /" &
