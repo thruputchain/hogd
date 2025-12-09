@@ -32,4 +32,4 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
 [jobs.host]
-bindings_1 = "hog1"
+bindings_1 = "?"
