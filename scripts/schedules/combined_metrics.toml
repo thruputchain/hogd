@@ -50,8 +50,9 @@ GIT_BRANCH = "{{ .git_branch }}"
 bench_1 = "hog6"
 bench_2 = "hog7"
 bench_3 = "hog8"
-bench_4 = "hog11"
-bench_5 = "hog1"
+bench_4 = "hog9"
+bench_5 = "hog11"
+bench_6 = "hog1"
 
 
 [[jobs]]
@@ -93,10 +94,11 @@ echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
 
-echo 'release hog1, hog6, and hog7'
+echo 'release hog1, hog6, hog7, and hog9'
 ./release/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
 
 echo 'run event server benchmarks'
 (./scripts/ci/event_bench.sh) || true
