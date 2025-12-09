@@ -12,6 +12,7 @@ add_library(hogdb_objects OBJECT
   item_lock/new_contract_lock.cc
   item_lock/new_deployment_lock.cc
   item_lock/nnint128_lock.cc
+  item_lock/replay_cache_lock.cc
   item_lock.cc
   invariant_hog_conservation.cc
   invoke_tx.cc
@@ -71,11 +72,11 @@ add_executable(
   hogdb_test.cc
   item_change_auth_test.cc
   item_change_exclusive_test.cc
-  item_change_replay_cache_test.cc
   item_lock_test.cc
   item_lock/auth_lock_test.cc
   item_lock/bytestring_lock_test.cc
   item_lock/nnint128_lock_test.cc
+  item_lock/replay_cache_lock_test.cc
   mock_authdb_rpc.cc
   recovery_tests.cc
 )

@@ -192,9 +192,9 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
   // committed as part of a single block, then the source account needs balance
   // to cover the storage cost of a replay entry for every transaction.
   populate_account_balances(bench->db_, n,
-                            bench->cost_model_.kBaseItemCost +
-                                (bench->cost_model_.kReplayCacheCostPerEntry *
-                                 n));
+                            (bench->cost_model_.kBaseItemCost +
+                             bench->cost_model_.kReplayCacheCostPerEntry) *
+                                n);
   HogDBStatus<uint64_t> lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());

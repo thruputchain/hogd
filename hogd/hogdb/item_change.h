@@ -363,55 +363,17 @@ namespace hogd {
 
 class ReplayCacheIt {
 public:
-  ReplayCacheIt(BlockHeight expired_height, ReplayCacheData const &cache);
+  ReplayCacheIt(Uniquifier const &uniquifier) : addition_(uniquifier) {}
 
-  void assert_is_valid() const
-  {
-    if constexpr (is_debug_build()) {
-      // no duplicate nonces anywhere
-      std::unordered_set<ReplayNonce> nonces{};
-      {
-        auto view = base_replay_cache_.uniquifiers |
-                    std::views::transform(&Uniquifier::nonce);
-        nonces.insert(view.begin(), view.end());
-      }
-      {
-        auto view = additions_ | std::views::transform(&Uniquifier::nonce);
-        nonces.insert(view.begin(), view.end());
-      }
-      assert(nonces.size() ==
-             base_replay_cache_.uniquifiers.size() + additions_.size());
+  bool narrow(const ReplayCacheIt &unused);
 
-      // no expired uniquifiers - can't check this without acccess to dbtip
-    }
-  }
+  Uniquifier const &addition() const { return addition_; }
 
-  HogDBStatus<void> check_conflict(Uniquifier const &uniquifier);
-  HogDBStatus<void> try_consume_uniquifier(Uniquifier const &uniquifier);
-
-  HogDBStatus<void> commit(HogDBDAO &db, MerkleTriePrefix &trie,
-                           const ItemKey &key) const;
-
-  bool narrow(const ReplayCacheIt &replay_cache_item);
-
-  HogDBStatus<int128_t> merge(const ReplayCacheIt &replay_cache_item,
-                              const StorageCostModel *cost_model);
-
-  void undo_merge(const ReplayCacheIt &replay_cache_item);
-
-  // TODO(stutsman): implement or remove storage_size entirely
-  static size_t storage_size() { return 0; }
-
-  int128_t committed_storage_cost(const StorageCostModel *cost_model) const;
-  int128_t marginal_storage_cost(const StorageCostModel *cost_model) const;
-
-  ReplayCacheData build_result() const;
-
-  BlockHeight expired_height_;
-  ReplayCacheData base_replay_cache_;
-  std::vector<Uniquifier> additions_;
+private:
+  Uniquifier addition_;
 
   friend struct std::formatter<ReplayCacheIt>;
+  friend class ReplayCacheLock;
 };
 
 } // namespace hogd
@@ -422,19 +384,15 @@ template<> struct std::formatter<hogd::ReplayCacheIt> {
   static auto format(const hogd::ReplayCacheIt &replay_cache_item, auto &ctx)
   {
     format_to(ctx.out(), "ReplayCacheIt{{");
-    format_to(ctx.out(), "base_replay_cache_: {}, ",
-              x23::show(replay_cache_item.base_replay_cache_));
-    format_to(ctx.out(), "additions_: [");
-    for (auto const &addition : replay_cache_item.additions_)
-      format_to(ctx.out(), "{},", x23::show(addition));
-    format_to(ctx.out(), "]");
+    format_to(ctx.out(), "addition_: {}, ",
+              x23::show(replay_cache_item.addition_));
     return ctx.out();
   }
 };
 
 namespace hogd {
 
-static_assert(hogd::is_item<hogd::ReplayCacheIt>);
+static_assert(hogd::is_item<hogd::PointerItem<hogd::ReplayCacheIt>>);
 
 // ItemChange represents a pending modification to an item.
 class ItemChange {
@@ -449,9 +407,12 @@ public:
   ItemChange(NewContractData &&new_contract_data)
     : type_(std::move(new_contract_data))
   {}
-  ItemChange(AuthDataItem &&auth_data_item) : type_(std::move(auth_data_item))
+  ItemChange(AuthDataItem &&auth_data_item)
+    : type_(PointerItem<AuthDataItem>(std::move(auth_data_item)))
   {}
-  ItemChange(ReplayCacheIt &&replay_cache) : type_(std::move(replay_cache)) {}
+  ItemChange(ReplayCacheIt &&replay_cache)
+    : type_(PointerItem<ReplayCacheIt>(std::move(replay_cache)))
+  {}
   ~ItemChange() = default;
 
   // getters
@@ -488,7 +449,7 @@ public:
   }
   bool is_replay_cache() const
   {
-    return std::holds_alternative<ReplayCacheIt>(type_);
+    return std::holds_alternative<PointerItem<ReplayCacheIt>>(type_);
   }
 
   template<typename T> auto const *get_inner() const
@@ -503,7 +464,8 @@ public:
 
 private:
   std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData, PointerItem<AuthDataItem>, ReplayCacheIt>
+               NewContractData, PointerItem<AuthDataItem>,
+               PointerItem<ReplayCacheIt>>
       type_;
   bool exclusive_{false};
   bool permanent_exclusive_{false};
@@ -553,8 +515,8 @@ ItemChange::get_raw_nnint128() const
 inline std::optional<ReplayCacheIt>
 ItemChange::to_replay_cache() const
 {
-  if (const auto *tmp = std::get_if<ReplayCacheIt>(&type_); tmp)
-    return *tmp;
+  if (const auto *tmp = std::get_if<PointerItem<ReplayCacheIt>>(&type_); tmp)
+    return *(tmp->get());
   return std::nullopt;
 }
 
