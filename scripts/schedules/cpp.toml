@@ -35,4 +35,4 @@ GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
-cpp_1 = "hog8"
+cpp_1 = "?"
