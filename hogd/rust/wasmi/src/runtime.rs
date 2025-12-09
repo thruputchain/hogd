@@ -201,7 +201,6 @@ pub struct NewWasmiRuntimeResult {
 /// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
 /// userctx can be any (null or non-null) pointer.
 /// bytes must be either null or a valid memory slice.
-
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
@@ -245,7 +244,9 @@ pub unsafe extern "C" fn new_wasmi_runtime(
         }
     };
 
-    let ptr = unsafe { core::mem::transmute(Box::into_raw(b)) };
+    let ptr = unsafe {
+        core::mem::transmute::<*mut WasmiRuntime, *mut c_void>(Box::into_raw(b))
+    };
     NewWasmiRuntimeResult {
         runtime: ptr,
         error: 0,

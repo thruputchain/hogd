@@ -110,7 +110,7 @@ impl ModuleCache {
                 return Err(error);
             }
             debug_log!(eprintln!("Unknown system error code: {res}"));
-            return Err(SystemErrorCode::kSystemUnrecoverable);
+            Err(SystemErrorCode::kSystemUnrecoverable)
         }
     }
 }

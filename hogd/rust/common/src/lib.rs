@@ -41,7 +41,9 @@ impl From<SystemErrorCode> for InvokeErrorCode {
     }
 }
 
-pub fn string_from_parts(
+/// # Safety
+/// bytes must be a valid UTF-8 string, and len must be the length of the string.
+pub unsafe fn string_from_parts(
     bytes: *const u8,
     len: u32,
 ) -> Result<String, Utf8Error> {
