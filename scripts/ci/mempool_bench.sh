@@ -8,6 +8,7 @@ cleanup() {
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
   exit "$exit_code"
@@ -28,6 +29,7 @@ echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog7 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog8 $CI_CONTROL_PORT
+./scripts/wait-port.sh hog9 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clear work dirs'
@@ -35,6 +37,7 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT clear_work_dir
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'launch loadgen'
@@ -62,7 +65,7 @@ echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
 
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
@@ -72,6 +75,7 @@ echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch fake coordinator and mempool'
