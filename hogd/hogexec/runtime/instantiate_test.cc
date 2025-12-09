@@ -71,4 +71,23 @@ TEST_F(InstantiateTest, InstantiateUnexportedMemory)
   EXPECT_FALSE(runtime.value());
 }
 
+TEST_F(InstantiateTest, InstantiateNoStart)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_no_start.wasm");
+  make_syscall_handler(contract);
+  auto deployed_contract_hash = DeployedContractHash{
+      .hash = sha256(contract),
+      .contract_size =
+          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+      .contract_type = ContractType::kWasmi,
+  };
+  WasmiContext context;
+  auto runtime = context.make_new_runtime(deployed_contract_hash,
+                                          syscall_handler_.get(), true);
+  ASSERT_TRUE(runtime.has_value());
+  EXPECT_FALSE(runtime.value());
+}
+
 } // namespace hogd

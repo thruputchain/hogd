@@ -1,5 +1,5 @@
 use wasmi::{
-    Caller, CompilationMode, Config, Engine, Error, Linker, Module, StackLimits,
+    Caller, CompilationMode, Config, Engine, Error, Linker, Module,
 };
 
 use core::ffi::c_void;
@@ -170,7 +170,16 @@ impl<'a> WasmiContext<'a> {
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(StackLimits::default())
+                // Previous API:
+                // .set_stack_limits(StackLimits::default())
+                .set_min_stack_height(1024)
+                .set_max_stack_height(16384)
+                .set_max_recursion_depth(1024)
+                // Relevant for concurrent operation:
+                // This is the number of stacks that are cached on one engine.
+                // When there's high usage of one module, we'd rather reuse a stack
+                // than create one each time.  So this shouudl probably mirror the thread count.
+                .set_max_cached_stacks(2048)
                 // MUST BE EAGER
                 // This warning is in ALL CAPITALS because if we change that
                 // we will have NONDETERMINISM in gas measurements

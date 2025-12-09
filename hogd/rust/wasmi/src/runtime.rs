@@ -41,13 +41,22 @@ fn check_memory_limit(module: &Module) -> bool {
     let export_unwrapped = export.unwrap();
 
     if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
-        debug_log!(if memory_type.initial_pages() > 1.into() {
+        debug_log!(if memory_type.minimum() > 1u64 {
             eprintln!("Wasm initial memory exceeds limit: {memory_type:?}")
         });
-        return memory_type.initial_pages() <= 1.into();
+        return memory_type.minimum() <= 1u64;
     }
     debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
     false
+}
+
+fn check_no_start(module: &Module) -> bool {
+    let start = module.get_export("start");
+    if start.is_some() {
+        debug_log!(eprintln!("Module has start function"));
+        return false;
+    }
+    true
 }
 
 impl WasmiRuntime {
@@ -77,6 +86,10 @@ impl WasmiRuntime {
                     debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
                     return None;
                 }
+                if !check_no_start(&module) {
+                    debug_log!(eprintln!("Module instantiation failed: Start function found"));
+                    return None;
+                }
                 context.put_cached_module(hash, &module, &linker);
                 (module, linker)
             }
@@ -95,21 +108,21 @@ impl WasmiRuntime {
                 debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
                 return None;
             }
+            if !check_no_start(&module) {
+                debug_log!(eprintln!("Module instantiation failed: Start function found"));
+                return None;
+            }
             (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker
-            .instantiate(&mut store, &module)
+        // instantiate_and_start doesn't call start if there is no start function.
+        debug_assert!(check_no_start(&module));
+        store.set_fuel(0).unwrap();
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
             .inspect_err(|_e| {
                 debug_log!(eprintln!("Error instantiating store: {_e}"))
-            })
-            .ok()?;
-
-        let instance = instance_result
-            .ensure_no_start(&mut store)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error ensuring no start: {_e}"))
             })
             .ok()?;
         Some(Self { store, instance })
