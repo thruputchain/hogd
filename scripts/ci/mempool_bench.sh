@@ -11,6 +11,7 @@ cleanup() {
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
+  echo "$(jobs -l)"
   exit "$exit_code"
 }
 
@@ -101,5 +102,3 @@ echo 'clone metrics history # This is idempotent'
 
 echo 'log integration metrics'
 ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
-
-exit 0
