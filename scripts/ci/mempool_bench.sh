@@ -102,3 +102,4 @@ echo 'clone metrics history # This is idempotent'
 echo 'log integration metrics'
 ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
 
+exit 0
