@@ -41,6 +41,9 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'kill stale processes'
+# [ssh] will return a non-zero error code if a process we try to kill does not
+# exist. To prevent this non-zero error code from causing this overall script to
+# fail, we append [|| true] to each line.
 ssh hog7 "killall loadgen_server" || true
 ssh hog5 "killall hogexec" || true
 ssh hog6 "killall hogexec" || true
