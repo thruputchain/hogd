@@ -41,7 +41,7 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'launch loadgen'
-ssh hog7 "kill loadgen_server"
+# ssh hog7 "kill loadgen_server"
 echo 'done killing loadgen_server'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
 echo 'done launching loadgen server'
