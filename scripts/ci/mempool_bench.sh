@@ -41,28 +41,22 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'launch loadgen'
-ssh hog7 "killall loadgen_server" || true
-echo 'done killalling loadgen_server'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
-echo 'done launching loadgen server'
 
 echo 'wait for loadgen'
 ./scripts/wait-port.sh hog7 11222
 
 echo 'launch first hogexec'
-ssh hog5 "killall hogexec" || true
 # the mempool runs on hog10
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'launch second hogexec'
-ssh hog6 "killall hogexec" || true
 # the mempool runs on hog10
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'launch third hogexec'
-ssh hog8 "killall hogexec" || true
 # the mempool runs on hog10
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
@@ -70,12 +64,11 @@ ssh hog8 "killall hogexec" || true
 echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
 
+echo "work dir is $WORK_DIR"
 echo 'launch event'
-ssh hog9 "killall event_exec" || true
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
 
 echo 'launch hogdb'
-ssh hog11 "killall hogdb" || true
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
 
 echo 'make sure procs are running'
@@ -87,8 +80,6 @@ echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch fake coordinator and mempool'
-ssh hog10 "killall coordinator" || true
-ssh hog10 "killall mempool_exec" || true
 ./$BUILD_DIR/hogd/mempool/test/coordinator hog10:$MEMPOOL_COORDINATOR_PORT hog7:11222 >coordinator_output.txt 2>&1 &
 bash -c 'timeout 90000s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
