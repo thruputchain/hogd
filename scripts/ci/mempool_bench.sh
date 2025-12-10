@@ -11,6 +11,7 @@ cleanup() {
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
+  killall coordinator
   echo "$(jobs -l)"
   exit "$exit_code"
 }
