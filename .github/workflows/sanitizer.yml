@@ -36,7 +36,7 @@ jobs:
             - name: Run hog schedule
               run: |
                   hog_sched \
-                  --i="github-${{ github.run_id }}" \
+                  --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                   --key=github_repo --value=${{ github.repository }} \
                   --key=git_commit --value=${{ github.sha }} \
                   ./scripts/schedules/sanitizer.toml
