@@ -4,7 +4,7 @@ set -Eeuo pipefail
 cleanup() {
   local exit_code=$1
 
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT stop
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
@@ -25,7 +25,7 @@ export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServer
 export MEMPOOL_COORDINATOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolCoordinatorServerPort)
 
 echo 'make sure bench servers are running'
-./scripts/wait-port.sh hog1 $CI_CONTROL_PORT
+./scripts/wait-port.sh hog5 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog7 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog8 $CI_CONTROL_PORT
@@ -33,12 +33,25 @@ echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clear work dirs'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT clear_work_dir
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
+
+echo 'kill stale processes'
+# [ssh] will return a non-zero error code if a process we try to kill does not
+# exist. To prevent this non-zero error code from causing this overall script to
+# fail, we append [|| true] to each line.
+ssh hog7 "killall loadgen_server" || true
+ssh hog5 "killall hogexec" || true
+ssh hog6 "killall hogexec" || true
+ssh hog8 "killall hogexec" || true
+ssh hog9 "killall event_exec" || true
+ssh hog11 "killall hogdb" || true
+ssh hog10 "killall coordinator" || true
+ssh hog10 "killall mempool_exec" || true
 
 echo 'launch loadgen'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
@@ -48,7 +61,7 @@ echo 'wait for loadgen'
 
 echo 'launch first hogexec'
 # the mempool runs on hog10
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec hog10:$MEMPOOL_EXECUTOR_PORT -n 1024
 # can't wait for hogexec: that's waiting on the coordinator
 
 echo 'launch second hogexec'
@@ -64,6 +77,7 @@ echo 'launch third hogexec'
 echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
 
+echo "work dir is $WORK_DIR"
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
 
@@ -71,7 +85,7 @@ echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
 
 echo 'make sure procs are running'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
@@ -80,7 +94,7 @@ echo 'make sure procs are running'
 
 echo 'launch fake coordinator and mempool'
 ./$BUILD_DIR/hogd/mempool/test/coordinator hog10:$MEMPOOL_COORDINATOR_PORT hog7:11222 >coordinator_output.txt 2>&1 &
-bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
