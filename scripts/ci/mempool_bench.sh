@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-cleanup() {
-  local exit_code=$1
-
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
-  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
-
-  exit "$exit_code"
-}
-
-trap 'cleanup "$?"' EXIT
-trap 'cleanup 130' INT TERM # 130 is conventional for SIGINT
-
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./$BUILD_DIR/hogd/utils/get_port kCIControlServerPort)
 export MEMPOOL_EXECUTOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolExecutorServerPort)
