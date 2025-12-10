@@ -18,6 +18,9 @@ cleanup() {
     wait
   fi
   echo "$(jobs -l)"
+
+  echo "[mempool_bench] reached end of script, about to exit" >&2
+  printf '[mempool_bench] $$=%d\n' "$$" >&2
   exit "$exit_code"
 }
 
