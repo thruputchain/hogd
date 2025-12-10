@@ -11,16 +11,6 @@ cleanup() {
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
-  if jobs -p > /dev/null; then
-    echo "Cleaning up leftover background jobs:"
-    echo "$(jobs -l)"
-    kill $(jobs -p) 2>/dev/null || true
-    wait
-  fi
-  echo "$(jobs -l)"
-
-  echo "[mempool_bench] reached end of script, about to exit" >&2
-  printf '[mempool_bench] $$=%d\n' "$$" >&2
   exit "$exit_code"
 }
 
@@ -87,7 +77,6 @@ echo 'launch third hogexec'
 echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
 
-echo "work dir is $WORK_DIR"
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
 
