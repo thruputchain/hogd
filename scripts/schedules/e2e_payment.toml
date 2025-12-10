@@ -75,6 +75,7 @@ mempool_bench_exit=$?
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
 
+echo 'done'
 """
 after = """
 
