@@ -11,6 +11,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -22,7 +23,8 @@ namespace hogd {
 HogDBStatus<int128_t>
 NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
                                           const DeployedContractData *after,
-                                          const StorageCostModel *cost_model)
+                                          const StorageCostModel *cost_model,
+                                          const LockContext & /*ctx*/)
 {
   assert(before == nullptr ||
          before->deployed_contract_hash() == deployed_contract_hash_);
@@ -37,24 +39,25 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
 }
 
 HogDBStatus<void>
-NewDeploymentLock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
+NewDeploymentLock::write_committed_change(LockContext const &ctx,
                                           MerkleTriePrefix &trie) const
 {
-  assert(key.is_address_metadata());
+  assert(ctx.key.is_address_metadata());
   HogDBStatus<void> ret =
-      dao.write_address_metadata(key.get_address(), deployed_contract_hash_);
+      ctx.dao.write_address_metadata(ctx.key.get_address(),
+                                     deployed_contract_hash_);
   if (ret) {
     auto buf = x23::serialize(deployed_contract_hash_);
     CHECK(
-        MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, 0,
+        MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
                                                   std::as_bytes(std::span(buf)))
             .has_value());
   }
 
   // Create an empty data record for this address for scheduler state;
   // the scheduler is responsible for populating this with nonzero data.
-  auto r = dao.write_address_average_hog_age(HogAge{
-      .address = key.get_address().get_raw(),
+  auto r = ctx.dao.write_address_average_hog_age(HogAge{
+      .address = ctx.key.get_address().get_raw(),
       .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
                    to_xdr(uint128_t{0})},
       .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},

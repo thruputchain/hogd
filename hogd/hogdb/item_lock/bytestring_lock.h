@@ -28,7 +28,8 @@ public:
   // If after is nullptr, the storage cost output should be ignored.
   HogDBStatus<int128_t>
   try_atomic_change_lock(const Bytes *before, const Bytes *after,
-                         const StorageCostModel *cost_model);
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
 
   int128_t get_storage_cost_of_committed_value(
       const StorageCostModel *cost_model) const noexcept
@@ -47,7 +48,7 @@ public:
     return 0;
   }
 
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
 private:

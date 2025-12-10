@@ -2,6 +2,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 
 namespace hogd {
@@ -17,9 +18,10 @@ public:
   // if after is nullptr. This method is infallible, and the before parameter is
   // ignored. We leave it as is to keep the same method signature as the other
   // lock types.
-  int128_t try_atomic_change_lock(const ItemChange * /*unused*/,
-                                  const ItemChange *after,
-                                  const StorageCostModel *cost_model);
+  HogDBStatus<int128_t>
+  try_atomic_change_lock(const ItemChange *before, const ItemChange *after,
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
 
 private:
 };

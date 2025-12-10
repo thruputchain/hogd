@@ -496,23 +496,9 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
   if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {
     return HogDBError(HogDBCode::kConflict);
   }
-  auto base_replay_cache =
-      block_.get().get_db().read_address_replay_cache(addr);
-  if (!base_replay_cache) {
-    if (base_replay_cache.error() != HogDBCode::kNotFound) {
-      return base_replay_cache.error();
-    }
-    base_replay_cache = ReplayCacheData{};
-  }
-
-  ReplayCacheIt replay_cache_item(block_.get().get_height() - 1,
-                                  std::move(base_replay_cache.value()));
-  HogDBStatus<void> ret = replay_cache_item.try_consume_uniquifier(uniquifier);
-  if (!ret)
-    return ret;
 
   return request_change(make_replay_cache_item_key(addr),
-                        std::move(replay_cache_item));
+                        ReplayCacheIt{uniquifier});
 }
 
 HogDBStatus<void>

@@ -38,11 +38,12 @@ public:
   HogDBStatus<int128_t>
   try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
                          const PointerItem<AuthDataItem> *after,
-                         const StorageCostModel *cost_model);
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<AuthDataItem> &after,
                          const StorageCostModel *cost_model);
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
   AccountAuthData build_result() const;

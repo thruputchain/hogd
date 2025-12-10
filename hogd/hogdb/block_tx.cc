@@ -20,6 +20,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
@@ -33,24 +34,26 @@ namespace hogd {
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_lock(ItemLock &lock, const ItemChange &change,
-                 const StorageCostModel *cost_model)
+                 const StorageCostModel *cost_model, const LockContext &ctx)
 {
-  return lock.try_atomic_change_lock(nullptr, &change, cost_model);
+  return lock.try_atomic_change_lock(nullptr, &change, cost_model, ctx);
 }
 
 ATTRIBUTE_ALWAYS_INLINE HogDBStatus<int128_t>
 BlockTX::do_modify_lock(ItemLock &lock, const ItemChange &old_change,
                         const ItemChange &new_change,
-                        const StorageCostModel *cost_model)
+                        const StorageCostModel *cost_model,
+                        const LockContext &ctx)
 {
-  return lock.try_atomic_change_lock(&old_change, &new_change, cost_model);
+  return lock.try_atomic_change_lock(&old_change, &new_change, cost_model, ctx);
 }
 
 ATTRIBUTE_ALWAYS_INLINE void
 BlockTX::do_unlock_item(ItemLock &lock, const ItemChange &change,
-                        const StorageCostModel *cost_model)
+                        const StorageCostModel *cost_model,
+                        const LockContext &ctx)
 {
-  auto r = lock.try_atomic_change_lock(&change, nullptr, cost_model);
+  auto r = lock.try_atomic_change_lock(&change, nullptr, cost_model, ctx);
   CHECK(r.has_value());
 }
 
@@ -59,9 +62,9 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
 {
   assert(delta > 0);
 
+  ItemKey key = make_address_balance_item_key(addr);
   auto *lock = addr_balance_locks_.insert_or_get(addr, [&] {
-    return get_snapshot_cost_and_cache_data(
-        make_address_balance_item_key(addr));
+    return get_snapshot_cost_and_cache_data(key);
   });
   CHECK_PTR(lock);
 
@@ -70,11 +73,12 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
 
   ItemChange change = ItemChange(NNInt128(*base, delta));
 
-  if (auto r = do_lock(*lock, change, &cost_model_); !r) [[unlikely]] {
+  LockContext ctx(db_, block_height_, key);
+  if (auto r = do_lock(*lock, change, &cost_model_, ctx); !r) [[unlikely]] {
     throw std::runtime_error("failed to lock balance");
   }
 
-  lock->commit_change(change, &cost_model_);
+  lock->commit_change(change, &cost_model_, ctx);
 }
 
 HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
@@ -103,7 +107,8 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
           make_address_balance_item_key(key.get_address()));
     });
 
-    return do_lock(*lock, change, &cost_model_)
+    LockContext ctx(db_, block_height_, key);
+    return do_lock(*lock, change, &cost_model_, ctx)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
@@ -113,7 +118,8 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
 
   assert(item != nullptr);
 
-  return do_lock(*item, change, &cost_model_);
+  LockContext ctx(db_, block_height_, key);
+  return do_lock(*item, change, &cost_model_, ctx);
 }
 
 HogDBStatus<int128_t>
@@ -124,14 +130,16 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    return do_modify_lock(*lock, old_change, new_change, &cost_model_)
+    LockContext ctx(db_, block_height_, key);
+    return do_modify_lock(*lock, old_change, new_change, &cost_model_, ctx)
         .and_then([](auto /*unused*/) -> HogDBStatus<int128_t> { return 0; });
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
 
-  return do_modify_lock(*lock, old_change, new_change, &cost_model_);
+  LockContext ctx(db_, block_height_, key);
+  return do_modify_lock(*lock, old_change, new_change, &cost_model_, ctx);
 }
 
 void
@@ -141,13 +149,15 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    do_unlock_item(*lock, change, &cost_model_);
+    LockContext ctx(db_, block_height_, key);
+    do_unlock_item(*lock, change, &cost_model_, ctx);
     return;
   }
 
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
-  do_unlock_item(*lock, change, &cost_model_);
+  LockContext ctx(db_, block_height_, key);
+  do_unlock_item(*lock, change, &cost_model_, ctx);
 }
 
 int128_t
@@ -159,13 +169,15 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
   if (key.is_address_balance()) {
     auto *lock = addr_balance_locks_.get(key.get_address());
     CHECK_PTR(lock);
-    lock->commit_change(change, &cost_model_);
+    LockContext ctx(db_, block_height_, key);
+    lock->commit_change(change, &cost_model_, ctx);
     return 0;
   }
   auto *lock = item_locks_.get(key);
   CHECK_PTR(lock);
 
-  return lock->commit_change(change, &cost_model_);
+  LockContext ctx(db_, block_height_, key);
+  return lock->commit_change(change, &cost_model_, ctx);
 }
 
 HogDBStatus<int128_t>
@@ -209,8 +221,8 @@ BlockTX::commit(WorkerPool &pool)
         if (!v.second.is_finalized()) {
           return;
         }
-        HogDBStatus<void> tmp =
-            v.second.write_committed_change(v.first, db_, trie_);
+        HogDBStatus<void> tmp = v.second.write_committed_change(
+            LockContext(db_, block_height_, v.first), trie_);
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;

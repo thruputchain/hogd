@@ -16,9 +16,13 @@
 #include "hogd/hogdb/background_commit_worker.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/invoke_tx.h"
+#include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
 #include "storage_delta_flags.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 #include "hogd/base/io.h"
@@ -261,67 +265,72 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-#if 0 // NOLINT
-
 TEST_F(HogDBTest, ItemChangeReplayCache)
 {
   BlockHeight height = 9;
   auto rckey = make_replay_cache_item_key(make_address("abcd"));
 
-  ReplayCacheData base{};
-  ItemChange c1(ReplayCacheIt(height, base));
-  c1.set_snapshot_cost(0);
-  ReplayCacheIt c2i(height, base);
-  ASSERT_TRUE(c2i.try_consume_uniquifier({height + 1, 101}));
-  ASSERT_TRUE(c2i.try_consume_uniquifier({height + 2, 102}));
-  ItemChange c2(std::move(c2i));
+  // Create a replay cache item wrapped in ItemChange
+  ItemChange c1(ReplayCacheIt(Uniquifier(height + 1, 101)));
+
+  // Create ItemLock with snapshot cost of 0 (no existing data)
+  ItemLock lock(0);
 
   {
-    auto r = c1.merge(c2, &cost_model_);
+    LockContext ctx(db_, height, rckey);
+    auto r = lock.try_atomic_change_lock(nullptr, &c1, &cost_model_, ctx);
     ASSERT_TRUE(r);
-    // marginal storage cost should include two elements since
-    // stored version has nothing in it.
-    EXPECT_EQ(cost_model_.kBaseItemCost +
-                  (2 * cost_model_.kReplayCacheCostPerEntry),
-              *r);
-    EXPECT_EQ(cost_model_.kBaseItemCost +
-                  (2 * cost_model_.kReplayCacheCostPerEntry),
-              c1.marginal_storage_cost(&cost_model_).value());
-    // store updated cache in db
-    ASSERT_TRUE(c1.commit(db_, trie_, rckey));
+    auto commit_cost = lock.commit_change(c1, &cost_model_, ctx);
+    EXPECT_EQ(cost_model_.kBaseItemCost + cost_model_.kReplayCacheCostPerEntry,
+              commit_cost);
+    ASSERT_TRUE(lock.write_committed_change(ctx, trie_));
   }
 
   height++;
 
+  // Read the replay cache data that was written in the previous block
   auto new_base = db_.read_address_replay_cache(rckey.get_address());
   ASSERT_TRUE(new_base);
 
-  ReplayCacheIt c3i(height, *new_base);
+  // Verify that the data was persisted correctly
+  ASSERT_EQ(1, new_base->uniquifiers.size());
+  EXPECT_EQ(height, new_base->uniquifiers[0].block_expiry_height);
+  EXPECT_EQ(101, new_base->uniquifiers[0].nonce);
+
+  // Create a new lock with the snapshot cost from the database
+  auto snapshot_result =
+      db_.get_charged_storage_cost_and_cache_data(rckey, &cost_model_);
+  ASSERT_TRUE(snapshot_result);
+  ItemLock lock2(snapshot_result->first);
 
   {
-    // one entry has expired
-    ItemChange change{ReplayCacheIt{c3i}};
-    // normally BlockTX::lock does this, but test skips BlockTX
-    ASSERT_TRUE(change.load_snapshot_cost(db_, rckey, &cost_model_));
-    auto marginal_cost = change.marginal_storage_cost(&cost_model_).value();
-    // -cost_model_.kReplayCacheCostPerEntry change in cost, but
-    // marginal_storage_cost is always at least 0.
-    EXPECT_EQ(0, marginal_cost);
+    LockContext ctx(db_, height, rckey);
+
+    // height is now 10, 101 expired, and it shouldn't be possible to readd it
+    ItemChange c2(ReplayCacheIt(Uniquifier(height, 101)));
+    auto r = lock2.try_atomic_change_lock(nullptr, &c2, &cost_model_, ctx);
+    ASSERT_FALSE(r);
+
+    ItemChange c3(ReplayCacheIt(Uniquifier(height + 1, 102)));
+    auto r2 = lock2.try_atomic_change_lock(nullptr, &c3, &cost_model_, ctx);
+    ASSERT_TRUE(r2);
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, r2.value());
+
+    auto commit_cost = lock2.commit_change(c3, &cost_model_, ctx);
+    EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
+    ASSERT_TRUE(lock2.write_committed_change(ctx, trie_));
   }
 
-  // succeeds because the earlier 101 entry expired
-  ASSERT_TRUE(c3i.try_consume_uniquifier({height + 1, 101}));
-  // fails because the earlier 102 entry is still unexpired
-  ASSERT_FALSE(c3i.try_consume_uniquifier({height + 1, 102}));
-  // one expired since last snapshot, one was added, so no change to overall
-  // cost
-  ItemChange change(std::move(c3i));
-  ASSERT_TRUE(change.load_snapshot_cost(db_, rckey, &cost_model_));
-  auto marginal_cost = change.marginal_storage_cost(&cost_model_).value();
-  EXPECT_EQ(0, marginal_cost);
-}
+  auto final_base = db_.read_address_replay_cache(rckey.get_address());
+  ASSERT_TRUE(final_base);
 
-#endif
+  // Verify that the data was persisted correctly
+  ASSERT_EQ(2, final_base->uniquifiers.size());
+  EXPECT_EQ(height, final_base->uniquifiers[0].block_expiry_height);
+  EXPECT_EQ(101, final_base->uniquifiers[0].nonce);
+  EXPECT_EQ(height + 1, final_base->uniquifiers[1].block_expiry_height);
+  EXPECT_EQ(102, final_base->uniquifiers[1].nonce);
+}
 
 } // namespace hogd
 
