@@ -42,7 +42,9 @@ echo 'clear work dirs'
 
 echo 'launch loadgen'
 ssh hog7 "kill loadgen_server"
+echo 'done killing loadgen_server'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
+echo 'done launching loadgen server'
 
 echo 'wait for loadgen'
 ./scripts/wait-port.sh hog7 11222
