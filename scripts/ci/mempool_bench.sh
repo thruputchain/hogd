@@ -94,7 +94,7 @@ echo 'make sure procs are running'
 
 echo 'launch fake coordinator and mempool'
 ./$BUILD_DIR/hogd/mempool/test/coordinator hog10:$MEMPOOL_COORDINATOR_PORT hog7:11222 >coordinator_output.txt 2>&1 &
-bash -c 'timeout 90000s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
