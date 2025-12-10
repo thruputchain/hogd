@@ -40,6 +40,16 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
+echo 'kill stale processes'
+ssh hog7 "killall loadgen_server" || true
+ssh hog5 "killall hogexec" || true
+ssh hog6 "killall hogexec" || true
+ssh hog8 "killall hogexec" || true
+ssh hog9 "killall event_exec" || true
+ssh hog11 "killall hogdb" || true
+ssh hog10 "killall coordinator" || true
+ssh hog10 "killall mempool_exec" || true
+
 echo 'launch loadgen'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
 
