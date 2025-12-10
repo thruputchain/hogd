@@ -11,7 +11,12 @@ cleanup() {
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
 
-  killall coordinator
+  if jobs -p > /dev/null; then
+    echo "Cleaning up leftover background jobs:"
+    echo "$(jobs -l)"
+    kill $(jobs -p) 2>/dev/null || true
+    wait
+  fi
   echo "$(jobs -l)"
   exit "$exit_code"
 }
