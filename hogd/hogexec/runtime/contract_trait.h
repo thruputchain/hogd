@@ -123,7 +123,15 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
           return I;
         }
         else {
-          return self(std::index_sequence<Is...>{});
+          if constexpr (sizeof...(Is) == 0) {
+            // more detailed error message (i.e. which name is missing) is a
+            // cpp26 extension
+            static_assert(false, "ContractTraitMeta: Method name not found");
+            std::unreachable();
+          }
+          else {
+            return self(std::index_sequence<Is...>{});
+          }
         }
       }(std::make_index_sequence<ContractTrait::kExportNames.size()>{});
 
