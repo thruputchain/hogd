@@ -65,4 +65,4 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
 [jobs.host]
-sanitizer_1 = "hog8"
+sanitizer_1 = "?"
