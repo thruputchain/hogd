@@ -118,7 +118,8 @@ trap cleanup EXIT INT TERM
 
 make -C "$HOGD_BUILD_DIR" -j$(nproc)
 # These build scripts place the binaries in the current working directory, so we
-# [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build directory.
+# [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build
+# directory.
 pushd "$HOGD_BUILD_DIR" > /dev/null
 "$CHUCKD_SCRIPT_DIR"/build_chuckd.sh
 "$CHUCKD_SCRIPT_DIR"/build_scpd.sh
