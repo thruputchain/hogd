@@ -7,7 +7,6 @@ HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
-fake_coordinator_server="hog3"
 mempool_server="hog3"
 hogexec_servers=("hog4" "hog5" "hog2")
 event_server="hog4"
@@ -238,7 +237,7 @@ ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
 
 remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   --copy-file "$SCPD_BINARY" \
-  -l debug --stack --config "$logdir"/config-chuckd.json \
+  --stack --config "$logdir"/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
@@ -294,10 +293,10 @@ else
   ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
     "tail -n +1 -f $logdir/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
   ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -n +1 -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+    "tail -n +1 -f $logdir/chuckd.dev.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
   ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-    "tail -n +1 -f $logdir/scpd.log" |
-    sed "s/^/[${fake_coordinator_server}\/scpd] /" &
+    "tail -n +1 -f $logdir/scpd.dev.log" |
+    sed "s/^/[${chuckd_server}\/scpd] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
     "tail -n +1 -f $logdir/mempool_exec.log" | sed "s/^/[${mempool_server}\/mempool] /" &

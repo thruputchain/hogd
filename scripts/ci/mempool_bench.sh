@@ -77,7 +77,6 @@ echo 'launch third hogexec'
 echo 'check hogexec is running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
 
-echo "work dir is $WORK_DIR"
 echo 'launch event'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT start hogd/event/event_exec hog10:$MEMPOOL_EVENT_PORT $WORK_DIR/
 
