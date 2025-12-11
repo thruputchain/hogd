@@ -22,7 +22,7 @@ impl TrampolineError {
             .map_or_else(WasmiInvokeResult::error, |_| {
                 WasmiInvokeResult::success()
             })
-       }
+    }
 }
 
 impl Display for TrampolineError {
