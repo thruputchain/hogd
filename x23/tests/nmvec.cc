@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <vector>
 
+#include <sys/resource.h>
+
 #include <gtest/gtest.h>
 
 #include "x23/nmvec.h"
@@ -429,7 +431,16 @@ TEST(NMVec, IterComparisons)
   EXPECT_NE(v1.begin(), v1.end());
   EXPECT_LT(v1.begin(), v1.end());
 #ifndef NDEBUG
+  struct rlimit core{};
+  getrlimit(RLIMIT_CORE, &core);
+  if (core.rlim_cur) {
+    auto nocore = core;
+    nocore.rlim_cur = 0;
+    setrlimit(RLIMIT_CORE, &nocore);
+  }
   EXPECT_DEATH(void(v1.begin() <= v2.begin()), "");
+  if (core.rlim_cur)
+    setrlimit(RLIMIT_CORE, &core);
 #endif // !NDEBUG
 }
 

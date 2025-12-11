@@ -20,18 +20,17 @@ public:
 
   NewContractLock(Contract contract) : contract_(std::move(contract)) {}
 
-  HogDBStatus<int128_t>
-  try_atomic_change_lock(const NewContractData *before,
-                         const NewContractData *after,
-                         const StorageCostModel * /*unused*/);
+  HogDBStatus<int128_t> try_atomic_change_lock(
+      const NewContractData *before, const NewContractData *after,
+      const StorageCostModel *cost_model, const LockContext &ctx);
   static int128_t commit_change(bool /*unused*/, int128_t /*unused*/,
                                 const NewContractData & /*unused*/,
                                 const StorageCostModel * /*unused*/)
   {
     return 0;
   }
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
-                                           MerkleTriePrefix & /*unused*/) const;
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
+                                           MerkleTriePrefix &trie) const;
 
 private:
   const Contract contract_;

@@ -38,7 +38,7 @@ jobs:
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
                   echo "Branch name: $BRANCH_NAME"
                   hog_sched \
-                    --i="github-${{ github.run_id }}" \
+                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=$BRANCH_NAME \

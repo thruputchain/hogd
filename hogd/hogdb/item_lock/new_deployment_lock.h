@@ -22,14 +22,13 @@ public:
     : deployed_contract_hash_(std::move(deployed_contract_hash))
   {}
 
-  HogDBStatus<int128_t>
-  try_atomic_change_lock(const DeployedContractData *before,
-                         const DeployedContractData *after,
-                         const StorageCostModel * /*unused*/);
+  HogDBStatus<int128_t> try_atomic_change_lock(
+      const DeployedContractData *before, const DeployedContractData *after,
+      const StorageCostModel *cost_model, const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const DeployedContractData & /*unused*/,
                          const StorageCostModel *cost_model) const;
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
 private:

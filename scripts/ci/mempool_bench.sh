@@ -44,14 +44,14 @@ echo 'kill stale processes'
 # [ssh] will return a non-zero error code if a process we try to kill does not
 # exist. To prevent this non-zero error code from causing this overall script to
 # fail, we append [|| true] to each line.
-ssh hog7 "killall loadgen_server" || true
-ssh hog5 "killall hogexec" || true
-ssh hog6 "killall hogexec" || true
-ssh hog8 "killall hogexec" || true
-ssh hog9 "killall event_exec" || true
-ssh hog11 "killall hogdb" || true
-ssh hog10 "killall coordinator" || true
-ssh hog10 "killall mempool_exec" || true
+ssh -n hog7 "killall loadgen_server" || true
+ssh -n hog5 "killall hogexec" || true
+ssh -n hog6 "killall hogexec" || true
+ssh -n hog8 "killall hogexec" || true
+ssh -n hog9 "killall event_exec" || true
+ssh -n hog11 "killall hogdb" || true
+ssh -n hog10 "killall coordinator" || true
+ssh -n hog10 "killall mempool_exec" || true
 
 echo 'launch loadgen'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222

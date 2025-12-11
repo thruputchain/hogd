@@ -1,4 +1,4 @@
-name = "sanitizer_ci"
+name = "asyncio_stress_test_ci"
 
 [[jobs]]
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
@@ -51,4 +51,4 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 
 [jobs.host]
-bindings_1 = "hog7"
+bindings_1 = "?"
