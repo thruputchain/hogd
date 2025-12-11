@@ -31,7 +31,7 @@ make_dummy_context(BlockHeight block_height = 0)
   static HogDBDAO *dummy_dao = nullptr;
   static Address dummy_addr = make_address(0);
   static ItemKey dummy_key = make_replay_cache_item_key(dummy_addr);
-  return LockContext(*dummy_dao, block_height, dummy_key);
+  return LockContext(dummy_dao, block_height, dummy_key);
 }
 
 } // namespace

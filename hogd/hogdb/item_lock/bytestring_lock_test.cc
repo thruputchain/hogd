@@ -33,7 +33,7 @@ make_dummy_context()
   // These are never dereferenced in most lock implementations
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
-  return LockContext(*dummy_dao, 0, dummy_key);
+  return LockContext(dummy_dao, 0, dummy_key);
 }
 
 } // namespace

@@ -277,7 +277,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ItemLock lock(0);
 
   {
-    LockContext ctx(db_, height, rckey);
+    LockContext ctx(&db_, height, rckey);
     auto r = lock.try_atomic_change_lock(nullptr, &c1, &cost_model_, ctx);
     ASSERT_TRUE(r);
     auto commit_cost = lock.commit_change(c1, &cost_model_, ctx);
@@ -304,7 +304,7 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ItemLock lock2(snapshot_result->first);
 
   {
-    LockContext ctx(db_, height, rckey);
+    LockContext ctx(&db_, height, rckey);
 
     // height is now 10, 101 expired, and it shouldn't be possible to readd it
     ItemChange c2(ReplayCacheIt(Uniquifier(height, 101)));
