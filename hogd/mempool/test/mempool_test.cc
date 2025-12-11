@@ -101,8 +101,7 @@ TEST(Mempool, NominateEmpty)
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  EXPECT_EQ(res.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationError);
+  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
 TEST(Mempool, NominateCommit)
@@ -367,8 +366,8 @@ TEST(Mempool, GetTip)
 
   MempoolTestInfra server;
 
-  auto res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(res_tip.height, 0);
+  DbTip db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(db_tip.height, 1);
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -377,7 +376,6 @@ TEST(Mempool, GetTip)
   // for the validation below. The [Nomination] struct contains some data, such
   // as the nondeterministic data, that I would prefer not to have to construct
   // myself in this test.
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
@@ -403,15 +401,15 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 
-  res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(res_tip.height, 0);
+  db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(db_tip.height, 1);
 
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
       res_validate.db_tip().id)();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
-  res_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
-  EXPECT_EQ(res_tip, res_validate.db_tip());
+  db_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(db_tip, res_validate.db_tip());
 }
 
 TEST(Mempool, GenerateBlockId)
