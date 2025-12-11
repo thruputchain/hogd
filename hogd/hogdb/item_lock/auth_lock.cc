@@ -134,8 +134,9 @@ AuthLock::write_committed_change(LockContext const &ctx,
   assert(ctx.key.is_account_auth_data());
 
   auto res = build_result();
+  assert(ctx.dao);
   auto ret =
-      ctx.dao.write_address_account_auth_data(ctx.key.get_address(), res);
+      ctx.dao->write_address_account_auth_data(ctx.key.get_address(), res);
   if (!ret) {
     return ret.error();
   }
