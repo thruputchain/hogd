@@ -24,6 +24,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogdb/block_tx.h"
@@ -62,7 +63,7 @@ HogDBSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   for (const ContractAddress &address : addresses) {
     HogDBStatus<HogAge> status = db.read_address_average_hog_age(address);
     if (!status) {
-      warn("Failed to read hog age for address {}: {}", address,
+      warn("Failed to read hog age for address {}: {}", HexArray(address).str(),
            status.error());
       co_return HogAgeResult(DbSchedResult::DbSchedResultError);
     }

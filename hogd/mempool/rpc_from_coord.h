@@ -54,14 +54,7 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
-  ~MempoolCoordinatorRpc()
-  {
-    size_t current_val;
-    while ((current_val = pending_detached_coroutines_.load(
-                std::memory_order_acquire)) != 0) {
-      pending_detached_coroutines_.wait(/*old=*/current_val);
-    }
-  }
+  ~MempoolCoordinatorRpc() { shut_down(); }
 
   // Disable copy and move.
   MempoolCoordinatorRpc(const MempoolCoordinatorRpc &) = delete;
@@ -85,6 +78,7 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
+    info("got {}, expected {}", card.protocol.c_str(), version::kHogdProtocol);
     if (strcmp(card.protocol.c_str(), version::kHogdProtocol) != 0) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
@@ -120,17 +114,21 @@ public:
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
-  x23::Async<void> schedulercoord_shutdown()
+  static x23::Async<void> schedulercoord_shutdown()
   {
-    shutdown_flag_.store(true, std::memory_order_release);
+    // TODO(jhumphri): Implement.
     co_return;
   }
 
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration(
-      const GenesisConfiguration &genesis_configuration)
+      GenesisConfiguration genesis_configuration)
   {
-    return db_sched_client_->dbsched_load_genesis_configuration(
+    auto ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
         genesis_configuration);
+    last_committed_block_ = {.height = 1,
+                             .hash = sha256(genesis_configuration),
+                             .id = generate_block_id()};
+    co_return ret;
   }
 
   x23::Async<x23::XdrVec<x23::BorrowedPtr<SignedTransaction>>>
@@ -142,15 +140,16 @@ public:
       x23::BorrowedPtr<SignedTransaction> tx(scheduler_->find_tx(tx_hash));
       ret.push_back(tx);
     }
+
     // [OptSignedTransactionBatch] is an
     // [x23::Vec<x23::Ptr<SignedTransaction>>]. We want to use [BorrowedPtrs],
-    // which are not the same as [Ptrs], but they serialize the same way. So we
-    // return a span of [BorrowedPtr]s.
+    // which are not the same as [Ptrs], but they serialize the same way. So
+    // we return a span of [BorrowedPtr]s.
     co_return ret;
   }
 
-  // Generates a new block ID. This block ID is guaranteed to be unique for the
-  // lifetime of this process. This function is thread-safe.
+  // Generates a new block ID. This block ID is guaranteed to be unique for
+  // the lifetime of this process. This function is thread-safe.
   static uint64_t generate_block_id()
   {
     static std::atomic<uint64_t> last_ns = 0;
@@ -163,9 +162,10 @@ public:
       if (ns == last_ns_relaxed) {
         continue;
       }
-      if (last_ns.compare_exchange_weak(/*expected=*/last_ns_relaxed,
-                                        /*desired=*/ns,
-                                        /*order=*/std::memory_order_relaxed)) {
+      if (last_ns.compare_exchange_weak(
+              /*expected=*/last_ns_relaxed,
+              /*desired=*/ns,
+              /*order=*/std::memory_order_relaxed)) {
         return ns;
       }
     }
@@ -181,11 +181,12 @@ public:
 
   void shut_down()
   {
-    // TODO(jhumphri): Implement.
-    shutdown_flag_ = true;
+    size_t current_val;
+    while ((current_val = pending_detached_coroutines_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_detached_coroutines_.wait(/*old=*/current_val);
+    }
   }
-
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
   // clang-tidy complains that an exception may be thrown in the function
@@ -221,7 +222,6 @@ private:
         exec_clients_.push_back(client);
       }
     }
-    info("exec_clients_.size() = {}", exec_clients_.size());
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
 
@@ -318,7 +318,6 @@ private:
   std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
-  std::atomic<bool> shutdown_flag_ = false;
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
