@@ -36,8 +36,9 @@ NewContractLock::write_committed_change(LockContext const &ctx,
                                         MerkleTriePrefix & /*trie*/) const
 {
   auto buf = x23::serialize(contract_);
-  return ctx.dao.write_wasm_code(ctx.key.get_contract_code_hash(),
-                                 std::as_bytes(std::span(buf)));
+  assert(ctx.dao);
+  return ctx.dao->write_wasm_code(ctx.key.get_contract_code_hash(),
+                                  std::as_bytes(std::span(buf)));
 }
 
 } // namespace hogd

@@ -150,7 +150,8 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
   auto block_height = ctx.block_height;
   auto res = build_result(block_height);
 
-  auto ret = ctx.dao.write_address_replay_cache(ctx.key.get_address(), res);
+  assert(ctx.dao);
+  auto ret = ctx.dao->write_address_replay_cache(ctx.key.get_address(), res);
   if (!ret) {
     return ret.error();
   }

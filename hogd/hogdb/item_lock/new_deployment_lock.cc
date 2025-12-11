@@ -43,9 +43,10 @@ NewDeploymentLock::write_committed_change(LockContext const &ctx,
                                           MerkleTriePrefix &trie) const
 {
   assert(ctx.key.is_address_metadata());
+  assert(ctx.dao);
   HogDBStatus<void> ret =
-      ctx.dao.write_address_metadata(ctx.key.get_address(),
-                                     deployed_contract_hash_);
+      ctx.dao->write_address_metadata(ctx.key.get_address(),
+                                      deployed_contract_hash_);
   if (ret) {
     auto buf = x23::serialize(deployed_contract_hash_);
     CHECK(
@@ -56,7 +57,7 @@ NewDeploymentLock::write_committed_change(LockContext const &ctx,
 
   // Create an empty data record for this address for scheduler state;
   // the scheduler is responsible for populating this with nonzero data.
-  auto r = ctx.dao.write_address_average_hog_age(HogAge{
+  auto r = ctx.dao->write_address_average_hog_age(HogAge{
       .address = ctx.key.get_address().get_raw(),
       .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
                    to_xdr(uint128_t{0})},

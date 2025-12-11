@@ -101,7 +101,8 @@ NNInt128Lock::write_committed_change(LockContext const &ctx,
   auto [value, of] = overflowing_add(base_, delta);
   CHECK(!of);
 
-  HogDBStatus<void> ret = ctx.dao.write_nnint128(ctx.key, value);
+  assert(ctx.dao);
+  HogDBStatus<void> ret = ctx.dao->write_nnint128(ctx.key, value);
   if (ret) {
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&value),
                                     sizeof(value));

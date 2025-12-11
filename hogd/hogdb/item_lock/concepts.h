@@ -8,6 +8,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -16,7 +17,7 @@ namespace hogd {
 // e.g. ReplayCacheLock uses this is access the block height to determine if
 // a uniquifier is expired and to lazily load chunks of replay caches.
 struct LockContext {
-  HogDBDAO &dao;
+  HogDBDAO *dao;
   BlockHeight block_height;
   const ItemKey &key;
 };

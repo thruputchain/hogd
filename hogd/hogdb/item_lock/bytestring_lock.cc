@@ -32,8 +32,9 @@ HogDBStatus<void>
 BytestringLock::write_committed_change(LockContext const &ctx,
                                        MerkleTriePrefix &trie) const
 {
+  assert(ctx.dao);
   std::span<const std::byte> v = std::as_bytes(std::span(bytestring_));
-  HogDBStatus<void> ret = ctx.dao.write_bytes(ctx.key, v);
+  HogDBStatus<void> ret = ctx.dao->write_bytes(ctx.key, v);
   if (ret) {
     // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
     // [trie.insert_or_update()] only fails if we attempt to insert an empty
