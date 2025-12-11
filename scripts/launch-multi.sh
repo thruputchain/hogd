@@ -28,9 +28,9 @@ EXPORT_REGEX='^X23'
 # -------------------------------
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
 CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
-CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd.dev
+CHUCKD_BINARY=${HOGD_PROJECT_DIR}/chuckd.dev
 CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
-SCPD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scpd.dev
+SCPD_BINARY=${HOGD_PROJECT_DIR}/scpd.dev
 MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
@@ -116,20 +116,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-build_all() {
-  for s in "${all_servers[@]}"; do
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc '\"$CHUCKD_BUILD_DIR\"/build_chuckd.sh'" | sed "s/^/[$s] /" &
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc '\"$CHUCKD_BUILD_DIR\"/build_scpd.sh'" | sed "s/^/[$s] /" &
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc '\"$HOGD_PROJECT_DIR\"/scripts/build.sh -c gcc -d \"$HOGD_BUILD_DIR\" -t Release -x -DHAVE_CXX_STACKTRACE=1'" | sed "s/^/[$s] /" &
-  done
-  ssh_pids=($(jobs -pr))
-  wait
-}
-# build_all
 make -C "$HOGD_BUILD_DIR" -j$(nproc)
+"$CHUCKD_SCRIPT_DIR"/build_chuckd.sh
+"$CHUCKD_SCRIPT_DIR"/build_scpd.sh
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
