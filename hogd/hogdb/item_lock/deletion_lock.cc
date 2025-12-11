@@ -1,5 +1,8 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 
+#include <cassert>
+#include <utility>
+
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -8,7 +11,6 @@
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
-#include <utility>
 
 namespace hogd {
 
@@ -21,7 +23,8 @@ DeletionLock::write_committed_change(LockContext const &ctx,
     type = 0;
   }
   else if (ctx.key.is_contract_data()) {
-    auto type_ret = ctx.dao.get_item_type(ctx.key);
+    assert(ctx.dao);
+    auto type_ret = ctx.dao->get_item_type(ctx.key);
     if (!type_ret) {
       // Deleting a non-existent key is a no-op.
       if (type_ret.error() == HogDBCode::kNotFound) {
@@ -37,7 +40,8 @@ DeletionLock::write_committed_change(LockContext const &ctx,
     return HogDBError(HogDBCode::kInternal);
   }
 
-  HogDBStatus<void> remove_ret = ctx.dao.remove_item(ctx.key);
+  assert(ctx.dao);
+  HogDBStatus<void> remove_ret = ctx.dao->remove_item(ctx.key);
   if (!remove_ret) {
     return remove_ret;
   }

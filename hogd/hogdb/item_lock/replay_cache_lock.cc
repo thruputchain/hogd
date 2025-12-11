@@ -75,7 +75,8 @@ ReplayCacheLock::try_atomic_change_lock(
   std::unique_lock<x23::TestLock> ul(lock_);
 
   if (!base_replay_cache_.has_value()) {
-    auto res = ctx.dao.read_address_replay_cache(ctx.key.get_address());
+    assert(ctx.dao);
+    auto res = ctx.dao->read_address_replay_cache(ctx.key.get_address());
     if (!res) {
       if (res.error() == HogDBCode::kNotFound) {
         base_replay_cache_ = ReplayCacheData{};
@@ -150,7 +151,8 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
   auto block_height = ctx.block_height;
   auto res = build_result(block_height);
 
-  auto ret = ctx.dao.write_address_replay_cache(ctx.key.get_address(), res);
+  assert(ctx.dao);
+  auto ret = ctx.dao->write_address_replay_cache(ctx.key.get_address(), res);
   if (!ret) {
     return ret.error();
   }
