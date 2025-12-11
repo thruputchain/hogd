@@ -180,6 +180,8 @@ function(add_spec_and_types_generation)
     
     list(APPEND all_depends 
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/Cargo.lock
       ${target_src_rs_files}
       ${target_bin_rs_files})
     list(APPEND all_bins "--bin" "generate_spec_${target_name}")
@@ -198,6 +200,8 @@ function(add_spec_and_types_generation)
     
     list(APPEND all_depends 
       ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/Cargo.lock
       ${target_src_rs_files}
       ${target_bin_rs_files})
     list(APPEND all_bins "--bin" "generate_types_${target_name}")
