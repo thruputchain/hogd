@@ -18,10 +18,10 @@ pub struct TrampolineError {
 impl TrampolineError {
     pub fn to_wasmi_invoke_result(self) -> WasmiInvokeResult {
         self.error
-           .to_invoke_result()
-           .map_or_else(WasmiInvokeResult::error, |_| {
-               WasmiInvokeResult::success()
-           })
+            .to_invoke_result()
+            .map_or_else(WasmiInvokeResult::error, |_| {
+                WasmiInvokeResult::success()
+            })
        }
 }
 
