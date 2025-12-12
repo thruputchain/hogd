@@ -120,10 +120,10 @@ make -C "$HOGD_BUILD_DIR" -j$(nproc)
 # These build scripts place the binaries in the current working directory, so we
 # [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build
 # directory.
-pushd "$HOGD_BUILD_DIR" > /dev/null
+pushd "$HOGD_BUILD_DIR" >/dev/null
 "$CHUCKD_SCRIPT_DIR"/build_chuckd.sh
 "$CHUCKD_SCRIPT_DIR"/build_scpd.sh
-popd > /dev/null
+popd >/dev/null
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
