@@ -20,6 +20,7 @@
 
 #include "x23/config.h"
 #include "x23/debug.h"
+#include "x23/fileio.h"
 #include "x23/progname.h"
 #include "x23/signal.h"
 #include "x23/vec.h"
@@ -33,6 +34,51 @@
 namespace x23 {
 
 bool ignore_debug_env;
+
+void
+append_arg(std::string *out, std::string_view arg)
+{
+  if (!out->empty())
+    *out += ' ';
+
+  if (!arg.empty() &&
+      arg.find_first_of(" \t\r\n\v\f\"") == std::string_view::npos) {
+    *out += arg;
+    return;
+  }
+
+  *out += '"';
+  for (auto c : arg) {
+    if (c == '"' || c == '\\')
+      *out += '\\';
+    *out += c;
+  }
+  *out += '"';
+}
+
+static inline std::pair<std::string_view, std::string_view>
+split_arg(std::string_view cmdline)
+{
+  if (auto pos = cmdline.find('\0'); pos != std::string_view::npos)
+    return {cmdline.substr(0, pos), cmdline.substr(pos + 1)};
+  return {cmdline, {}};
+}
+
+std::string
+cmdline()
+{
+  std::string ret;
+  auto r = readfile<std::string>("/proc/self/cmdline");
+  if (!r)
+    return ret;
+  std::string_view rem(*r);
+  while (!rem.empty()) {
+    std::string_view arg;
+    std::tie(arg, rem) = split_arg(rem);
+    append_arg(&ret, arg);
+  }
+  return ret;
+}
 
 std::string
 stacktrace(unsigned indent, std::string ret)
@@ -214,6 +260,8 @@ do_panic(std::string_view fmt, std::format_args args,
   uvformat_to(&msg, fmt, args);
   uformat_to(&msg, "\n  in {}\n  function {}\n  at  {}:{}\n", getprogpath(),
              sloc.function_name(), sloc.file_name(), sloc.line());
+  if (auto cmd = cmdline(); !cmd.empty())
+    uformat_to(&msg, "  Command line:\n    {}\n", cmd);
   if (auto st = stacktrace(4); !st.empty()) {
     msg += "  Strack trace:\n";
     msg += st;

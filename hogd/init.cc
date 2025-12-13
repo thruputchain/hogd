@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include <x23/debug.h>
 #include <x23/fileio.h>
 #include <x23/progname.h>
 #include <x23/vec.h>
@@ -23,6 +24,8 @@
 #include <cstring>
 #include <mach-o/dyld.h>
 #endif
+
+std::string cmdline;
 
 namespace hogd {
 
@@ -73,11 +76,11 @@ print_version(const char *process, bool do_print_binary_hash)
 {
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
        version::kHogdGitHash);
-  info("build config: {}", version::kHogdCmake);
+  info("hogd config: {}", version::kHogdCmake);
   info("hogd protocol: {}", version::kHogdProtocol);
-  if (do_print_binary_hash) {
+  info("hogd command: {}", cmdline);
+  if (do_print_binary_hash)
     info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
-  }
 }
 
 } // namespace
@@ -85,7 +88,10 @@ print_version(const char *process, bool do_print_binary_hash)
 int
 hogd_init(int argc, char *argv[], bool do_print_version)
 {
-  // TODO(amb): parse arguments and set up configuration
+  // record command line
+  cmdline.clear();
+  for (int i = 0; i < argc; ++i)
+    x23::append_arg(&cmdline, argv[i]);
 
   // initialize logging
   // NOTE: this must come before any use of the CHECK macros
