@@ -25,7 +25,7 @@
 #include <mach-o/dyld.h>
 #endif
 
-std::string cmdline;
+std::string cmdline; // NOLINT
 
 namespace hogd {
 
