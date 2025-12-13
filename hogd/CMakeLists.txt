@@ -16,15 +16,11 @@ add_subdirectory(loadgen)
 add_subdirectory(auth_claim)
 add_subdirectory(auth)
 
-set_source_files_properties(
-  ${VERSION_CC}
-  PROPERTIES GENERATED TRUE)
-
 # Then combine them into the hogd library (used by all executables below)
 add_library(
   hogd
   init.cc
-  ${VERSION_CC}
+  version.c
 )
 add_library(hogd_interface INTERFACE)
 target_link_libraries(

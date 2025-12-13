@@ -73,6 +73,7 @@ print_version(const char *process, bool do_print_binary_hash)
 {
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
        version::kHogdGitHash);
+  info("build config: {}", version::kHogdCmake);
   info("hogd protocol: {}", version::kHogdProtocol);
   if (do_print_binary_hash) {
     info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
