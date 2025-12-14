@@ -31,7 +31,7 @@ jobs:
                       ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
                       ${{ secrets.HOGD_TO_LIB_GO_KEY }}
                       ${{ secrets.HOGD_TO_SCP_KEY }}
-                      ${{ secrets.HOGD_TO_XDP_RPC }}
+                      ${{ secrets.HOGD_TO_XDR_RPC }}
             - uses: actions/checkout@v4
             - name: Run hog schedule
               run: |
