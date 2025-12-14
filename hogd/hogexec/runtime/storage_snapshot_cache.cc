@@ -75,9 +75,16 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,
   // then the contract cache needs to only cache positive lookups
-  auto [obj, _] = contract_cache_.insert(hash, std::move(db_res.value()));
-  assert(obj != nullptr);
-  return (*obj).get();
+  info("inserting contract hash {}", hash);
+  auto [obj, lock] = contract_cache_.insert(hash, std::move(db_res.value()));
+  if (obj != nullptr) {
+    return obj->get();
+  }
+  assert(lock.owns_lock());
+  // concurrent insert happened: fetch the result from the cache again
+  auto *obj2 = contract_cache_.find(hash, lock);
+  assert(obj2 != nullptr);
+  return obj2->get();
 }
 
 namespace {

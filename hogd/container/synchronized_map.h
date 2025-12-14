@@ -104,10 +104,22 @@ public:
     return {&it->second, std::move(ul)};
   }
 
+  T *find(const Key &key, const std::unique_lock<std::mutex> &ul)
+  {
+    assert(ul.owns_lock());
+    auto &map = get_bucket(key, ul);
+    auto it = map.find(key);
+    if (it == map.end())
+      return nullptr;
+    return &it->second;
+  }
+
   std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k, T &&obj)
   {
     auto [map, ul] = get_bucket(k);
+    info("got bucket");
     auto [it, inserted] = map.insert({k, std::move(obj)});
+    info("inserted: {}", inserted);
     if (!inserted)
       return {nullptr, std::move(ul)};
     return {&it->second, std::move(ul)};
@@ -254,6 +266,17 @@ private:
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
     return {buckets_[idx], std::unique_lock<std::mutex>(locks_[idx])};
+  }
+
+  ATTRIBUTE_ALWAYS_INLINE Map &
+  get_bucket(const Key &key, const std::unique_lock<std::mutex> &ul)
+  {
+    assert(ul.owns_lock());
+    assert(std::has_single_bit(locks_.size()));
+    assert(locks_.size() == buckets_.size());
+    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
+    assert(ul.mutex() == std::addressof(locks_[idx]));
+    return buckets_[idx];
   }
 };
 
