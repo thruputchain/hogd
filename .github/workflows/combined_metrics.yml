@@ -42,4 +42,5 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value=$BRANCH_NAME \
+                    --timeout-sec=1800 \
                     ./scripts/schedules/combined_metrics.toml
