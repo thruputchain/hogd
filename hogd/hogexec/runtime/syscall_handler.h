@@ -215,8 +215,7 @@ public:
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
-  SystemStatus<std::shared_ptr<const Contract>>
-  resolve_contract(SHA256Hash const &hash) const;
+  SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
@@ -227,7 +226,7 @@ private:
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
-  const std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>
+  const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>>
       newly_created_contracts_;
 
   ExecutionModeData execution_mode_data_;

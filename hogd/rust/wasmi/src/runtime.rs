@@ -6,6 +6,7 @@ use crate::context::WasmiContext;
 use crate::error::TrampolineError;
 use crate::invoke_result::WasmiInvokeResult;
 use common::InvokeErrorCode;
+use common::SystemErrorCode;
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
@@ -184,23 +185,42 @@ pub unsafe extern "C" fn wasmi_invoke(
     r.invoke(string)
 }
 
+#[repr(C)]
+pub struct NewWasmiRuntimeResult {
+    err_code: i32, // SystemErrorCode
+    context_pointer: *mut c_void,
+}
+
+impl NewWasmiRuntimeResult {
+    pub fn new(runtime: Result<*mut c_void, SystemErrorCode>) -> Self {
+        match runtime {
+            Ok(ptr) => Self {
+                err_code: 0i32,
+                context_pointer: ptr,
+            },
+            Err(code) => Self {
+                err_code: code as i32,
+                context_pointer: core::ptr::null_mut(),
+            },
+        }
+    }
+}
 /// # Safety
 /// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
 /// userctx can be any (null or non-null) pointer.
 /// bytes must be either null or a valid memory slice.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_runtime(
-    bytes: *const u8,
-    bytes_len: u32,
-    hash: *const u8, // 32 bytes
-    userctx: *mut c_void,
+    hash: *const u8,      // 32 bytes
+    userctx: *mut c_void, // *HostCallContext
+    do_verify_contract: bool,
     wasmi_context_ptr: *mut c_void,
-) -> *mut c_void {
-    if bytes.is_null() {
-        return core::ptr::null_mut();
+) -> NewWasmiRuntimeResult {
+    if hash.is_null() || wasmi_context_ptr.is_null() {
+        return NewWasmiRuntimeResult::new(Err(
+            SystemErrorCode::kSystemUnrecoverable,
+        ));
     }
-    debug_assert!(!hash.is_null());
-    debug_assert!(!wasmi_context_ptr.is_null());
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
@@ -210,16 +230,32 @@ pub unsafe extern "C" fn new_wasmi_runtime(
         )
     };
 
-    let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
+    let slice = match wasmi_context.fetch_contract(userctx, hash_slice) {
+        Ok(Some(slice)) => slice,
+        Ok(None) => {
+            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
+        }
+        Err(code) => {
+            return NewWasmiRuntimeResult::new(Err(code));
+        }
+    };
+
+    if do_verify_contract {
+        if !wasmi_context.verify_contract(slice) {
+            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
+        }
+    }
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
         Some(res) => Box::new(res),
         None => {
-            return core::ptr::null_mut();
+            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
         }
     };
 
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+    NewWasmiRuntimeResult::new(Ok(unsafe {
+        core::mem::transmute(Box::into_raw(b))
+    }))
 }
 
 /// # Safety

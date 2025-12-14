@@ -44,7 +44,7 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<std::shared_ptr<const Contract>>
+  SystemStatus<const Contract *>
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<std::optional<DeployedContractHash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
@@ -66,7 +66,7 @@ public:
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
-  SynchronizedMap<SHA256Hash, std::shared_ptr<const Contract>> contract_cache_;
+  SynchronizedMap<SHA256Hash, std::unique_ptr<const Contract>> contract_cache_;
   // Neither does the deployment cache
   SynchronizedMap<ContractAddress, std::optional<DeployedContractHash>>
       deployment_cache_;
