@@ -146,6 +146,8 @@ impl<'a> WasmiContext<'a> {
         }
     }
 
+    /// # Safety
+    /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
     pub unsafe fn fetch_contract(
         &self,
         user_context: *mut c_void,
