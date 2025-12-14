@@ -146,7 +146,7 @@ impl<'a> WasmiContext<'a> {
         }
     }
 
-    pub fn fetch_contract(
+    pub unsafe fn fetch_contract(
         &self,
         user_context: *mut c_void,
         hash: &SHA256Hash,

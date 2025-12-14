@@ -240,10 +240,8 @@ pub unsafe extern "C" fn new_wasmi_runtime(
         }
     };
 
-    if do_verify_contract {
-        if !wasmi_context.verify_contract(slice) {
-            return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
-        }
+    if do_verify_contract && !wasmi_context.verify_contract(slice) {
+        return NewWasmiRuntimeResult::new(Ok(core::ptr::null_mut()));
     }
 
     let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
@@ -254,7 +252,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     };
 
     NewWasmiRuntimeResult::new(Ok(unsafe {
-        core::mem::transmute(Box::into_raw(b))
+        core::mem::transmute::<*mut WasmiRuntime, *mut c_void>(Box::into_raw(b))
     }))
 }
 
