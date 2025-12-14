@@ -238,8 +238,8 @@ remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
   bench coordinator_loadgen \
   --in-addr hog3:7888 \
   --debug-port 5500 \
-  --num-accts 100 \
-  --txs-per-block 10000 \
+  --num-accts 10000 \
+  --txs-per-block 1000000 \
   --num-blocks 1000 \
   --storage-dir "$logdir"/chuckd-storage \
   --out-addr :50000 \

@@ -149,6 +149,12 @@ inline DebugFd<"X23SERVER_TRACE"> debug;
 //    }
 Defer<> dump_rusage(int fd = debug.fd());
 
+// Append argument to string, quoting if necessary
+void append_arg(std::string *out, std::string_view arg);
+
+// If /proc/self/cmdline exists, parse it into a single string
+std::string cmdline();
+
 std::string stacktrace(unsigned indent = 2, std::string ret = {});
 
 #ifdef NDEBUG
