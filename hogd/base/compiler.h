@@ -93,7 +93,7 @@ is_debug_build()
 // See:
 // https://akrzemi1.wordpress.com/2017/05/18/asserts-in-constexpr-functions/
 // https://github.com/abseil/abseil-cpp/blob/master/absl/base/macros.h
-#if defined NDEBUG
+#ifdef NDEBUG
 #define ASSERT_CONSTEXPR(x)                                                    \
   (false ? static_cast<void>(x) : static_cast<void>(0))
 #else
@@ -239,7 +239,7 @@ integer_sub_overflow(T a, U b)
 {
   using Result = std::conditional_t<std::is_void_v<R>, decltype(a - b), R>;
   // clang doensn't have sub_overflow_p but does have sub_overflow
-#if defined(__builtin_sub_overflow_p)
+#ifdef __builtin_sub_overflow_p
   return __builtin_sub_overflow_p(a, b, Result{0});
 #else
   Result r;
