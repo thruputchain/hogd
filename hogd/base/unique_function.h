@@ -12,13 +12,13 @@
 #include <utility>
 #include <version>
 
-#if defined(__cpp_lib_move_only)
+#ifdef __cpp_lib_move_only
 #include <functional>
 #endif // defined(__cpp_lib_move_only)
 
 namespace hogd {
 
-#if defined(__cpp_lib_move_only)
+#ifdef __cpp_lib_move_only
 
 using UniqueFunction = std::move_only_function;
 

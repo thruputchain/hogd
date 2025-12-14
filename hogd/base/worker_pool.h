@@ -135,7 +135,7 @@ public:
     // constructed in the temporary (the first argument into the
     // ranges::for_each).  Moving the range construction outside the for_each
     // fixes this.
-#if defined(__cpp_lib_ranges_chunk)
+#ifdef __cpp_lib_ranges_chunk
     auto range = r | std::views::chunk(width);
     std::ranges::for_each(range, [this, &f, proj, &completions](
                                      std::ranges::viewable_range auto &&r) {
