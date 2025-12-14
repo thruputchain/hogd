@@ -117,9 +117,7 @@ public:
   std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k, T &&obj)
   {
     auto [map, ul] = get_bucket(k);
-    info("got bucket");
     auto [it, inserted] = map.insert({k, std::move(obj)});
-    info("inserted: {}", inserted);
     if (!inserted)
       return {nullptr, std::move(ul)};
     return {&it->second, std::move(ul)};
