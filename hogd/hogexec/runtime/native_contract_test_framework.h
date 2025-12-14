@@ -303,14 +303,14 @@ public:
     return *r;
   }
 
-  std::shared_ptr<const Contract>
+  std::unique_ptr<const Contract>
   lookup_contract_from_db(SHA256Hash const &hash)
   {
     auto r = db_proxy_->get_contract(block_number_, hash);
     if (!r.has_value()) {
       throw std::runtime_error("lookup_contract_from_db: db lookup failed");
     }
-    return *r;
+    return std::move(*r);
   }
 
   static auto make_native_contract(int32_t contract_id)
