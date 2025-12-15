@@ -95,7 +95,7 @@ echo 'launch coordinator and scp'
 ./$BUILD_DIR/chuckd.dev \
 -l info \
 --stack \
---config /$BUILD_DIR/scripts/config-chuckd.json \
+--config ./scripts/config-chuckd.json \
 --instance 970c9b \
 --seed 1410441218572558875 \
 --metrics :2223 \
