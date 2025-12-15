@@ -25,7 +25,7 @@ public:
     server_port_ = port;
     // Create ShardCard with the auth address
     std::string auth_address = std::format("localhost:{}", port);
-    ShardCard shard_card{.protocol = version::kHogdProtocol,
+    ShardCard shard_card{.protocol = version::kHogdProtocol(),
                          .upid = {},
                          .block_height = 0,
                          .address_for_exec = "",

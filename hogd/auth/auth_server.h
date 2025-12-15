@@ -143,7 +143,7 @@ public:
       CHECK_EQ(gethostname(hostname.data(), hostname.size()), 0);
     }
     return {
-        .protocol = version::kHogdProtocol,
+        .protocol = version::kHogdProtocol(),
         .upid = {},
         .address_for_db =
             std::format("{}:{}", hostname, auth_db_rpc_.port()).c_str(),
