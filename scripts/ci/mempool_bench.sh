@@ -50,7 +50,10 @@ ssh -n hog6 "killall hogexec" || true
 ssh -n hog8 "killall hogexec" || true
 ssh -n hog9 "killall event_exec" || true
 ssh -n hog11 "killall hogdb" || true
-ssh -n hog10 "killall coordinator" || true
+ssh -n hog10 "killall chuckd" || true
+ssh -n hog10 "killall chuckd.dev" || true
+ssh -n hog10 "killall scpd" || true
+ssh -n hog10 "killall scpd.dev" || true
 ssh -n hog10 "killall mempool_exec" || true
 
 echo 'launch loadgen'
