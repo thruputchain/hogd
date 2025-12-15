@@ -1,5 +1,3 @@
-
-
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
@@ -8,8 +6,8 @@
 use core::fmt;
 use core::fmt::Display;
 
-use common::HostFnErrorCode;
 use crate::invoke_result::WasmtimeInvokeResult;
+use common::HostFnErrorCode;
 
 use std::error::Error;
 

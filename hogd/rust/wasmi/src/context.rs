@@ -5,10 +5,10 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use crate::contract_loader::ContractGetFn;
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::SHA256Hash;
+use common::contract_loader::ContractGetFn;
 use common::string_from_parts;
 use common::SystemErrorCode;
 

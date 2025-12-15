@@ -1,15 +1,12 @@
 use core::ffi::c_void;
 
 pub mod context;
-mod contract_loader;
 mod error;
 pub mod invoke_result;
 pub mod module_cache;
 pub mod runtime;
 
 type SHA256Hash = [u8; 32];
-
-type ForeignHostCallContext = *mut core::ffi::c_void;
 
 use crate::runtime::WasmiRuntime;
 

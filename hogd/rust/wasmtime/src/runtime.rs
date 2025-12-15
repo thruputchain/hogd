@@ -50,51 +50,53 @@ fn check_memory_limit(module: &Module) -> bool {
     false
 }
 
+fn check_no_start(module: &Module) -> bool {
+    let export = module.get_export("start");
+    export.is_none()
+}
+
 impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
-        hash: &[u8; 32],
+        _hash: &[u8; 32],
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
         let (module, linker) = {
             let linker = context.linker();
-            let module =
-                unsafe { Module::new(linker.engine(), bytes) }
-                    .inspect_err(|_e| {
-                        debug_log!(eprintln!(
-                            "Module new_unchecked error: {_e}"
-                        ))
-                    })
-                    .ok()?;
+            let module = Module::new(linker.engine(), bytes)
+                .inspect_err(|_e| {
+                    debug_log!(eprintln!("Module new_unchecked error: {_e}"))
+                })
+                .ok()?;
 
             if !check_memory_limit(&module) {
                 debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+                return None;
+            }
+            if !check_no_start(&module) {
+                debug_log!(eprintln!(
+                    "Module instantiation failed: Has start function"
+                ));
                 return None;
             }
             (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
-        let instance_result = linker
+        let instance = linker
             .instantiate(&mut store, &module)
             .inspect_err(|_e| {
                 debug_log!(eprintln!("Error instantiating store: {_e}"))
             })
             .ok()?;
 
-        let instance = instance_result
-            .ensure_no_start(&mut store)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error ensuring no start: {_e}"))
-            })
-            .ok()?;
         Some(Self { store, instance })
     }
 
     fn invoke(&mut self, method: &str) -> WasmtimeInvokeResult {
-        let func = match self.instance.get_func(&self.store, method) {
+        let func = match self.instance.get_func(&mut self.store, method) {
             Some(v) => v,
             _ => {
                 debug_log!(eprintln!("Function {method} not found"));
@@ -107,8 +109,10 @@ impl WasmtimeRuntime {
         match func.call(&mut self.store, &[], &mut []) {
             Ok(_) => WasmtimeInvokeResult::success(),
             Err(err) => {
-                if let Some(trap_code) = err.as_trap_code() {
-                    return WasmtimeInvokeResult::from_wasmtime_trap_code(trap_code);
+                if let Some(trap_code) = err.downcast_ref::<wasmtime::Trap>() {
+                    return WasmtimeInvokeResult::from_wasmtime_trap_code(
+                        trap_code,
+                    );
                 }
                 err.downcast_ref::<TrampolineError>().map_or_else(
                     || {
@@ -142,7 +146,9 @@ pub unsafe extern "C" fn wasmtime_invoke(
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
-        return WasmtimeInvokeResult::error(InvokeErrorCode::kInvokeDeterministic);
+        return WasmtimeInvokeResult::error(
+            InvokeErrorCode::kInvokeDeterministic,
+        );
     }
 
     let method_name_slice =
@@ -190,7 +196,12 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
-    let b = match WasmtimeRuntime::new(slice, hash_slice, wasmtime_context, userctx) {
+    let b = match WasmtimeRuntime::new(
+        slice,
+        hash_slice,
+        wasmtime_context,
+        userctx,
+    ) {
         Some(res) => Box::new(res),
         None => {
             return core::ptr::null_mut();

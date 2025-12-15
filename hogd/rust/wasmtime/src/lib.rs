@@ -3,13 +3,9 @@ use core::ffi::c_void;
 use crate::runtime::WasmtimeRuntime;
 
 pub mod context;
-pub mod invoke_result;
 pub mod error;
+pub mod invoke_result;
 pub mod runtime;
-
-
-
-
 
 #[cfg(feature = "debug_logging")]
 #[macro_export]
@@ -47,7 +43,7 @@ pub unsafe extern "C" fn wasmtime_get_memory(
 
     let r = unsafe { &mut *runtime };
 
-    match r.instance.get_memory(&r.store, "memory") {
+    match r.instance.get_memory(&mut r.store, "memory") {
         Some(mem) => {
             let mem_sz = mem.data_size(&r.store) as u32;
             // wasmi docs say that _any_ call to data_ptr or use of store

@@ -4,7 +4,7 @@ use crate::ForeignHostCallContext;
 /// Warning: this struct returns pointers to external data (i.e. data held within the
 /// WasmiContext on the C++ side).
 /// As such, this struct cannot outlive the WasmiContext.)
-use common::SystemErrorCode;
+use crate::SystemErrorCode;
 use core::slice;
 
 #[repr(C)]

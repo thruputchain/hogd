@@ -1,13 +1,12 @@
-
 use core::ffi::c_void;
 use core::slice;
 
 use common::string_from_parts;
 
-use wasmtime::{Engine, Linker, Module, Config, Caller};
+use wasmtime::{Caller, Config, Engine, Linker, Module};
 
-use common::TrampolineResult;
 use crate::error::TrampolineError;
+use common::TrampolineResult;
 
 pub struct LinkEntry {
     module: String,
@@ -46,11 +45,14 @@ struct BorrowBypass {
 unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
 
-
-fn wasmtime_handle_trampoline_error(result: TrampolineResult) -> Result<i32, wasmtime::Error> {
+fn wasmtime_handle_trampoline_error(
+    result: TrampolineResult,
+) -> Result<i32, wasmtime::Error> {
     let error = result.panic.try_into();
     if error.is_err() {
-        return Err(wasmtime::Error::new(TrampolineError { error: common::HostFnErrorCode::kHostUnrecoverable }));
+        return Err(wasmtime::Error::new(TrampolineError {
+            error: common::HostFnErrorCode::kHostUnrecoverable,
+        }));
     }
     let error = error.unwrap();
     match error {
@@ -103,8 +105,9 @@ impl WasmtimeContext {
                 .wasm_backtrace(false)
                 .strategy(wasmtime::Strategy::Winch)
                 .cranelift_opt_level(wasmtime::OptLevel::Speed)
-                .cranelift_nan_canonicalization(true) // deterministic nan
-        ).unwrap()
+                .cranelift_nan_canonicalization(true), // deterministic nan
+        )
+        .unwrap()
     }
 
     pub fn linker(&self) -> Linker<*mut c_void> {
