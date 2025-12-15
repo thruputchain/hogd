@@ -50,7 +50,10 @@ ssh -n hog6 "killall hogexec" || true
 ssh -n hog8 "killall hogexec" || true
 ssh -n hog9 "killall event_exec" || true
 ssh -n hog11 "killall hogdb" || true
-ssh -n hog10 "killall coordinator" || true
+ssh -n hog10 "killall chuckd" || true
+ssh -n hog10 "killall chuckd.dev" || true
+ssh -n hog10 "killall scpd" || true
+ssh -n hog10 "killall scpd.dev" || true
 ssh -n hog10 "killall mempool_exec" || true
 
 echo 'launch loadgen'
@@ -91,8 +94,31 @@ echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT expect_running
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
-echo 'launch fake coordinator and mempool'
-./$BUILD_DIR/hogd/mempool/test/coordinator hog10:$MEMPOOL_COORDINATOR_PORT hog7:11222 >coordinator_output.txt 2>&1 &
+echo 'launch coordinator and scp'
+./$BUILD_DIR/chuckd.dev \
+  -l info \
+  --stack \
+  --config ./scripts/config-chuckd.json \
+  --instance 970c9b \
+  --seed 1410441218572558875 \
+  --metrics :2223 \
+  bench coordinator_loadgen \
+  --in-addr hog10:7888 \
+  --debug-port 5500 \
+  --num-accts 10000 \
+  --txs-per-block 1000000 \
+  --num-blocks 1000 \
+  --storage-dir $WORK_DIR/chuckd-storage \
+  --out-addr :50000 \
+  --wallet-addr :40000 \
+  --loadgen-addr hog7:11222 \
+  --sched-addr hog10:8070 \
+  --scpd-path ./$BUILD_DIR/scpd.dev \
+  --scp-handle-addr 127.0.0.1:3300 \
+  --scp-control-addr 127.0.0.1:4400 \
+  >coordinator_output.txt 2>&1 &
+
+echo 'launch mempool'
 bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'clone metrics history # This is idempotent'
