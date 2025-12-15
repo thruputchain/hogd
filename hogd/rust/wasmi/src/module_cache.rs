@@ -2,10 +2,9 @@ use lru::LruCache;
 
 use wasmi::{Linker, Module};
 
+use crate::SHA256Hash;
 use core::ffi::c_void;
 use std::num::NonZeroUsize;
-
-type SHA256Hash = [u8; 32];
 
 #[derive(Clone)]
 pub struct ModuleCacheEntry {

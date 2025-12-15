@@ -72,8 +72,6 @@ public:
     shutdown_flag_ = true;
   }
 
-  void await_shutdown_request() { shutdown_flag_.wait(false); }
-
 private:
   std::atomic<bool> shutdown_flag_ = false;
 };

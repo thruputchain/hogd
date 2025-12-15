@@ -3,11 +3,10 @@
 # These parameters are CONFIGURABLE.
 # -------------------------------
 HOGD_PROJECT_DIR=$(readlink -f $(dirname $0)/..)
-HOGD_BUILD_DIR="/home/local/$(whoami)/build"
+HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 
 loadgen_server="hog3"
 chuckd_server="hog3"
-fake_coordinator_server="hog3"
 mempool_server="hog3"
 hogexec_servers=("hog4" "hog5" "hog2")
 event_server="hog4"
@@ -28,22 +27,19 @@ EXPORT_REGEX='^X23'
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
-CHUCKD_BUILD_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd
-CHUCKD_BINARY=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/chuckd/chuckd
-FAKE_COORDINATOR_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/test/coordinator
+CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
+CHUCKD_BINARY=${HOGD_BUILD_DIR}/chuckd.dev
+CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
+SCPD_BINARY=${HOGD_BUILD_DIR}/scpd.dev
 MEMPOOL_BINARY=${HOGD_BUILD_DIR}/hogd/mempool/mempool_exec
 EVENT_BINARY=${HOGD_BUILD_DIR}/hogd/event/event_exec
 HOGEXEC_BINARY=${HOGD_BUILD_DIR}/hogd/hogexec/hogexec
 HOGDB_BINARY=${HOGD_BUILD_DIR}/hogd/hogdb/hogdb
 
-# procs=("chuckd" "loadgen_server" "mempool_exec" "hogexec" "event_exec" "hogdb")
-procs=("loadgen_server" "coordinator" "mempool_exec" "hogexec" "event_exec" "hogdb")
+procs=("loadgen_server" "chuckd.dev" "scpd.dev" "mempool_exec" "hogexec" "event_exec" "hogdb")
 
-# binaries=("$CHUCKD_BINARY" "$LOADGEN_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "EVENT_BINARY" "$HOGDB_BINARY")
-binaries=("$LOADGEN_BINARY" "$FAKE_COORDINATOR_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
-# all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "${event_server}"
-#   "${hogdb_servers[@]}")
-all_servers=("$loadgen_server" "$fake_coordinator_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
+binaries=("$LOADGEN_BINARY" "$CHUCKD_BINARY" "$SCPD_BINARY" "$MEMPOOL_BINARY" "$HOGEXEC_BINARY" "$EVENT_BINARY" "$HOGDB_BINARY")
+all_servers=("$loadgen_server" "$chuckd_server" "$mempool_server" "${hogexec_servers[@]}" "$event_server" "${hogdb_servers[@]}")
 
 COMMON_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -120,18 +116,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-build_all() {
-  for s in "${all_servers[@]}"; do
-    # ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-    #   "bash -lc 'go build -C \"$CHUCKD_BUILD_DIR\"'" | sed "s/^/[$s] /" &
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" \
-      "bash -lc '\"$HOGD_PROJECT_DIR\"/scripts/build.sh -c gcc -d \"$HOGD_BUILD_DIR\" -t Release -x -DHAVE_CXX_STACKTRACE=1'" | sed "s/^/[$s] /" &
-  done
-  ssh_pids=($(jobs -pr))
-  wait
-}
-# build_all
 make -C "$HOGD_BUILD_DIR" -j$(nproc)
+# These build scripts place the binaries in the current working directory, so we
+# [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build
+# directory.
+pushd "$HOGD_BUILD_DIR" >/dev/null
+"$CHUCKD_SCRIPT_DIR"/build_chuckd.sh
+"$CHUCKD_SCRIPT_DIR"/build_scpd.sh
+popd >/dev/null
 
 # Checks that the binaries are the same on all servers.
 check_binaries() {
@@ -207,25 +199,6 @@ echo "Start loadgen..."
 remote_launch "$loadgen_server" "$LOADGEN_BINARY" -p 11222
 wait_port "$loadgen_server" 11222
 
-# echo "Start chuckd..."
-# # Start chuckd.
-# ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-#   "$X23ENV;                  \
-#   nohup \"$CHUCKD_BINARY\"                     \
-#   bench loadgen                                \
-#   --stack                                      \
-#   --level info                                 \
-#   --in-addr :7888                              \
-#   --loadgen-addr \"$loadgen_server\":11222     \
-#   --num-accts 10000                            \
-#   --num-txs 20000                              \
-#   --exec-batch 100                             \
-#   --exec-par 10                                \
-#   --num-blocks 100                             \
-#   --max-msg-size 400000000                     \
-#   > $logdir/chuckd.log 2>&1 &"
-# wait_port "$chuckd_server" 7888
-
 # Start hogexec.
 echo "Start hogexec..."
 for s in "${hogexec_servers[@]}"; do
@@ -246,14 +219,37 @@ for s in "${hogdb_servers[@]}"; do
     "$logdir/hogdb.data" 10000000000 "$mempool_server":8072
 done
 
-# Start fake coordinator.
-remote_launch "$fake_coordinator_server" "$FAKE_COORDINATOR_BINARY" \
-  "$mempool_server":8070 "$loadgen_server":11222
-
 # Start mempool.
 echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   ${#hogdb_servers[@]} ${#hogexec_servers[@]}
+sleep 1
+
+# Launch chuckd.
+echo "Start chuckd..."
+ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" "rm -rf \"$logdir\"/chuckd-storage"
+
+remote_launch "$chuckd_server" "$CHUCKD_BINARY" --copy-file "$CHUCKD_CONFIG" \
+  --copy-file "$SCPD_BINARY" \
+  -l info --stack --config "$logdir"/config-chuckd.json \
+  --instance 970c9b \
+  --seed 1410441218572558875 \
+  --metrics :2223 \
+  bench coordinator_loadgen \
+  --in-addr hog3:7888 \
+  --debug-port 5500 \
+  --num-accts 10000 \
+  --txs-per-block 1000000 \
+  --num-blocks 1000 \
+  --storage-dir "$logdir"/chuckd-storage \
+  --out-addr :50000 \
+  --wallet-addr :40000 \
+  --loadgen-addr "$loadgen_server":11222 \
+  --sched-addr "$mempool_server":8070 \
+  --scpd-path "$logdir"/scpd.dev \
+  --scp-handle-addr 127.0.0.1:3300 \
+  --scp-control-addr 127.0.0.1:4400 \
+  --scp-is-validator true
 
 # Wait for hogexec (port 8090).
 for s in "${hogexec_servers[@]}"; do
@@ -270,8 +266,8 @@ for s in "${hogdb_servers[@]}"; do
   wait_port "$s" 8081
 done
 
-# Wait for fake coordinator (port 7888).
-wait_port "$fake_coordinator_server" 7888
+# Wait for chuckd (port 7888).
+wait_port hog3 7888
 
 # Wait for mempool (ports 8070-8073).
 wait_port "$mempool_server" 8070
@@ -283,21 +279,18 @@ echo "Done with launch."
 
 if $results_only; then
   # Stream only the results.
-  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  #   "tail -n +1 -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
-  #   sed "s/^/[${chuckd_server}\/chuckd] /" &
-  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-    "tail -n +1 -f $logdir/fake_coordinator.log" |
-    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/chuckd.log | grep --line-buffered obtain_delay_msec" |
+    sed "s/^/[${chuckd_server}\/chuckd] /" &
 else
   # Stream the logs from each server.
   ssh "${COMMON_SSH_OPTS[@]}" "$loadgen_server" \
     "tail -n +1 -f $logdir/loadgen.log" | sed "s/^/[${loadgen_server}\/loadgen] /" &
-  # ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
-  #   "tail -n +1 -f $logdir/chuckd.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
-  ssh "${COMMON_SSH_OPTS[@]}" "$fake_coordinator_server" \
-    "tail -n +1 -f $logdir/coordinator.log" |
-    sed "s/^/[${fake_coordinator_server}\/coordinator] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/chuckd.dev.log" | sed "s/^/[${chuckd_server}\/chuckd] /" &
+  ssh "${COMMON_SSH_OPTS[@]}" "$chuckd_server" \
+    "tail -n +1 -f $logdir/scpd.dev.log" |
+    sed "s/^/[${chuckd_server}\/scpd] /" &
 
   ssh "${COMMON_SSH_OPTS[@]}" "$mempool_server" \
     "tail -n +1 -f $logdir/mempool_exec.log" | sed "s/^/[${mempool_server}\/mempool] /" &

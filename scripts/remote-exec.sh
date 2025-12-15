@@ -14,11 +14,16 @@ rm -f remote-exec.env
 export -p | sed -e 's/^declare -x //' | grep -e "$EXPORT_REGEX" || : |
   sed -e 's/^/export /' >remote-exec.env
 
-# remote_exec [user@]host /local/exe [--] [args...]
+# remote_exec [user@]host /local/exe [--copy-file /local/file ...] [--] [args...]
 remote_exec() {
   local remote="$1" exe="$2"
   shift 2
-  [[ "$1" == "--" ]] && shift
+  local copy_files=()
+  while [[ "${1:-}" == "--copy-file" ]]; do
+    copy_files+=("$2")
+    shift 2
+  done
+  [[ "${1:-}" == "--" ]] && shift
   [[ -x "$exe" ]] || {
     echo "$exe: no such executable" >&2
     return 2
@@ -26,7 +31,16 @@ remote_exec() {
 
   local base="$(basename -- "$exe")" dir="$(dirname -- "$exe")"
 
-  tar -cf - remote-exec.env -C "$dir" "$base" |
+  local tar_args=(remote-exec.env -C "$dir" "$base")
+  for f in "${copy_files[@]}"; do
+    [[ -r "$f" ]] || {
+      echo "$f: no such file to copy" >&2
+      return 2
+    }
+    tar_args+=(-C "$(dirname -- "$f")" "$(basename -- "$f")")
+  done
+
+  tar -cf - "${tar_args[@]}" |
     ssh "${STDIN_SSH_OPTS[@]}" -- "$remote" '
 set -euo pipefail
 workdir="/tmp/${USER:-$(whoami)}"

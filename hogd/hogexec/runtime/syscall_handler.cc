@@ -72,11 +72,11 @@ SystemCallHandler::SystemCallHandler(
         },
         db_proxy_),
     newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
+      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
         contracts.emplace(sha256(contract),
-                          std::make_shared<const Contract>(contract));
+                          std::make_unique<const Contract>(contract));
       }
       return contracts;
     }()),
@@ -409,7 +409,7 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
   }
 }
 
-SystemStatus<std::shared_ptr<const Contract>>
+SystemStatus<const Contract *>
 SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 {
   auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
@@ -424,7 +424,7 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   auto it = newly_created_contracts_.find(hash);
   if (it != newly_created_contracts_.end()) {
     assert(it->second != nullptr);
-    return it->second;
+    return it->second.get();
   }
   return nullptr;
 }

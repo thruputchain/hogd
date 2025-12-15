@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "exec_sched.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/dispatch_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -57,6 +58,7 @@ public:
                        TransactionID tx_id);
   std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
   {
+    // NOLINTNEXTLINE(readability-ambiguous-smartptr-reset-call)
     snapshot_cache_->reset();
     return std::move(snapshot_cache_);
   }

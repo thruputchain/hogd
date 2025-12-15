@@ -17,6 +17,12 @@ source ./scripts/ci/prepare_env.sh
 
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
+# These build scripts place the binaries in the current working directory, so we
+# [pushd release] so that the binaries are placed in the [release] directory.
+pushd release >/dev/null
+../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
+../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
+popd >/dev/null
 
 echo 'clear hogdb file directory'
 rm -r ./work_dir/ || true
@@ -33,13 +39,15 @@ echo 'run bench server'
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
 bench_1 = "hog6"
 bench_2 = "hog7"
 bench_3 = "hog8"
-bench_4 = "hog11"
-bench_5 = "hog1"
+bench_4 = "hog9"
+bench_5 = "hog11"
+bench_6 = "hog5"
 
 
 [[jobs]]
@@ -80,10 +88,11 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'cleanup control servers'
-./release/hogd/hogexec/bench/control_cli hog1 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 
 """
@@ -91,6 +100,7 @@ echo 'cleanup control servers'
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
 
 [jobs.host]
 metrics_1 = "hog10"

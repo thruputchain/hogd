@@ -72,8 +72,9 @@ template<is_bytevec BufT>
 std::expected<size_t, Errno>
 readall(BorrowedFd fd, BufT *buf)
 {
-  if (auto sb = seek_bounds(fd))
-    // Some /proc file systems let you seek beyond the end, so set eofok
+  if (auto sb = seek_bounds(fd); sb && sb->cur != sb->end)
+    // Some /proc files let you seek beyond the end, so set eofok
+    // Other /proc files don't let you seek to the end, so also ignore bounds
     return fullread(fd, buf, sb->end - sb->cur, true);
 
   size_t nread{};

@@ -14,6 +14,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "sched_db.hh"
@@ -98,13 +99,14 @@ private:
 
   static inline HogDBStatus<int128_t>
   do_lock(ItemLock &lock, const ItemChange &change,
-          const StorageCostModel *cost_model);
+          const StorageCostModel *cost_model, const LockContext &ctx);
   static inline HogDBStatus<int128_t>
   do_modify_lock(ItemLock &lock, const ItemChange &old_change,
                  const ItemChange &new_change,
-                 const StorageCostModel *cost_model);
+                 const StorageCostModel *cost_model, const LockContext &ctx);
   static inline void do_unlock_item(ItemLock &lock, const ItemChange &change,
-                                    const StorageCostModel *cost_model);
+                                    const StorageCostModel *cost_model,
+                                    const LockContext &ctx);
 };
 
 } // namespace hogd

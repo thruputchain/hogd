@@ -14,17 +14,18 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/exclusive_lock.h"
 #include "hogd/hogdb/item_lock/new_contract_lock.h"
 #include "hogd/hogdb/item_lock/new_deployment_lock.h"
 #include "hogd/hogdb/item_lock/nnint128_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
+#include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
@@ -64,7 +65,8 @@ public:
   // required to support the after change. Is a no-op on failure.
   HogDBStatus<int128_t>
   try_atomic_change_lock(const ItemChange *before, const ItemChange *after,
-                         const StorageCostModel *cost_model);
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
 
   // Commits the change to the item lock.
   // Returns the storage cost used to commit the change.
@@ -72,9 +74,10 @@ public:
   // try_atomic_change_lock for that change.
   // change must be non-null.
   int128_t commit_change(const ItemChange &change,
-                         const StorageCostModel *cost_model);
+                         const StorageCostModel *cost_model,
+                         const LockContext &ctx);
 
-  HogDBStatus<void> write_committed_change(ItemKey const &key, HogDBDAO &dao,
+  HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
 
   bool is_finalized() const { return lock_state_ != kUncommitted; }
@@ -96,26 +99,22 @@ public:
   }
 
 private:
-  HogDBStatus<int128_t>
-  handle_try_atomic_from_finalized(const ItemChange *before,
-                                   const ItemChange *after,
-                                   const StorageCostModel *cost_model);
-  HogDBStatus<int128_t>
-  handle_try_atomic_from_pending(const ItemChange *before,
-                                 const ItemChange *after,
-                                 const StorageCostModel *cost_model,
-                                 std::unique_lock<x23::TestLock> const &ul);
+  HogDBStatus<int128_t> handle_try_atomic_from_finalized(
+      const ItemChange *before, const ItemChange *after,
+      const StorageCostModel *cost_model, const LockContext &ctx);
+  HogDBStatus<int128_t> handle_try_atomic_from_pending(
+      const ItemChange *before, const ItemChange *after,
+      const StorageCostModel *cost_model, const LockContext &ctx,
+      std::unique_lock<x23::TestLock> const &ul);
 
   // No change has committed on this item, and we would like to try to acquire a
   // change in a transaction that does not currently hold any lock on this item.
-  HogDBStatus<int128_t>
-  handle_uncommitted_try_new_lock(const ItemChange *after,
-                                  const StorageCostModel *cost_model,
-                                  std::unique_lock<x23::TestLock> &ul);
-  void
-  handle_release_uncommitted_lock(const ItemChange *before,
-                                  const StorageCostModel *cost_model,
-                                  std::unique_lock<x23::TestLock> const &ul);
+  HogDBStatus<int128_t> handle_uncommitted_try_new_lock(
+      const ItemChange *after, const StorageCostModel *cost_model,
+      const LockContext &ctx, std::unique_lock<x23::TestLock> &ul);
+  void handle_release_uncommitted_lock(
+      const ItemChange *before, const StorageCostModel *cost_model,
+      const LockContext &ctx, std::unique_lock<x23::TestLock> const &ul);
 
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
@@ -140,7 +139,7 @@ private:
 
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
                DeletionLock, NewContractLock, NewDeploymentLock,
-               PointerLock<AuthLock>>
+               PointerLock<AuthLock>, PointerLock<ReplayCacheLock>>
       lock_contents_ = std::monostate{};
   // padding_ and snapshot_cost_ are readonly fields: set during the
   // constructor.

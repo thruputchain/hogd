@@ -30,13 +30,15 @@ jobs:
                       ${{ secrets.HOGD_TO_PROTOCOL_GO }}
                       ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
                       ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+                      ${{ secrets.HOGD_TO_SCP_KEY }}
+                      ${{ secrets.HOGD_TO_XDR_RPC }}
             - uses: actions/checkout@v4
             - name: Run hog schedule
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
                   echo "Branch name: $BRANCH_NAME"
                   hog_sched \
-                  --i="github-${{ github.run_id }}" \
+                  --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                   --key=github_repo --value=${{ github.repository }} \
                   --key=git_branch --value=$BRANCH_NAME \
                   --key=git_commit --value=${{ github.sha }} \

@@ -1,7 +1,7 @@
 #include "hogd/base/os.h"
 
 extern "C" {
-#if defined(__linux__)
+#ifdef __linux__
 #include <sched.h>
 #endif // defined(__linux__)
 }
@@ -41,7 +41,7 @@ available_parallelism()
   if (auto r = get_constrained_threadpool_size())
     return *r;
 
-#if defined(__linux__)
+#ifdef __linux__
   // sched_getaffinity() determines the number of cores the program is allowed
   // to run on based on taskset instead of the number of cores in the machine.
   cpu_set_t mask;
@@ -58,7 +58,7 @@ available_parallelism()
 ErrnoStatus<ProcessStats>
 read_process_stats()
 {
-#if defined(__linux__)
+#ifdef __linux__
   ErrnoStatus<std::string> stat = read_sys_file("/proc/self/stat");
   if (!stat)
     return stat.error();

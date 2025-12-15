@@ -10,9 +10,9 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -22,7 +22,8 @@ namespace hogd {
 HogDBStatus<int128_t>
 NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
                                      const NNInt128 *after,
-                                     const StorageCostModel *cost_model)
+                                     const StorageCostModel *cost_model,
+                                     const LockContext & /*ctx*/)
 {
   assert(before == nullptr || before->base() == base_);
 
@@ -92,7 +93,7 @@ NNInt128Lock::try_atomic_change_lock(const NNInt128 *before,
 }
 
 HogDBStatus<void>
-NNInt128Lock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
+NNInt128Lock::write_committed_change(LockContext const &ctx,
                                      MerkleTriePrefix &trie) const
 {
 
@@ -100,14 +101,15 @@ NNInt128Lock::write_committed_change(ItemKey const &key, HogDBDAO &dao,
   auto [value, of] = overflowing_add(base_, delta);
   CHECK(!of);
 
-  HogDBStatus<void> ret = dao.write_nnint128(key, value);
+  assert(ctx.dao);
+  HogDBStatus<void> ret = ctx.dao->write_nnint128(ctx.key, value);
   if (ret) {
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&value),
                                     sizeof(value));
     // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
     // [trie.insert_or_update()] only fails if we attempt to insert an empty
     // key.
-    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kNNInt128,
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, kNNInt128,
                                                     value_span)
               .has_value());
   }
