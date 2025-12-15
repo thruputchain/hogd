@@ -1,5 +1,6 @@
 add_subdirectory(crypto)
 add_subdirectory(wasmi)
+add_subdirectory(wasmtime)
 add_subdirectory(contract_types)
 
 include(cmake/check_rust_version.cmake)

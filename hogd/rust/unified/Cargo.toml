@@ -7,6 +7,7 @@ rust-version = "1.81"
 [dependencies]
 crypto_lib = { path = "../crypto" }
 wasmi_lib = { path = "../wasmi" }
+wasmtime_lib = { path = "../wasmtime" }
 
 [features]
 debug_logging = ["wasmi_lib/debug_logging"]

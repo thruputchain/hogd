@@ -63,6 +63,7 @@ impl WasmtimeRuntime {
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
+        eprintln!("WasmtimeRuntime::new");
         let (module, linker) = {
             let linker = context.linker();
             let module = Module::new(linker.engine(), bytes)

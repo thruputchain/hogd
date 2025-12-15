@@ -10,6 +10,10 @@ set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
+set_source_files_properties(
+    ${CMAKE_BINARY_DIR}/hogd/rust/wasmtime/bindings.h
+    PROPERTIES GENERATED TRUE)
+
 add_subdirectory(test_util)
 
 add_library(runtime_objects OBJECT
@@ -40,6 +44,7 @@ add_library(runtime_objects OBJECT
   syscall_stats.cc
   transaction_stats.cc
   wasmi_runtime.cc
+  wasmtime_runtime.cc
 )
 
 target_link_libraries(
@@ -131,6 +136,7 @@ add_dependencies(
   generate_syscall_inner_h
   generate_syscall_meta_h
   generate_wasmi_ffi_h
+  generate_wasmtime_ffi_h
   generate_contract_types_ffi_h
   protocol
 )

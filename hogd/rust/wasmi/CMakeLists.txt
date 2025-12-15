@@ -3,12 +3,13 @@ add_custom_command(
     OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     DEPENDS 
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/context.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/error.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/wasmi_context.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/wasmi_error.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/wasmi_invoke_result.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/module_cache.rs
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/wasmi_runtime.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/../common/src/contract_loader.rs
     COMMAND 
       cbindgen --config cbindgen.toml --crate wasmi_lib --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     WORKING_DIRECTORY

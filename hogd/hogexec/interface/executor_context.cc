@@ -158,6 +158,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   auto invoke_res = syscall_handler.root_invoke();
 
   if (!invoke_res.is_root_success()) {
+    info("Propose transaction failed: {}", invoke_res.result_.error().code());
     auto st = proxy.abort_transaction();
     if (!st.has_value()) {
       return ExecProposeResult(make_exec_result(st.error().code()));
@@ -174,6 +175,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
     return out;
   }
 
+  info("Trying to commit transaction");
   auto commit_res = syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction

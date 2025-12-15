@@ -5,10 +5,11 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use crate::error::TrampolineError;
+use crate::wasmi_error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use crate::SHA256Hash;
-use common::contract_loader::ContractGetFn;
+pub use common::contract_loader::ContractGetFn;
+pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
 use common::SystemErrorCode;
 
@@ -104,7 +105,7 @@ pub fn handle_trampoline_error(
     let error = error.unwrap();
     match error {
         common::HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
-        _ => Err(Error::host(crate::error::TrampolineError { error })),
+        _ => Err(Error::host(TrampolineError { error })),
     }
 }
 
