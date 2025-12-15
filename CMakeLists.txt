@@ -92,17 +92,16 @@ file(MAKE_DIRECTORY "${BUILT_HEADERS_DIR}")
 set(HOGD_BUILT_HEADERS_DIR "${BUILT_HEADERS_DIR}/hogd")
 file(MAKE_DIRECTORY "${HOGD_BUILT_HEADERS_DIR}")
 
-# A target that regenerates version.cc on every build.
-set(VERSION_CC "${HOGD_BUILT_HEADERS_DIR}/version.cc")
-add_custom_target(version ALL
-  COMMAND ${CMAKE_COMMAND}
-          -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-          -DOUT_FILE=${VERSION_CC}
-          -DPROJECT_VERSION=${PROJECT_VERSION}
-          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake
-  BYPRODUCTS "${VERSION_CC}"
-  COMMENT "Generating version.cc"
-  VERBATIM)
+include(cmake/repro.cmake)
+
+git_describe_string(GIT_HOGD_COMMIT)
+git_describe_string(GIT_PROTOCOL_COMMIT protocol NODIRTY)
+generate_cmake_repro_string(CMAKE_REPRO_COMMAND)
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/cmake/version.c.in
+  ${CMAKE_BINARY_DIR}/hogd/version.c
+  @ONLY)
 
 # === Interface target that exposes the header and enforces the dep ===
 add_library(built_headers_interface INTERFACE)

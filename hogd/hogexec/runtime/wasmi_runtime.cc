@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -17,13 +18,89 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmi/bindings.h"
+#include "types.hh"
 #include "x23/format.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
+namespace {
+
+constexpr ContractGetResult
+make_err(SystemErrorCode err)
+{
+  return ContractGetResult{.err_code = std::to_underlying(err),
+                           .data = nullptr,
+                           .data_len = 0};
+}
+
+constexpr SystemError
+make_system_error(int32_t raw_code)
+{
+  switch (raw_code) {
+  case std::to_underlying(SystemErrorCode::kSystemUnrecoverable):
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  case std::to_underlying(SystemErrorCode::kSystemAbortTransaction):
+    return SystemError{SystemErrorCode::kSystemAbortTransaction};
+  case std::to_underlying(SystemErrorCode::kSystemValidationFailure):
+    return SystemError{SystemErrorCode::kSystemValidationFailure};
+  default:
+    error("Unrecoverable: Unknown system error code: {}", raw_code);
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+}
+
+ContractGetResult
+wasmi_contract_get_fn(void *host_call_context_ptr,
+                      const uint8_t *hash_ptr) noexcept
+{
+  if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr(s) passed to wasmi_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  auto *host_call_context =
+      static_cast<HostCallContext *>(host_call_context_ptr);
+  if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr syscall_handler in wasmi_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+  SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
+
+  // TODO(geoff): this is an extra copy
+  SHA256Hash hash{};
+  std::memcpy(hash.data(), hash_ptr, hash.size());
+
+  auto res = syscall_handler.resolve_contract(hash);
+
+  if (!res.has_value()) {
+    return make_err(res.error().code());
+  }
+
+  if ((*res)->contract_type() != ContractType::kWasmi) [[unlikely]] {
+    error("Unrecoverable: Attempt to access a non-wasmi contract from inside "
+          "wasmi_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  try {
+    auto const &wasm = (*res)->wasmi_contract().wasm;
+
+    return ContractGetResult{.err_code = 0,
+                             .data = wasm.data(),
+                             .data_len = wasm.size()};
+  } catch (x23::XdrBadUnionAccess const &e) {
+    error("Unrecoverable: Bad union access: {}", e.what());
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+}
+
+} // namespace
+
 WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
   : wasmi_context_ptr_(
-        new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
+        new_wasmi_context(&wasmi_contract_get_fn,
+                          module_cache ? module_cache->get_inner() : nullptr))
 {}
 
 WasmiContext::~WasmiContext()
@@ -40,33 +117,17 @@ WasmiContext::make_new_runtime(
 {
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
-  auto contract =
-      syscall_handler->resolve_contract(deployed_contract_hash.hash);
-  if (!contract.has_value()) [[unlikely]] {
-    return contract.error();
-  }
-  if (contract.value() == nullptr) [[unlikely]] {
-    error("Unrecoverable: Contract lookup failed: {}",
-          deployed_contract_hash.hash);
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  NewWasmiRuntimeResult new_runtime_result =
+      new_wasmi_runtime(deployed_contract_hash.hash.data(),
+                        host_call_context.get(), do_contract_verify,
+                        wasmi_context_ptr_);
+
+  if (new_runtime_result.err_code != 0) {
+    return make_system_error(new_runtime_result.err_code);
   }
 
-  if (contract.value()->contract_type() != ContractType::kWasmi) [[unlikely]] {
-    error("Unrecoverable: Attempt made to access a non-wasmi contract from "
-          "WasmiContext: {}",
-          contract.value()->contract_type());
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
-  }
+  void *wasmi_runtime_ptr = new_runtime_result.context_pointer;
 
-  if (do_contract_verify && !verify_contract(*contract.value())) {
-    return {};
-  }
-
-  void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.value()->wasmi_contract().wasm.data(),
-                        contract.value()->wasmi_contract().wasm.size(),
-                        deployed_contract_hash.hash.data(),
-                        host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }

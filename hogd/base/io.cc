@@ -72,7 +72,7 @@ sys_lseek(int fd, off_t offset, int whence)
 inline ErrnoStatus<void>
 sys_fsync(int fd)
 {
-#if defined(__linux__)
+#ifdef __linux__
   // Linux provides a version of fsync that makes the file's data persistent
   // but doesn't wait to update the file's other metadata (e.g. atime). This is
   // a little faster when it's available, but it might be unreliable on other
@@ -210,7 +210,7 @@ File::open_temporary()
 {
   std::string tmpdir = get_tmp_dir();
 
-#if defined(__linux__)
+#ifdef __linux__
   // Linux supports a more advanced form of temporary files that are
   // automatically cleaned up when the file descriptor is closed. It may not
   // be available on every filesystem.

@@ -48,13 +48,13 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
   return out;
 }
 
-SystemStatus<std::shared_ptr<const Contract>>
+SystemStatus<const Contract *>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   {
     auto [obj, ul] = contract_cache_.find(hash);
     if (obj) {
-      return *obj;
+      return (*obj).get();
     }
   }
 
@@ -62,11 +62,10 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   if (!db_res) {
     return db_res.error();
   }
-  auto out = db_res.value();
 
   if constexpr (is_debug_build()) {
-    if (out) {
-      auto received_hash = sha256(*out);
+    if (db_res.value()) {
+      auto received_hash = sha256(*db_res.value());
       if (received_hash != hash) {
         panic("Received incorrect contract hash from db: {} != {}",
               received_hash, hash);
@@ -76,8 +75,15 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,
   // then the contract cache needs to only cache positive lookups
-  contract_cache_.insert(hash, std::move(db_res.value()));
-  return out;
+  auto [obj, lock] = contract_cache_.insert(hash, std::move(db_res.value()));
+  if (obj != nullptr) {
+    return obj->get();
+  }
+  assert(lock.owns_lock());
+  // concurrent insert happened: fetch the result from the cache again
+  auto *obj2 = contract_cache_.find(hash, lock);
+  assert(obj2 != nullptr);
+  return obj2->get();
 }
 
 namespace {

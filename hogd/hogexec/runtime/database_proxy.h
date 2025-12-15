@@ -56,7 +56,7 @@ public:
   SystemStatus<std::optional<StorageItem>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
 
-  SystemStatus<std::shared_ptr<const Contract>>
+  SystemStatus<std::unique_ptr<const Contract>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
   SystemStatus<std::optional<DeployedContractHash>>

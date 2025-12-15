@@ -5,10 +5,12 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use common::string_from_parts;
-
+use crate::contract_loader::ContractGetFn;
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::SHA256Hash;
+use common::string_from_parts;
+use common::SystemErrorCode;
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -77,6 +79,7 @@ impl LinkEntry {
 pub struct WasmiContext<'a> {
     pub entries: Vec<LinkEntry>,
     pub module_cache: Option<&'a mut ModuleCache>,
+    contract_get_fn: ContractGetFn,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -132,11 +135,27 @@ macro_rules! link_function_nargs {
 }
 
 impl<'a> WasmiContext<'a> {
-    fn new(module_cache: Option<&'a mut ModuleCache>) -> WasmiContext<'a> {
+    fn new(
+        get_fn: ContractGetFn,
+        module_cache: Option<&'a mut ModuleCache>,
+    ) -> WasmiContext<'a> {
         Self {
             entries: Vec::new(),
             module_cache,
+            contract_get_fn: get_fn,
         }
+    }
+
+    /// # Safety
+    /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
+    pub unsafe fn fetch_contract(
+        &self,
+        user_context: *mut c_void,
+        hash: &SHA256Hash,
+    ) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        let get_res =
+            unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
+        get_res.to_data()
     }
 
     pub fn has_module_cache(&self) -> bool {
@@ -255,7 +274,7 @@ impl<'a> WasmiContext<'a> {
         linker
     }
 
-    fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         // TODO(geoff): consider caching the engine
         let engine = Self::new_engine();
         Module::validate(&engine, contract_data).is_ok()
@@ -370,12 +389,13 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 /// module_cache must outlive WasmiContext.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
+    get_fn: ContractGetFn,
     module_cache: *mut c_void,
 ) -> *mut c_void {
     let b = if module_cache.is_null() {
-        Box::new(WasmiContext::new(None))
+        Box::new(WasmiContext::new(get_fn, None))
     } else {
-        Box::new(WasmiContext::new(unsafe {
+        Box::new(WasmiContext::new(get_fn, unsafe {
             Some(
                 &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
                     module_cache,
