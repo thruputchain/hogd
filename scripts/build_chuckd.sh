@@ -10,4 +10,5 @@ go build
 ls -la
 echo "root is $ROOT"
 mv ./chuckd $ROOT/chuckd.dev
+ls -la $ROOT
 cd $ROOT
