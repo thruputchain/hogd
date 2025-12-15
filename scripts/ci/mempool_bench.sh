@@ -110,7 +110,7 @@ bench coordinator_loadgen \
 --wallet-addr :40000 \
 --loadgen-addr hog7:11222 \
 --sched-addr hog10:8070 \
---scpd-path scpd.dev \
+--scpd-path ./$BUILD_DIR/scpd.dev \
 --scp-handle-addr 127.0.0.1:3300 \
 --scp-control-addr 127.0.0.1:4400 \
 >coordinator_output.txt 2>&1 &
