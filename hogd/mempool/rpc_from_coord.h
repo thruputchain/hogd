@@ -78,7 +78,8 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(), version::kHogdProtocol());
+    info("got {}, expected {}", card.protocol.c_str(),
+         version::kHogdProtocol());
     if (strcmp(card.protocol.c_str(), version::kHogdProtocol()) != 0) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
