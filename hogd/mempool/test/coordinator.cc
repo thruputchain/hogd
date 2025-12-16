@@ -56,7 +56,7 @@ coordinator_init(const std::string &mempool_address,
         /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize)());
   }
   std::string address_for_sched = create_address(kSchedulerServerPort);
-  CoordCard card{.protocol = version::kHogdProtocol,
+  CoordCard card{.protocol = version::kHogdProtocol(),
                  .address_for_sched = address_for_sched.c_str()};
   CHECK_EQ(clients[0].schedulercoord_intro_coord(card)(),
            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);

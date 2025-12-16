@@ -67,7 +67,7 @@ protected:
 
     // Create AuthCard pointing to the mock server
     std::string server_address = std::format("localhost:{}", port);
-    auth_card_ = AuthCard{.protocol = version::kHogdProtocol,
+    auth_card_ = AuthCard{.protocol = version::kHogdProtocol(),
                           .upid = {},
                           .address_for_db = server_address.c_str(),
                           .address_for_mempool = ""};
@@ -257,7 +257,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
     MockAuthDBServer mock_auth_server2;
     uint16_t port2 = mock_auth_server2.start_server(0);
     std::string server_address2 = std::format("localhost:{}", port2);
-    AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocol,
+    AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocol(),
                                    .upid = {},
                                    .address_for_db = server_address2.c_str(),
                                    .address_for_mempool = ""};
@@ -268,7 +268,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   MockAuthDBServer mock_auth_server3;
   uint16_t port3 = mock_auth_server3.start_server(0);
   std::string server_address3 = std::format("localhost:{}", port3);
-  AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocol,
+  AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocol(),
                                  .upid = {},
                                  .address_for_db = server_address3.c_str(),
                                  .address_for_mempool = ""};
@@ -334,15 +334,15 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
 TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 {
-  AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocol,
+  AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocol(),
                                .upid = {},
                                .address_for_db = "localhost:12345",
                                .address_for_mempool = ""};
-  AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocol,
+  AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocol(),
                                 .upid = {},
                                 .address_for_db = "unresolvable:12345",
                                 .address_for_mempool = ""};
-  AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocol,
+  AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocol(),
                                 .upid = {},
                                 .address_for_db = "unparseable_nonsense",
                                 .address_for_mempool = ""};
