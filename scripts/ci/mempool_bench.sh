@@ -44,20 +44,23 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'kill stale processes'
-# [ssh] will return a non-zero error code if a process we try to kill does not
-# exist. To prevent this non-zero error code from causing this overall script to
-# fail, we append [|| true] to each line.
-ssh -n hog7 "killall loadgen_server" || true
-ssh -n hog5 "killall hogexec" || true
-ssh -n hog6 "killall hogexec" || true
-ssh -n hog8 "killall hogexec" || true
-ssh -n hog9 "killall event_exec" || true
-ssh -n hog11 "killall hogdb" || true
-ssh -n hog4 "killall chuckd" || true
-ssh -n hog4 "killall chuckd.dev" || true
-ssh -n hog4 "killall scpd" || true
-ssh -n hog4 "killall scpd.dev" || true
-ssh -n hog10 "killall mempool_exec" || true
+kill_stale_processes() {
+  # [ssh] will return a non-zero error code if a process we try to kill does not
+  # exist. To prevent this non-zero error code from causing this overall script
+  # to fail, we append [|| true] to each line.
+  ssh -n hog7 "killall loadgen_server" || true
+  ssh -n hog5 "killall hogexec" || true
+  ssh -n hog6 "killall hogexec" || true
+  ssh -n hog8 "killall hogexec" || true
+  ssh -n hog9 "killall event_exec" || true
+  ssh -n hog11 "killall hogdb" || true
+  ssh -n hog4 "killall chuckd" || true
+  ssh -n hog4 "killall chuckd.dev" || true
+  ssh -n hog4 "killall scpd" || true
+  ssh -n hog4 "killall scpd.dev" || true
+  ssh -n hog10 "killall mempool_exec" || true
+}
+kill_stale_processes
 
 echo 'launch loadgen'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
@@ -134,3 +137,5 @@ echo 'clone metrics history # This is idempotent'
 
 echo 'log integration metrics'
 ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+
+kill_stale_processes
