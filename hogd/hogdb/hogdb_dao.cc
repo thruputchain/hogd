@@ -206,8 +206,8 @@ HogDBDAO::read_address_average_hog_age(const Address &addr)
   return age;
 }
 
-HogDBStatus<ReplayCacheData>
-HogDBDAO::read_address_replay_cache(Address const &addr)
+HogDBStatus<ReplayCacheMetadata>
+HogDBDAO::read_address_replay_cache_meta(Address const &addr)
 {
   auto key = make_address_key(addr, Prefix::kReplayCache);
   HogDBStatus<OwningSpan<const std::byte>> raw =
@@ -215,13 +215,32 @@ HogDBDAO::read_address_replay_cache(Address const &addr)
   if (!raw)
     return raw.error();
 
-  ReplayCacheData rcd;
+  ReplayCacheMetadata meta;
   try {
-    x23::deserialize(&rcd, x23::BufViewEnd(*raw));
+    x23::deserialize(&meta, x23::BufViewEnd(*raw));
   } catch (x23::XdrException &e) {
     return HogDBError(HogDBCode::kInternal);
   }
-  return rcd;
+  return meta;
+}
+
+HogDBStatus<ReplayCacheData>
+HogDBDAO::read_address_replay_cache_data(Address const &addr,
+                                         BlockHeight height)
+{
+  auto key = make_replay_cache_data_key(addr, height);
+  HogDBStatus<OwningSpan<const std::byte>> raw =
+      db_.get_if_type(std::as_bytes(std::span(key)), 0);
+  if (!raw)
+    return raw.error();
+
+  ReplayCacheData data;
+  try {
+    x23::deserialize(&data, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return data;
 }
 
 // TODO(jhumphri): Handle [block_id].
@@ -337,17 +356,49 @@ HogDBDAO::write_address_account_auth_data(const Address &addr,
 }
 
 HogDBStatus<void>
-HogDBDAO::write_address_replay_cache(Address const &addr,
-                                     ReplayCacheData const &replay_cache)
+HogDBDAO::write_address_replay_cache_meta(Address const &addr,
+                                          ReplayCacheMetadata const &meta)
 {
   auto key = make_address_key(addr, Prefix::kReplayCache);
-  auto buf = x23::serialize(replay_cache);
+  auto buf = x23::serialize(meta);
 
   auto before_item = get_before_item(key);
 
   auto ret =
       db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
   update_invariants_post(key, before_item);
+  return ret;
+}
+
+HogDBStatus<void>
+HogDBDAO::write_address_replay_cache_data(Address const &addr,
+                                          BlockHeight height,
+                                          ReplayCacheData const &data)
+{
+  auto key = make_replay_cache_data_key(addr, height);
+  auto buf = x23::serialize(data);
+  auto key_span = std::as_bytes(std::span(key));
+  // trace("-> {} height {} nonces {}", std::string(key_span), height,
+  // data.nonces.size());
+
+  auto before_item = get_before_item(key_span);
+
+  auto ret = db_.put(key_span, 0, std::as_bytes(std::span(buf)));
+  update_invariants_post(key_span, before_item);
+  return ret;
+}
+
+HogDBStatus<void>
+HogDBDAO::delete_address_replay_cache_data(const Address &addr,
+                                           BlockHeight height)
+{
+  auto key = make_replay_cache_data_key(addr, height);
+  auto key_span = std::as_bytes(std::span(key));
+
+  auto before_item = get_before_item(key_span);
+
+  auto ret = db_.remove(key_span);
+  update_invariants_post(key_span, before_item);
   return ret;
 }
 
@@ -444,7 +495,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
   case ItemKeyType::kItemKeyTypeReplayCache:
     assert(key.is_replay_cache());
     {
-      auto r = read_address_replay_cache(key.get_address());
+      auto r = read_address_replay_cache_meta(key.get_address());
       if (!r && r.error() != HogDBCode::kNotFound) {
         return r.error();
       }
@@ -452,8 +503,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         assert(r.error() == HogDBCode::kNotFound);
         return HogDBError(HogDBCode::kNotFound);
       }
-      return std::make_pair(cost_model->get_replay_cache_cost(
-                                r->uniquifiers.size()),
+      return std::make_pair(cost_model->get_replay_cache_cost(r->size),
                             ItemLockCacheData{kItemLockCacheDataTypeNone});
     }
   case ItemKeyType::kItemKeyTypeAddressMetadata:

@@ -152,6 +152,24 @@ enum {
   kItemLockCacheDataNNInt128BaseValue = 1,
 };
 
+// create a key for a replay cache data item that holds nonces for with a
+// particular expiry block height. Exposed so that ReplayCacheLock can use it
+// to formulate correct keys to sub-items that are part of each replay cache.
+constexpr auto
+make_replay_cache_data_key(const Address &addr, BlockHeight height)
+{
+  std::array<std::byte, kAddressSize + 1 + sizeof(BlockHeight)> ret;
+  std::ranges::copy(addr.as_bytes(),
+                    std::begin(std::as_writable_bytes(std::span(ret))) + 1);
+  ret[0] = static_cast<std::byte>(Prefix::kReplayCache);
+
+  auto h = cpu_to_le(height);
+  std::ranges::copy(std::as_bytes(std::span(&h, 1)),
+                    std::begin(std::as_writable_bytes(std::span(ret))) + 1 +
+                        kAddressSize);
+  return ret;
+}
+
 // hogDBDAO provides a data access object (DAO) for hogdb's persistent state.
 class HogDBDAO {
 public:
@@ -212,7 +230,10 @@ public:
   HogDBStatus<AccountAuthData>
   read_address_account_auth_data(const Address &addr);
   HogDBStatus<DeployedContractHash> read_address_metadata(const Address &addr);
-  HogDBStatus<ReplayCacheData> read_address_replay_cache(Address const &addr);
+  HogDBStatus<ReplayCacheMetadata>
+  read_address_replay_cache_meta(Address const &addr);
+  HogDBStatus<ReplayCacheData>
+  read_address_replay_cache_data(Address const &addr, BlockHeight height);
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
@@ -222,8 +243,13 @@ public:
   HogDBStatus<void> write_address_metadata(Address const &addr,
                                            const DeployedContractHash &hash);
   HogDBStatus<void>
-  write_address_replay_cache(Address const &addr,
-                             ReplayCacheData const &replay_cache);
+  write_address_replay_cache_meta(Address const &addr,
+                                  ReplayCacheMetadata const &meta);
+  HogDBStatus<void>
+  write_address_replay_cache_data(Address const &addr, BlockHeight height,
+                                  ReplayCacheData const &data);
+  HogDBStatus<void> delete_address_replay_cache_data(const Address &addr,
+                                                     BlockHeight height);
 
   //
   // WASM Operations
