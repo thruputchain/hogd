@@ -99,11 +99,14 @@ public:
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
-    std::string cur_ts = std::to_string(x23::fastclock::now().time_since_epoch().count());
+    std::string cur_ts =
+        std::to_string(x23::fastclock::now().time_since_epoch().count());
     std::filesystem::path stdout_path =
-        temp_dir / ("hogd_stdout_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
+        temp_dir /
+        ("hogd_stdout_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
     std::filesystem::path stderr_path =
-        temp_dir / ("hogd_stderr_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
+        temp_dir /
+        ("hogd_stderr_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
 
     // Convert to C-style strings for mkstemp
     std::string stdout_template = stdout_path.string();
