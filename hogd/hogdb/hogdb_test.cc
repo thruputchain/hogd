@@ -288,14 +288,23 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
 
   height++;
 
-  // Read the replay cache data that was written in the previous block
-  auto new_base = db_.read_address_replay_cache(rckey.get_address());
-  ASSERT_TRUE(new_base);
+  // Read the replay cache metadata and data that was written in the previous
+  // block
+  auto meta = db_.read_address_replay_cache_meta(rckey.get_address());
+  ASSERT_TRUE(meta);
 
-  // Verify that the data was persisted correctly
-  ASSERT_EQ(1, new_base->uniquifiers.size());
-  EXPECT_EQ(height, new_base->uniquifiers[0].block_expiry_height);
-  EXPECT_EQ(101, new_base->uniquifiers[0].nonce);
+  // Verify metadata
+  ASSERT_EQ(1, meta->size);
+  ASSERT_EQ(1, meta->heights.size());
+  EXPECT_EQ(height, meta->heights[0].height);
+  EXPECT_EQ(1, meta->heights[0].nonce_count);
+
+  // Read data for height 10
+  auto data_h10 =
+      db_.read_address_replay_cache_data(rckey.get_address(), height);
+  ASSERT_TRUE(data_h10);
+  ASSERT_EQ(1, data_h10->nonces.size());
+  EXPECT_EQ(101, data_h10->nonces[0]);
 
   // Create a new lock with the snapshot cost from the database
   auto snapshot_result =
@@ -321,15 +330,31 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
     ASSERT_TRUE(lock2.write_committed_change(ctx, trie_));
   }
 
-  auto final_base = db_.read_address_replay_cache(rckey.get_address());
-  ASSERT_TRUE(final_base);
+  // Read final metadata and data
+  auto final_meta = db_.read_address_replay_cache_meta(rckey.get_address());
+  ASSERT_TRUE(final_meta);
 
-  // Verify that the data was persisted correctly
-  ASSERT_EQ(2, final_base->uniquifiers.size());
-  EXPECT_EQ(height, final_base->uniquifiers[0].block_expiry_height);
-  EXPECT_EQ(101, final_base->uniquifiers[0].nonce);
-  EXPECT_EQ(height + 1, final_base->uniquifiers[1].block_expiry_height);
-  EXPECT_EQ(102, final_base->uniquifiers[1].nonce);
+  // Verify final metadata - should have 2 total nonces across 2 heights
+  ASSERT_EQ(2, final_meta->size);
+  ASSERT_EQ(2, final_meta->heights.size());
+  EXPECT_EQ(height, final_meta->heights[0].height);
+  EXPECT_EQ(1, final_meta->heights[0].nonce_count);
+  EXPECT_EQ(height + 1, final_meta->heights[1].height);
+  EXPECT_EQ(1, final_meta->heights[1].nonce_count);
+
+  // Verify data at height 10
+  auto final_data_h10 =
+      db_.read_address_replay_cache_data(rckey.get_address(), height);
+  ASSERT_TRUE(final_data_h10);
+  ASSERT_EQ(1, final_data_h10->nonces.size());
+  EXPECT_EQ(101, final_data_h10->nonces[0]);
+
+  // Verify data at height 11
+  auto final_data_h11 =
+      db_.read_address_replay_cache_data(rckey.get_address(), height + 1);
+  ASSERT_TRUE(final_data_h11);
+  ASSERT_EQ(1, final_data_h11->nonces.size());
+  EXPECT_EQ(102, final_data_h11->nonces[0]);
 }
 
 } // namespace hogd

@@ -167,10 +167,10 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
   std::vector<Payment> ops;
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    // db tip at start is height 0 which is still uncommitted.
-    // so 0 is not yet an expired height for uniquifiers.
+    // db tip at start is height 1, so all uniquifiers must have
+    // expiry height of at least 1.
     ops.emplace_back(make_key(0, 0), make_key(0, i), 1,
-                     maybe_uniquifier(0, i, nonces));
+                     maybe_uniquifier((i / 1024) + 1, i, nonces));
   }
 
   // create the benchmark.
@@ -211,7 +211,7 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers,
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
     ops.emplace_back(make_key(i, 0), make_key(0, 0), 1,
-                     maybe_uniquifier(0, i, nonces));
+                     maybe_uniquifier(1, i, nonces));
   }
 
   // create the benchmark.
@@ -249,7 +249,7 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers,
   ops.reserve(n);
   for (size_t i = 0; i < n; i++) {
     ops.emplace_back(make_key(i, 0), make_key((i + 1) % n, 0), 1,
-                     maybe_uniquifier(0, i, use_nonces));
+                     maybe_uniquifier(1, i, use_nonces));
   }
 
   // create the benchmark.
@@ -281,7 +281,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
   ops.reserve(n);
   for (size_t i = 0; i < n; i++) {
     ops.emplace_back(make_key(i, 0), make_key(i, 1), 1,
-                     maybe_uniquifier(0, i, use_nonces));
+                     maybe_uniquifier(1, i, use_nonces));
   }
 
   // create the benchmark.
@@ -308,8 +308,8 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers, bool use_nonces)
 void
 Benchmark::run()
 {
-  // swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
-  // trace("trace logging enabled");
+  swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
+  trace("trace logging enabled");
 
   BackgroundCommitWorker background_commit_worker(subscription_manager_,
                                                   nullptr);
@@ -321,17 +321,16 @@ Benchmark::run()
     fail(ret.error());
 
   // invoke_tx simulates DB operations from a contract invocation.
-  auto invoke_fn = [&block](const Payment &p) {
+  auto invoke_fn = [&block, &tip](const Payment &p) {
     [[maybe_unused]]
     auto ref = block.try_acquire_reference();
     assert(ref);
 
     InvokeTX tx(block);
     if (p.uniquifier) {
-      Uniquifier u = *p.uniquifier;
-      u.block_expiry_height = block.get().get_height();
+      CHECK(p.uniquifier->block_expiry_height >= tip.height);
       HogDBStatus<void> ret =
-          tx.request_consume_uniquifier(p.src.get_address(), u,
+          tx.request_consume_uniquifier(p.src.get_address(), *p.uniquifier,
                                         std::to_underlying(
                                             StorageItemRPCFlags::kStorageNone));
       if (!ret)

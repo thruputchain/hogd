@@ -4,12 +4,15 @@ set -Eeuo pipefail
 cleanup() {
   local exit_code=$1
 
+  ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT stop
   ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT stop
+
+  kill_stale_processes
 
   exit "$exit_code"
 }
@@ -25,6 +28,7 @@ export MEMPOOL_EVENT_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolEventServer
 export MEMPOOL_COORDINATOR_PORT=$(./$BUILD_DIR/hogd/utils/get_port kMempoolCoordinatorServerPort)
 
 echo 'make sure bench servers are running'
+./scripts/wait-port.sh hog4 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog5 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog6 $CI_CONTROL_PORT
 ./scripts/wait-port.sh hog7 $CI_CONTROL_PORT
@@ -33,6 +37,7 @@ echo 'make sure bench servers are running'
 ./scripts/wait-port.sh hog11 $CI_CONTROL_PORT
 
 echo 'clear work dirs'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT clear_work_dir
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT clear_work_dir
@@ -41,20 +46,23 @@ echo 'clear work dirs'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT clear_work_dir
 
 echo 'kill stale processes'
-# [ssh] will return a non-zero error code if a process we try to kill does not
-# exist. To prevent this non-zero error code from causing this overall script to
-# fail, we append [|| true] to each line.
-ssh -n hog7 "killall loadgen_server" || true
-ssh -n hog5 "killall hogexec" || true
-ssh -n hog6 "killall hogexec" || true
-ssh -n hog8 "killall hogexec" || true
-ssh -n hog9 "killall event_exec" || true
-ssh -n hog11 "killall hogdb" || true
-ssh -n hog10 "killall chuckd" || true
-ssh -n hog10 "killall chuckd.dev" || true
-ssh -n hog10 "killall scpd" || true
-ssh -n hog10 "killall scpd.dev" || true
-ssh -n hog10 "killall mempool_exec" || true
+kill_stale_processes() {
+  # [ssh] will return a non-zero error code if a process we try to kill does not
+  # exist. To prevent this non-zero error code from causing this overall script
+  # to fail, we append [|| true] to each line.
+  ssh -n hog7 "killall loadgen_server" || true
+  ssh -n hog5 "killall hogexec" || true
+  ssh -n hog6 "killall hogexec" || true
+  ssh -n hog8 "killall hogexec" || true
+  ssh -n hog9 "killall event_exec" || true
+  ssh -n hog11 "killall hogdb" || true
+  ssh -n hog4 "killall chuckd" || true
+  ssh -n hog4 "killall chuckd.dev" || true
+  ssh -n hog4 "killall scpd" || true
+  ssh -n hog4 "killall scpd.dev" || true
+  ssh -n hog10 "killall mempool_exec" || true
+}
+kill_stale_processes
 
 echo 'launch loadgen'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server -p 11222
@@ -86,16 +94,9 @@ echo 'launch event'
 echo 'launch hogdb'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb $WORK_DIR/ 10000000000 hog10:$MEMPOOL_DB_PORT
 
-echo 'make sure procs are running'
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT expect_running
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT expect_running
-./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
-
 echo 'launch coordinator and scp'
-./$BUILD_DIR/chuckd.dev \
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \
+  chuckd.dev \
   -l info \
   --stack \
   --config ./scripts/config-chuckd.json \
@@ -103,7 +104,7 @@ echo 'launch coordinator and scp'
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
-  --in-addr hog10:7888 \
+  --in-addr hog4:7888 \
   --debug-port 5500 \
   --num-accts 10000 \
   --txs-per-block 1000000 \
@@ -115,11 +116,23 @@ echo 'launch coordinator and scp'
   --sched-addr hog10:8070 \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400 \
-  >coordinator_output.txt 2>&1 &
+  --scp-control-addr 127.0.0.1:4400
+
+echo 'make sure procs are running'
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT expect_running
+./$BUILD_DIR/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+
+echo 'copy coordinator output from hog4'
+# We grab the file with the prefix [hogd_stdout] that comes last alphabetically.
+scp hog4:"$(ssh -n hog4 'ls -1 /tmp/hogd_stdout* | tail -n 1')" ./coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

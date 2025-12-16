@@ -21,6 +21,12 @@ echo 'configure'
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
+# These build scripts place the binaries in the current working directory, so we
+# [pushd release] so that the binaries are placed in the [release] directory.
+pushd release >/dev/null
+../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
+../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
+popd >/dev/null
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
@@ -53,6 +59,7 @@ bench_3 = "hog8"
 bench_4 = "hog9"
 bench_5 = "hog11"
 bench_6 = "hog5"
+bench_7 = "hog4"
 
 
 [[jobs]]
@@ -76,12 +83,6 @@ echo 'configure'
 
 echo 'build'
 make -C release -j$(nproc) > build2.log 2>&1 || (cat build2.log && exit 1)
-# These build scripts place the binaries in the current working directory, so we
-# [pushd release] so that the binaries are placed in the [release] directory.
-pushd release >/dev/null
-../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
-../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
-popd >/dev/null
 
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh
@@ -100,7 +101,8 @@ echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
 
-echo 'release hog5, hog6, hog7, and hog9'
+echo 'release hog4, hog5, hog6, hog7, and hog9'
+./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown

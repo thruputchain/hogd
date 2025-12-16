@@ -37,7 +37,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 2, 5, 100, 5);
+const StorageCostModel cost_model(12000, 2, 5, 100, 7);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -729,7 +729,7 @@ TEST_P(DeltaManagerTest, ReplayCacheInsertFromEmpty)
   auto r = item.get_post_close_block_item();
   ASSERT_TRUE(r);
   EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCacheData);
-  EXPECT_EQ(r->replay_cache().data().uniquifiers.size(), 2);
+  EXPECT_EQ(r->replay_cache().uniquifiers().size(), 2);
 }
 
 namespace {
