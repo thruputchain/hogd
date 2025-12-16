@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
