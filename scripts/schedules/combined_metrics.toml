@@ -53,6 +53,7 @@ bench_3 = "hog8"
 bench_4 = "hog9"
 bench_5 = "hog11"
 bench_6 = "hog5"
+bench_7 = "hog4"
 
 
 [[jobs]]
@@ -100,7 +101,8 @@ echo 'run mempool benchmarks'
 (./scripts/ci/mempool_bench.sh) || true
 mempool_bench_exit=$?
 
-echo 'release hog5, hog6, hog7, and hog9'
+echo 'release hog4, hog5, hog6, hog7, and hog9'
+./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
 ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
