@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"

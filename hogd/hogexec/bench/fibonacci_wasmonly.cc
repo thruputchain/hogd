@@ -15,7 +15,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"

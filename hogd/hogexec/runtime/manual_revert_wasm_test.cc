@@ -9,7 +9,7 @@
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/manual_revert_test.hh"
 #include "contract.hh"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
