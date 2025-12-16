@@ -9,7 +9,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
