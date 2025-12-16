@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "hogd/storage_item/replay_cache.h"
-#include "storage_item.hh"
 #include "transaction.hh"
 
 namespace hogd {
@@ -44,20 +43,18 @@ TEST(ReplayCache, Basic)
   EXPECT_FALSE(
       cache.contains(Uniquifier{.block_expiry_height = 15, .nonce = 15}));
 
-  EXPECT_EQ(cache.data().uniquifiers.size(), 3);
+  EXPECT_EQ(cache.uniquifiers().size(), 3);
 }
 
 TEST(ReplayCache, CountRemainingAfterClear)
 {
-  ReplayCache cache(
-      ReplayCacheData{
-          .uniquifiers = {Uniquifier{.block_expiry_height = 11, .nonce = 11},
-                          Uniquifier{.block_expiry_height = 12, .nonce = 12},
-                          Uniquifier{.block_expiry_height = 14, .nonce = 14},
-                          Uniquifier{.block_expiry_height = 15, .nonce = 15}}},
-      10);
+  ReplayCache cache({Uniquifier{.block_expiry_height = 11, .nonce = 11},
+                     Uniquifier{.block_expiry_height = 12, .nonce = 12},
+                     Uniquifier{.block_expiry_height = 14, .nonce = 14},
+                     Uniquifier{.block_expiry_height = 15, .nonce = 15}},
+                    10);
 
-  ReplayCache cache2(cache.data(), 12);
+  ReplayCache cache2(cache.uniquifiers(), 12);
 
   EXPECT_EQ(cache2.committed_size(), 3);
 }

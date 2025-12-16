@@ -1,10 +1,8 @@
 #pragma once
 
-#include <cstddef>
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -14,10 +12,11 @@ class ReplayCache {
 public:
   ReplayCache(BlockHeight expired_height) : expired_height_(expired_height) {}
 
-  ReplayCache(ReplayCacheData data, BlockHeight expired_height)
-    : data_(std::move(data)), expired_height_(expired_height)
+  ReplayCache(std::vector<Uniquifier> uniquifiers, BlockHeight expired_height)
+    : uniquifiers_(std::move(uniquifiers)), expired_height_(expired_height)
   {
     filter_expired();
+    committed_size_ = uniquifiers_.size();
   }
 
   bool contains(Uniquifier uniquifier) const;
@@ -27,14 +26,14 @@ public:
   void commit_add(Uniquifier uniquifier);
   void remove(Uniquifier uniquifier);
 
-  ReplayCacheData const &data() const { return data_; }
+  std::vector<Uniquifier> const &uniquifiers() const { return uniquifiers_; }
 
   size_t committed_size() const { return committed_size_; }
 
   BlockHeight expired_height() const { return expired_height_; }
 
 private:
-  ReplayCacheData data_;
+  std::vector<Uniquifier> uniquifiers_;
   BlockHeight expired_height_;
 
   size_t committed_size_;
