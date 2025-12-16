@@ -111,8 +111,7 @@ echo 'launch coordinator and scp'
   --sched-addr hog10:8070 \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400 \
-  >coordinator_output.txt 2>&1 &
+  --scp-control-addr 127.0.0.1:4400
 
 echo 'make sure procs are running'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT expect_running
