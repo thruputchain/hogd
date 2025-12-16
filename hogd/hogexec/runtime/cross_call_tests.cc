@@ -5,6 +5,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -63,8 +64,7 @@ protected:
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
   }
@@ -87,8 +87,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
   {
@@ -104,8 +103,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
 
@@ -165,8 +163,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1000);
     gas_consumed_1 = res.gas_consumed_;
   }
@@ -183,8 +180,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1010);
     gas_consumed_2 = res.gas_consumed_;
   }

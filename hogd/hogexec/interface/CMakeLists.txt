@@ -20,6 +20,7 @@ target_link_libraries(
 
 add_library(exec_interface_test_objects OBJECT
   rpc_open_proposal_block_test.cc
+  rpc_loadgen_payment_test.cc
 )
 target_link_libraries(
   exec_interface_test_objects
@@ -35,6 +36,7 @@ target_link_libraries(
   exec_interface_test
   exec_interface
   runtime_test_lib
+  loadgen
   GTest::gtest
 )
 gtest_discover_tests(exec_interface_test)

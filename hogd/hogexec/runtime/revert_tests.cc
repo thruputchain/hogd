@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -99,8 +100,7 @@ TEST_P(RevertTest, RootFrameReverts)
 
   // Commit the transaction - it should succeed
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -272,8 +272,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 
   // Commit the transaction - it should succeed
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 

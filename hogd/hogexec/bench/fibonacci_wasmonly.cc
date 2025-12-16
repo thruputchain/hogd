@@ -15,6 +15,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
+#include "exec_result.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -148,8 +149,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
             throw std::runtime_error("Failed to invoke transaction");
           }
           if (do_commit) {
-            if (auto r = handler.try_commit_transaction();
-                !r.has_value() || !r.value()) {
+            if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
               throw std::runtime_error("failed to perform commit operation");
             }
           }
