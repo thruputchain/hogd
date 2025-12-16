@@ -127,7 +127,7 @@ bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $s
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that comes last alphabetically.
-scp hog4:"/tmp/$(ls -1 hogd_stdout* | tail -n 1)" ./coordinator_output.txt
+scp hog4:"$(ssh hog4 'ls -1 /tmp/hogd_stdout* | tail -n 1')" ./coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
