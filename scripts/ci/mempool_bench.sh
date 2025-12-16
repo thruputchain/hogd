@@ -125,6 +125,10 @@ echo 'make sure procs are running'
 echo 'launch mempool'
 bash -c 'timeout 90s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
+echo 'copy coordinator output from hog4'
+# We grab the file with the prefix [hogd_stdout] that comes last alphabetically.
+scp hog4:"/tmp/$(ls -1 hogd_stdout* | tail -n 1)" ./coordinator_output.txt
+
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
 
