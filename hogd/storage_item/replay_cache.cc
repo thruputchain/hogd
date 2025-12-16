@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <utility>
+#include <vector>
 
-#include "storage_item.hh"
 #include "transaction.hh"
 
 namespace hogd {
@@ -12,8 +12,7 @@ namespace hogd {
 bool
 ReplayCache::contains(Uniquifier uniquifier) const
 {
-  return std::ranges::find(data_.uniquifiers, uniquifier) !=
-         data_.uniquifiers.end();
+  return std::ranges::find(uniquifiers_, uniquifier) != uniquifiers_.end();
 }
 
 bool
@@ -30,7 +29,7 @@ void
 ReplayCache::add(Uniquifier uniquifier)
 {
   assert(can_accept(uniquifier));
-  data_.uniquifiers.push_back(uniquifier);
+  uniquifiers_.push_back(uniquifier);
 }
 
 void
@@ -44,21 +43,20 @@ void
 ReplayCache::remove(Uniquifier uniquifier)
 {
   assert(contains(uniquifier));
-  data_.uniquifiers.erase(std::ranges::find(data_.uniquifiers, uniquifier));
+  uniquifiers_.erase(std::ranges::find(uniquifiers_, uniquifier));
 }
 
 void
 ReplayCache::filter_expired()
 {
-  ReplayCacheData new_data;
-  new_data.uniquifiers.reserve(data_.uniquifiers.size());
-  for (Uniquifier const &uniquifier : data_.uniquifiers) {
+  std::vector<Uniquifier> new_data;
+  new_data.reserve(uniquifiers_.size());
+  for (Uniquifier const &uniquifier : uniquifiers_) {
     if (uniquifier.block_expiry_height >= expired_height_) {
-      new_data.uniquifiers.push_back(uniquifier);
+      new_data.push_back(uniquifier);
     }
   }
-  data_ = std::move(new_data);
-  committed_size_ = data_.uniquifiers.size();
+  uniquifiers_ = std::move(new_data);
 }
 
 } // namespace hogd
