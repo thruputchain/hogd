@@ -691,7 +691,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res  , ExecResult::ExecResultOK);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 namespace {

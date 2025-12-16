@@ -290,8 +290,7 @@ root_invoke(void *syscall_handler) noexcept
 std::string
 format_foreign_try_commit_result(const ForeignTryCommitResult &result)
 {
-  return std::format("result_code={}, ffi_error_code={}",
-                     result.result_code,
+  return std::format("result_code={}, ffi_error_code={}", result.result_code,
                      std::to_underlying(result.ffi_error_code));
 }
 
@@ -316,7 +315,9 @@ try_commit_transaction(void *syscall_handler) noexcept
       auto events_res = context->to_handler().emit_events()();
       if (!events_res.has_value()) {
         error("failed to emit events: {}", events_res.error());
-        return ForeignTryCommitResult{.result_code = std::to_underlying(SystemCallHandler::to_exec_result(events_res.error().code())) };
+        return ForeignTryCommitResult{
+            .result_code = std::to_underlying(
+                SystemCallHandler::to_exec_result(events_res.error().code()))};
       }
     }
     auto out = ForeignTryCommitResult{.result_code = std::to_underlying(res)};

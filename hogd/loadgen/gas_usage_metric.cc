@@ -87,7 +87,8 @@ run_gas_usage_metric(uint32_t num_accounts)
   }
 
   // Commit the transaction
-  if (auto r = handler.try_commit_transaction(); r != ExecResult::ExecResultOK) {
+  if (auto r = handler.try_commit_transaction();
+      r != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to commit transaction");
   }
 

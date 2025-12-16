@@ -180,7 +180,8 @@ TEST(TestBindingsTest, MockContractCreateEventTest)
   // Events not available until next block
 
   auto commit_res = try_commit_transaction(syscall_handler);
-  EXPECT_EQ(commit_res.result_code, std::to_underlying(ExecResult::ExecResultOK));
+  EXPECT_EQ(commit_res.result_code,
+            std::to_underlying(ExecResult::ExecResultOK));
   EXPECT_EQ(commit_res.ffi_error_code, kTestFFIErrorCodeNone);
 
   ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);

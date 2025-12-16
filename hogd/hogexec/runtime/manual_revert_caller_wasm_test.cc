@@ -79,7 +79,8 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK) << "Failed to commit initialization";
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -142,7 +143,8 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK) << "Failed to commit initialization";
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -206,7 +208,8 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK) << "Failed to commit initialization";
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -272,7 +275,8 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK) << "Failed to commit initialization";
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -336,7 +340,8 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK) << "Failed to commit initialization";
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 

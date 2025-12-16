@@ -152,7 +152,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
               throw std::runtime_error("root invoke failed");
             }
             auto commit_res = handler.try_commit_transaction();
-            if (commit_res != ExecResult::ExecResultOK && commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            if (commit_res != ExecResult::ExecResultOK &&
+                commit_res != ExecResult::ExecResultTxNonDeterministicError) {
               throw std::runtime_error("try_commit_transaction error");
             }
             if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {

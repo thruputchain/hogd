@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -19,7 +20,6 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "exec_sched.hh"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -798,7 +798,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
         << "No error case should succeed normally";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK) << "No error case transaction should commit";
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
+        << "No error case transaction should commit";
 
     advance_block();
 

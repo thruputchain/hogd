@@ -1075,7 +1075,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
   auto commit_res2 = handler2.try_commit_transaction();
   // Transaction should not commit because handler2 returned a failure
-  ASSERT_EQ(commit_res2,ExecResult::ExecResultTxDeterministicError);
+  ASSERT_EQ(commit_res2, ExecResult::ExecResultTxDeterministicError);
 
   // Now commit the first transaction (should succeed)
   auto commit_res1 = handler1.try_commit_transaction();
@@ -2383,8 +2383,10 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           }
           co_await set.bg();
           auto commit_res = handler.try_commit_transaction();
-          if (commit_res != ExecResult::ExecResultOK && commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " + x23::show(commit_res));
+          if (commit_res != ExecResult::ExecResultOK &&
+              commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            throw std::runtime_error("try_commit_transaction error: " +
+                                     x23::show(commit_res));
           }
           co_return;
         },
@@ -2417,8 +2419,10 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             co_return;
           }
           auto commit_res = handler.try_commit_transaction();
-          if (commit_res != ExecResult::ExecResultOK && commit_res != ExecResult::ExecResultTxNonDeterministicError) {
-            throw std::runtime_error("try_commit_transaction error: " + x23::show(commit_res));
+          if (commit_res != ExecResult::ExecResultOK &&
+              commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            throw std::runtime_error("try_commit_transaction error: " +
+                                     x23::show(commit_res));
           }
           co_return;
         },

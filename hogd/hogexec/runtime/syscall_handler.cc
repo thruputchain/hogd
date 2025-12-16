@@ -45,42 +45,41 @@
 
 namespace hogd {
 
-    ExecResult
+ExecResult
 SystemCallHandler::to_exec_result(InvokeErrorCode error_code)
-    {
-      switch (error_code) {
-      case InvokeErrorCode::kInvokeNone:
-        return ExecResult::ExecResultOK;
-      case InvokeErrorCode::kInvokeAbortTransaction:
-        return ExecResult::ExecResultSystemError;
-      case InvokeErrorCode::kInvokeDeterministic:
-      case InvokeErrorCode::kInvokeOutOfGas:
-        return ExecResult::ExecResultTxDeterministicError;
-      case InvokeErrorCode::kInvokeValidationFailure:
-        return ExecResult::ExecResultTxValidationFailure;
-      case InvokeErrorCode::kInvokeUnrecoverable:
-        error("make_exec_result: received kInvokeUnrecoverable");
-        return ExecResult::ExecResultUnrecoverable;
-      }
-      assert(false);
-      return ExecResult::ExecResultUnrecoverable;
-    }
-    
-    ExecResult
-    SystemCallHandler::to_exec_result(SystemErrorCode error_code)
-    {
-      switch (error_code) {
-      case SystemErrorCode::kSystemUnrecoverable:
-        return ExecResult::ExecResultUnrecoverable;
-      case SystemErrorCode::kSystemAbortTransaction:
-        return ExecResult::ExecResultSystemError;
-      case SystemErrorCode::kSystemValidationFailure:
-        return ExecResult::ExecResultTxValidationFailure;
-      }
-      assert(false);
-      return ExecResult::ExecResultUnrecoverable;
-    }
+{
+  switch (error_code) {
+  case InvokeErrorCode::kInvokeNone:
+    return ExecResult::ExecResultOK;
+  case InvokeErrorCode::kInvokeAbortTransaction:
+    return ExecResult::ExecResultSystemError;
+  case InvokeErrorCode::kInvokeDeterministic:
+  case InvokeErrorCode::kInvokeOutOfGas:
+    return ExecResult::ExecResultTxDeterministicError;
+  case InvokeErrorCode::kInvokeValidationFailure:
+    return ExecResult::ExecResultTxValidationFailure;
+  case InvokeErrorCode::kInvokeUnrecoverable:
+    error("make_exec_result: received kInvokeUnrecoverable");
+    return ExecResult::ExecResultUnrecoverable;
+  }
+  assert(false);
+  return ExecResult::ExecResultUnrecoverable;
+}
 
+ExecResult
+SystemCallHandler::to_exec_result(SystemErrorCode error_code)
+{
+  switch (error_code) {
+  case SystemErrorCode::kSystemUnrecoverable:
+    return ExecResult::ExecResultUnrecoverable;
+  case SystemErrorCode::kSystemAbortTransaction:
+    return ExecResult::ExecResultSystemError;
+  case SystemErrorCode::kSystemValidationFailure:
+    return ExecResult::ExecResultTxValidationFailure;
+  }
+  assert(false);
+  return ExecResult::ExecResultUnrecoverable;
+}
 
 namespace {
 template<StorageItemRPCFlags... Flags>
@@ -227,7 +226,8 @@ SystemCallHandler::root_invoke()
     }
     // Leaving the default arm out of the switch, so that the compiler
     // will raise a warning later if we add additional InvokeError codes.
-    error("handle_root_host_fn_status: received unknown error code {}", status.error().code());
+    error("handle_root_host_fn_status: received unknown error code {}",
+          status.error().code());
     return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   };
 
@@ -259,8 +259,9 @@ SystemCallHandler::try_commit_transaction()
     if (!st.has_value()) {
       return to_exec_result(st.error().code());
     }
-    
-    if (cumulative_invoke_result_.result_.error().code() == InvokeErrorCode::kInvokeUnrecoverable) {
+
+    if (cumulative_invoke_result_.result_.error().code() ==
+        InvokeErrorCode::kInvokeUnrecoverable) {
       error("try_commit_transaction: received kInvokeUnrecoverable");
     }
     return to_exec_result(cumulative_invoke_result_.result_.error().code());
