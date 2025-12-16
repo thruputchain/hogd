@@ -20,6 +20,7 @@
 #include "ci_server.hh"
 #include "db_sched.hh"
 #include "event_rpc.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"

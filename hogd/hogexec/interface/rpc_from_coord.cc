@@ -4,6 +4,7 @@
 #include <cassert>
 #include <memory>
 
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
