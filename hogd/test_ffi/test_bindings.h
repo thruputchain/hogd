@@ -58,8 +58,7 @@ struct ForeignHostFnResult {
 
 // Translation of try_commit_transaction result into an FFI-safe type.
 struct ForeignTryCommitResult {
-  int32_t result_code; // boolean
-  int32_t panic;       // SystemErrorCode
+  int32_t result_code; // ExecResult
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
   // of hogexec.

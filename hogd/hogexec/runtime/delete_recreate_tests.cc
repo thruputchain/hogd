@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -186,8 +187,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -342,8 +342,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -502,8 +501,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();

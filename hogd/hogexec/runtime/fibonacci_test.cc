@@ -9,6 +9,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci.h"
 #include "contract.hh"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/native_contract_builder.h"
@@ -69,8 +70,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
 
@@ -172,8 +172,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
   {
@@ -197,8 +196,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }

@@ -13,6 +13,7 @@
 #include "account.hh"
 #include "contract.hh"
 #include "event.hh"
+#include "exec_sched.hh"
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
@@ -43,6 +44,43 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+    ExecResult
+SystemCallHandler::to_exec_result(InvokeErrorCode error_code)
+    {
+      switch (error_code) {
+      case InvokeErrorCode::kInvokeNone:
+        return ExecResult::ExecResultOK;
+      case InvokeErrorCode::kInvokeAbortTransaction:
+        return ExecResult::ExecResultSystemError;
+      case InvokeErrorCode::kInvokeDeterministic:
+      case InvokeErrorCode::kInvokeOutOfGas:
+        return ExecResult::ExecResultTxDeterministicError;
+      case InvokeErrorCode::kInvokeValidationFailure:
+        return ExecResult::ExecResultTxValidationFailure;
+      case InvokeErrorCode::kInvokeUnrecoverable:
+        error("make_exec_result: received kInvokeUnrecoverable");
+        return ExecResult::ExecResultUnrecoverable;
+      }
+      assert(false);
+      return ExecResult::ExecResultUnrecoverable;
+    }
+    
+    ExecResult
+    SystemCallHandler::to_exec_result(SystemErrorCode error_code)
+    {
+      switch (error_code) {
+      case SystemErrorCode::kSystemUnrecoverable:
+        return ExecResult::ExecResultUnrecoverable;
+      case SystemErrorCode::kSystemAbortTransaction:
+        return ExecResult::ExecResultSystemError;
+      case SystemErrorCode::kSystemValidationFailure:
+        return ExecResult::ExecResultTxValidationFailure;
+      }
+      assert(false);
+      return ExecResult::ExecResultUnrecoverable;
+    }
+
 
 namespace {
 template<StorageItemRPCFlags... Flags>
@@ -179,6 +217,7 @@ SystemCallHandler::root_invoke()
     case HostFnErrorCode::kHostAbortTransaction:
       return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
     case HostFnErrorCode::kHostUnrecoverable:
+      error("handle_root_host_fn_status: received kHostUnrecoverable");
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     case HostFnErrorCode::kHostNoneOrRecoverable:
       // This case should never happen, as it is instead handled by
@@ -188,6 +227,7 @@ SystemCallHandler::root_invoke()
     }
     // Leaving the default arm out of the switch, so that the compiler
     // will raise a warning later if we add additional InvokeError codes.
+    error("handle_root_host_fn_status: received unknown error code {}", status.error().code());
     return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   };
 
@@ -208,7 +248,7 @@ SystemCallHandler::root_invoke()
   return cumulative_invoke_result_;
 }
 
-SystemStatus<bool>
+ExecResult
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
@@ -217,13 +257,17 @@ SystemCallHandler::try_commit_transaction()
                                    get_block_execution_mode());
     auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
-      return st.error();
+      return to_exec_result(st.error().code());
     }
-
-    return false;
+    
+    if (cumulative_invoke_result_.result_.error().code() == InvokeErrorCode::kInvokeUnrecoverable) {
+      error("try_commit_transaction: received kInvokeUnrecoverable");
+    }
+    return to_exec_result(cumulative_invoke_result_.result_.error().code());
   }
   assert(last_frame_.has_value());
   assert(root_invoke_succeeded_);
+  assert(cumulative_invoke_result_.result_.has_value());
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op.
@@ -234,7 +278,7 @@ SystemCallHandler::try_commit_transaction()
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
                                    get_block_execution_mode());
     if (!res.has_value()) {
-      return res.error();
+      return to_exec_result(res.error().code());
     }
 
     // extract the events, so that they cannot be sent later to the event server
@@ -242,14 +286,14 @@ SystemCallHandler::try_commit_transaction()
     last_frame_.value().extract_events();
 
     transaction_committed_or_aborted_ = true;
-    return true;
+    return ExecResult::ExecResultOK;
   }
 
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
                .value()
                .try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
-    return r.error();
+    return to_exec_result(r.error().code());
   }
 
   bool result = r.value();
@@ -258,10 +302,10 @@ SystemCallHandler::try_commit_transaction()
 
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
-      return abort_status.error();
+      return to_exec_result(abort_status.error().code());
     }
 
-    return false;
+    return ExecResult::ExecResultTxNonDeterministicError;
   }
 
   auto new_contract_hashes =
@@ -278,7 +322,7 @@ SystemCallHandler::try_commit_transaction()
 
   auto res = db_proxy_.commit_transaction(std::move(new_contracts));
   if (!res.has_value()) {
-    return res.error();
+    return to_exec_result(res.error().code());
   }
 
   // This is past the point of successful commitment;
@@ -287,7 +331,7 @@ SystemCallHandler::try_commit_transaction()
   HogexecMetrics::mark_tx_success(cumulative_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
-  return true;
+  return ExecResult::ExecResultOK;
 }
 
 SystemStatus<void>

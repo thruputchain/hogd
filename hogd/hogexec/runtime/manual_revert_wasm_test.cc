@@ -9,6 +9,7 @@
 #include "built_contracts/manual_revert_test.h"
 #include "built_contracts/manual_revert_test.hh"
 #include "contract.hh"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -172,7 +173,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   ASSERT_TRUE(res.is_root_success()) << "Manual revert test should succeed";
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value())
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
 
@@ -256,7 +257,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   ASSERT_TRUE(res.is_root_success()) << "No revert test should succeed";
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value())
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
 
@@ -328,7 +329,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
       << "Nested manual revert test should succeed";
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value())
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
 
@@ -403,7 +404,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
         << "Error type " << error_type << " should succeed via manual revert";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value())
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Error type " << error_type
         << " transaction should commit successfully";
   }
@@ -475,7 +476,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   ASSERT_TRUE(res.is_root_success()) << "Error type 0 should succeed normally";
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value())
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Error type 0 transaction should commit successfully";
 }
 
@@ -550,7 +551,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
         << "Storage manual revert should succeed";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value())
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Storage manual revert transaction should commit successfully";
   }
 
@@ -610,7 +611,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
         << "Storage no revert should succeed normally";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value())
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Storage no revert transaction should commit successfully";
   }
 }

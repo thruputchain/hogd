@@ -10,6 +10,7 @@
 #include "built_contracts/fibonacci_call.h"
 #include "built_contracts/manual_revert_test.h"
 #include "db_sched.hh"
+#include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -103,8 +104,7 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 
@@ -125,8 +125,7 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 
@@ -214,8 +213,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 
@@ -231,8 +229,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 
@@ -256,8 +253,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 }
@@ -323,8 +319,7 @@ TEST_P(GenesisConfigurationUnfurlTest,
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 
@@ -348,8 +343,7 @@ TEST_P(GenesisConfigurationUnfurlTest,
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 }
@@ -387,8 +381,7 @@ TEST_P(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
   }
 

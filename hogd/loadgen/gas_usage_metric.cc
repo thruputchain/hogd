@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -54,7 +55,7 @@ run_gas_usage_metric(uint32_t num_accounts)
         throw std::runtime_error("Initialization transaction execution failed");
       }
       if (auto r = handler.try_commit_transaction();
-          !r.has_value() || !r.value()) {
+          r != ExecResult::ExecResultOK) {
         throw std::runtime_error("Failed to commit initialization transaction");
       }
     }
@@ -86,7 +87,7 @@ run_gas_usage_metric(uint32_t num_accounts)
   }
 
   // Commit the transaction
-  if (auto r = handler.try_commit_transaction(); !r.has_value() || !r.value()) {
+  if (auto r = handler.try_commit_transaction(); r != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to commit transaction");
   }
 

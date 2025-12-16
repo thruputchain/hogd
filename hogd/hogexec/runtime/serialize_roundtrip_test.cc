@@ -13,6 +13,7 @@
 #include "built_contracts/txs_roundtrip.h"
 #include "built_contracts/txs_roundtrip.hh"
 #include "contract.hh"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
@@ -492,8 +493,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
@@ -511,8 +511,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
@@ -530,8 +529,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
@@ -549,8 +547,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
@@ -568,8 +565,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
@@ -587,8 +583,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
@@ -606,8 +601,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
@@ -625,8 +619,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripErrorXDR)
@@ -644,8 +637,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripErrorXDR)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripContractErrorXDR)
@@ -663,8 +655,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripContractErrorXDR)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripStorageErrXDR)
@@ -682,8 +673,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripStorageErrXDR)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
@@ -701,8 +691,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res  , ExecResult::ExecResultOK);
 }
 
 namespace {

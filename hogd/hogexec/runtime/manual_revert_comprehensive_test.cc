@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "exec_sched.hh"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -124,8 +125,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
   // Transaction should still commit successfully (this is the key difference
   // from normal revert)
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -252,8 +252,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -356,8 +355,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
     ASSERT_TRUE(res.is_root_success()); // Manual revert should succeed
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res); // Should commit successfully
+    // should commit successfully
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
   }
@@ -378,8 +377,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
     ASSERT_FALSE(res.is_root_success()); // Normal failure should fail
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_FALSE(*commit_res); // Should not commit
+    // should not commit
+    ASSERT_EQ(commit_res, ExecResult::ExecResultTxDeterministicError);
 
     advance_block();
   }
@@ -470,8 +469,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   ASSERT_GE(gas_consumed, 10000);
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -620,8 +618,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -771,8 +768,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
         << "Error type " << error_type << " should succeed via manual revert";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res)
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Error type " << error_type << " transaction should commit";
 
     advance_block();
@@ -802,8 +798,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
         << "No error case should succeed normally";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res) << "No error case transaction should commit";
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK) << "No error case transaction should commit";
 
     advance_block();
 

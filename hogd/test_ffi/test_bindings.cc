@@ -14,12 +14,14 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -288,8 +290,8 @@ root_invoke(void *syscall_handler) noexcept
 std::string
 format_foreign_try_commit_result(const ForeignTryCommitResult &result)
 {
-  return std::format("result_code={}, panic={}, ffi_error_code={}",
-                     result.result_code, result.panic,
+  return std::format("result_code={}, ffi_error_code={}",
+                     result.result_code,
                      std::to_underlying(result.ffi_error_code));
 }
 
@@ -310,22 +312,14 @@ try_commit_transaction(void *syscall_handler) noexcept
     auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
     auto res = context->to_handler().try_commit_transaction();
     context->mark_committed_or_aborted();
-    if (!res.has_value()) {
-      error("try_commit_transaction encountered system error {}", res.error());
-      return ForeignTryCommitResult{.result_code = 0,
-                                    .panic =
-                                        std::to_underlying(res.error().code())};
-    }
-    if (*res) {
+    if (res == ExecResult::ExecResultOK) {
       auto events_res = context->to_handler().emit_events()();
       if (!events_res.has_value()) {
         error("failed to emit events: {}", events_res.error());
-        return ForeignTryCommitResult{.result_code = 0,
-                                      .panic = std::to_underlying(
-                                          res.error().code())};
+        return ForeignTryCommitResult{.result_code = std::to_underlying(SystemCallHandler::to_exec_result(events_res.error().code())) };
       }
     }
-    auto out = ForeignTryCommitResult{.result_code = *res ? 1 : 0, .panic = 0};
+    auto out = ForeignTryCommitResult{.result_code = std::to_underlying(res)};
     ffi_trace("FFI: try_commit_transaction(syscall_handler={}) -> (result={})",
               syscall_handler, format_foreign_try_commit_result(out));
     return out;

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -118,8 +119,7 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
             error("Failed to invoke transaction");
             throw std::runtime_error("Failed to invoke transaction");
           }
-          if (auto r = handler.try_commit_transaction();
-              !r.has_value() || !r.value()) {
+          if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
             throw std::runtime_error("failed to perform commit operation");
           }
           handler.emit_events()(

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -127,8 +128,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(*r);
+    ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 
   // Step 2: Create a transaction that invokes method 1 with calldata [5, 4],
@@ -148,8 +148,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(*r);
+    ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 
   // Step 3: Advance to the next block.
@@ -172,8 +171,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(*r);
+    ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 
   // Step 5: Create a transaction that invokes method 1 with calldata
@@ -197,8 +195,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(*r);
+    ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 }
 

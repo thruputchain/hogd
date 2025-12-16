@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
+#include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -179,8 +180,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -200,8 +200,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   ASSERT_TRUE(res2.is_root_success());
 
   auto r2 = handler2.try_commit_transaction();
-  ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(*r2);
+  ASSERT_TRUE(r2 == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler2.emit_events()());
 }
 
@@ -273,8 +272,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
   advance_block();
 
@@ -416,8 +414,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
     advance_block();
     // Check that the last write was "world"
@@ -451,8 +448,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_FALSE(*commit_res); // Transaction should not commit
+    // transaction should not commit
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
     advance_block();
     // Storage should not be updated
     auto read_res = lookup_storage_item_from_db(
@@ -481,8 +478,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(handler.emit_events()());
     advance_block();
     // Storage should be updated to "world"
@@ -606,9 +602,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   ASSERT_FALSE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
   // The transaction should not commit because it failed
-  ASSERT_FALSE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
 
   advance_block();
 
@@ -911,13 +906,12 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
   auto commit_res2 = handler2.try_commit_transaction();
-  ASSERT_TRUE(commit_res2.has_value());
-  ASSERT_FALSE(*commit_res2); // Transaction should not commit
+  // transaction should not commit
+  ASSERT_TRUE(commit_res2 == ExecResult::ExecResultTxDeterministicError);
 
   // Now commit the first transaction (should succeed)
   auto commit_res1 = handler1.try_commit_transaction();
-  ASSERT_TRUE(commit_res1.has_value());
-  ASSERT_TRUE(*commit_res1);
+  ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -1004,17 +998,17 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                                       InvokeFlag::kInvokeFlagTryInvoke));
 
                if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
 
                // Check that the try_invoke failed (should fail because -5 is
                // negative)
                if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                 return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
                }
 
                // Return a deterministic error to make the transaction fail
-               return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }},
             {2,
              [](SystemCallHandler &handler,
@@ -1080,13 +1074,12 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
   auto commit_res2 = handler2.try_commit_transaction();
-  ASSERT_TRUE(commit_res2.has_value());
-  ASSERT_FALSE(*commit_res2); // Transaction should not commit
+  // Transaction should not commit because handler2 returned a failure
+  ASSERT_EQ(commit_res2,ExecResult::ExecResultTxDeterministicError);
 
   // Now commit the first transaction (should succeed)
   auto commit_res1 = handler1.try_commit_transaction();
-  ASSERT_TRUE(commit_res1.has_value());
-  ASSERT_TRUE(*commit_res1);
+  ASSERT_EQ(commit_res1, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -1275,16 +1268,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler2.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
   // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
   // set_typeclass lock).
   {
     auto commit_res = tc1_handler.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
   // TC1.4: Then invoke method 2 again, with parameter [true]. This should
@@ -1304,8 +1295,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler3.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc1_handler3.emit_events()());
   }
 
@@ -1339,8 +1329,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler1.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler1.emit_events()());
   }
 
@@ -1360,8 +1349,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler2.try_commit_transaction();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(commit_res.value());
+    ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler2.emit_events()());
   }
 
@@ -1477,8 +1465,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(commit_res.value());
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -1631,8 +1618,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -1800,8 +1786,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -1921,8 +1906,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -2068,8 +2052,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -2224,8 +2207,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -2401,8 +2383,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
           }
           co_await set.bg();
           auto commit_res = handler.try_commit_transaction();
-          if (!commit_res.has_value()) {
-            throw std::runtime_error("try_commit_transaction error");
+          if (commit_res != ExecResult::ExecResultOK && commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            throw std::runtime_error("try_commit_transaction error: " + x23::show(commit_res));
           }
           co_return;
         },
@@ -2435,8 +2417,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
             co_return;
           }
           auto commit_res = handler.try_commit_transaction();
-          if (!commit_res.has_value()) {
-            throw std::runtime_error("try_commit_transaction error");
+          if (commit_res != ExecResult::ExecResultOK && commit_res != ExecResult::ExecResultTxNonDeterministicError) {
+            throw std::runtime_error("try_commit_transaction error: " + x23::show(commit_res));
           }
           co_return;
         },
@@ -2457,8 +2439,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
       auto commit_res = handler.try_commit_transaction();
-      ASSERT_TRUE(commit_res.has_value());
-      ASSERT_TRUE(*commit_res);
+      ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events()());
     }
 
@@ -2660,8 +2641,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 }
 
@@ -2783,8 +2763,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
