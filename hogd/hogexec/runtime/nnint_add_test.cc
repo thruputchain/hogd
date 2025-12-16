@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -124,8 +125,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -205,8 +205,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -294,8 +293,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
   auto commit_res1 = handler1.try_commit_transaction();
-  ASSERT_TRUE(commit_res1.has_value());
-  ASSERT_TRUE(*commit_res1);
+  ASSERT_EQ(commit_res1, ExecResult::ExecResultOK);
 
   // Second transaction: call method 1 (add on (-100))
   auto handler2 = make_new_system_call_handler(
@@ -313,8 +311,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
   auto commit_res2 = handler2.try_commit_transaction();
-  ASSERT_TRUE(commit_res2.has_value());
-  ASSERT_TRUE(*commit_res2);
+  ASSERT_EQ(commit_res2, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -343,8 +340,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto res3 = handler3.root_invoke();
   ASSERT_TRUE(res3.is_root_success());
   auto commit_res3 = handler3.try_commit_transaction();
-  ASSERT_TRUE(commit_res3.has_value());
-  ASSERT_TRUE(*commit_res3);
+  ASSERT_EQ(commit_res3, ExecResult::ExecResultOK);
 
   // Fourth transaction: call method 1 (add on (-100))
   auto handler4 = make_new_system_call_handler(
@@ -362,8 +358,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
   auto res4 = handler4.root_invoke();
   ASSERT_TRUE(res4.is_root_success());
   auto commit_res4 = handler4.try_commit_transaction();
-  ASSERT_TRUE(commit_res4.has_value());
-  ASSERT_FALSE(*commit_res4);
+  ASSERT_EQ(commit_res4, ExecResult::ExecResultTxNonDeterministicError);
 
   advance_block();
 

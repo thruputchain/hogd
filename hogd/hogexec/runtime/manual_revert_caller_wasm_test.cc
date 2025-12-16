@@ -7,6 +7,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_caller.h"
+#include "exec_result.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -78,8 +79,8 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_TRUE(init_commit_res.has_value()) << "Failed to commit initialization";
-  ASSERT_TRUE(*init_commit_res);
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -95,9 +96,8 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
       << "Failed to call call_basic_manual_revert";
 
   auto call_commit_res = call_handler.try_commit_transaction();
-  ASSERT_TRUE(call_commit_res.has_value())
+  ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
-  ASSERT_TRUE(*call_commit_res);
 
   advance_block();
 
@@ -143,8 +143,8 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_TRUE(init_commit_res.has_value()) << "Failed to commit initialization";
-  ASSERT_TRUE(*init_commit_res);
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -161,9 +161,8 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
       << "Failed to call call_nested_manual_revert";
 
   auto call_commit_res = call_handler.try_commit_transaction();
-  ASSERT_TRUE(call_commit_res.has_value())
+  ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
-  ASSERT_TRUE(*call_commit_res);
 
   advance_block();
 
@@ -209,8 +208,8 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_TRUE(init_commit_res.has_value()) << "Failed to commit initialization";
-  ASSERT_TRUE(*init_commit_res);
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -229,9 +228,8 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
       << "Failed to call call_error_type_revert";
 
   auto call_commit_res = call_handler.try_commit_transaction();
-  ASSERT_TRUE(call_commit_res.has_value())
+  ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
-  ASSERT_TRUE(*call_commit_res);
 
   advance_block();
 
@@ -277,8 +275,8 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_TRUE(init_commit_res.has_value()) << "Failed to commit initialization";
-  ASSERT_TRUE(*init_commit_res);
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -295,9 +293,8 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
       << "Failed to call call_storage_manual_revert";
 
   auto call_commit_res = call_handler.try_commit_transaction();
-  ASSERT_TRUE(call_commit_res.has_value())
+  ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
-  ASSERT_TRUE(*call_commit_res);
 
   advance_block();
 
@@ -343,8 +340,8 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
       << "Failed to initialize manual_revert_caller contract";
 
   auto init_commit_res = init_handler.try_commit_transaction();
-  ASSERT_TRUE(init_commit_res.has_value()) << "Failed to commit initialization";
-  ASSERT_TRUE(*init_commit_res);
+  ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
+      << "Failed to commit initialization";
 
   advance_block();
 
@@ -365,9 +362,8 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
   ASSERT_TRUE(write_res.is_root_success()) << "Failed to write own state";
 
   auto write_commit_res = write_handler.try_commit_transaction();
-  ASSERT_TRUE(write_commit_res.has_value())
+  ASSERT_EQ(write_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit write transaction";
-  ASSERT_TRUE(*write_commit_res);
 
   advance_block();
 
@@ -386,9 +382,8 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
       << "Failed to check own state exists";
 
   auto check_commit_res = check_handler.try_commit_transaction();
-  ASSERT_TRUE(check_commit_res.has_value())
+  ASSERT_EQ(check_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit check transaction";
-  ASSERT_TRUE(*check_commit_res);
 
   advance_block();
 

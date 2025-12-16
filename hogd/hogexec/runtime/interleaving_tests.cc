@@ -2,12 +2,12 @@
 
 #include <cassert>
 #include <cstdint>
-
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -106,7 +106,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
       throw std::runtime_error("root invoke for reset transaction failed");
     }
     auto commit_res = handler.try_commit_transaction();
-    if (!commit_res.has_value() || !commit_res.value()) {
+    if (commit_res != ExecResult::ExecResultOK) {
       throw std::runtime_error(
           "try_commit_transaction error for reset transaction");
     }
@@ -151,10 +151,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
               throw std::runtime_error("root invoke failed");
             }
             auto commit_res = handler.try_commit_transaction();
-            if (!commit_res.has_value()) {
+            if (commit_res != ExecResult::ExecResultOK &&
+                commit_res != ExecResult::ExecResultTxNonDeterministicError) {
               throw std::runtime_error("try_commit_transaction error");
             }
-            if (!commit_res.value()) {
+            if (commit_res == ExecResult::ExecResultTxNonDeterministicError) {
               action_result = false;
               co_return;
             }

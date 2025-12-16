@@ -36,43 +36,6 @@ ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
   return PerTransactionEventServerProxy(event_server_proxy_, block_id_, tx_id);
 }
 
-namespace {
-ExecResult
-make_exec_result(InvokeErrorCode error_code)
-{
-  switch (error_code) {
-  case InvokeErrorCode::kInvokeNone:
-    return ExecResult::ExecResultOK;
-  case InvokeErrorCode::kInvokeAbortTransaction:
-    return ExecResult::ExecResultSystemError;
-  case InvokeErrorCode::kInvokeDeterministic:
-  case InvokeErrorCode::kInvokeOutOfGas:
-    return ExecResult::ExecResultTxDeterministicError;
-  case InvokeErrorCode::kInvokeValidationFailure:
-    return ExecResult::ExecResultTxValidationFailure;
-  case InvokeErrorCode::kInvokeUnrecoverable:
-    return ExecResult::ExecResultUnrecoverable;
-  }
-  assert(false);
-  return ExecResult::ExecResultUnrecoverable;
-}
-
-ExecResult
-make_exec_result(SystemErrorCode error_code)
-{
-  switch (error_code) {
-  case SystemErrorCode::kSystemUnrecoverable:
-    return ExecResult::ExecResultUnrecoverable;
-  case SystemErrorCode::kSystemAbortTransaction:
-    return ExecResult::ExecResultSystemError;
-  case SystemErrorCode::kSystemValidationFailure:
-    return ExecResult::ExecResultTxValidationFailure;
-  }
-  assert(false);
-  return ExecResult::ExecResultUnrecoverable;
-}
-} // namespace
-
 x23::Async<ExecProposeResult>
 ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
                                      TransactionID tx_id)
@@ -156,46 +119,35 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ProposalModeCtor{}, make_hogexec_context());
-  auto invoke_res = syscall_handler.root_invoke();
+  syscall_handler.root_invoke();
+  auto exec_res = syscall_handler.try_commit_transaction();
 
-  if (!invoke_res.is_root_success()) {
-    auto st = proxy.abort_transaction();
-    if (!st.has_value()) {
-      return ExecProposeResult(make_exec_result(st.error().code()));
-    }
-    assert(!invoke_res.result_.has_value());
+  auto out = ExecProposeResult(exec_res);
 
-    auto out =
-        ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
-    assert(invoke_res.result_.error().code() != InvokeErrorCode::kInvokeNone);
-    if (invoke_res.result_.error().code() ==
-        InvokeErrorCode::kInvokeDeterministic) {
-      out.proposal_data() = syscall_handler.get_proposal_data();
-    }
-    return out;
-  }
-
-  auto commit_res = syscall_handler.try_commit_transaction();
-  if (!commit_res.has_value()) {
-    // this error code should not be returned by the try_commit_transaction
-    // function
-    assert(commit_res.error().code() !=
-           SystemErrorCode::kSystemValidationFailure);
-    return ExecProposeResult(make_exec_result(commit_res.error().code()));
-  }
-
-  if (commit_res.value()) {
-    auto out = ExecProposeResult(ExecResult::ExecResultOK);
+  switch (exec_res) {
+  case ExecResult::ExecResultOK:
+  case ExecResult::ExecResultTxDeterministicError:
     out.proposal_data() = syscall_handler.get_proposal_data();
+    break;
+  case ExecResult::ExecResultTxNonDeterministicError:
+  case ExecResult::ExecResultFailedGasSponsorship:
+  case ExecResult::ExecResultTxValidationFailure:
+  case ExecResult::ExecResultSystemError:
+  case ExecResult::ExecResultUnrecoverable:
+    // nothing to do
+    break;
+  }
+
+  if (exec_res == ExecResult::ExecResultOK) {
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return;
         });
-    return out;
   }
-  return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+
+  return out;
 }
 
 ExecResult
@@ -209,36 +161,18 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},
                                     make_hogexec_context());
-  auto invoke_res = syscall_handler.root_invoke();
+  syscall_handler.root_invoke();
+  auto exec_res = syscall_handler.try_commit_transaction();
 
-  if (!invoke_res.is_root_success()) {
-    auto res = proxy.abort_transaction();
-    if (!res.has_value()) {
-      return make_exec_result(res.error().code());
-    }
-    assert(!invoke_res.result_.has_value());
-    return make_exec_result(invoke_res.result_.error().code());
-  }
-
-  auto commit_res = syscall_handler.try_commit_transaction();
-  if (!commit_res.has_value()) {
-    // this error code should not be returned by the try_commit_transaction
-    // function
-    assert(commit_res.error().code() !=
-           SystemErrorCode::kSystemValidationFailure);
-    return make_exec_result(commit_res.error().code());
-  }
-
-  if (commit_res.value()) {
+  if (exec_res == ExecResult::ExecResultOK) {
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
-          co_return;
+          co_return void();
         });
-    return ExecResult::ExecResultOK;
   }
-  return ExecResult::ExecResultTxNonDeterministicError;
+  return exec_res;
 }
 
 void

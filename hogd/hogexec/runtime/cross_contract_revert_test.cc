@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -176,8 +177,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -388,8 +388,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -524,8 +523,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
       << "Expected root success, but frame success: " << res.is_frame_success();
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
 
