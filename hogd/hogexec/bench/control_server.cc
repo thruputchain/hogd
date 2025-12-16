@@ -28,6 +28,7 @@
 #include "hogd/hogexec/bench/control_client.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "x23/fastclock.h"
 
 namespace hogd {
 
@@ -98,10 +99,14 @@ public:
 
     // Create temporary files
     std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
+    std::string cur_ts =
+        std::to_string(x23::fastclock::now().time_since_epoch().count());
     std::filesystem::path stdout_path =
-        temp_dir / ("hogd_stdout_" + std::to_string(getpid()) + "_XXXXXX");
+        temp_dir /
+        ("hogd_stdout_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
     std::filesystem::path stderr_path =
-        temp_dir / ("hogd_stderr_" + std::to_string(getpid()) + "_XXXXXX");
+        temp_dir /
+        ("hogd_stderr_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
 
     // Convert to C-style strings for mkstemp
     std::string stdout_template = stdout_path.string();
