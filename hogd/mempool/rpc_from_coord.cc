@@ -55,7 +55,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
   co_await scheduler_->add_txs(batch);
   ElapsedTimer timer2;
-  co_await coord_client_->coordscheduler_notify_vetted(batch);
+  co_await coord_clients_[c % kNumCoordClients].coordscheduler_notify_vetted(
+      batch);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
        c, timer.elapsed(), --outstanding, timer2.elapsed());
@@ -455,9 +456,11 @@ MempoolCoordinatorRpc::process_tx_outcomes(PendingBlock &cache)
 
 x23::Async<void>
 MempoolCoordinatorRpc::send_nomination_chunk(
-    const SchedulerNominationChunk &chunk)
+    size_t coord_idx, const SchedulerNominationChunk &chunk)
 {
-  co_return co_await coord_client_->coordscheduler_finish_nomination(chunk);
+  CHECK_LT(coord_idx, kNumCoordClients);
+  co_return co_await coord_clients_[coord_idx].coordscheduler_finish_nomination(
+      chunk);
 }
 
 x23::Detached
@@ -477,7 +480,8 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
   for (size_t i = 0; i < cache.sched_nominations.size(); i++) {
     cache.sched_nominations[i].chunk_idx = i;
     finish_nomination_handles.push_back(
-        send_nomination_chunk(cache.sched_nominations[i]));
+        send_nomination_chunk(/*coord_idx=*/i % kNumCoordClients,
+                              cache.sched_nominations[i]));
   }
 
   {
@@ -501,7 +505,7 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
     CHECK(nomination.transaction_nominations.empty());
   }
   x23::Async<void> last_chunk_handle =
-      coord_client_->coordscheduler_finish_nomination(cache.last_chunk);
+      coord_clients_[0].coordscheduler_finish_nomination(cache.last_chunk);
 
   // [co_await] all of the handles.
   for (x23::Async<void> &handle : finish_block_handles) {
