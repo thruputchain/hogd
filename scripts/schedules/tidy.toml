@@ -24,19 +24,19 @@ echo 'running clang-tidy'
 ./scripts/tidy.sh -d build/llvm > tidy.log 2>&1
 
 if [ $? -ne 0 ]; then
-    printf "clang-tidy failed!\n"
-    printf "\n===== tidy log =====\n"
+    printf 'clang-tidy failed!\n'
+    printf '\n===== tidy log =====\n'
     cat tidy.log
-    printf "===== end tidy log =====\n\n"
-    printf "\n===== filtered tidy log =====\n"
+    printf '===== end tidy log =====\n\n'
+    printf '\n===== filtered tidy log =====\n'
     cat tidy.log |
-      grep -v "^[0-9]\+ warnings generated\.$" |
-      grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" |
+      grep -v '^[0-9]\+ warnings generated\.$' |
+      grep -v '^\[[[:space:]]*[0-9]\+/[0-9]\+\]' |
       grep -v "^[[:space:]]*Checking" |
-      grep -v "^[[:space:]]*Compiling" |
-      grep -v "^[[:space:]]*Finished" |
-      grep -v "^$"
-    printf "\n===== end filtered tidy log =====\n\n"
+      grep -v '^[[:space:]]*Compiling' |
+      grep -v '^[[:space:]]*Finished' |
+      grep -v '^$'
+    printf '\n===== end filtered tidy log =====\n\n'
     exit 1
 fi
 
