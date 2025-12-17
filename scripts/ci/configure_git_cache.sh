@@ -7,10 +7,30 @@ GIT_CACHE_PATH=/tmp/hogcache/
 
 mkdir -p $GIT_CACHE_PATH
 
-if [[ ! -d $GIT_CACHE_PATH/facebook/rocksdb ]]; then
-    git clone --mirror https://github.com/facebook/rocksdb.git $GIT_CACHE_PATH/facebook/rocksdb.git
-fi
+git config --global protocol.file.allow always
 
-git config --global \
-  url."file://$GIT_CACHE_PATH/facebook/rocksdb.git".insteadOf \
-  https://github.com/facebook/rocksdb.git
+# cache_repo <repo_path>
+# Example: cache_repo facebook/rocksdb.git
+cache_repo() {
+    local repo_path="$1"
+    
+    local cache_dir="$GIT_CACHE_PATH/$repo_path"
+    
+    if [[ ! -d "$cache_dir" ]]; then
+        mkdir -p "$(dirname "$cache_dir")"
+        git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+    fi
+    
+    git config --global \
+      url."file://$cache_dir".insteadOf \
+      https://github.com/$repo_path.git
+}
+
+# Cache the repos we need
+cache_repo facebook/rocksdb.git
+cache_repo gramseyer/model-checker.git
+cache_repo google/googletest.git
+cache_repo google/benchmark.git
+cache_repo google/crc32c.git
+cache_repo BLAKE3-team/BLAKE3.git
+cache_repo corrosion-rs/corrosion.git
