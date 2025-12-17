@@ -30,9 +30,10 @@ source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.lo
 make -j "$(nproc)" -C build/llvm tidy_targets > build.log 2>&1 || (cat build.log && exit 1)
 
 echo 'running clang-tidy'
-./scripts/tidy.sh -d build/llvm > tidy.log 2>&1
+TIDY_RESULT=0
+./scripts/tidy.sh -d build/llvm > tidy.log 2>&1 || TIDY_RESULT=$?
 
-if [ $? -ne 0 ]; then
+if [ $TIDY_RESULT -ne 0 ]; then
     printf 'clang-tidy failed!\n'
     printf '\n===== tidy log =====\n'
     cat tidy.log
