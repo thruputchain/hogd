@@ -71,7 +71,7 @@ protected:
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
     assert(runtime_context != nullptr);
-    
+
     return SystemCallHandler(
         signed_tx, snapshot,
         PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
