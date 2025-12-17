@@ -12,7 +12,16 @@ git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout -q {{ .git_commit }}
 # Only bring in required submodules
-git submodule update --init --recursive --quiet external/rocksdb protocol external/model-checker external/googletest
+git submodule update --init --recursive --quiet \
+   protocol \
+   external/rocksdb \
+   external/model-checker \
+   external/googletest \
+   external/benchmark \
+   external/crc32c \
+   external/blake3 \
+   external/corrosion \
+   built_contracts/integration_test_contracts
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
