@@ -29,13 +29,7 @@ if [ $? -ne 0 ]; then
     cat tidy.log
     printf '===== end tidy log =====\n\n'
     printf '\n===== filtered tidy log =====\n'
-    cat tidy.log |
-      grep -v '^[0-9]\+ warnings generated\.$' |
-      grep -v '^\[[[:space:]]*[0-9]\+/[0-9]\+\]' |
-      grep -v "^[[:space:]]*Checking" |
-      grep -v '^[[:space:]]*Compiling' |
-      grep -v '^[[:space:]]*Finished' |
-      grep -v '^$'
+    ./scripts/filter_tidy_log.sh tidy.log
     printf '\n===== end filtered tidy log =====\n\n'
     exit 1
 fi
