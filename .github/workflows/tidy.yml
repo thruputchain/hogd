@@ -1,4 +1,4 @@
-name: C++ CI (hog_sched)
+name: Tidy (hog_sched)
 
 on:
     workflow_dispatch:
