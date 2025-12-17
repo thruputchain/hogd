@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
 
 #include "account.hh"
@@ -66,13 +65,12 @@ public:
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
-  SynchronizedMap<SHA256Hash, std::unique_ptr<const Contract>> contract_cache_;
+  SynchronizedMap<SHA256Hash, std::optional<const Contract>> contract_cache_;
   // Neither does the deployment cache
   SynchronizedMap<ContractAddress, std::optional<DeployedContractHash>>
       deployment_cache_;
 
-  SynchronizedMap<AddressAndKey, std::unique_ptr<SnapshotStorageItem>>
-      snapshot_item_cache_;
+  SynchronizedMap<AddressAndKey, SnapshotStorageItem> snapshot_item_cache_;
 
   BlockID block_id_;
   DatabaseProxy &db_proxy_;

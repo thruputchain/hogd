@@ -303,8 +303,7 @@ public:
     return *r;
   }
 
-  std::unique_ptr<const Contract>
-  lookup_contract_from_db(SHA256Hash const &hash)
+  std::optional<const Contract> lookup_contract_from_db(SHA256Hash const &hash)
   {
     auto r = db_proxy_->get_contract(block_number_, hash);
     if (!r.has_value()) {

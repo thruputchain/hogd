@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <format>
-#include <memory>
 #include <optional>
 #include <utility>
 
@@ -54,7 +53,10 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   {
     auto [obj, ul] = contract_cache_.find(hash);
     if (obj) {
-      return (*obj).get();
+      if (obj->has_value()) {
+        return &obj->value();
+      }
+      return nullptr;
     }
   }
 
@@ -77,30 +79,20 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   // then the contract cache needs to only cache positive lookups
   auto [obj, lock] = contract_cache_.insert(hash, std::move(db_res.value()));
   if (obj != nullptr) {
-    return obj->get();
+    if (obj->has_value()) {
+      return &obj->value();
+    }
+    return nullptr;
   }
   assert(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
   assert(obj2 != nullptr);
-  return obj2->get();
-}
-
-namespace {
-std::unique_ptr<SnapshotStorageItem>
-make_snapshot_item(std::optional<StorageItem> db_item,
-                   AddressAndKey const &addrkey, BlockID block_id,
-                   DatabaseProxy &db_proxy)
-{
-  if (!db_item) {
-    return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), addrkey, block_id,
-        db_proxy);
+  if (obj2->has_value()) {
+    return &obj2->value();
   }
-  return std::make_unique<SnapshotStorageItem>(*db_item, addrkey, block_id,
-                                               db_proxy);
+  return nullptr;
 }
-} // namespace
 
 SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
@@ -108,8 +100,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   {
     auto [obj, ul] = snapshot_item_cache_.find(addrkey);
     if (obj) {
-      assert(obj->get());
-      return obj->get();
+      return obj;
     }
   }
 
@@ -119,19 +110,21 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   }
 
   // cache both positive and negative lookups
-  auto ptr = make_snapshot_item(db_res.value(), addrkey, block_id_, db_proxy_);
+  StorageItem db_item = db_res.value().has_value()
+                            ? db_res.value().value()
+                            : StorageItem(StorageItemType::kItemTypeDeleted);
   {
-    auto [out, ul] = snapshot_item_cache_.insert(addrkey, std::move(ptr));
+    auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
+                                                 block_id_, db_proxy_);
     if (out) {
       // insertion happened; return the result
-      return out->get();
+      return out;
     }
   }
   // otherwise, lookup the item in the cache again
   auto [obj, ul] = snapshot_item_cache_.find(addrkey);
   assert(obj);
-  assert(obj->get());
-  return obj->get();
+  return obj;
 }
 
 } // namespace hogd

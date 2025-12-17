@@ -54,3 +54,15 @@ add_subdirectory(utils)
 if (ENABLE_TEST_FFI)
   add_subdirectory(test_ffi)
 endif()
+
+add_custom_target(tidy_targets)
+add_dependencies(
+  tidy_targets 
+  all_wasm_headers 
+  protocol 
+  hogd_interface
+  generate_syscall_inner_h
+  generate_syscall_meta_h
+  generate_wasmi_ffi_h
+  generate_contract_types_ffi_h
+)
