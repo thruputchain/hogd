@@ -20,6 +20,7 @@ add_xdr(
   ../../protocol/exec_sched.x
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
+  ../../protocol/hogexec_constants.x
   ../../protocol/loadgen.x
   ../../protocol/nomination.x
   ../../protocol/port.x

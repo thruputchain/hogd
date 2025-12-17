@@ -1,4 +1,3 @@
-#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <concepts>
@@ -7,6 +6,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
@@ -32,6 +32,30 @@ syscall_SHA256_inner(SystemCallHandler &handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone,
           SHA256HashCost(input_buffer.size())};
 };
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
+                           std::span<const std::byte> input_buffer,
+                           bool input_reset)
+{
+  auto r = handler.sha256_update(input_index, input_buffer, input_reset);
+  if (!r.has_value()) {
+    return {r.error().code(), 0};
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
+                             SHA256Hash &output_output)
+{
+  auto r = handler.sha256_finalize(input_index);
+  if (!r.has_value()) {
+    return {r.error().code(), 0};
+  }
+  output_output = r.value();
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
 
 // Verifies a cryptographic signature against a message using the provided
 // public key

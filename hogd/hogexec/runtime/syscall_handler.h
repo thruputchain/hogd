@@ -169,6 +169,12 @@ public:
     return invocation_frame_stack_.get_active_frame().is_read_only();
   }
 
+  // === Crypto syscalls ===
+  SyscallStatus<void> sha256_update(uint32_t input_index,
+                                    std::span<const std::byte> input_buffer,
+                                    bool input_reset);
+  SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
+
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   SystemStatus<SyscallStatus<std::span<const std::byte>>>

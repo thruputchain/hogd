@@ -17,6 +17,7 @@ add_library(runtime_objects OBJECT
   database_proxy.cc
   event_server_proxy.cc
   execution_mode.cc
+  hash_buffers.cc
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
@@ -81,6 +82,7 @@ add_library(runtime_test_objects OBJECT
   ffi_helpers_tests.cc
   fibonacci_test.cc
   gas_api_test.cc
+  hash_buffers_test.cc
   interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc

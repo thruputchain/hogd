@@ -1067,4 +1067,27 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   return item_view->set(new_item);
 }
 
+SyscallStatus<void>
+SystemCallHandler::sha256_update(uint32_t input_index,
+                                 std::span<const std::byte> input_buffer,
+                                 bool input_reset)
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame().hash_buffers_.update(
+      input_index, input_buffer, input_reset);
+}
+
+SyscallStatus<SHA256Hash>
+SystemCallHandler::sha256_finalize(uint32_t input_index)
+{
+  assert(!invocation_frame_stack_.empty());
+  size_t output_size = 0;
+  auto r = invocation_frame_stack_.get_active_frame().hash_buffers_.finalize(
+      input_index, &output_size);
+  if (auto *stats = get_transaction_stats()) {
+    stats->sha256_total_bytes_processed += output_size;
+  }
+  return r;
+}
+
 } // namespace hogd
