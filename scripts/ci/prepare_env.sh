@@ -30,16 +30,4 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
 echo 'set gcc-14 in check'
 echo "GCC_CC=gcc-14 GCC_CXX=g++-14" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
 
-echo 'ensure git submodule cache is populated'
-GIT_CACHE_PATH=/tmp/hogcache/
-
-mkdir -p $GIT_CACHE_PATH
-
-if [ ! -d $GIT_CACHE_PATH/facebook/rocksdb ]; then
-    git clone --mirror https://github.com/facebook/rocksdb.git $GIT_CACHE_PATH/facebook/rocksdbq 
-fi
-
-git config --global \
-  url."file://$GIT_CACHE_PATH/github.com/facebook/rocksdb.git".insteadOf \
-  https://github.com/facebook/rocksdb.git
 

@@ -12,9 +12,11 @@ git remote add origin git@github.com:{{ .github_repo }}.git
 git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout -q {{ .git_commit }}
 
-source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/configure_git_cache.sh
 
 git submodule update --init --recursive --quiet
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 ./scripts/check.sh -p -b
 
