@@ -65,4 +65,5 @@ add_dependencies(
   generate_syscall_meta_h
   generate_wasmi_ffi_h
   generate_contract_types_ffi_h
+  generate_crypto_ffi_h
 )
