@@ -316,7 +316,11 @@ add_contract_header(manual_revert_caller)
 add_contract_header(simple_wallet)
 add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+
 add_dependencies(itc_erc20_header itc_erc20_hh)
+add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
+add_dependencies(txs_roundtrip_header txs_roundtrip_hh)
+add_dependencies(manual_revert_test_header manual_revert_test_hh)
 
 # Create ONE top-level ALL target that triggers everything
 add_custom_target(build_all_contracts ALL)

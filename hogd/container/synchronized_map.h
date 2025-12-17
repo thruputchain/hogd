@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <cassert>
+#include <concepts>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
@@ -114,10 +115,14 @@ public:
     return &it->second;
   }
 
-  std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k, T &&obj)
+  template<typename... Args> requires std::constructible_from<T, Args...>
+  std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k,
+                                                      Args &&...args)
   {
     auto [map, ul] = get_bucket(k);
-    auto [it, inserted] = map.insert({k, std::move(obj)});
+    auto [it, inserted] =
+        map.emplace(std::piecewise_construct, std::forward_as_tuple(k),
+                    std::forward_as_tuple(std::forward<Args>(args)...));
     if (!inserted)
       return {nullptr, std::move(ul)};
     return {&it->second, std::move(ul)};

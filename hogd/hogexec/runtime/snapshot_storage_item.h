@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -30,8 +29,8 @@ class DatabaseProxy;
 class SnapshotStorageItem {
 public:
   // Construct from a StorageItem (by value)
-  explicit SnapshotStorageItem(StorageItem item, AddressAndKey addrkey,
-                               BlockID block_id, DatabaseProxy &db_proxy)
+  SnapshotStorageItem(StorageItem item, AddressAndKey addrkey, BlockID block_id,
+                      DatabaseProxy &db_proxy)
     : addrkey_(std::move(addrkey)),
       entry_(make_variant(std::move(item), addrkey_.key)), block_id_(block_id),
       db_proxy_(db_proxy)
