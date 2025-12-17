@@ -68,4 +68,5 @@ add_dependencies(
   generate_contract_types_ffi_h
   generate_crypto_ffi_h
   roundtrip_hh
+  xdrtest
 )
