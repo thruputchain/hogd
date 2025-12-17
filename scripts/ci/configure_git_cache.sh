@@ -32,5 +32,6 @@ cache_repo gramseyer/model-checker
 cache_repo google/googletest
 cache_repo google/benchmark
 cache_repo google/crc32c
+cache_repo google/glog
 cache_repo BLAKE3-team/BLAKE3
 cache_repo corrosion-rs/corrosion
