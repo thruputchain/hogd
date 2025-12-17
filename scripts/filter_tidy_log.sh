@@ -18,11 +18,10 @@ if [ ! -f "$LOG_FILE" ]; then
   exit 1
 fi
 
-cat "$LOG_FILE" \
-  | grep -v "^[0-9]\+ warnings generated\.$" \
-  | grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" \
-  | grep -v "^[[:space:]]*Checking" \
-  | grep -v "^[[:space:]]*Compiling" \
-  | grep -v "^[[:space:]]*Finished" \
-  | grep -v "^$"
-
+cat "$LOG_FILE" |
+  grep -v "^[0-9]\+ warnings generated\.$" |
+  grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" |
+  grep -v "^[[:space:]]*Checking" |
+  grep -v "^[[:space:]]*Compiling" |
+  grep -v "^[[:space:]]*Finished" |
+  grep -v "^$"

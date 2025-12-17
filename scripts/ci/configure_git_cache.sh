@@ -12,18 +12,18 @@ git config --global protocol.file.allow always
 # cache_repo <repo_path>
 # Example: cache_repo facebook/rocksdb
 cache_repo() {
-    local repo_path="$1"
-    
-    local cache_dir="$GIT_CACHE_PATH/$repo_path"
-    
-    if [[ ! -d "$cache_dir" ]]; then
-        mkdir -p "$(dirname "$cache_dir")"
-        git clone --mirror https://github.com/$repo_path.git "$cache_dir"
-    fi
-    
-    git config --global \
-      url."file://$cache_dir".insteadOf \
-      https://github.com/$repo_path.git
+  local repo_path="$1"
+
+  local cache_dir="$GIT_CACHE_PATH/$repo_path"
+
+  if [[ ! -d "$cache_dir" ]]; then
+    mkdir -p "$(dirname "$cache_dir")"
+    git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+  fi
+
+  git config --global \
+    url."file://$cache_dir".insteadOf \
+    https://github.com/$repo_path.git
 }
 
 # Cache the repos we need

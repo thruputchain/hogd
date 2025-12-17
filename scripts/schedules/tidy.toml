@@ -15,7 +15,7 @@ git checkout -q {{ .git_commit }}
 source ./scripts/ci/configure_git_cache.sh
 
 # Only bring in required submodules
-git submodule update --init --recursive --quiet \
+git submodule update --init --recursive \
    protocol \
    external/rocksdb \
    external/model-checker \
