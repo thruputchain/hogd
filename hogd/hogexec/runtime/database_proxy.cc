@@ -3,7 +3,6 @@
 #include <cassert>
 #include <concepts>
 #include <format>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -158,12 +157,12 @@ DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
   });
 }
 
-SystemStatus<std::unique_ptr<const Contract>>
+SystemStatus<std::optional<const Contract>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   auto res = client_.get_contract(block_id, contract_hash);
-  return to_system_error_code<nullptr>(res, [](const Contract &x) {
-    return std::make_unique<const Contract>(x);
+  return to_system_error_code<std::nullopt>(res, [](const Contract &x) {
+    return std::make_optional<const Contract>(x);
   });
 }
 

@@ -6,21 +6,24 @@ source ${SCRIPT_DIR}/env.sh
 BUILD_DIR=bcheck
 PARALLEL=
 BUILD_PARALLEL=no
+SKIP_TIDY=no
 
 print_usage() {
   printf "usage: scripts/check.sh [OPTION]...\n"
   printf -- "-e enable extra checks\n"
   printf -- "-p run tests in parallel\n"
   printf -- "-b do builds in parallel\n"
+  printf -- "-s skip tidy check\n"
   printf -- "-d <dir> specify build directory (default: $BUILD_DIR)\n"
 }
 
-while getopts 'epbd:' flag; do
+while getopts 'epbd:s' flag; do
   case "${flag}" in
   e) EXTRA=yes ;;
   p) PARALLEL=--parallel ;;
   b) BUILD_PARALLEL=yes ;;
   d) BUILD_DIR="$OPTARG" ;;
+  s) SKIP_TIDY=yes ;;
   *)
     print_usage
     exit 1
@@ -107,10 +110,12 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   fi
   printf "${COLOR}Step 4 (llvm) build finished\n${NC}"
 
-  printf "${COLOR}STEP 6: Check linter\n${NC}"
-  TIDY_LOG=${BUILD_DIR}/tidy.log
-  ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm >"$TIDY_LOG" 2>&1 &
-  TIDY_PID=$!
+  if [ "$SKIP_TIDY" = "no" ]; then
+    printf "${COLOR}STEP 6: Check linter\n${NC}"
+    TIDY_LOG=${BUILD_DIR}/tidy.log
+    ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm >"$TIDY_LOG" 2>&1 &
+    TIDY_PID=$!
+  fi
 else
   printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
   if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" -x "-DENABLE_CI_FAIL_LOG=${LLVM_ERRORS_LOG}"; then
@@ -128,31 +133,33 @@ if ! ctest --test-dir ${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeou
   exit 1
 fi
 
-if [ $BUILD_PARALLEL = "yes" ]; then
-  wait $TIDY_PID
-  TIDY_STATUS=$?
-  if [ $TIDY_STATUS -ne 0 ]; then
-    printf "tidy failed!\n"
-    printf "\n===== tidy log =====\n"
-    cat "$TIDY_LOG"
-    printf "===== end tidy log =====\n\n"
-    printf "\n===== filtered tidy log =====\n"
-    cat "$TIDY_LOG" |
-      grep -v "^[0-9]\+ warnings generated\.$" |
-      grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" |
-      grep -v "^[[:space:]]*Checking" |
-      grep -v "^[[:space:]]*Compiling" |
-      grep -v "^[[:space:]]*Finished" |
-      grep -v "^$"
-    printf "\n===== end filtered tidy log =====\n\n"
-    exit 1
-  fi
-  printf "${COLOR}Step 6 (tidy) finished\n${NC}"
-else
-  printf "${COLOR}\nSTEP 6: Check linter\n${NC}"
-  if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
-    printf "linter failed!\n"
-    exit 1
+if [ "$SKIP_TIDY" = "no" ]; then
+  if [ $BUILD_PARALLEL = "yes" ]; then
+    wait $TIDY_PID
+    TIDY_STATUS=$?
+    if [ $TIDY_STATUS -ne 0 ]; then
+      printf "tidy failed!\n"
+      printf "\n===== tidy log =====\n"
+      cat "$TIDY_LOG"
+      printf "===== end tidy log =====\n\n"
+      printf "\n===== filtered tidy log =====\n"
+      cat "$TIDY_LOG" |
+        grep -v "^[0-9]\+ warnings generated\.$" |
+        grep -v "^\[[[:space:]]*[0-9]\+/[0-9]\+\]" |
+        grep -v "^[[:space:]]*Checking" |
+        grep -v "^[[:space:]]*Compiling" |
+        grep -v "^[[:space:]]*Finished" |
+        grep -v "^$"
+      printf "\n===== end filtered tidy log =====\n\n"
+      exit 1
+    fi
+    printf "${COLOR}Step 6 (tidy) finished\n${NC}"
+  else
+    printf "${COLOR}\nSTEP 6: Check linter\n${NC}"
+    if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
+      printf "linter failed!\n"
+      exit 1
+    fi
   fi
 fi
 

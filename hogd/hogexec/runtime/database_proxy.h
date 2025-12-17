@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <memory>
 #include <optional>
 #include <random>
 #include <variant>
@@ -56,7 +55,7 @@ public:
   SystemStatus<std::optional<StorageItem>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
 
-  SystemStatus<std::unique_ptr<const Contract>>
+  SystemStatus<std::optional<const Contract>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
   SystemStatus<std::optional<DeployedContractHash>>
