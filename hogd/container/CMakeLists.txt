@@ -5,6 +5,7 @@ add_executable(
   container_test
   synchronized_map_test.cc
   concurrent_map_test.cc
+  concurrent_set_test.cc
 )
 target_link_libraries(
   container_test
