@@ -2,9 +2,9 @@
 
 #include <map>
 #include <optional>
-#include <set>
 
 #include "hogd/base/types.h"
+#include "hogd/container/concurrent_set.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
@@ -22,6 +22,8 @@ class ReplayCacheLock {
 public:
   using change_type = PointerItem<ReplayCacheIt>;
 
+  HogDBStatus<void> initialize(LockContext const &ctx);
+
   HogDBStatus<int128_t>
   try_atomic_change_lock(const PointerItem<ReplayCacheIt> *before,
                          const PointerItem<ReplayCacheIt> *after,
@@ -33,16 +35,21 @@ public:
                                            MerkleTriePrefix &trie) const;
 
 private:
-  HogDBStatus<ReplayCacheData> build_result(const LockContext &ctx,
-                                            BlockHeight block_height) const;
+  HogDBStatus<ReplayCacheData>
+  build_result(const LockContext &ctx, BlockHeight block_height,
+               const std::span<Uniquifier> &uniquifiers) const;
   HogDBStatus<ReplayCacheData *> get_base(const LockContext &ctx,
                                           BlockHeight block_height) const;
+  HogDBStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
   mutable std::map<BlockHeight, ReplayCacheData> bases_;
-  mutable std::optional<ReplayCacheMetadata> meta_;
-  std::set<Uniquifier> additions_;
+  mutable x23::SharedLock bases_lock_;
 
-  x23::TestLock lock_;
+  mutable std::atomic<ReplayCacheMetadata *> meta_;
+  mutable std::optional<ReplayCacheMetadata> meta_cell_;
+  mutable std::once_flag meta_once_flag_;
+
+  mutable ConcurrentSet<uint128_t> conflicts_;
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;

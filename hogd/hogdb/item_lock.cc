@@ -111,7 +111,7 @@ ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
       // Then apply the change (which must succeed).
       // This is the same workflow as when attempting to lock the first change
       // on the item.
-      prepare_lock_contents(&change, lock);
+      prepare_lock_contents(&change, ctx, lock);
 
       std::visit(
           [&](auto &lock) -> void {
@@ -249,7 +249,7 @@ ItemLock::handle_try_atomic_from_pending(
     }
 
     // downgrade from exclusive to non-exclusive
-    prepare_lock_contents(after, ul);
+    prepare_lock_contents(after, ctx, ul);
 
     // before might be a different type of change, which is incompatible with
     // the type-specific lock API.  So when downgrading from exclusive to
@@ -358,7 +358,7 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
   if (pending_refcount_ == 0) {
     assert(std::holds_alternative<std::monostate>(lock_contents_));
     assert(after != nullptr);
-    prepare_lock_contents(after, ul);
+    prepare_lock_contents(after, ctx, ul);
   }
 
   auto res = handle_try_atomic_from_pending(nullptr, after, ctx, ul);
@@ -405,6 +405,7 @@ ItemLock::set_exclusive_lock(std::unique_lock<x23::TestLock> const &ul)
 
 void
 ItemLock::prepare_lock_contents(const ItemChange *after,
+                                const LockContext & /*ctx*/,
                                 std::unique_lock<x23::TestLock> const &ul)
 {
   assert((pending_refcount_ == 0 &&
