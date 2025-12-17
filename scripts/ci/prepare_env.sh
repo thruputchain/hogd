@@ -3,6 +3,9 @@ echo "prepare the environment for building hogd"
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
+echo 'setting up ccache'
+ln -s "$USER_HOME/.cache" "$HOME/.cache"
+
 echo 'installing cbindgen'
 cargo install --force cbindgen
 

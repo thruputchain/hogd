@@ -177,14 +177,14 @@ run_fibonacci_client(std::vector<std::string> const &server_addrs,
   bs.initialize();
 
   // strong scaling
-  for (auto nthread : {1, 16, 64, 128, 256, 512, 2048}) {
+  for (auto nthread : {64, 256, 512, 1024, 2048}) {
     run_bench_rep(bs, 10000, 20, nthread, true);
     run_bench_rep(bs, 10000, 20, nthread, false);
     run_bench_rep(bs, 10000, 15, nthread, true);
     run_bench_rep(bs, 10000, 15, nthread, false);
   }
   // weak scaling
-  for (auto nthread : {1, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
+  for (auto nthread : {64, 256, 512, 1024, 2048}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
     run_bench_rep(bs, nthread * 1000, 15, nthread, true);
