@@ -17,7 +17,7 @@ print_usage() {
   printf -- "-d <dir> specify build directory (default: $BUILD_DIR)\n"
 }
 
-while getopts 'epbd:' flag; do
+while getopts 'epbd:s' flag; do
   case "${flag}" in
   e) EXTRA=yes ;;
   p) PARALLEL=--parallel ;;
