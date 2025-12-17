@@ -243,7 +243,7 @@ struct GenRs {
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
   static constexpr string_view kDefaultDerives =
-      R"(#[derive(Clone, Debug, PartialEq, Eq, Hash)])";
+      R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
   optional<Definition> convert_to_newtype(const Definition &d);
 };
