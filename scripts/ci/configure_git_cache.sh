@@ -10,7 +10,7 @@ mkdir -p $GIT_CACHE_PATH
 git config --global protocol.file.allow always
 
 # cache_repo <repo_path>
-# Example: cache_repo facebook/rocksdb.git
+# Example: cache_repo facebook/rocksdb
 cache_repo() {
     local repo_path="$1"
     
@@ -27,10 +27,10 @@ cache_repo() {
 }
 
 # Cache the repos we need
-cache_repo facebook/rocksdb.git
-cache_repo gramseyer/model-checker.git
-cache_repo google/googletest.git
-cache_repo google/benchmark.git
-cache_repo google/crc32c.git
-cache_repo BLAKE3-team/BLAKE3.git
-cache_repo corrosion-rs/corrosion.git
+cache_repo facebook/rocksdb
+cache_repo gramseyer/model-checker
+cache_repo google/googletest
+cache_repo google/benchmark
+cache_repo google/crc32c
+cache_repo BLAKE3-team/BLAKE3
+cache_repo corrosion-rs/corrosion
