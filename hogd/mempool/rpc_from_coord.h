@@ -322,6 +322,8 @@ private:
   std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
+
+  std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
