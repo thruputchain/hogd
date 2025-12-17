@@ -211,7 +211,7 @@ def gen_inner_outer(
     syscall_handler_decl = ""
     inner_return_type = "HostFnStatus<SyscallErrorCode>"
 
-    if syscall["inputs"] is not None:
+    if "inputs" in syscall and syscall["inputs"] is not None:
         for arg in syscall["inputs"]:
             local_user_arg_count, inner_arg_decl = (
                 gen_validate_arg(arg, is_input=True)
@@ -219,7 +219,7 @@ def gen_inner_outer(
             user_arg_count += local_user_arg_count
             inner_arg_decl_strs.append(inner_arg_decl)
 
-    if syscall["outputs"] is not None:
+    if "outputs" in syscall and syscall["outputs"] is not None:
         for arg in syscall["outputs"]:
             local_user_arg_count, inner_arg_decl = (
                 gen_validate_arg(arg, is_input=False)
@@ -276,10 +276,10 @@ def gen_syscall_meta(syscall: dict) -> str:
 
     syscall_input_names = []
     syscall_output_names = []
-    if syscall["inputs"] is not None:
+    if "inputs" in syscall and syscall["inputs"] is not None:
         for arg in syscall["inputs"]:
             syscall_input_names.append("\"" + arg["name"] + "\"")
-    if syscall["outputs"] is not None:
+    if "outputs" in syscall and syscall["outputs"] is not None:
         for arg in syscall["outputs"]:
             syscall_output_names.append("\"" + arg["name"] + "\"")
 
