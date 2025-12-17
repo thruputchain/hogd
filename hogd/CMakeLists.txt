@@ -59,7 +59,8 @@ add_custom_target(tidy_targets)
 add_dependencies(
   tidy_targets 
   all_wasm_headers 
-  protocol 
+  protocol
+  x23
   hogd_interface
   generate_syscall_inner_h
   generate_syscall_meta_h
