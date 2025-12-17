@@ -14,7 +14,13 @@ namespace hogd::version {
 // NOLINTBEGIN(readability-identifier-naming)
 constexpr const char *kHogdVersion = hogd_version;
 constexpr const char *kHogdGitHash = hogd_commit;
-constexpr const char *kHogdProtocol = protocol_commit;
+inline const char *
+kHogdProtocol()
+{
+  static const std::string kProtocol =
+      "hogp/" + std::string(protocol_commit, 12);
+  return kProtocol.c_str();
+}
 constexpr const char *kHogdCmake = cmake_repro;
 // NOLINTEND(readability-identifier-naming)
 

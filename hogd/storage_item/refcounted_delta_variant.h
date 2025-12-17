@@ -257,7 +257,8 @@ private:
 class ReplayCacheArgs {
 public:
   ReplayCacheArgs(const ReplayCache *base_cache, BlockHeight current_height)
-    : current_cache_(base_cache ? base_cache->data() : ReplayCacheData{},
+    : current_cache_(base_cache ? base_cache->uniquifiers()
+                                : std::vector<Uniquifier>{},
                      current_height)
   {}
 

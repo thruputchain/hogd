@@ -11,6 +11,7 @@
 
 #include "db_sched.hh"
 #include "event_rpc.hh"
+#include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -275,8 +276,7 @@ CommonBenchState::run_genesis_configuration(
       if (!handler.root_invoke().is_root_success()) {
         throw std::runtime_error("Failed to invoke transaction");
       }
-      if (auto r = handler.try_commit_transaction();
-          !r.has_value() || !r.value()) {
+      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
         throw std::runtime_error("failed to perform commit operation");
       }
     }

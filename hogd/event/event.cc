@@ -65,7 +65,7 @@ event_init(const std::string &mempool_address,
   auto client = connect_to_event_sched_server(mempool_address);
   std::string address_for_exec = create_address(kEventExecutorServerPort);
   std::string address_for_mempool = create_address(kEventMempoolServerPort);
-  EventCard card{.protocol = version::kHogdProtocol,
+  EventCard card{.protocol = version::kHogdProtocol(),
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
                  .address_for_sched = address_for_mempool.c_str()};

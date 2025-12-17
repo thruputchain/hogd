@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "event.hh"
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -166,8 +167,7 @@ TEST_F(EventTest, EventSuccess)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -285,8 +285,7 @@ TEST_F(EventTest, BadEventInputs)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   advance_block();
@@ -552,8 +551,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction();
-  ASSERT_TRUE(r.has_value());
-  ASSERT_TRUE(*r);
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
   EphemeralTxIdentifier tx_id_2;
@@ -573,8 +571,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(res2.is_root_success());
 
   auto r2 = handler2.try_commit_transaction();
-  ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(*r2);
+  ASSERT_EQ(r2, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler2.emit_events()());
 
   advance_block();

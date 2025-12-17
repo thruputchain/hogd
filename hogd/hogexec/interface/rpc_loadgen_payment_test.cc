@@ -2,12 +2,11 @@
 
 #include <format>
 #include <memory>
-#include <stdexcept>
 #include <utility>
 
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
-#include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
@@ -16,7 +15,6 @@
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
-#include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -56,8 +54,8 @@ public:
     // Create loadgen client
     x23::HostPort loadgen_host_port{"localhost", loadgen_port_};
     loadgen_client_ = std::make_unique<loadgen_client_t>(
-        create_client<LoadgenInterfaceV1>(
-            loadgen_host_port, false, LoadgenRpc::kRpcMaxMessageSize)());
+        create_client<LoadgenInterfaceV1>(loadgen_host_port, false,
+                                          LoadgenRpc::kRpcMaxMessageSize)());
   }
 
   // void TearDown() override { rpc_server_.shut_down(); }
@@ -82,7 +80,7 @@ protected:
   ShardCard make_shard_card()
   {
     return ShardCard{
-        .protocol = hogd::version::kHogdProtocol,
+        .protocol = hogd::version::kHogdProtocol(),
         .upid = {},
         .block_height = 0,
         .address_for_exec =
@@ -215,4 +213,3 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
 }
 
 } // namespace hogd
-

@@ -251,7 +251,7 @@ private:
     auto client = create_client<SchedDb1>(kAddress, sched_db_server_.port())();
     std::string exec_address = address(kAddress, db_executor_server_->port());
     std::string sched_address = address(kAddress, db_scheduler_server_->port());
-    client.scheddb_intro_shard({.protocol = version::kHogdProtocol,
+    client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str()})();
@@ -262,7 +262,7 @@ private:
     auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
                                              sched_event_server_.port())();
     auto r = client.schedevent_intro_event(
-        {.protocol = version::kHogdProtocol,
+        {.protocol = version::kHogdProtocol(),
          .upid = {},
          .address_for_exec =
              address(kAddress, event_exec_server_.port()).c_str(),
@@ -286,7 +286,7 @@ private:
                                        mempool_coord_server_.port())();
     std::string coord_address =
         address(kAddress, coordinator_sched_server_.port());
-    CoordCard card{.protocol = version::kHogdProtocol,
+    CoordCard card{.protocol = version::kHogdProtocol(),
                    .address_for_sched = coord_address.c_str()};
     CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);

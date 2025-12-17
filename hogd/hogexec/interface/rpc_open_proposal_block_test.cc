@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
@@ -72,7 +73,7 @@ protected:
   ShardCard make_shard_card()
   {
     return ShardCard{
-        .protocol = hogd::version::kHogdProtocol,
+        .protocol = hogd::version::kHogdProtocol(),
         .upid = {},
         .block_height = 0,
         .address_for_exec =

@@ -4,6 +4,7 @@
 #include <optional>
 #include <set>
 
+#include "exec_result.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -71,8 +72,7 @@ TEST_P(ERC20ExperimentTest, Basic)
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res.has_value());
-      ASSERT_TRUE(*res);
+      ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events()());
     }
 
@@ -91,8 +91,7 @@ TEST_P(ERC20ExperimentTest, Basic)
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
     auto res = handler.try_commit_transaction();
-    ASSERT_TRUE(res.has_value());
-    ASSERT_TRUE(*res);
+    ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
     }
@@ -119,8 +118,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res.has_value());
-      ASSERT_TRUE(*res);
+      ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events()());
     }
 
@@ -138,8 +136,7 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
     auto res = handler.try_commit_transaction();
-    ASSERT_TRUE(res.has_value());
-    ASSERT_TRUE(*res);
+    ASSERT_TRUE(res == ExecResult::ExecResultOK);
     if (!gas_used) {
       gas_used = invoke_res.gas_consumed_;
     }

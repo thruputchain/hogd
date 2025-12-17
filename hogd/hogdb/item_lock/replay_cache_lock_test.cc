@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <utility>
+
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
@@ -11,6 +14,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -39,15 +43,46 @@ make_dummy_context(BlockHeight block_height = 0)
 // Helper class that is a friend of ReplayCacheLock
 class ReplayCacheLockTestHelper {
 public:
-  static void set_base(ReplayCacheLock &lock, const ReplayCacheData &data)
+  // Set base data for a specific height
+  static void set_base(ReplayCacheLock &lock, BlockHeight height,
+                       const ReplayCacheData &data)
   {
-    lock.base_replay_cache_ = data;
+    lock.bases_[height] = data;
+    // Initialize metadata
+    std::int64_t total = 0;
+    x23::Vec<ReplayCacheHeightCount> heights;
+    for (const auto &pair : lock.bases_) {
+      auto s = static_cast<std::int64_t>(pair.second.nonces.size());
+      total += s;
+      if (s > 0) {
+        heights.push_back({.height = pair.first,
+                           .nonce_count = static_cast<unsigned int>(s)});
+      }
+    }
+    lock.meta_ =
+        ReplayCacheMetadata{.size = total, .heights = std::move(heights)};
   }
 
-  static ReplayCacheData build_result(const ReplayCacheLock &lock,
-                                      BlockHeight height)
+  // Set empty base data for a range of heights to avoid DAO calls
+  static void set_empty_bases(ReplayCacheLock &lock, BlockHeight start,
+                              BlockHeight end)
   {
-    return lock.build_result(height);
+    for (BlockHeight h = start; h <= end; ++h) {
+      if (!lock.bases_.contains(h)) {
+        lock.bases_[h] = ReplayCacheData{.nonces = {}};
+      }
+    }
+    // Initialize metadata if not already set
+    if (!lock.meta_.has_value()) {
+      lock.meta_.emplace(ReplayCacheMetadata{.size = 0, .heights = {}});
+    }
+  }
+
+  static HogDBStatus<ReplayCacheData> build_result(const ReplayCacheLock &lock,
+                                                   const LockContext &ctx,
+                                                   BlockHeight height)
+  {
+    return lock.build_result(ctx, height);
   }
 };
 
@@ -59,9 +94,7 @@ protected:
   void SetUp() override
   {
     height_ = 9;
-    base_data_ = ReplayCacheData{.uniquifiers = {
-                                     u(height_ + 1, 100),
-                                 }};
+    base_data_ = ReplayCacheData{.nonces = {100}};
   }
 
   BlockHeight height_;
@@ -71,7 +104,8 @@ protected:
 TEST_F(ReplayCacheLockTest, DisallowDuplicateConsume)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   // Create first item: conflicts with a nonce in base_data_
@@ -96,7 +130,8 @@ TEST_F(ReplayCacheLockTest, DisallowDuplicateConsume)
 TEST_F(ReplayCacheLockTest, DisallowConsumeInThePast)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   // expiry == current height is okay, so this should be allowed.
@@ -114,7 +149,8 @@ TEST_F(ReplayCacheLockTest, DisallowConsumeInThePast)
 TEST_F(ReplayCacheLockTest, MergeConflict)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 3);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   // Tx1 adds 101
@@ -142,7 +178,8 @@ TEST_F(ReplayCacheLockTest, MergeConflict)
 TEST_F(ReplayCacheLockTest, UndoMerge)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   // 1. Acquire 101
@@ -201,7 +238,8 @@ TEST_F(ReplayCacheLockTest, Expiry)
 {
   {
     ReplayCacheLock lock;
-    ReplayCacheLockTestHelper::set_base(lock, base_data_);
+    ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+    ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
     auto ctx = make_dummy_context(height_);
 
     // u(height_, 101) -> expiry 9. Current height 9. Allowed (>=).
@@ -227,7 +265,8 @@ TEST_F(ReplayCacheLockTest, Expiry)
 
   {
     ReplayCacheLock lock;
-    ReplayCacheLockTestHelper::set_base(lock, base_data_);
+    ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+    ReplayCacheLockTestHelper::set_base(lock, height_, base_data_);
     auto ctx = make_dummy_context(height_);
 
     // u(height_, 101) -> expiry 10. Current height 10. Allowed.
@@ -254,26 +293,29 @@ TEST_F(ReplayCacheLockTest, Expiry)
         lock.try_atomic_change_lock(nullptr, &item4, &kTestCostModel, ctx)
             .has_value());
 
-    // Build result at height 10.
-    // Base: u(10, 100) -> expiry 10 >= 10. Keep.
-    // Additions:
-    // u(10, 101) -> expiry 10 >= 10. Keep.
-    // u(11, 100) -> expiry 11 >= 10. Keep.
-    // u(11, 101) -> expiry 11 >= 10. Keep.
-    ReplayCacheData out =
-        ReplayCacheLockTestHelper::build_result(lock, height_);
-    ASSERT_EQ(4, out.uniquifiers.size());
-    EXPECT_EQ(100, out.uniquifiers[0].nonce); // u(10, 100)
-    EXPECT_EQ(101, out.uniquifiers[1].nonce); // u(10, 101)
-    EXPECT_EQ(100, out.uniquifiers[2].nonce); // u(11, 100)
-    EXPECT_EQ(101, out.uniquifiers[3].nonce); // u(11, 101)
+    // Build result at height 10 - should have base nonce (100) plus addition
+    // (101)
+    auto out_h10 = ReplayCacheLockTestHelper::build_result(lock, ctx, height_);
+    ASSERT_TRUE(out_h10.has_value());
+    ASSERT_EQ(2, out_h10->nonces.size());
+    EXPECT_EQ(100, out_h10->nonces[0]); // u(10, 100) from base
+    EXPECT_EQ(101, out_h10->nonces[1]); // u(10, 101) from additions
+
+    // Build result at height 11 - should have additions only (100, 101)
+    auto out_h11 =
+        ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
+    ASSERT_TRUE(out_h11.has_value());
+    ASSERT_EQ(2, out_h11->nonces.size());
+    EXPECT_EQ(100, out_h11->nonces[0]); // u(11, 100) from additions
+    EXPECT_EQ(101, out_h11->nonces[1]); // u(11, 101) from additions
   }
 }
 
 TEST_F(ReplayCacheLockTest, Build)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   PointerItem<ReplayCacheIt> item1(u(height_, 102));
@@ -284,23 +326,33 @@ TEST_F(ReplayCacheLockTest, Build)
   ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
                   .has_value());
 
-  ReplayCacheData out = ReplayCacheLockTestHelper::build_result(lock, height_);
-  ASSERT_EQ(3, out.uniquifiers.size());
-  EXPECT_EQ(101, out.uniquifiers[0].nonce); // had height 9
-  EXPECT_EQ(102, out.uniquifiers[1].nonce); // had height 9
-  EXPECT_EQ(100, out.uniquifiers[2].nonce); // had height 10 (part of base)
+  // Build result for height 9 - should have additions (101, 102) sorted
+  auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_);
+  ASSERT_TRUE(out.has_value());
+  ASSERT_EQ(2, out->nonces.size());
+  EXPECT_EQ(101, out->nonces[0]); // sorted
+  EXPECT_EQ(102, out->nonces[1]);
 
+  // Build result for height 10 - should have base nonce (100)
+  auto out_h10 =
+      ReplayCacheLockTestHelper::build_result(lock, ctx, height_ + 1);
+  ASSERT_TRUE(out_h10.has_value());
+  ASSERT_EQ(1, out_h10->nonces.size());
+  EXPECT_EQ(100, out_h10->nonces[0]); // from base
+
+  // Test that remade lock with the built data detects conflicts
   ReplayCacheLock remade;
-  ReplayCacheLockTestHelper::set_base(remade, out);
-  EXPECT_FALSE(
+  ReplayCacheLockTestHelper::set_base(remade, height_, *out);
+  ReplayCacheLockTestHelper::set_base(remade, height_ + 1, *out_h10);
+  ASSERT_FALSE(
       remade.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
           .has_value());
-  EXPECT_FALSE(
+  ASSERT_FALSE(
       remade.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
           .has_value());
 
   PointerItem<ReplayCacheIt> item3(u(height_ + 1, 100));
-  EXPECT_FALSE(
+  ASSERT_FALSE(
       remade.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx)
           .has_value());
 }
@@ -308,7 +360,8 @@ TEST_F(ReplayCacheLockTest, Build)
 TEST_F(ReplayCacheLockTest, MergeCost)
 {
   ReplayCacheLock lock;
-  ReplayCacheLockTestHelper::set_base(lock, base_data_);
+  ReplayCacheLockTestHelper::set_empty_bases(lock, height_ - 1, height_ + 2);
+  ReplayCacheLockTestHelper::set_base(lock, height_ + 1, base_data_);
   auto ctx = make_dummy_context(height_);
 
   { // merging non-conflicting entry results adds cost

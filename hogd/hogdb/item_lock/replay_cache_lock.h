@@ -1,21 +1,16 @@
 #pragma once
 
-#include <array>
 #include <optional>
 #include <set>
-#include <utility>
-#include <vector>
 
-#include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_item.hh"
 #include "x23/testlock.h"
 
 namespace hogd {
@@ -36,9 +31,13 @@ public:
                                            MerkleTriePrefix &trie) const;
 
 private:
-  ReplayCacheData build_result(BlockHeight block_height) const;
+  HogDBStatus<ReplayCacheData> build_result(const LockContext &ctx,
+                                            BlockHeight block_height) const;
+  HogDBStatus<ReplayCacheData *> get_base(const LockContext &ctx,
+                                          BlockHeight block_height) const;
 
-  mutable std::optional<ReplayCacheData> base_replay_cache_;
+  mutable std::map<BlockHeight, ReplayCacheData> bases_;
+  mutable std::optional<ReplayCacheMetadata> meta_;
   std::set<Uniquifier> additions_;
 
   x23::TestLock lock_;

@@ -16,9 +16,11 @@ add_xdr(
   ../../protocol/event.x
   ../../protocol/event_rpc.x
   ../../protocol/executor_to_db_rpc.x
+  ../../protocol/exec_result.x
   ../../protocol/exec_sched.x
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
+  ../../protocol/hogexec_constants.x
   ../../protocol/loadgen.x
   ../../protocol/nomination.x
   ../../protocol/port.x

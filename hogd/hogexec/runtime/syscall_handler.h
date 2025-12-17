@@ -13,6 +13,8 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"
+#include "exec_result.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -102,10 +104,9 @@ public:
 
   // Attempt to commit the current transaction to the database.
   // Requirement: root_invoke() must be called first.
-  // Returns true if the transaction commits, false otherwise.
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
-  SystemStatus<bool> try_commit_transaction();
+  ExecResult try_commit_transaction();
   SystemStatus<void> abort_transaction();
   // If the transaction succeeds, the events can be emitted to the event server.
   x23::Async<SystemStatus<void>> emit_events();
@@ -168,6 +169,12 @@ public:
     return invocation_frame_stack_.get_active_frame().is_read_only();
   }
 
+  // === Crypto syscalls ===
+  SyscallStatus<void> sha256_update(uint32_t input_index,
+                                    std::span<const std::byte> input_buffer,
+                                    bool input_reset);
+  SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
+
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   SystemStatus<SyscallStatus<std::span<const std::byte>>>
@@ -216,6 +223,10 @@ public:
   //
   // returns nullptr if the contract does not exist
   SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
+
+  // == Error converstion methods ==
+  static ExecResult to_exec_result(InvokeErrorCode error_code);
+  static ExecResult to_exec_result(SystemErrorCode error_code);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;

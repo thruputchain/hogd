@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/hash_buffers.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
@@ -131,6 +132,8 @@ public:
     }
     return committed_contracts;
   }
+
+  HashBuffers hash_buffers_;
 
 private:
   const ContractAddress address_;

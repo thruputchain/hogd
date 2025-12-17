@@ -14,7 +14,6 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -351,7 +350,7 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
 
   ASSERT_EQ(item->type(), StorageItemType::kItemTypeReplayCacheData);
   auto const &cache = item->replay_cache();
-  ASSERT_EQ(cache.data().uniquifiers.size(), 3);
+  ASSERT_EQ(cache.uniquifiers().size(), 3);
 
   EXPECT_EQ(item->storage_cost(), cost_model.get_replay_cache_cost(3));
 
