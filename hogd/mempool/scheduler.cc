@@ -563,11 +563,11 @@ Scheduler::schedule(size_t num_txs,
       ready_accounts_.clear();
       cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
       removed_accounts.clear();
+      account_it = ready_accounts_.begin();
       if (ready_accounts_.empty()) {
         // If there are still no ready accounts, then break.
         break;
       }
-      account_it = ready_accounts_.begin();
     }
 
     // TODO(jhumphri): This is a good place to parallelize. Each thread can
@@ -593,6 +593,7 @@ Scheduler::schedule(size_t num_txs,
       }
       if (it == txs_to_schedule.end()) {
         account_it++;
+        CHECK(removed_accounts.insert(account).second);
         break;
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
@@ -645,7 +646,6 @@ Scheduler::schedule(size_t num_txs,
           // just skip over this account and revisit it once it has been
           // cycled.
         }
-        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         account_it++;
         CHECK(removed_accounts.insert(account).second);
         break;
