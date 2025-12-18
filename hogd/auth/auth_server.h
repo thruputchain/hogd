@@ -27,10 +27,9 @@ namespace hogd {
 
 class AuthServer {
 public:
-  explicit AuthServer(IntroAuthResult intro_auth_result,
+  explicit AuthServer(const std::string &address_for_auth,
                       int bucket_size = 1'048'576)
-    : auth_data_cache_(bucket_size),
-      dbauth_client_(std::move(intro_auth_result))
+    : auth_data_cache_(bucket_size), dbauth_client_(address_for_auth)
   {}
 
   x23::Async<AuthErrorCodeBatch>

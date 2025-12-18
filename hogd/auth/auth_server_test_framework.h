@@ -24,20 +24,10 @@ public:
     uint16_t port = mock_db_server_.start_server(0);
     server_port_ = port;
     // Create ShardCard with the auth address
-    std::string auth_address = std::format("localhost:{}", port);
-    ShardCard shard_card{.protocol = version::kHogdProtocol(),
-                         .upid = {},
-                         .block_height = 0,
-                         .address_for_exec = "",
-                         .address_for_sched = "",
-                         .address_for_auth = auth_address.c_str()};
-
-    // Create IntroAuthResult
-    IntroAuthResult intro_result;
-    intro_result.shards.push_back(shard_card);
+    std::string address_for_auth = std::format("localhost:{}", port);
 
     // Create AuthServer
-    auth_server_ = std::make_unique<AuthServer>(std::move(intro_result), 16);
+    auth_server_ = std::make_unique<AuthServer>(address_for_auth, 16);
   }
 
   AuthServer &auth_server() { return *auth_server_; }
