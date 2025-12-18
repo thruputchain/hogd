@@ -2,6 +2,7 @@
 
 #include <format>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -63,7 +64,8 @@ protected:
     db_ = HogDBDAO(RAMDB(std::move(*db)));
 
     // Start mock auth server
-    uint16_t port = mock_auth_server_.start_server(0);
+    mock_auth_server_.emplace();
+    uint16_t port = mock_auth_server_->start_server(0);
 
     // Create AuthCard pointing to the mock server
     std::string server_address = std::format("localhost:{}", port);
@@ -81,7 +83,7 @@ protected:
 
   HogDBDAO db_;
   MerkleTriePrefix trie_;
-  MockAuthDBServer mock_auth_server_;
+  std::optional<MockAuthDBServer> mock_auth_server_;
   AuthCard auth_card_;
   AuthChangeSubscriptionManager subscription_manager_;
 };
@@ -153,10 +155,10 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   ASSERT_TRUE(commit_result);
 
   // Wait for changes to be received
-  mock_auth_server_.impl()->wait_for_changes(height);
+  mock_auth_server_->impl()->wait_for_changes(height);
 
   // Verify the changes were received
-  auto received = mock_auth_server_.impl()->get_changes_at_height(height);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(height);
   ASSERT_TRUE(received.has_value());
   EXPECT_EQ(received->size(), 3);
 
@@ -235,10 +237,10 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   ASSERT_TRUE(commit_result);
 
   // Wait for changes to be received
-  mock_auth_server_.impl()->wait_for_changes(height);
+  mock_auth_server_->impl()->wait_for_changes(height);
 
   // Verify the deletion was received
-  auto received = mock_auth_server_.impl()->get_changes_at_height(height);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(height);
   ASSERT_TRUE(received.has_value());
   EXPECT_EQ(received->size(), 1);
 
@@ -312,7 +314,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
   // Shut down the mock server before committing BlockTX
   // This simulates the server going down before auth changes are sent
-  mock_auth_server_.shut_down();
+  mock_auth_server_.reset();
 
   // Commit BlockTX (should succeed even though auth server is down)
   // The subscription manager should handle the error gracefully
@@ -321,7 +323,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
       << "BlockTX commit should succeed even if auth server is down";
 
   // Verify that no changes were received (server was down)
-  auto received = mock_auth_server_.impl()->get_changes_at_height(height);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(height);
   ASSERT_FALSE(received.has_value());
 
   mock_auth_server3.impl()->wait_for_changes(height);
@@ -394,8 +396,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
   ASSERT_TRUE(commit_result);
 
   // Verify that the good server still received the change
-  mock_auth_server_.impl()->wait_for_changes(height);
-  auto received = mock_auth_server_.impl()->get_changes_at_height(height);
+  mock_auth_server_->impl()->wait_for_changes(height);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(height);
   ASSERT_TRUE(received.has_value());
   EXPECT_EQ(received->size(), 1);
   EXPECT_EQ(received->at(0).address, addr.get_raw());

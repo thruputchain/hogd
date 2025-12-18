@@ -34,18 +34,18 @@ RpcStreamImpl::~RpcStreamImpl()
 }
 
 void
-RpcStreamImpl::fail(bool wait_for_callbacks)
+RpcStreamImpl::fail()
 {
-  if (ss_.stop_requested())
+  x23assert(refcount()); // Should be called holding a reference
+
+  if (!ss_.request_stop())
     return;
-  ss_.request_stop();
+
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
-    if (wait_for_callbacks)
-      cb(Buf{});
-    else
-      cp_->pool_.make_callback(cb, Buf{});
-  cp_->poison(fd_); // might delete this
+    cb(Buf{});
+  srvmap_.clear();
+  cp_->poison(fd_);
 }
 
 Async<std::expected<std::uint32_t, Errno>>
