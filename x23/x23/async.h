@@ -452,7 +452,9 @@ template<typename R> struct CoroCB {
       requires requires { resume_->set_result(std::forward<T>(t)...); }
   {
     resume_->do_return(std::forward<T>(t)...);
-    return {resume_->caller(), resume_->waiter()};
+    if (std::coroutine_handle<> h = resume_->caller())
+      return {h, resume_->waiter()};
+    return {};
   }
 };
 
