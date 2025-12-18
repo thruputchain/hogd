@@ -1,0 +1,156 @@
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+
+#include "contract.hh"
+#include "exec_result.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
+
+namespace hogd {
+
+class SelectiveDeploymentTest : public ::testing::TestWithParam<TestDB>,
+                                public NativeContractTestFramework {
+public:
+  SelectiveDeploymentTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
+
+protected:
+  void SetUp() override {}
+};
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// Test that verifies when a transaction has two contracts in
+// contracts_to_deploy, but the invoked contract only deploys the first one,
+// then after commit:
+// - The first contract is in the database
+// - The second contract is NOT in the database
+TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
+{
+  // Create two contracts to add to contracts_to_deploy
+  Contract contract_to_deploy_1(ContractType::kWasmi);
+  contract_to_deploy_1.wasmi_contract() =
+      ContractBlob{.wasm = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1}};
+
+  Contract contract_to_deploy_2(ContractType::kWasmi);
+  contract_to_deploy_2.wasmi_contract() =
+      ContractBlob{.wasm = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2}};
+
+  auto contract_1_hash = sha256(contract_to_deploy_1);
+  auto contract_2_hash = sha256(contract_to_deploy_2);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 1;
+    return nonce;
+  }();
+
+  // Create a native contract that will deploy only the first contract
+  auto make_context = [contract_1_hash]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [contract_1_hash](SystemCallHandler &handler,
+                               NativeRuntime & /*runtime*/)
+                 -> InvokeStatus<void> {
+               // Deploy only the first contract
+
+               auto deploy_result =
+                   handler.deploy_contract(kDeployNonce, contract_1_hash);
+               if (!deploy_result.has_value()) {
+                 return deploy_result.error().to_invoke_error();
+               }
+               if (!deploy_result.value().has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+
+               return {};
+             }}});
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  // Mark the deployer contract as existing and deployed within the database
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  // To verify the deployment addresses
+  auto deployed_addr_1 =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   contract_1_hash);
+
+  // Grant storage tokens to the deployer and the deployed contract
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr_1, 1'000'000'000);
+
+  // Setup the transaction with both contracts in contracts_to_deploy
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .contracts_to_deploy = {contract_to_deploy_1,
+                                          contract_to_deploy_2},
+              }},
+      make_context());
+
+  // Invoke the contract
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Commit the transaction
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+
+  advance_block();
+
+  // Verify that contract_1 is in the database (it was deployed)
+  auto contract_1_lookup = lookup_contract_from_db(contract_1_hash);
+  EXPECT_TRUE(contract_1_lookup.has_value())
+      << "First contract should be in database after deployment";
+
+  // Verify that contract_2 is NOT in the database (it was not deployed)
+  auto contract_2_lookup = lookup_contract_from_db(contract_2_hash);
+  EXPECT_FALSE(contract_2_lookup.has_value())
+      << "Second contract should NOT be in database (was not deployed)";
+
+  // Check that the first contract is deployed at the expected address
+  auto deployment_1 = lookup_deployment_from_db(deployed_addr_1);
+  ASSERT_TRUE(deployment_1.has_value());
+  EXPECT_EQ(deployment_1.value().hash, contract_1_hash);
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
+
+} // namespace hogd
