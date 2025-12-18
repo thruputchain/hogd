@@ -312,6 +312,16 @@ public:
     return std::move(*r);
   }
 
+  std::optional<DeployedContractHash>
+  lookup_deployment_from_db(ContractAddress const &addr)
+  {
+    auto r = db_proxy_->get_deployment(block_number_, addr);
+    if (!r.has_value()) {
+      throw std::runtime_error("lookup_deployment_from_db: db lookup failed");
+    }
+    return *r;
+  }
+
   static auto make_native_contract(int32_t contract_id)
   {
     auto contract = std::make_shared<Contract>(ContractType::kNative);
