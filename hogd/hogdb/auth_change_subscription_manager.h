@@ -17,8 +17,9 @@ namespace hogd {
 
 class AuthChangeSubscriptionManager {
 public:
-  void detached_publish_auth_changes(BlockHeight height,
-                                     PerThread<KeyChangeBatch> key_changes);
+  x23::Detached
+  detached_publish_auth_changes(BlockHeight height,
+                                PerThread<KeyChangeBatch> key_changes);
   x23::Async<void> publish_auth_changes(BlockHeight height,
                                         PerThread<KeyChangeBatch> key_changes);
   x23::Async<bool> add_full_auth_change_subscriber(AuthCard card);
