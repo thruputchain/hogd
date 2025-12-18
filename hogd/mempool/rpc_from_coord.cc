@@ -552,6 +552,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   {
     DbBlockResult result = co_await commit_snapshot_handle;
+    info("HERE {}", result.result());
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
 }
