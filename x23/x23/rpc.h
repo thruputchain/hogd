@@ -312,7 +312,7 @@ public:
   size_t max_message_size = default_max_message_size;
   RefPtr<CoroPoll> cp_;
 
-  void fail(bool wait_for_callbacks = true);
+  void fail();
   int get_fd() const { return fd_.get(); }
 
 protected:
@@ -605,8 +605,8 @@ tcp_rpc_server(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
   return std::pair{port, rawfd};
 }
 
-// Similar to tcp_rpc_server, but doesn't return unless/until it
-// accept returns an error or the CoroPoll is destroyed.
+// Similar to tcp_rpc_server, but doesn't return unless/until accept
+// returns an error or the CoroPoll is destroyed.
 void
 tcp_rpc_server_wait(CoroPoll &cp, uint16_t port, auto cb, int backlog = -1)
     requires std::invocable<decltype(cb), RpcStream<RpcNoLogger>::Configurator>

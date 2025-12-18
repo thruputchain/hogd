@@ -646,7 +646,6 @@ Scheduler::schedule(size_t num_txs,
           // just skip over this account and revisit it once it has been
           // cycled.
         }
-        // CHECK_EQ(ready_accounts_.erase(account_key), 1UL);
         account_it++;
         CHECK(removed_accounts.insert(account).second);
         break;

@@ -100,6 +100,7 @@ add_library(runtime_test_objects OBJECT
   reference_leak_test.cc
   revert_tests.cc
   runtime_test.cc
+  selective_deployment_test.cc
   serialize_roundtrip_test.cc
   shutdown_test.cc
   snapshot_storage_item_test.cc

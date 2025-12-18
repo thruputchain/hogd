@@ -40,8 +40,6 @@ public:
     auth_server_ = std::make_unique<AuthServer>(std::move(intro_result), 16);
   }
 
-  ~AuthServerTestFramework() { mock_db_server_.shut_down(); }
-
   AuthServer &auth_server() { return *auth_server_; }
   MockDBAuthRpc &mock_db() { return *mock_db_server_.impl(); }
 

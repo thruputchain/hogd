@@ -81,7 +81,7 @@ class AtomicCoroHandle {
 public:
   void put(const CoroHandle &ch)
   {
-    pb_ = ch.pb_;
+    pb_.store(ch.pb_, std::memory_order_relaxed);
 #ifdef NDEBUG
     h_.store(ch, std::memory_order_release);
 #else  // !NDEBUG
@@ -91,8 +91,9 @@ public:
   }
   CoroHandle take()
   {
-    PromiseBase *pb = std::exchange(pb_, nullptr);
     auto h = h_.exchange(nullptr, std::memory_order_acquire);
+    PromiseBase *pb =
+        h ? pb_.exchange(nullptr, std::memory_order_relaxed) : nullptr;
     return {h, pb};
   }
   explicit operator bool() const
@@ -103,7 +104,7 @@ public:
 
 private:
   std::atomic<std::coroutine_handle<>> h_;
-  PromiseBase *pb_{};
+  std::atomic<PromiseBase *> pb_{nullptr};
 };
 
 #else // !X23_CORO_TRACE
