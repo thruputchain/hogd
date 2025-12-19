@@ -1,38 +1,16 @@
 #include "hogd/auth/dbauth_client.h"
 
 #include <optional>
-#include <stdexcept>
-#include <string>
 
 #include "account.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
-#include "hogd/base/rpc_client.h"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/sockio.h"
 
 namespace hogd {
-
-namespace {
-
-auto
-make_dbauth_client(const std::string &address_for_auth)
-{
-  x23::HostPort hostport;
-  if (!hostport.parse(address_for_auth)) {
-    throw std::runtime_error("Failed to parse database shard address");
-  }
-  return make_rpc_client<DBAuth1>(hostport);
-}
-
-} // namespace
-
-DBAuthClient::DBAuthClient(const std::string &address_for_auth)
-  : client_(make_dbauth_client(address_for_auth)())
-{}
 
 x23::Async<AuthStatus<std::optional<AccountAuthData>>>
 DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
