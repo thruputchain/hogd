@@ -24,9 +24,27 @@
 
 namespace hogd {
 
+class WasmtimeGlobalContext {
+public:
+  WasmtimeGlobalContext() {
+    wasmtime_global_context_ptr_ = new_wasmtime_global_context();
+  }
+  ~WasmtimeGlobalContext() {
+    if (wasmtime_global_context_ptr_ != nullptr) {
+      free_wasmtime_global_context(wasmtime_global_context_ptr_);
+    }
+  }
+
+  void *wasmtime_global_context_ptr_;
+};
+
 WasmtimeContext::WasmtimeContext()
-  : wasmtime_context_ptr_(new_wasmtime_context())
-{}
+  : wasmtime_context_ptr_(nullptr)
+{
+  static WasmtimeGlobalContext wasmtime_global_context;
+  CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
+  wasmtime_context_ptr_ = new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_);
+}
 
 WasmtimeContext::~WasmtimeContext()
 {

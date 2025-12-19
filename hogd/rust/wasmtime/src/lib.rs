@@ -9,8 +9,8 @@ pub mod runtime;
 
 // Re-export FFI functions and types for testing and external use
 pub use context::{
-    free_wasmtime_context, new_wasmtime_context, wasmtime_link_nargs,
-    wasmtime_verify_contract,
+    free_wasmtime_context, free_wasmtime_global_context, new_wasmtime_context,
+    new_wasmtime_global_context, wasmtime_link_nargs, wasmtime_verify_contract,
 };
 pub use invoke_result::WasmtimeInvokeResult;
 pub use runtime::{

@@ -3,7 +3,7 @@ use core::slice;
 
 use common::string_from_parts;
 
-use wasmtime::{Caller, Config, Engine, Linker, Module};
+use wasmtime::{Caller, Config, Engine, Linker, Module, PoolingAllocationConfig};
 
 use crate::error::TrampolineError;
 use common::TrampolineResult;
@@ -31,7 +31,52 @@ impl LinkEntry {
     }
 }
 
+#[derive(Clone)]
+pub struct WasmtimeGlobalContext {
+    pub engine: Engine,
+    // TODO(geoff): we could stick the Linker here
+}
+
+impl WasmtimeGlobalContext {
+    fn new() -> WasmtimeGlobalContext {
+        let page_size: usize = 65536; // 64KB, i.e. 1 page
+        let allocation_config : PoolingAllocationConfig =        
+            PoolingAllocationConfig::default()
+                .max_unused_warm_slots(8192)
+                .total_memories(8192)
+                .total_tables(8192)
+                .linear_memory_keep_resident(page_size * 2)
+                .max_memory_size(page_size * 2)
+                .table_keep_resident(20000).clone();
+                // .table_elements(max_size: default is 20k, leaving that as is)
+
+        Self {
+            engine: Engine::new(
+                Config::default()
+                    .consume_fuel(true)
+                    .wasm_backtrace(false)
+                    .strategy(wasmtime::Strategy::Winch)
+                    .cranelift_opt_level(wasmtime::OptLevel::Speed)
+                    .cranelift_nan_canonicalization(true) // deterministic nan
+                    .wasm_backtrace(false)
+                    .epoch_interruption(false)
+                    .max_wasm_stack(16 * 1024)
+                    // Configs set as per wasmtime documentation to eliminate vmm in steady state
+                    // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
+                    .memory_init_cow(false)
+                    .memory_guard_size(0)
+                    .memory_reservation(2 * page_size as u64)
+                    .guard_before_linear_memory(false)
+                    .allocation_strategy(
+                        allocation_config
+                ),
+            ).unwrap(),
+        }
+    }
+}
+
 pub struct WasmtimeContext {
+    pub global_context: WasmtimeGlobalContext,
     pub entries: Vec<LinkEntry>,
 }
 
@@ -88,8 +133,9 @@ macro_rules! link_function_nargs {
 }
 
 impl WasmtimeContext {
-    fn new() -> WasmtimeContext {
+    fn new(global_context: &WasmtimeGlobalContext) -> WasmtimeContext {
         Self {
+            global_context: global_context.clone(),
             entries: Vec::new(),
         }
     }
@@ -98,24 +144,9 @@ impl WasmtimeContext {
         self.entries.push(entry);
     }
 
-    fn new_engine() -> Engine {
-        Engine::new(
-            &Config::default()
-                .consume_fuel(true)
-                .wasm_backtrace(false)
-                .strategy(wasmtime::Strategy::Winch)
-                .cranelift_opt_level(wasmtime::OptLevel::Speed)
-                .cranelift_nan_canonicalization(true) // deterministic nan
-                .wasm_backtrace(false)
-                .epoch_interruption(false)
-                .max_wasm_stack(16 * 1024),
-        )
-        .unwrap()
-    }
-
     pub fn linker(&self) -> Linker<*mut c_void> {
-        let engine = Self::new_engine();
-        let mut linker = Linker::new(&engine);
+        let engine = &self.global_context.engine;
+        let mut linker = Linker::new(engine);
 
         for entry in &self.entries {
             match entry.nargs {
@@ -184,8 +215,7 @@ impl WasmtimeContext {
     }
 
     fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        // TODO(geoff): consider caching the engine
-        let engine = Self::new_engine();
+        let engine = &self.global_context.engine;
         Module::validate(&engine, contract_data).is_ok()
     }
 
@@ -291,14 +321,37 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
     true
 }
 
+/// # Safety
+/// Creates a global context that can be shared across threads.
+/// Global context is threadsafe.
+#[no_mangle]
+pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
+    let b = Box::new(WasmtimeGlobalContext::new());
+    unsafe { core::mem::transmute(Box::into_raw(b)) }
+}
+
+/// # Safety
+/// Global context must not be a nullptr.
+/// Global context must have been created by new_wasmtime_global_context.
+#[no_mangle]
+pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
+    debug_assert!(!p.is_null());
+
+    let context: *mut WasmtimeGlobalContext = unsafe { core::mem::transmute(p) };
+
+    unsafe { drop(Box::from_raw(context)) };
+}
+
 // Rust FFI needs no_mangle and extern "C"
 /// # Safety
 /// module_cache can be nullptr, in which case no module cache is used.
 /// module_cache is threadsafe, so it can be safely shared across threads.
 /// module_cache must outlive WasmiContext.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_context() -> *mut c_void {
-    let b = Box::new(WasmtimeContext::new());
+pub unsafe extern "C" fn new_wasmtime_context(global_context: *mut c_void) -> *mut c_void {
+    debug_assert!(!global_context.is_null());
+    let global_context: &WasmtimeGlobalContext = unsafe { &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(global_context) };
+    let b = Box::new(WasmtimeContext::new(global_context));
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
@@ -311,7 +364,7 @@ pub unsafe extern "C" fn new_wasmtime_context() -> *mut c_void {
 pub unsafe extern "C" fn free_wasmtime_context(p: *mut c_void) {
     debug_assert!(!p.is_null());
 
-    let context: *mut WasmtimeContext = unsafe { core::mem::transmute(p) };
+    let context: *mut WasmtimeContext = unsafe { core::mem::transmute::<*mut c_void, *mut WasmtimeContext>(p) };
 
     unsafe { drop(Box::from_raw(context)) };
 }
