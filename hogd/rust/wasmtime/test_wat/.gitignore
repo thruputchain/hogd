@@ -1,8 +1,0 @@
-# This directory contains pre-built WASM binaries for integration testing.
-# WASM files (.wasm) in this directory SHOULD be checked into git.
-# 
-# To add a test WASM:
-# 1. Build your .wasm file
-# 2. Copy it here
-# 3. Git add it explicitly: git add test_wasms/your_test.wasm
-# 4. Add corresponding tests in hogd/hogexec/runtime/

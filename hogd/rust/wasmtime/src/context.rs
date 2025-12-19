@@ -104,7 +104,7 @@ impl WasmtimeContext {
                 .consume_fuel(true)
                 .wasm_backtrace(false)
                 .strategy(wasmtime::Strategy::Winch)
-                .cranelift_opt_level(wasmtime::OptLevel::None)
+                .cranelift_opt_level(wasmtime::OptLevel::Speed)
                 .cranelift_nan_canonicalization(true) // deterministic nan
                 .wasm_backtrace(false)
                 .epoch_interruption(false)

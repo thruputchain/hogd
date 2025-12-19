@@ -26,9 +26,7 @@ namespace hogd {
 
 WasmtimeContext::WasmtimeContext()
   : wasmtime_context_ptr_(new_wasmtime_context())
-{
-  info("WasmtimeContext created {}", wasmtime_context_ptr_);
-}
+{}
 
 WasmtimeContext::~WasmtimeContext()
 {
@@ -61,22 +59,19 @@ WasmtimeContext::make_new_runtime(
   }
 
   // Verify contract if requested
-  //if (do_contract_verify) {
+  if (do_contract_verify) {
     if (!verify_contract(*contract)) {
-      info("Contract verification failed");
       return SystemError{SystemErrorCode::kSystemValidationFailure};
     }
-//  }
+  }
 
   try {
     auto const &wasm = contract->wasmi_contract().wasm;
 
-    info("Creating WasmtimeRuntime");
     void *wasmtime_runtime_ptr = new_wasmtime_runtime(
         wasm.data(), static_cast<uint32_t>(wasm.size()),
         deployed_contract_hash.hash.data(), host_call_context.get(),
         wasmtime_context_ptr_);
-    info("WasmtimeRuntime created");
 
     if (wasmtime_runtime_ptr == nullptr) {
       return SystemError{SystemErrorCode::kSystemUnrecoverable};
