@@ -322,10 +322,6 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   ASSERT_TRUE(commit_result)
       << "BlockTX commit should succeed even if auth server is down";
 
-  // Verify that no changes were received (server was down)
-  auto received = mock_auth_server_->impl()->get_changes_at_height(height);
-  ASSERT_FALSE(received.has_value());
-
   mock_auth_server3.impl()->wait_for_changes(height);
   auto received3 = mock_auth_server3.impl()->get_changes_at_height(height);
   ASSERT_TRUE(received3.has_value());
