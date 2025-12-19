@@ -251,7 +251,6 @@ SystemCallHandler::root_invoke()
 ExecResult
 SystemCallHandler::try_commit_transaction()
 {
-  info("try_commit_transaction");
   assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
     HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
