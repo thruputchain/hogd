@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "auth_rpc.hh"
 #include "block.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
