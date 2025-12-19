@@ -31,6 +31,7 @@ TEST(Mempool, SubmitUnvetted)
   MempoolTestInfra server;
 
   AccountAuthData auth_data = get_default_account();
+  auth_data.last_written_height = 0;
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
   add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
@@ -39,6 +40,11 @@ TEST(Mempool, SubmitUnvetted)
   // the output of nominations, etc.
   server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
+  KeyChangeBatch key_changes = {
+      KeyChange{.address = MempoolTestInfra::kAccountAddresses[0],
+                .auth_data = x23::BorrowedPtr<AccountAuthData>(&auth_data)}};
+  server.register_auth_data_updates(
+      /*height=*/0, key_changes)();
   Transaction tx = txs[0].tx;
   auto make_sign_claim = [&](uint32_t idx) {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);

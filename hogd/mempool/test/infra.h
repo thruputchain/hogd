@@ -145,6 +145,14 @@ public:
               .has_value());
   }
 
+  x23::Async<void> register_auth_data_updates(BlockHeight height,
+                                              const KeyChangeBatch &key_changes)
+  {
+    CHECK_PTR(db_auth_server_->impl());
+    return mempool_coord_server_->impl()->auth()->register_auth_data_updates(
+        height, key_changes);
+  }
+
   void set_dbtip(const DbTip &db_tip)
   {
     CHECK(get_db().write_dbtip(db_tip).has_value());

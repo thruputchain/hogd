@@ -64,6 +64,7 @@ public:
   MempoolCoordinatorRpc &operator=(MempoolCoordinatorRpc &&) = delete;
 
   std::shared_ptr<Scheduler> scheduler() { return scheduler_; }
+  std::unique_ptr<AuthServer> &auth() { return auth_; }
 
   static x23::Async<coord_sched_client_t> get_client()
   {
