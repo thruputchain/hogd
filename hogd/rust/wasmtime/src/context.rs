@@ -108,7 +108,7 @@ impl WasmtimeContext {
                 .cranelift_nan_canonicalization(true) // deterministic nan
                 .wasm_backtrace(false)
                 .epoch_interruption(false)
-                .max_wasm_stack(16 * 1024)
+                .max_wasm_stack(16 * 1024),
         )
         .unwrap()
     }

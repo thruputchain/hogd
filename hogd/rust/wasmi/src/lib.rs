@@ -1,9 +1,9 @@
 use core::ffi::c_void;
 
+pub mod module_cache;
 pub mod wasmi_context;
 mod wasmi_error;
 pub mod wasmi_invoke_result;
-pub mod module_cache;
 pub mod wasmi_runtime;
 
 type SHA256Hash = [u8; 32];

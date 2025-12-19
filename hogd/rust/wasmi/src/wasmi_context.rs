@@ -5,8 +5,8 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use crate::wasmi_error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::wasmi_error::TrampolineError;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;

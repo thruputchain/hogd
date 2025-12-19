@@ -47,7 +47,7 @@ fn check_memory_limit(module: &Module) -> bool {
         });
         return memory_type.initial_pages() <= 1.into();
     }
-debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
+    debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
     false
 }
 

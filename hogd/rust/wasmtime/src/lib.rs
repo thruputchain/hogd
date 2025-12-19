@@ -9,17 +9,13 @@ pub mod runtime;
 
 // Re-export FFI functions and types for testing and external use
 pub use context::{
-    new_wasmtime_context,
-    free_wasmtime_context,
+    free_wasmtime_context, new_wasmtime_context, wasmtime_link_nargs,
     wasmtime_verify_contract,
-    wasmtime_link_nargs,
-};
-pub use runtime::{
-    new_wasmtime_runtime,
-    free_wasmtime_runtime,
-    wasmtime_invoke,
 };
 pub use invoke_result::WasmtimeInvokeResult;
+pub use runtime::{
+    free_wasmtime_runtime, new_wasmtime_runtime, wasmtime_invoke,
+};
 
 #[cfg(feature = "debug_logging")]
 #[macro_export]
