@@ -6,6 +6,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogdb/rpc_from_auth.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogdb/rpc_from_sched.h"
 #include "hogd/loadgen/loadgen_server.h"

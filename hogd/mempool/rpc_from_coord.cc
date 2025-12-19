@@ -73,7 +73,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), batch);
 
-  // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
   co_await scheduler_->add_txs(batch);
   AuthErrorCodeBatch auth_ret = co_await auth_handle;
   x23::Vec<SignedTransactionHash> to_remove;
