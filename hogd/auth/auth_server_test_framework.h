@@ -8,6 +8,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/auth/mock_dbauth_rpc.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/version.h"
 #include "sched_db.hh"

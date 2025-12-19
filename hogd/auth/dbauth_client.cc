@@ -1,18 +1,14 @@
 #include "hogd/auth/dbauth_client.h"
 
 #include <optional>
-#include <stdexcept>
-#include <string>
 
 #include "account.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
-#include "hogd/base/rpc_client.h"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
