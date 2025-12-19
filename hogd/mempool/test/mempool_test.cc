@@ -41,8 +41,8 @@ TEST(Mempool, SubmitUnvetted)
   server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   KeyChangeBatch key_changes = {
-      KeyChange{.address = MempoolTestInfra::kAccountAddresses[0],
-                .auth_data = x23::BorrowedPtr<AccountAuthData>(&auth_data)}};
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AccountAuthData>(auth_data)}};
   server.register_auth_data_updates(
       /*height=*/0, key_changes)();
   Transaction tx = txs[0].tx;
