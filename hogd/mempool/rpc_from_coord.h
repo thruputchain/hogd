@@ -237,7 +237,9 @@ private:
     Registration::registration().shards_registered(&cards);
     CHECK(!cards.empty());
     info("HERE ADDR IS {}", cards[0].address_for_auth);
-    auth_ = std::make_unique<AuthServer>(cards[0].address_for_auth.c_str());
+    dbauth_client_t dbauth_client =
+        co_await make_dbauth_client(cards[0].address_for_auth.c_str());
+    auth_ = std::make_unique<AuthServer>(std::move(dbauth_client));
 
     ready_.store(true, std::memory_order_release);
   }
