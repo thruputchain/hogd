@@ -15,13 +15,6 @@
 namespace hogd {
 
 namespace {
-constexpr ContractAddress
-make_test_address(uint8_t id)
-{
-  ContractAddress address{};
-  address[0] = id;
-  return address;
-}
 
 std::pair<PublicKey, SecretKey>
 make_key_pair()
