@@ -66,7 +66,7 @@ impl WasmtimeGlobalContext {
                     .max_wasm_stack(16 * 1024)
                     // Configs set as per wasmtime documentation to eliminate vmm in steady state
                     // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
-                    .memory_init_cow(false)
+                    .memory_init_cow(true)
                     .memory_guard_size(0)
                     .memory_reservation(2 * page_size as u64)
                     .guard_before_linear_memory(false)
