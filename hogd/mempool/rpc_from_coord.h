@@ -13,6 +13,7 @@
 #include "event_rpc.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
+#include "hogd/auth/auth_server.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -231,6 +232,11 @@ private:
     scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
+    x23::XdrVec<ShardCard> cards;
+    Registration::registration().shards_registered(&cards);
+    CHECK(!cards.empty());
+    auth_ = std::make_unique<AuthServer>(cards[0].address_for_auth.c_str());
+
     ready_.store(true, std::memory_order_release);
   }
 
@@ -302,6 +308,7 @@ private:
 
   // TODO(jhumphri): Make the mempool work with multiple threads.
   std::shared_ptr<Scheduler> scheduler_;
+  std::unique_ptr<AuthServer> auth_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
