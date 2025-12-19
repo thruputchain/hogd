@@ -44,6 +44,7 @@ impl WasmtimeGlobalContext {
         let allocation_config : PoolingAllocationConfig =        
             PoolingAllocationConfig::default()
                 .max_unused_warm_slots(8192)
+                .total_core_instances(8192)
                 .total_memories(8192)
                 .total_tables(8192)
                 .linear_memory_keep_resident(page_size * 2)
@@ -59,7 +60,8 @@ impl WasmtimeGlobalContext {
                     .strategy(wasmtime::Strategy::Winch)
                     .cranelift_opt_level(wasmtime::OptLevel::Speed)
                     .cranelift_nan_canonicalization(true) // deterministic nan
-                    .wasm_backtrace(false)
+                    .relaxed_simd_deterministic(true)
+                    .wasm_multi_memory(false)
                     .epoch_interruption(false)
                     .max_wasm_stack(16 * 1024)
                     // Configs set as per wasmtime documentation to eliminate vmm in steady state
@@ -69,7 +71,7 @@ impl WasmtimeGlobalContext {
                     .memory_reservation(2 * page_size as u64)
                     .guard_before_linear_memory(false)
                     .allocation_strategy(
-                        allocation_config
+                        InstanceAllocationStrategy::Pooling(allocation_config),
                 ),
             ).unwrap(),
         }
