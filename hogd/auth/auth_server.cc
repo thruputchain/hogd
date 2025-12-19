@@ -157,6 +157,8 @@ AuthServer::populate_auth_data(BlockHeight height,
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height, SignedTransactionBatch txs)
 {
+  co_await default_coropoll().pool_.bg();
+
   AuthErrorCodeBatch result;
   result.reserve(txs.size());
   for (const auto &tx : txs) {

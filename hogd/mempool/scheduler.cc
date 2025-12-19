@@ -674,6 +674,8 @@ x23::Async<void>
 Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
+  co_await default_coropoll().pool_.bg();
+
   static SynchronizedMap<ContractAddress, char> accounts;
   accounts.clear();
 

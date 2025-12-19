@@ -40,6 +40,28 @@
 
 namespace hogd {
 
+namespace {
+
+template<typename T>
+void
+remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
+{
+  size_t write_idx = 0;
+  size_t num_erased = 0;
+  for (size_t read_idx = 0; read_idx < remove_from.size(); read_idx++) {
+    if (num_erased < indices.size() && read_idx == indices[num_erased]) {
+      // We are erasing this element, so skip it.
+      ++num_erased;
+    }
+    else {
+      remove_from[write_idx++] = std::move(remove_from[read_idx]);
+    }
+  }
+  remove_from.resize(write_idx);
+}
+
+} // namespace
+
 // TODO(jhumphri): When should we remove txs from [vetted_txs_]?
 
 x23::Async<void>
@@ -47,8 +69,28 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     SignedTransactionBatch batch)
 {
   info("submit_unvetted, {} txs", batch.size());
+  auto auth_handle = auth_->verify_transactions(
+      /*height=*/scheduler_->current_block(), batch);
+
   // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
   co_await scheduler_->add_txs(batch);
+  AuthErrorCodeBatch auth_ret = co_await auth_handle;
+  x23::Vec<SignedTransactionHash> to_remove;
+  x23::Vec<size_t> to_remove_indices;
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      to_remove.push_back(sha256(batch[i]));
+      to_remove_indices.push_back(i);
+    }
+  }
+  // The txs are on the runqueue and need to be removed, so we set
+  // [validated_block] to true.
+  auto remove_handle =
+      scheduler_->remove_from_scheduler(to_remove, /*validated_block=*/true);
+  remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+  co_await remove_handle;
+
   co_await coord_client_->coordscheduler_notify_vetted(batch);
   co_return;
 }

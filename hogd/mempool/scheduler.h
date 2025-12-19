@@ -108,6 +108,7 @@ public:
   // between them.
   static void cycle_groups(HogAge &current_averages);
 
+  BlockHeight current_block() const { return current_block_; }
   void increment_current_block() { current_block_++; }
   void decrement_current_block() { current_block_--; }
 
