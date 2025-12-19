@@ -13,9 +13,11 @@
 
 namespace hogd {
 
+using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
+
 class DBAuthClient {
 public:
-  DBAuthClient(IntroAuthResult intro_auth_result);
+  DBAuthClient(dbauth_client_t &&client) : client_(std::move(client)) {}
 
   x23::Async<AuthStatus<std::optional<AccountAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
@@ -23,8 +25,6 @@ public:
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
-  using dbauth_client_t = decltype(make_rpc_client<DBAuth1>(x23::HostPort{})());
-
   // Sharded DB is not yet implemented.
   dbauth_client_t client_;
 };
