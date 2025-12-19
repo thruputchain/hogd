@@ -3,7 +3,7 @@ use core::slice;
 
 use common::string_from_parts;
 
-use wasmtime::{Caller, Config, Engine, Linker, Module, PoolingAllocationConfig};
+use wasmtime::{Caller, Config, Engine, Linker, Module, InstanceAllocationStrategy, PoolingAllocationConfig};
 
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
