@@ -39,7 +39,7 @@ private:
   std::unique_ptr<AuthServer> auth_server_;
 };
 
-constexpr inline ContractAddress
+constexpr ContractAddress
 make_test_address(uint8_t id)
 {
   ContractAddress address{};

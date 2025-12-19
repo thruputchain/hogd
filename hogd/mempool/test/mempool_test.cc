@@ -13,7 +13,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/x23/mvar.h"
+#include "x23/x23/x23.h"
 
 namespace hogd {
 

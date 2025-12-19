@@ -8,10 +8,8 @@
 #include "account.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server_test_framework.h"
-#include "hogd/base/types.h"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/x23.h"
 
 namespace hogd {
 
