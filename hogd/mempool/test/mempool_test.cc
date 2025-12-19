@@ -2,6 +2,7 @@
 
 #include "account.hh"
 #include "auth_claim.hh"
+#include "auth_rpc.hh"
 #include "discovery.hh"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -12,6 +13,7 @@
 #include "sched_coord.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/x23/mvar.h"
 
 namespace hogd {
 
