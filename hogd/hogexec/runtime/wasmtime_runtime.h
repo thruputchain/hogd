@@ -66,7 +66,7 @@ private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
-  void *wasmtime_context_ptr_;
+  void *wasmtime_context_ptr_ = nullptr;
 };
 
 // Wrapper around one Wasm module (one wasmtime instance). Can be invoked, and
