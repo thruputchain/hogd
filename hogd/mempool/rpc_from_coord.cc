@@ -517,10 +517,11 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
   }
   co_await last_chunk_handle;
 
-  pending_detached_coroutines_.fetch_sub(1, std::memory_order_release);
-  // Only one thread will be waiting on [pending_detached_coroutines_] in the
-  // destructor.
-  pending_detached_coroutines_.notify_one();
+  pending_nomination_responses_.fetch_sub(1, std::memory_order_release);
+  // Multiple threads may be waiting on [pending_nomination_responses_]. One
+  // thread could be in [schedulercoord_commit_block()] and another thread could
+  // be in the destructor.
+  pending_nomination_responses_.notify_all();
 }
 
 x23::Async<void>
@@ -647,7 +648,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   //       SchedulerNominationOutcome::SchedulerNominationError);
   // }
 
-  pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+  pending_nomination_responses_.fetch_add(1, std::memory_order_acquire);
   finish_nominating_block(nominated_block_cache_);
 
   SchedulerNominationResult result(
@@ -929,6 +930,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
     co_await handle;
   }
 
+  // There may still be outgoing RPCs to [coordscheduler_finish_nomination()],
+  // which reads from [nominated_block_cache_].
+  wait_for_pending_nomination_responses();
   // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
   // elements in the vectors in [nominated_block_cache_], so if we clear those
   // vectors, we will experience segfaults because we will later attempt to

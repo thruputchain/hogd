@@ -181,14 +181,7 @@ public:
 
   void dump_stats() { scheduler_->dump_runqueue(); }
 
-  void shut_down()
-  {
-    size_t current_val;
-    while ((current_val = pending_detached_coroutines_.load(
-                std::memory_order_acquire)) != 0) {
-      pending_detached_coroutines_.wait(/*old=*/current_val);
-    }
-  }
+  void shut_down() { wait_for_pending_nomination_responses(); }
 
 private:
   // clang-tidy complains that an exception may be thrown in the function
@@ -208,6 +201,15 @@ private:
     x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
     x23::XdrVec<SignedTransaction> failed_txs;
   };
+
+  void wait_for_pending_nomination_responses()
+  {
+    size_t current_val;
+    while ((current_val = pending_nomination_responses_.load(
+                std::memory_order_acquire)) != 0) {
+      pending_nomination_responses_.wait(/*old=*/current_val);
+    }
+  }
 
   x23::Async<void> finish_init()
   {
@@ -319,7 +321,7 @@ private:
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
-  std::atomic<size_t> pending_detached_coroutines_ = 0;
+  std::atomic<size_t> pending_nomination_responses_ = 0;
 
   std::atomic<bool> ready_ = false;
 
