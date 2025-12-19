@@ -14,6 +14,16 @@
 
 namespace hogd {
 
+inline x23::Async<dbauth_client_t>
+make_dbauth_client(const std::string &address_for_auth)
+{
+  x23::HostPort hostport;
+  if (!hostport.parse(address_for_auth)) {
+    throw std::runtime_error("Failed to parse database shard address");
+  }
+  return make_rpc_client<DBAuth1>(hostport);
+}
+
 // Test framework for AuthServer that sets up a mock DB RPC server
 // and creates an AuthServer connected to it.
 class AuthServerTestFramework {
@@ -25,9 +35,10 @@ public:
     server_port_ = port;
     // Create ShardCard with the auth address
     std::string address_for_auth = std::format("localhost:{}", port);
+    dbauth_client_t dbauth_client = make_dbauth_client(address_for_auth)();
 
     // Create AuthServer
-    auth_server_ = std::make_unique<AuthServer>(address_for_auth, 16);
+    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client), 16);
   }
 
   AuthServer &auth_server() { return *auth_server_; }

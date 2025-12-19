@@ -16,24 +16,6 @@
 
 namespace hogd {
 
-namespace {
-
-auto
-make_dbauth_client(const std::string &address_for_auth)
-{
-  x23::HostPort hostport;
-  if (!hostport.parse(address_for_auth)) {
-    throw std::runtime_error("Failed to parse database shard address");
-  }
-  return make_rpc_client<DBAuth1>(hostport);
-}
-
-} // namespace
-
-DBAuthClient::DBAuthClient(const std::string &address_for_auth)
-  : client_(make_dbauth_client(address_for_auth)())
-{}
-
 x23::Async<AuthStatus<std::optional<AccountAuthData>>>
 DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
