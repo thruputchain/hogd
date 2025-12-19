@@ -352,3 +352,38 @@ fn test_fibonacci_computation() {
         free_wasmtime_context(context);
     }
 }
+
+#[test]
+fn test_fibonacci_computation_overflow() {
+    unsafe {
+        let context = new_wasmtime_context();
+        let wasm_bytes = load_wasm_file("fibonacci.wasm");
+        let contract_hash = [0u8; 32];
+        
+        let runtime = new_wasmtime_runtime(
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len() as u32,
+            contract_hash.as_ptr(),
+            std::ptr::null_mut(),
+            context,
+        );
+        
+        assert!(!runtime.is_null(), "Runtime should be created");
+
+        wasmtime_set_available_gas(runtime, 1_000_000_000_000);
+        
+        // Try to invoke the fib function
+        let fn_name = b"fib30";
+        let result = wasmtime_invoke(
+            runtime,
+            fn_name.as_ptr(),
+            fn_name.len() as u32,
+        );
+        
+        // Verify we get the expected error code
+        assert_ne!(result.error, common::InvokeErrorCode::kInvokeUnrecoverable as i32, "Fibonacci invoke should fail with stack overflow");
+
+        free_wasmtime_runtime(runtime);
+        free_wasmtime_context(context);
+    }
+}
