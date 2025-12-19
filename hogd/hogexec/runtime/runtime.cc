@@ -18,6 +18,7 @@ namespace hogd {
 namespace {
 
 thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
+thread_local WasmtimeModuleCache wasmtime_module_cache = WasmtimeModuleCache(10);
 
 } // namespace
 
@@ -26,6 +27,7 @@ void
 reset_module_cache()
 {
   module_cache.test_reset_cache(10);
+  wasmtime_module_cache.test_reset_cache(10);
 }
 } // namespace test
 
@@ -34,7 +36,7 @@ make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
-    return std::make_unique<WasmtimeContext>();
+    return std::make_unique<WasmtimeContext>(&wasmtime_module_cache);
    // return std::make_unique<WasmiContext>(&module_cache);
     break;
   default:

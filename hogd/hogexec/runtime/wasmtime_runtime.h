@@ -24,6 +24,10 @@ public:
   WasmtimeModuleCache(WasmtimeModuleCache const &) = delete;
   WasmtimeModuleCache &operator=(WasmtimeModuleCache const &) = delete;
 
+  // Not threadsafe with any transaction using the cache.
+  // should ONLY be used in test setup/teardown.
+  void test_reset_cache(size_t capacity);
+
 private:
   friend class WasmtimeContext;
   void *get_inner() const { return wasmtime_module_cache_ptr_; }

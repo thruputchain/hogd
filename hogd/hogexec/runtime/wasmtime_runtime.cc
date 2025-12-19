@@ -35,6 +35,16 @@ WasmtimeModuleCache::~WasmtimeModuleCache()
   }
 }
 
+void
+WasmtimeModuleCache::test_reset_cache(size_t capacity)
+{
+  assert(capacity > 0);
+  if (wasmtime_module_cache_ptr_ != nullptr) {
+    free_wasmtime_module_cache(wasmtime_module_cache_ptr_);
+  }
+  wasmtime_module_cache_ptr_ = new_wasmtime_module_cache(capacity);
+}
+
 class WasmtimeGlobalContext {
 public:
   WasmtimeGlobalContext() {
