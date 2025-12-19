@@ -235,6 +235,7 @@ private:
     x23::XdrVec<ShardCard> cards;
     Registration::registration().shards_registered(&cards);
     CHECK(!cards.empty());
+    info("HERE ADDR IS {}", cards[0].address_for_auth);
     auth_ = std::make_unique<AuthServer>(cards[0].address_for_auth.c_str());
 
     ready_.store(true, std::memory_order_release);
