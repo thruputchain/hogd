@@ -3,7 +3,10 @@ use core::slice;
 
 use common::string_from_parts;
 
-use wasmtime::{Caller, Config, Engine, Linker, Module, InstanceAllocationStrategy, PoolingAllocationConfig};
+use wasmtime::{
+    Caller, Config, Engine, InstanceAllocationStrategy, Linker, Module,
+    PoolingAllocationConfig,
+};
 
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
@@ -41,7 +44,7 @@ pub struct WasmtimeGlobalContext {
 impl WasmtimeGlobalContext {
     fn new() -> WasmtimeGlobalContext {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let allocation_config : PoolingAllocationConfig =        
+        let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
                 .max_unused_warm_slots(8192)
                 .total_core_instances(8192)
@@ -49,8 +52,9 @@ impl WasmtimeGlobalContext {
                 .total_tables(8192)
                 .linear_memory_keep_resident(page_size * 2)
                 .max_memory_size(page_size * 2)
-                .table_keep_resident(20000).clone();
-                // .table_elements(max_size: default is 20k, leaving that as is)
+                .table_keep_resident(20000)
+                .clone();
+        // .table_elements(max_size: default is 20k, leaving that as is)
 
         Self {
             engine: Engine::new(
@@ -66,14 +70,15 @@ impl WasmtimeGlobalContext {
                     .max_wasm_stack(16 * 1024)
                     // Configs set as per wasmtime documentation to eliminate vmm in steady state
                     // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
-                    .memory_init_cow(true)
+                    .memory_init_cow(false)
                     .memory_guard_size(0)
                     .memory_reservation(2 * page_size as u64)
                     .guard_before_linear_memory(false)
-                    .allocation_strategy(
-                        InstanceAllocationStrategy::Pooling(allocation_config),
-                ),
-            ).unwrap(),
+                    .allocation_strategy(InstanceAllocationStrategy::Pooling(
+                        allocation_config,
+                    )),
+            )
+            .unwrap(),
         }
     }
 }
@@ -367,7 +372,8 @@ pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
 pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
     debug_assert!(!p.is_null());
 
-    let context: *mut WasmtimeGlobalContext = unsafe { core::mem::transmute(p) };
+    let context: *mut WasmtimeGlobalContext =
+        unsafe { core::mem::transmute(p) };
 
     unsafe { drop(Box::from_raw(context)) };
 }
@@ -383,8 +389,12 @@ pub unsafe extern "C" fn new_wasmtime_context(
     module_cache: *mut c_void,
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
-    let global_context: &WasmtimeGlobalContext = unsafe { &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(global_context) };
-    
+    let global_context: &WasmtimeGlobalContext = unsafe {
+        &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(
+            global_context,
+        )
+    };
+
     let b = if module_cache.is_null() {
         Box::new(WasmtimeContext::new(global_context, None))
     } else {

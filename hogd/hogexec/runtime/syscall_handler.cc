@@ -305,7 +305,7 @@ SystemCallHandler::try_commit_transaction()
     if (!abort_status.has_value()) {
       return to_exec_result(abort_status.error().code());
     }
-    
+
     // abort_transaction() sets transaction_committed_or_aborted_ to true
     return ExecResult::ExecResultTxNonDeterministicError;
   }

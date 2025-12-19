@@ -47,10 +47,12 @@ WasmtimeModuleCache::test_reset_cache(size_t capacity)
 
 class WasmtimeGlobalContext {
 public:
-  WasmtimeGlobalContext() {
+  WasmtimeGlobalContext()
+  {
     wasmtime_global_context_ptr_ = new_wasmtime_global_context();
   }
-  ~WasmtimeGlobalContext() {
+  ~WasmtimeGlobalContext()
+  {
     if (wasmtime_global_context_ptr_ != nullptr) {
       free_wasmtime_global_context(wasmtime_global_context_ptr_);
     }
@@ -64,9 +66,9 @@ WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
 {
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
-  wasmtime_context_ptr_ = new_wasmtime_context(
-      wasmtime_global_context.wasmtime_global_context_ptr_,
-      module_cache ? module_cache->get_inner() : nullptr);
+  wasmtime_context_ptr_ =
+      new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_,
+                           module_cache ? module_cache->get_inner() : nullptr);
 }
 
 WasmtimeContext::~WasmtimeContext()
@@ -84,15 +86,16 @@ WasmtimeContext::make_new_runtime(
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   // Resolve the contract to get the WASM bytes
-  auto contract_res = syscall_handler->resolve_contract(
-      deployed_contract_hash.hash);
+  auto contract_res =
+      syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract_res.has_value()) {
     return contract_res.error();
   }
 
   auto const &contract = *contract_res;
-  // TODO(geoff): When kWasmtime contract type is added, use that instead of kWasmi
-  // For now, wasmtime contracts use the same WASM bytecode format as wasmi
+  // TODO(geoff): When kWasmtime contract type is added, use that instead of
+  // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
+  // wasmi
   if (contract->contract_type() != ContractType::kWasmi) [[unlikely]] {
     error("Unrecoverable: Attempt to access a non-wasmi contract from "
           "inside WasmtimeContext::make_new_runtime");
@@ -109,10 +112,10 @@ WasmtimeContext::make_new_runtime(
   try {
     auto const &wasm = contract->wasmi_contract().wasm;
 
-    void *wasmtime_runtime_ptr = new_wasmtime_runtime(
-        wasm.data(), static_cast<uint32_t>(wasm.size()),
-        deployed_contract_hash.hash.data(), host_call_context.get(),
-        wasmtime_context_ptr_);
+    void *wasmtime_runtime_ptr =
+        new_wasmtime_runtime(wasm.data(), static_cast<uint32_t>(wasm.size()),
+                             deployed_contract_hash.hash.data(),
+                             host_call_context.get(), wasmtime_context_ptr_);
 
     if (wasmtime_runtime_ptr == nullptr) {
       return SystemError{SystemErrorCode::kSystemUnrecoverable};
@@ -131,17 +134,19 @@ WasmtimeContext::verify_contract(Contract const &contract) const
 {
   assert(wasmtime_context_ptr_);
 
-  // TODO(geoff): When kWasmtime contract type is added, use that instead of kWasmi
-  // For now, wasmtime contracts use the same WASM bytecode format as wasmi
+  // TODO(geoff): When kWasmtime contract type is added, use that instead of
+  // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
+  // wasmi
   if (contract.contract_type() != ContractType::kWasmi) {
     return false;
   }
 
   try {
     auto const &wasm = contract.wasmi_contract().wasm;
-    return wasmtime_verify_contract(
-        wasmtime_context_ptr_,
-        reinterpret_cast<uint8_t const *>(wasm.data()), wasm.size());
+    return wasmtime_verify_contract(wasmtime_context_ptr_,
+                                    reinterpret_cast<uint8_t const *>(
+                                        wasm.data()),
+                                    wasm.size());
   } catch (x23::XdrBadUnionAccess const &e) {
     error("Unrecoverable: Bad union access: {}", e.what());
     return false;
@@ -150,16 +155,17 @@ WasmtimeContext::verify_contract(Contract const &contract) const
 
 bool
 WasmtimeContext::link_fn_nargs(std::string_view module_name,
-                                std::string_view fn_name, void *fn_ptr,
-                                uint8_t nargs)
+                               std::string_view fn_name, void *fn_ptr,
+                               uint8_t nargs)
 {
   assert(wasmtime_context_ptr_ != nullptr);
-  return wasmtime_link_nargs(
-      wasmtime_context_ptr_,
-      reinterpret_cast<uint8_t const *>(module_name.data()),
-      static_cast<uint32_t>(module_name.size()),
-      reinterpret_cast<uint8_t const *>(fn_name.data()),
-      static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
+  return wasmtime_link_nargs(wasmtime_context_ptr_,
+                             reinterpret_cast<uint8_t const *>(
+                                 module_name.data()),
+                             static_cast<uint32_t>(module_name.size()),
+                             reinterpret_cast<uint8_t const *>(fn_name.data()),
+                             static_cast<uint32_t>(fn_name.size()), fn_ptr,
+                             nargs);
 }
 
 std::span<std::byte>
@@ -175,10 +181,10 @@ WasmtimeRuntime::invoke_internal(std::string_view method_name)
 {
   assert(wasmtime_runtime_ptr_ != nullptr);
 
-  WasmtimeInvokeResult res = wasmtime_invoke(
-      wasmtime_runtime_ptr_,
-      reinterpret_cast<uint8_t const *>(method_name.data()),
-      static_cast<uint32_t>(method_name.size()));
+  WasmtimeInvokeResult res =
+      wasmtime_invoke(wasmtime_runtime_ptr_,
+                      reinterpret_cast<uint8_t const *>(method_name.data()),
+                      static_cast<uint32_t>(method_name.size()));
 
   InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
   trace("Wasmtime Invoke Result: {}",

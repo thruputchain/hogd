@@ -72,7 +72,9 @@ pub unsafe extern "C" fn free_wasmtime_module_cache(ptr: *mut c_void) {
 /// # Safety
 /// ptr must be a pointer to a ModuleCache, which was produced by new_wasmtime_module_cache.
 #[no_mangle]
-pub unsafe extern "C" fn wasmtime_module_cache_cached_size(ptr: *mut c_void) -> usize {
+pub unsafe extern "C" fn wasmtime_module_cache_cached_size(
+    ptr: *mut c_void,
+) -> usize {
     debug_assert!(!ptr.is_null());
     let cache: *mut ModuleCache = unsafe { core::mem::transmute(ptr) };
     let cache = unsafe { &mut *cache };

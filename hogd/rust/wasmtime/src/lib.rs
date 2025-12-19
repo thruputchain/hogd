@@ -16,7 +16,10 @@ pub use context::{
     new_wasmtime_global_context, wasmtime_link_nargs, wasmtime_verify_contract,
 };
 pub use invoke_result::WasmtimeInvokeResult;
-pub use module_cache::{free_wasmtime_module_cache, new_wasmtime_module_cache, wasmtime_module_cache_cached_size};
+pub use module_cache::{
+    free_wasmtime_module_cache, new_wasmtime_module_cache,
+    wasmtime_module_cache_cached_size,
+};
 pub use runtime::{
     free_wasmtime_runtime, new_wasmtime_runtime, wasmtime_invoke,
 };

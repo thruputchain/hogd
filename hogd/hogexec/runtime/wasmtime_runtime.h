@@ -42,8 +42,8 @@ private:
 // and provide new runtime instances.
 //
 // The intent with this API is to abstract away most of the details
-// of wasmtime, so that later switching to a different engine, should we so choose,
-// should not require significant redesign work.
+// of wasmtime, so that later switching to a different engine, should we so
+// choose, should not require significant redesign work.
 //
 // This should NOT be used across multiple concurrent transactions.
 class WasmtimeContext : public RuntimeContext {
@@ -76,7 +76,7 @@ class WasmtimeRuntime : public Runtime {
 public:
   // should be called only from within WasmtimeContext::make_new_runtime
   WasmtimeRuntime(std::unique_ptr<HostCallContext> host_call_context,
-               void *wasmtime_runtime_ptr);
+                  void *wasmtime_runtime_ptr);
 
   ~WasmtimeRuntime() override;
 
