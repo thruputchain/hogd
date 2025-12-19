@@ -15,7 +15,7 @@ namespace hogd {
 
 class DBAuthClient {
 public:
-  DBAuthClient(IntroAuthResult intro_auth_result);
+  DBAuthClient(const std::string &address_for_auth);
 
   x23::Async<AuthStatus<std::optional<AccountAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);

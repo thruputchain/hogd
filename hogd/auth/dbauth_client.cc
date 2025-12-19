@@ -2,7 +2,7 @@
 
 #include <optional>
 #include <stdexcept>
-#include <utility>
+#include <string>
 
 #include "account.hh"
 #include "auth_card.hh"
@@ -19,11 +19,10 @@ namespace hogd {
 namespace {
 
 auto
-make_dbauth_client(IntroAuthResult intro_auth_result)
+make_dbauth_client(const std::string &address_for_auth)
 {
-  CHECK(intro_auth_result.shards.size() == 1);
   x23::HostPort hostport;
-  if (!hostport.parse(intro_auth_result.shards[0].address_for_auth)) {
+  if (!hostport.parse(address_for_auth)) {
     throw std::runtime_error("Failed to parse database shard address");
   }
   return make_rpc_client<DBAuth1>(hostport);
@@ -31,8 +30,8 @@ make_dbauth_client(IntroAuthResult intro_auth_result)
 
 } // namespace
 
-DBAuthClient::DBAuthClient(IntroAuthResult intro_auth_result)
-  : client_(make_dbauth_client(std::move(intro_auth_result))())
+DBAuthClient::DBAuthClient(const std::string &address_for_auth)
+  : client_(make_dbauth_client(address_for_auth)())
 {}
 
 x23::Async<AuthStatus<std::optional<AccountAuthData>>>
