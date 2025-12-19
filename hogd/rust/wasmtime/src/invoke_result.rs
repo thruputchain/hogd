@@ -2,8 +2,9 @@ use crate::debug_log;
 use common::InvokeErrorCode;
 
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct WasmtimeInvokeResult {
-    error: i32, // InvokeErrorCode
+    pub error: i32, // InvokeErrorCode
 }
 
 impl WasmtimeInvokeResult {

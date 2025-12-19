@@ -16,14 +16,28 @@ corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
 
 corrosion_add_target_rustflags(unified_lib "-C target-cpu=native")
 
-
-
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   corrosion_set_features(unified_lib
       FEATURES
           debug_logging
   )
 endif()
+
+
+# If we want asan:
+#
+# Use nightly toolchain for Rust builds
+#set(CARGO_BUILD_COMMAND "cargo +nightly build")
+#set(CARGO_TEST_COMMAND "cargo +nightly test")
+#set(CARGO_RUN_COMMAND "cargo +nightly run")
+
+#corrosion_set_env_vars(unified_lib RUSTFLAGS="-Zsanitizer=address")
+#corrosion_set_env_vars(unified_lib ASAN_OPTIONS=detect_stack_use_after_return=1:abort_on_error=1)
+#set_property(TARGET unified_lib PROPERTY CARGO_BUILD_FLAGS "+nightly -Zsanitizer=address")
+
+
+
+
 
 
 add_dependencies(

@@ -7,6 +7,20 @@ pub mod error;
 pub mod invoke_result;
 pub mod runtime;
 
+// Re-export FFI functions and types for testing and external use
+pub use context::{
+    new_wasmtime_context,
+    free_wasmtime_context,
+    wasmtime_verify_contract,
+    wasmtime_link_nargs,
+};
+pub use runtime::{
+    new_wasmtime_runtime,
+    free_wasmtime_runtime,
+    wasmtime_invoke,
+};
+pub use invoke_result::WasmtimeInvokeResult;
+
 #[cfg(feature = "debug_logging")]
 #[macro_export]
 macro_rules! debug_log {
@@ -24,9 +38,10 @@ macro_rules! debug_log {
 }
 
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct WasmtimeMemorySlice {
-    mem: *mut u8,
-    sz: u32,
+    pub mem: *mut u8,
+    pub sz: u32,
 }
 
 /// # Safety
