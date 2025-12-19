@@ -24,6 +24,17 @@
 
 namespace hogd {
 
+WasmtimeModuleCache::WasmtimeModuleCache(size_t capacity)
+  : wasmtime_module_cache_ptr_(new_wasmtime_module_cache(capacity))
+{}
+
+WasmtimeModuleCache::~WasmtimeModuleCache()
+{
+  if (wasmtime_module_cache_ptr_ != nullptr) {
+    free_wasmtime_module_cache(wasmtime_module_cache_ptr_);
+  }
+}
+
 class WasmtimeGlobalContext {
 public:
   WasmtimeGlobalContext() {
@@ -38,12 +49,14 @@ public:
   void *wasmtime_global_context_ptr_;
 };
 
-WasmtimeContext::WasmtimeContext()
+WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
   : wasmtime_context_ptr_(nullptr)
 {
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
-  wasmtime_context_ptr_ = new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_);
+  wasmtime_context_ptr_ = new_wasmtime_context(
+      wasmtime_global_context.wasmtime_global_context_ptr_,
+      module_cache ? module_cache->get_inner() : nullptr);
 }
 
 WasmtimeContext::~WasmtimeContext()

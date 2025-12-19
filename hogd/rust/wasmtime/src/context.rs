@@ -6,6 +6,7 @@ use common::string_from_parts;
 use wasmtime::{Caller, Config, Engine, Linker, Module, PoolingAllocationConfig};
 
 use crate::error::TrampolineError;
+use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 use common::TrampolineResult;
 
 pub struct LinkEntry {
@@ -75,9 +76,10 @@ impl WasmtimeGlobalContext {
     }
 }
 
-pub struct WasmtimeContext {
+pub struct WasmtimeContext<'a> {
     pub global_context: WasmtimeGlobalContext,
     pub entries: Vec<LinkEntry>,
+    pub module_cache: Option<&'a mut ModuleCache>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -132,11 +134,37 @@ macro_rules! link_function_nargs {
     };
 }
 
-impl WasmtimeContext {
-    fn new(global_context: &WasmtimeGlobalContext) -> WasmtimeContext {
+impl<'a> WasmtimeContext<'a> {
+    fn new(
+        global_context: &WasmtimeGlobalContext,
+        module_cache: Option<&'a mut ModuleCache>,
+    ) -> WasmtimeContext<'a> {
         Self {
             global_context: global_context.clone(),
             entries: Vec::new(),
+            module_cache,
+        }
+    }
+
+    pub fn has_module_cache(&self) -> bool {
+        self.module_cache.is_some()
+    }
+
+    pub fn get_cached_module(
+        &mut self,
+        hash: &[u8; 32],
+    ) -> Option<ModuleCacheEntry> {
+        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
+    }
+
+    pub fn put_cached_module(
+        &mut self,
+        hash: &[u8; 32],
+        module: &Module,
+        linker: &Linker<*mut c_void>,
+    ) {
+        if let Some(cache) = self.module_cache.as_mut() {
+            cache.put(hash, module, linker);
         }
     }
 
@@ -277,7 +305,7 @@ impl WasmtimeContext {
 
 /// # Safety
 /// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
-/// Context must have been created by new_wasmi_context.
+/// Context must have been created by new_wasmtime_context.
 #[no_mangle]
 pub unsafe extern "C" fn wasmtime_link_nargs(
     context_void: *mut c_void,
@@ -344,27 +372,41 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
 
 // Rust FFI needs no_mangle and extern "C"
 /// # Safety
+/// global_context must not be nullptr and must have been created by new_wasmtime_global_context.
 /// module_cache can be nullptr, in which case no module cache is used.
-/// module_cache is threadsafe, so it can be safely shared across threads.
-/// module_cache must outlive WasmiContext.
+/// module_cache must outlive WasmtimeContext.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_context(global_context: *mut c_void) -> *mut c_void {
+pub unsafe extern "C" fn new_wasmtime_context(
+    global_context: *mut c_void,
+    module_cache: *mut c_void,
+) -> *mut c_void {
     debug_assert!(!global_context.is_null());
     let global_context: &WasmtimeGlobalContext = unsafe { &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(global_context) };
-    let b = Box::new(WasmtimeContext::new(global_context));
+    
+    let b = if module_cache.is_null() {
+        Box::new(WasmtimeContext::new(global_context, None))
+    } else {
+        Box::new(WasmtimeContext::new(global_context, unsafe {
+            Some(
+                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
+                    module_cache,
+                )),
+            )
+        }))
+    };
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 
 /// # Safety
 /// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
-/// Context must have been created by new_wasmi_context.
+/// Context must have been created by new_wasmtime_context.
 /// Context must not be accessed after this call.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmtime_context(p: *mut c_void) {
     debug_assert!(!p.is_null());
 
-    let context: *mut WasmtimeContext = unsafe { core::mem::transmute::<*mut c_void, *mut WasmtimeContext>(p) };
+    let context: *mut WasmtimeContext = unsafe { core::mem::transmute(p) };
 
     unsafe { drop(Box::from_raw(context)) };
 }

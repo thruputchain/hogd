@@ -59,15 +59,39 @@ impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
-        _hash: &[u8; 32],
+        hash: &[u8; 32],
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let (module, linker) = {
+        let (module, linker) = if context.has_module_cache() {
+            if let Some(cached) = context.get_cached_module(hash) {
+                (cached.module, cached.linker)
+            } else {
+                let linker = context.linker();
+                let module = Module::new(linker.engine(), bytes)
+                    .inspect_err(|_e| {
+                        debug_log!(eprintln!("Module new error: {_e}"))
+                    })
+                    .ok()?;
+
+                if !check_memory_limit(&module) {
+                    debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+                    return None;
+                }
+                if !check_no_start(&module) {
+                    debug_log!(eprintln!(
+                        "Module instantiation failed: Has start function"
+                    ));
+                    return None;
+                }
+                context.put_cached_module(hash, &module, &linker);
+                (module, linker)
+            }
+        } else {
             let linker = context.linker();
             let module = Module::new(linker.engine(), bytes)
                 .inspect_err(|_e| {
-                    debug_log!(eprintln!("Module new_unchecked error: {_e}"))
+                    debug_log!(eprintln!("Module new error: {_e}"))
                 })
                 .ok()?;
 

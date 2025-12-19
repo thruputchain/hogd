@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 // Import the FFI functions from wasmtime_lib
 use wasmtime_lib::{
-    free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
-    new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
-    wasmtime_get_available_gas, wasmtime_get_memory, wasmtime_invoke,
-    wasmtime_set_available_gas, wasmtime_verify_contract,
+    free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_module_cache,
+    free_wasmtime_runtime, new_wasmtime_context, new_wasmtime_global_context,
+    new_wasmtime_module_cache, new_wasmtime_runtime, wasmtime_get_available_gas,
+    wasmtime_get_memory, wasmtime_invoke, wasmtime_set_available_gas,
+    wasmtime_verify_contract, wasmtime_module_cache_cached_size,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
@@ -170,7 +171,7 @@ fn test_create_context() {
     unsafe {
         let global_context = new_wasmtime_global_context();
         assert!(!global_context.is_null(), "Global context should be created");
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         assert!(!context.is_null(), "Context should be created");
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -181,7 +182,7 @@ fn test_create_context() {
 fn test_verify_valid_wasm() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         assert!(!context.is_null());
 
         // Load a test WASM file
@@ -205,7 +206,7 @@ fn test_verify_valid_wasm() {
 fn test_create_runtime() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("simple_add.wasm");
 
         // Create a dummy contract hash
@@ -232,7 +233,7 @@ fn test_create_runtime() {
 fn test_get_memory() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("simple_add.wasm");
         let contract_hash = [0u8; 32];
 
@@ -266,7 +267,7 @@ fn test_get_memory() {
 fn test_invoke_function() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         let contract_hash = [0u8; 32];
 
@@ -299,7 +300,7 @@ fn test_invoke_function() {
 fn test_gas_metering() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         let contract_hash = [0u8; 32];
 
@@ -338,7 +339,7 @@ fn test_missing_wasm_file() {
 fn test_verify_invalid_wasm() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
 
         // Create some invalid WASM bytes
         let invalid_wasm = vec![0x00, 0x01, 0x02, 0x03];
@@ -361,7 +362,7 @@ fn test_verify_invalid_wasm() {
 fn test_multiple_runtimes() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         let contract_hash = [0u8; 32];
 
@@ -398,7 +399,7 @@ fn test_fibonacci_computation() {
     // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         let contract_hash = [0u8; 32];
 
@@ -437,7 +438,7 @@ fn test_fibonacci_computation() {
 fn test_fibonacci_computation_overflow() {
     unsafe {
         let global_context = new_wasmtime_global_context();
-        let context = new_wasmtime_context(global_context);
+        let context = new_wasmtime_context(global_context, std::ptr::null_mut());
         let wasm_bytes = load_wasm_file("fibonacci.wasm");
         let contract_hash = [0u8; 32];
 
@@ -467,6 +468,65 @@ fn test_fibonacci_computation_overflow() {
 
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
+        free_wasmtime_global_context(global_context);
+    }
+}
+
+#[test]
+fn test_module_cache() {
+    unsafe {
+        let global_context = new_wasmtime_global_context();
+        assert!(!global_context.is_null());
+
+        // Create a module cache with capacity 10
+        let module_cache = new_wasmtime_module_cache(10);
+        assert!(!module_cache.is_null());
+
+        // Create context with module cache
+        let context = new_wasmtime_context(global_context, module_cache);
+        assert!(!context.is_null());
+
+        // Load a WASM file
+        let wasm_bytes = load_wasm_file("simple_add.wasm");
+
+        // Create first runtime - this should cache the module
+        let hash1: [u8; 32] = [1u8; 32];
+        let runtime1 = new_wasmtime_runtime(
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len() as u32,
+            hash1.as_ptr(),
+            std::ptr::null_mut(),
+            context,
+        );
+        assert!(!runtime1.is_null(), "First runtime should be created");
+        assert_eq!(wasmtime_module_cache_cached_size(module_cache), 1, "Module cache should have 1 cached module");
+        // Create second runtime with same hash - should use cached module
+        let runtime2 = new_wasmtime_runtime(
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len() as u32,
+            hash1.as_ptr(),
+            std::ptr::null_mut(),
+            context,
+        );
+        assert!(!runtime2.is_null(), "Second runtime should be created from cache");
+        assert_eq!(wasmtime_module_cache_cached_size(module_cache), 1, "Module cache should still have 1 cached module");
+        // Create third runtime with different hash - should cache a new module
+        let hash2: [u8; 32] = [2u8; 32];
+        let runtime3 = new_wasmtime_runtime(
+            wasm_bytes.as_ptr(),
+            wasm_bytes.len() as u32,
+            hash2.as_ptr(),
+            std::ptr::null_mut(),
+            context,
+        );
+        assert!(!runtime3.is_null(), "Third runtime should be created");
+        assert_eq!(wasmtime_module_cache_cached_size(module_cache), 2, "Module cache should have 2 cached modules");
+        // Clean up
+        free_wasmtime_runtime(runtime1);
+        free_wasmtime_runtime(runtime2);
+        free_wasmtime_runtime(runtime3);
+        free_wasmtime_context(context);
+        free_wasmtime_module_cache(module_cache);
         free_wasmtime_global_context(global_context);
     }
 }

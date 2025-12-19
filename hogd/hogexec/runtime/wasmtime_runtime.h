@@ -14,6 +14,23 @@ namespace hogd {
 
 struct Contract;
 
+// Wrapper around a Rust-side module cache.
+// Thread-safe and can be shared across transactions.
+class WasmtimeModuleCache {
+public:
+  WasmtimeModuleCache(size_t capacity);
+  ~WasmtimeModuleCache();
+
+  WasmtimeModuleCache(WasmtimeModuleCache const &) = delete;
+  WasmtimeModuleCache &operator=(WasmtimeModuleCache const &) = delete;
+
+private:
+  friend class WasmtimeContext;
+  void *get_inner() const { return wasmtime_module_cache_ptr_; }
+
+  void *wasmtime_module_cache_ptr_ = nullptr;
+};
+
 // Context shared between WasmtimeRuntime objects.
 // Guarantee isolation between transactions
 // by starting each transaction with a separate
@@ -27,7 +44,9 @@ struct Contract;
 // This should NOT be used across multiple concurrent transactions.
 class WasmtimeContext : public RuntimeContext {
 public:
-  WasmtimeContext();
+  // module_cache can be nullptr, in which case no module cache is used.
+  // module_cache must outlive this WasmtimeContext.
+  WasmtimeContext(WasmtimeModuleCache *module_cache = nullptr);
 
   // wrapper around a manual drop call on the rust side
   ~WasmtimeContext() override;
