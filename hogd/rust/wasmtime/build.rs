@@ -1,10 +1,10 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn convert_wat_to_wasm(
-    manifest_dir: &PathBuf,
-    out_dir: &PathBuf,
+    manifest_dir: &Path,
+    out_dir: &Path,
     wat_filename: &str,
     wasm_filename: &str,
 ) {

@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/wasmtime_runtime.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
