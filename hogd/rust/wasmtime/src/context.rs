@@ -67,10 +67,10 @@ impl WasmtimeGlobalContext {
             Config::default()
                 .consume_fuel(true)
                 .wasm_backtrace(false)
-                .strategy(wasmtime::Strategy::Cranelift)
+                .strategy(wasmtime::Strategy::Winch)
                 // cranelift-only options
-                .signals_based_traps(false)
-                .table_lazy_init(true)
+                //.signals_based_traps(false)
+                //.table_lazy_init(true)
                 // done cranelift-only
                 .cranelift_pcc(false)
                 .native_unwind_info(false)
