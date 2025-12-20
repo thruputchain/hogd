@@ -954,12 +954,16 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
+  SignedTransactionHashBatch tx_hashes;
   SignedTransactionBatch txs;
   for (const KeyChange &change : key_changes) {
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
-    SignedTransactionBatch change_txs =
-        scheduler_->get_txs_for_account(change.address);
+    SignedTransactionHashBatch change_tx_hashes;
+    SignedTransactionBatch change_txs;
+    scheduler_->get_txs_for_account(change.address, change_tx_hashes,
+                                    change_txs);
+    tx_hashes += change_tx_hashes;
     txs += change_txs;
   }
   AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
@@ -969,7 +973,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
       // TODO(jhumphri): The scheduler already has the hashes.
-      to_remove.push_back(sha256(txs[i]));
+      to_remove.push_back(txs_hashes[i]);
     }
   }
   // The txs are on the runqueue and need to be removed, so we set

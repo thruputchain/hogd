@@ -65,15 +65,17 @@ public:
     return nullptr;
   }
 
-  SignedTransactionBatch get_txs_for_account(const ContractAddress &address)
+  void get_txs_for_account(const ContractAddress &address,
+                           SignedTransactionHashBatch &tx_hashes,
+                           SignedTransactionBatch &txs)
   {
     auto [txs, lock] = account_to_tx_[address];
-    SignedTransactionBatch ret;
-    ret.reserve(txs.size());
-    for (const auto &[_, tx_value] : txs) {
-      ret.push_back(tx_value->tx);
+    tx_hashes.reserve(txs.size());
+    txs.reserve(txs.size());
+    for (const auto &[tx_key, tx_value] : txs) {
+      tx_hashes.push_back(tx_key.tx_hash);
+      txs.push_back(tx_value->tx);
     }
-    return ret;
   }
 
   void reenqueue_txs(const auto &begin, const auto &end)
