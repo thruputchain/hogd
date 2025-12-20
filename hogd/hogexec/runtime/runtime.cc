@@ -19,7 +19,7 @@ namespace {
 
 thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
 thread_local WasmtimeModuleCache wasmtime_module_cache =
-    WasmtimeModuleCache(100);
+    WasmtimeModuleCache(200);
 
 } // namespace
 
@@ -28,7 +28,7 @@ void
 reset_module_cache()
 {
   module_cache.test_reset_cache(10);
-  wasmtime_module_cache.test_reset_cache(100);
+  wasmtime_module_cache.test_reset_cache(200);
 }
 } // namespace test
 

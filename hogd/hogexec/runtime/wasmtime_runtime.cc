@@ -50,8 +50,8 @@ class WasmtimeGlobalContext {
 public:
   WasmtimeGlobalContext()
   {
-    size_t max_llc_count = x23::llc_map->nbuckets();
-    wasmtime_global_context_ptr_ = new_wasmtime_global_context(max_llc_count);
+    engine_count = 64;
+    wasmtime_global_context_ptr_ = new_wasmtime_global_context(engine_count);
   }
   ~WasmtimeGlobalContext()
   {
@@ -61,6 +61,7 @@ public:
   }
 
   void *wasmtime_global_context_ptr_;
+  size_t engine_count;
 };
 
 WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
@@ -69,11 +70,11 @@ WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
   
-  size_t current_llc = x23::llc_map->bucket();
+  size_t engine = x23::core_map->bucket() % wasmtime_global_context.engine_count;
   wasmtime_context_ptr_ =
       new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_,
                            module_cache ? module_cache->get_inner() : nullptr,
-                           current_llc);
+                           engine);
 }
 
 WasmtimeContext::~WasmtimeContext()
