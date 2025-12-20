@@ -973,7 +973,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
       // TODO(jhumphri): The scheduler already has the hashes.
-      to_remove.push_back(txs_hashes[i]);
+      to_remove.push_back(tx_hashes[i]);
     }
   }
   // The txs are on the runqueue and need to be removed, so we set
