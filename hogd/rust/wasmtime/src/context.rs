@@ -48,7 +48,7 @@ pub struct WasmtimeGlobalContext {
 impl WasmtimeGlobalContext {
     fn new_engine() -> Engine {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let num_slots: u32 = 256;
+        let num_slots: u32 = 1024;
         let table_size: usize = 64;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
