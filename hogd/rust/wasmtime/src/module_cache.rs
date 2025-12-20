@@ -1,6 +1,6 @@
 use lru::LruCache;
 
-use wasmtime::{Linker, Module};
+use wasmtime::{InstancePre, Linker, Module};
 
 use crate::SHA256Hash;
 use core::ffi::c_void;
@@ -8,8 +8,7 @@ use std::num::NonZeroUsize;
 
 #[derive(Clone)]
 pub struct ModuleCacheEntry {
-    pub module: Module,
-    pub linker: Linker<*mut c_void>,
+    pub instance: InstancePre<*mut c_void>,
 }
 
 // Module cache is NOT threadsafe, and should NOT be shared across threads.
@@ -31,14 +30,12 @@ impl ModuleCache {
     pub fn put(
         &mut self,
         hash: &SHA256Hash,
-        module: &Module,
-        linker: &Linker<*mut c_void>,
+        instance: &InstancePre<*mut c_void>,
     ) {
         self.cache.put(
             *hash,
             ModuleCacheEntry {
-                module: module.clone(),
-                linker: linker.clone(),
+                instance: instance.clone(),
             },
         );
     }

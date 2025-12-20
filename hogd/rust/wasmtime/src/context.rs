@@ -4,8 +4,8 @@ use core::slice;
 use common::string_from_parts;
 
 use wasmtime::{
-    Caller, Config, Engine, InstanceAllocationStrategy, Linker, Module,
-    PoolingAllocationConfig,
+    Caller, Config, Engine, InstanceAllocationStrategy, InstancePre, Linker,
+    Module, PoolingAllocationConfig,
 };
 
 use crate::error::TrampolineError;
@@ -167,11 +167,10 @@ impl<'a> WasmtimeContext<'a> {
     pub fn put_cached_module(
         &mut self,
         hash: &[u8; 32],
-        module: &Module,
-        linker: &Linker<*mut c_void>,
+        instance: &InstancePre<*mut c_void>,
     ) {
         if let Some(cache) = self.module_cache.as_mut() {
-            cache.put(hash, module, linker);
+            cache.put(hash, instance);
         }
     }
 

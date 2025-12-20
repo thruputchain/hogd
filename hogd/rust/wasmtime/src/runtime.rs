@@ -63,9 +63,9 @@ impl WasmtimeRuntime {
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let (module, linker) = if context.has_module_cache() {
+        let instance_pre = if context.has_module_cache() {
             if let Some(cached) = context.get_cached_module(hash) {
-                (cached.module, cached.linker)
+                cached.instance
             } else {
                 let linker = context.linker();
                 let module = Module::new(linker.engine(), bytes)
@@ -84,8 +84,15 @@ impl WasmtimeRuntime {
                     ));
                     return None;
                 }
-                context.put_cached_module(hash, &module, &linker);
-                (module, linker)
+
+                let instance_pre = linker
+                    .instantiate_pre(&module)
+                    .inspect_err(|_e| {
+                        debug_log!(eprintln!("Error instantiating store: {_e}"))
+                    })
+                    .ok()?;
+                context.put_cached_module(hash, &instance_pre);
+                instance_pre
             }
         } else {
             let linker = context.linker();
@@ -105,17 +112,22 @@ impl WasmtimeRuntime {
                 ));
                 return None;
             }
-            (module, linker)
+            let instance_pre = linker
+                .instantiate_pre(&module)
+                .inspect_err(|_e| {
+                    debug_log!(eprintln!("Error instantiating store: {_e}"))
+                })
+                .ok()?;
+            instance_pre
         };
 
-        let mut store = Store::new(module.engine(), userctx);
-        let instance = linker
-            .instantiate(&mut store, &module)
+        let mut store = Store::new(&context.global_context.engine, userctx);
+        let instance = instance_pre
+            .instantiate(&mut store)
             .inspect_err(|_e| {
                 debug_log!(eprintln!("Error instantiating store: {_e}"))
             })
             .ok()?;
-
         Some(Self { store, instance })
     }
 
