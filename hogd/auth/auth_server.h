@@ -15,6 +15,7 @@
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/version.h"
@@ -151,7 +152,7 @@ public:
   AuthCard make_auth_card(std::string hostname = "")
   {
     if (hostname.empty()) {
-      CHECK_EQ(gethostname(hostname.data(), hostname.size()), 0);
+      CHECK_EQ(get_hostname(hostname), 0);
     }
     return {
         .protocol = version::kHogdProtocol(),
