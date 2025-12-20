@@ -954,13 +954,17 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
-  SignedTransactionHashBatch tx_hashes;
-  SignedTransactionBatch txs;
+  static SignedTransactionHashBatch tx_hashes;
+  static SignedTransactionBatch txs;
+  tx_hashes.clear();
+  txs.clear();
   for (const KeyChange &change : key_changes) {
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
-    SignedTransactionHashBatch change_tx_hashes;
-    SignedTransactionBatch change_txs;
+    static SignedTransactionHashBatch change_tx_hashes;
+    static SignedTransactionBatch change_txs;
+    change_tx_hashes.clear();
+    change_txs.clear();
     scheduler_->get_txs_for_account(change.address, change_tx_hashes,
                                     change_txs);
     tx_hashes += change_tx_hashes;
