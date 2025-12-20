@@ -32,10 +32,6 @@ pub type ContractGetFn = unsafe extern "C" fn(
 // Lifetime is be lifetime of the block, not static.
 impl ContractGetResult {
     pub fn to_data(&self) -> Result<Option<&'static [u8]>, SystemErrorCode> {
-        println!(
-            "ContractGetResult: err_code: {}, data: {:?}, data_len: {}",
-            self.err_code, self.data, self.data_len
-        );
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),
