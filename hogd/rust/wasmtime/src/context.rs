@@ -64,7 +64,7 @@ impl WasmtimeGlobalContext {
                 Config::default()
                     .consume_fuel(true)
                     .wasm_backtrace(false)
-                    .strategy(wasmtime::Strategy::Winch)
+                    .strategy(wasmtime::Strategy::Cranelift)
                     .cranelift_opt_level(wasmtime::OptLevel::Speed)
                     .cranelift_nan_canonicalization(true) // deterministic nan
                     .relaxed_simd_deterministic(true)
@@ -76,8 +76,10 @@ impl WasmtimeGlobalContext {
                     .memory_init_cow(false)
                     .memory_guard_size(0)
                     .memory_reservation(2 * page_size as u64)
+                    .memory_reservation_for_growth(0)
                     .guard_before_linear_memory(false)
                     .memory_may_move(false)
+                    .signals_based_traps(false)
                     .allocation_strategy(InstanceAllocationStrategy::Pooling(
                         allocation_config,
                     )),
