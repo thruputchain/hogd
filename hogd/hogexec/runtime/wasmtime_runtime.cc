@@ -66,7 +66,6 @@ public:
 
 WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
 {
-  
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
   

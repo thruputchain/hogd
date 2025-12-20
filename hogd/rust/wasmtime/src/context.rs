@@ -46,12 +46,13 @@ impl WasmtimeGlobalContext {
     fn new_engine() -> Engine {
 
         let page_size: usize = 65536; // 64KB, i.e. 1 page
+        let num_slots : usize = 1024;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
-                .max_unused_warm_slots(8192)
-                .total_core_instances(8192)
-                .total_memories(8192)
-                .total_tables(8192)
+                .max_unused_warm_slots(num_slots)
+                .total_core_instances(num_slots)
+                .total_memories(num_slots)
+                .total_tables(num_slots)
                 .linear_memory_keep_resident(page_size * 2)
                 .max_memory_size(page_size * 2)
                 .table_keep_resident(20000)
