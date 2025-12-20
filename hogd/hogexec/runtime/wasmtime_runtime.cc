@@ -53,6 +53,7 @@ public:
     engine_count = 64;
     wasmtime_global_context_ptr_ = new_wasmtime_global_context(engine_count);
   }
+
   ~WasmtimeGlobalContext()
   {
     if (wasmtime_global_context_ptr_ != nullptr) {
@@ -68,8 +69,10 @@ WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
 {
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
-  
-  size_t engine = x23::core_map->bucket() % wasmtime_global_context.engine_count;
+
+  static std::atomic<size_t> threadlocal_alloc = 0;
+  static thread_local size_t engine = threadlocal_alloc.fetch_add(1) % wasmtime_global_context.engine_count;
+
   wasmtime_context_ptr_ =
       new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_,
                            module_cache ? module_cache->get_inner() : nullptr,
