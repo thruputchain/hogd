@@ -10,6 +10,10 @@ use wasmtime::{
 
 use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::SHA256Hash;
+pub use common::contract_loader::ContractGetFn;
+pub use common::contract_loader::ContractGetResult;
+use common::SystemErrorCode;
 use common::TrampolineResult;
 
 pub struct LinkEntry {
@@ -42,10 +46,9 @@ pub struct WasmtimeGlobalContext {
 }
 
 impl WasmtimeGlobalContext {
-
     fn new_engine() -> Engine {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let num_slots : u32 = 256;
+        let num_slots: u32 = 256;
         let table_size: usize = 64;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
@@ -61,43 +64,39 @@ impl WasmtimeGlobalContext {
                 .clone();
 
         Engine::new(
-                Config::default()
-                    .consume_fuel(true)
-                    .wasm_backtrace(false)
-                    .strategy(wasmtime::Strategy::Cranelift)
-                    // cranelift-only options
-                    .signals_based_traps(false)
-                    .table_lazy_init(true)
-                    // done cranelift-only
-                    
-                    .cranelift_pcc(false)
-                    
-                    .native_unwind_info(false)
-                    .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
-                    .wasm_backtrace(false)
-                    .debug_info(false)
-
-                    .cranelift_opt_level(wasmtime::OptLevel::Speed)
-                    .cranelift_nan_canonicalization(true) // deterministic nan
-                    .relaxed_simd_deterministic(true)
-                    .wasm_multi_memory(false)
-                    .epoch_interruption(false)
-                    .max_wasm_stack(16 * 1024)
-                    // Configs set as per wasmtime documentation to eliminate vmm in steady state
-                    // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
-                    .memory_init_cow(false)
-                    .memory_guard_size(0)
-                    .memory_reservation(2 * page_size as u64)
-                    .memory_reservation_for_growth(0)
-                    .guard_before_linear_memory(false)
-                    .memory_may_move(false)
-                    .generate_address_map(false)
-                    .allocation_strategy(InstanceAllocationStrategy::Pooling(
-                        allocation_config,
-                    )),
-            )
-            .unwrap()
-
+            Config::default()
+                .consume_fuel(true)
+                .wasm_backtrace(false)
+                .strategy(wasmtime::Strategy::Cranelift)
+                // cranelift-only options
+                .signals_based_traps(false)
+                .table_lazy_init(true)
+                // done cranelift-only
+                .cranelift_pcc(false)
+                .native_unwind_info(false)
+                .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
+                .wasm_backtrace(false)
+                .debug_info(false)
+                .cranelift_opt_level(wasmtime::OptLevel::Speed)
+                .cranelift_nan_canonicalization(true) // deterministic nan
+                .relaxed_simd_deterministic(true)
+                .wasm_multi_memory(false)
+                .epoch_interruption(false)
+                .max_wasm_stack(16 * 1024)
+                // Configs set as per wasmtime documentation to eliminate vmm in steady state
+                // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
+                .memory_init_cow(false)
+                .memory_guard_size(0)
+                .memory_reservation(2 * page_size as u64)
+                .memory_reservation_for_growth(0)
+                .guard_before_linear_memory(false)
+                .memory_may_move(false)
+                .generate_address_map(false)
+                .allocation_strategy(InstanceAllocationStrategy::Pooling(
+                    allocation_config,
+                )),
+        )
+        .unwrap()
     }
 
     pub fn new(engine_count: usize) -> WasmtimeGlobalContext {
@@ -117,6 +116,7 @@ pub struct WasmtimeContext<'a> {
     pub entries: Vec<LinkEntry>,
     pub engine_index: usize,
     pub module_cache: Option<&'a mut ModuleCache>,
+    contract_get_fn: ContractGetFn,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -176,13 +176,27 @@ impl<'a> WasmtimeContext<'a> {
         global_context: &WasmtimeGlobalContext,
         engine_index: usize,
         module_cache: Option<&'a mut ModuleCache>,
+        get_fn: ContractGetFn,
     ) -> WasmtimeContext<'a> {
         Self {
             global_context: global_context.clone(),
             entries: Vec::new(),
             engine_index,
             module_cache,
+            contract_get_fn: get_fn,
         }
+    }
+
+    /// # Safety
+    /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
+    pub unsafe fn fetch_contract(
+        &self,
+        user_context: *mut c_void,
+        hash: &SHA256Hash,
+    ) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        let get_res =
+            unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
+        get_res.to_data()
     }
 
     pub fn engine(&self) -> &Engine {
@@ -197,7 +211,9 @@ impl<'a> WasmtimeContext<'a> {
         &mut self,
         hash: &[u8; 32],
     ) -> Option<ModuleCacheEntry> {
-        self.module_cache.as_mut().and_then(|cache| cache.get(self.engine_index, hash))
+        self.module_cache
+            .as_mut()
+            .and_then(|cache| cache.get(self.engine_index, hash))
     }
 
     pub fn put_cached_module(
@@ -284,7 +300,7 @@ impl<'a> WasmtimeContext<'a> {
         linker
     }
 
-    fn verify_contract(&self, contract_data: &[u8]) -> bool {
+    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         let engine = &self.global_context.get_engine(self.engine_index);
         Module::validate(&engine, contract_data).is_ok()
     }
@@ -395,7 +411,9 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 /// Creates a global context that can be shared across threads.
 /// Global context is threadsafe.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context(engines: usize) -> *mut c_void {
+pub unsafe extern "C" fn new_wasmtime_global_context(
+    engines: usize,
+) -> *mut c_void {
     let b = Box::new(WasmtimeGlobalContext::new(engines));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
@@ -420,6 +438,7 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
 /// module_cache must outlive WasmtimeContext.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_context(
+    get_fn: ContractGetFn,
     global_context: *mut c_void,
     module_cache: *mut c_void,
     engine_index: usize,
@@ -432,15 +451,25 @@ pub unsafe extern "C" fn new_wasmtime_context(
     };
 
     let b = if module_cache.is_null() {
-        Box::new(WasmtimeContext::new(global_context, engine_index, None))
+        Box::new(WasmtimeContext::new(
+            global_context,
+            engine_index,
+            None,
+            get_fn,
+        ))
     } else {
-        Box::new(WasmtimeContext::new(global_context, engine_index, unsafe {
-            Some(
-                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
-                    module_cache,
-                )),
-            )
-        }))
+        Box::new(WasmtimeContext::new(
+            global_context,
+            engine_index,
+            unsafe {
+                Some(
+                    &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
+                        module_cache,
+                    )),
+                )
+            },
+            get_fn,
+        ))
     };
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }

@@ -14,6 +14,7 @@ type SHA256Hash = [u8; 32];
 pub use context::{
     free_wasmtime_context, free_wasmtime_global_context, new_wasmtime_context,
     new_wasmtime_global_context, wasmtime_link_nargs, wasmtime_verify_contract,
+    ContractGetFn, ContractGetResult,
 };
 pub use invoke_result::WasmtimeInvokeResult;
 pub use module_cache::{

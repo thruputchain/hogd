@@ -14,6 +14,16 @@ pub struct ContractGetResult {
     data_len: usize,
 }
 
+impl ContractGetResult {
+    pub fn new(err_code: i32, data: &'static [u8]) -> Self {
+        Self {
+            err_code,
+            data: data.as_ptr(),
+            data_len: data.len(),
+        }
+    }
+}
+
 pub type ContractGetFn = unsafe extern "C" fn(
     ForeignHostCallContext,
     *const u8,
@@ -22,6 +32,10 @@ pub type ContractGetFn = unsafe extern "C" fn(
 // Lifetime is be lifetime of the block, not static.
 impl ContractGetResult {
     pub fn to_data(&self) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        println!(
+            "ContractGetResult: err_code: {}, data: {:?}, data_len: {}",
+            self.err_code, self.data, self.data_len
+        );
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),

@@ -1,15 +1,17 @@
 use std::ffi::c_void;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 // Import the FFI functions from wasmtime_lib
+use common::SystemErrorCode;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context,
     free_wasmtime_module_cache, free_wasmtime_runtime, new_wasmtime_context,
     new_wasmtime_global_context, new_wasmtime_module_cache,
     new_wasmtime_runtime, wasmtime_get_available_gas, wasmtime_get_memory,
     wasmtime_invoke, wasmtime_module_cache_cached_size,
-    wasmtime_set_available_gas, wasmtime_verify_contract,
+    wasmtime_set_available_gas, wasmtime_verify_contract, ContractGetResult,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
@@ -150,20 +152,31 @@ extern "C" fn c_call_8args(
     }
 }
 
+// Mock ContractGetFn for testing
+// Returns the WASM bytes stored in MOCK_CONTRACT_DATA
+unsafe extern "C" fn no_get_mock_contract_get_fn(
+    _userctx: *mut c_void,
+    _hash: *const u8,
+) -> ContractGetResult {
+    ContractGetResult::new(SystemErrorCode::kSystemUnrecoverable as i32, &[])
+}
+
 // Helper function to load a WASM file from the test_wasms directory
-fn load_wasm_file(filename: &str) -> Vec<u8> {
+// Leaks the memory to create a 'static lifetime, which is fine for tests
+fn load_wasm_file(filename: &str) -> &'static [u8] {
     // Try loading from OUT_DIR first (for build.rs generated files)
     let out_dir_path = PathBuf::from(env!("OUT_DIR")).join(filename);
     if out_dir_path.exists() {
-        return fs::read(&out_dir_path).unwrap_or_else(|e| {
+        let bytes = fs::read(&out_dir_path).unwrap_or_else(|e| {
             panic!(
                 "Failed to load WASM file from OUT_DIR {:?}: {}",
                 out_dir_path, e
             );
         });
+        Box::leak(bytes.into_boxed_slice())
+    } else {
+        panic!("Failed to load WASM file from OUT_DIR {:?}", out_dir_path);
     }
-
-    panic!("Failed to load WASM file from OUT_DIR {:?}", out_dir_path);
 }
 
 #[test]
@@ -175,8 +188,12 @@ fn test_create_context() {
             !global_context.is_null(),
             "Global context should be created"
         );
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
+        let context = new_wasmtime_context(
+            no_get_mock_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
         assert!(!context.is_null(), "Context should be created");
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -187,8 +204,12 @@ fn test_create_context() {
 fn test_verify_valid_wasm() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
+        let context = new_wasmtime_context(
+            no_get_mock_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
         assert!(!context.is_null());
 
         // Load a test WASM file
@@ -208,26 +229,66 @@ fn test_verify_valid_wasm() {
     }
 }
 
+unsafe extern "C" fn test_get_simple_add_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let wasm_bytes = load_wasm_file("simple_add.wasm");
+
+    // Check that the contract hash is [0;32]. If not, return kUnrecoverable error.
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 0) {
+        // Contract hash does not match [0;32]: return unrecoverable error.
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+
+    ContractGetResult::new(0, wasm_bytes)
+}
+
+unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let wasm_bytes = load_wasm_file("fibonacci.wasm");
+
+    // Check that the contract hash is [1;32]. If not, return kUnrecoverable error.
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    if hash_slice.iter().any(|&b| b != 1) {
+        // Contract hash does not match [1;32]: return unrecoverable error.
+        return ContractGetResult::new(
+            SystemErrorCode::kSystemUnrecoverable as i32,
+            &[],
+        );
+    }
+    ContractGetResult::new(0, wasm_bytes)
+}
+
 #[test]
 fn test_create_runtime() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("simple_add.wasm");
-
+        println!("global_context created");
+        let context = new_wasmtime_context(
+            test_get_simple_add_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        println!("context created");
         // Create a dummy contract hash
         let contract_hash = [0u8; 32];
 
         // Create a runtime with null host context (no syscalls needed for basic test)
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
-
+        println!("runtime created");
         assert!(!runtime.is_null(), "Should successfully create runtime");
 
         free_wasmtime_runtime(runtime);
@@ -240,16 +301,18 @@ fn test_create_runtime() {
 fn test_get_memory() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("simple_add.wasm");
+        let context = new_wasmtime_context(
+            test_get_simple_add_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
         let contract_hash = [0u8; 32];
 
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -275,16 +338,18 @@ fn test_get_memory() {
 fn test_invoke_function() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("fibonacci.wasm");
-        let contract_hash = [0u8; 32];
+        let context = new_wasmtime_context(
+            test_get_fibonacci_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        let contract_hash = [1u8; 32];
 
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -309,16 +374,18 @@ fn test_invoke_function() {
 fn test_gas_metering() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("fibonacci.wasm");
-        let contract_hash = [0u8; 32];
+        let context = new_wasmtime_context(
+            test_get_fibonacci_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        let contract_hash = [1u8; 32];
 
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -349,8 +416,12 @@ fn test_missing_wasm_file() {
 fn test_verify_invalid_wasm() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
+        let context = new_wasmtime_context(
+            no_get_mock_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
 
         // Create some invalid WASM bytes
         let invalid_wasm = vec![0x00, 0x01, 0x02, 0x03];
@@ -373,25 +444,26 @@ fn test_verify_invalid_wasm() {
 fn test_multiple_runtimes() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("fibonacci.wasm");
-        let contract_hash = [0u8; 32];
+        let context = new_wasmtime_context(
+            test_get_fibonacci_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        let contract_hash = [1u8; 32];
 
         // Create multiple runtimes from the same context
         let runtime1 = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
         let runtime2 = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -411,16 +483,18 @@ fn test_fibonacci_computation() {
     // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("fibonacci.wasm");
-        let contract_hash = [0u8; 32];
+        let context = new_wasmtime_context(
+            test_get_fibonacci_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        let contract_hash = [1u8; 32];
 
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -451,16 +525,18 @@ fn test_fibonacci_computation() {
 fn test_fibonacci_computation_overflow() {
     unsafe {
         let global_context = new_wasmtime_global_context(1);
-        let context =
-            new_wasmtime_context(global_context, std::ptr::null_mut(), 0);
-        let wasm_bytes = load_wasm_file("fibonacci.wasm");
-        let contract_hash = [0u8; 32];
+        let context = new_wasmtime_context(
+            test_get_fibonacci_contract_get_fn,
+            global_context,
+            std::ptr::null_mut(),
+            0,
+        );
+        let contract_hash = [1u8; 32];
 
         let runtime = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
 
@@ -486,6 +562,25 @@ fn test_fibonacci_computation_overflow() {
     }
 }
 
+unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
+    _userctx: *mut c_void,
+    hash: *const u8,
+) -> ContractGetResult {
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+
+    if hash_slice.iter().all(|&b| b == 0) {
+        let wasm_bytes = load_wasm_file("simple_add.wasm");
+        return ContractGetResult::new(0, wasm_bytes);
+    } else if hash_slice.iter().all(|&b| b == 1) {
+        let wasm_bytes = load_wasm_file("fibonacci.wasm");
+        return ContractGetResult::new(0, wasm_bytes);
+    }
+    return ContractGetResult::new(
+        SystemErrorCode::kSystemUnrecoverable as i32,
+        &[],
+    );
+}
+
 #[test]
 fn test_module_cache() {
     unsafe {
@@ -497,19 +592,20 @@ fn test_module_cache() {
         assert!(!module_cache.is_null());
 
         // Create context with module cache
-        let context = new_wasmtime_context(global_context, module_cache, 0);
+        let context = new_wasmtime_context(
+            test_get_simple_add_and_fibonacci_contract_get_fn,
+            global_context,
+            module_cache,
+            0,
+        );
         assert!(!context.is_null());
 
-        // Load a WASM file
-        let wasm_bytes = load_wasm_file("simple_add.wasm");
-
         // Create first runtime - this should cache the module
-        let hash1: [u8; 32] = [1u8; 32];
+        let hash1: [u8; 32] = [0u8; 32];
         let runtime1 = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             hash1.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
         assert!(!runtime1.is_null(), "First runtime should be created");
@@ -520,10 +616,9 @@ fn test_module_cache() {
         );
         // Create second runtime with same hash - should use cached module
         let runtime2 = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             hash1.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
         assert!(
@@ -536,12 +631,11 @@ fn test_module_cache() {
             "Module cache should still have 1 cached module"
         );
         // Create third runtime with different hash - should cache a new module
-        let hash2: [u8; 32] = [2u8; 32];
+        let hash2: [u8; 32] = [1u8; 32];
         let runtime3 = new_wasmtime_runtime(
-            wasm_bytes.as_ptr(),
-            wasm_bytes.len() as u32,
             hash2.as_ptr(),
             std::ptr::null_mut(),
+            false,
             context,
         );
         assert!(!runtime3.is_null(), "Third runtime should be created");

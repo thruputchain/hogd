@@ -7,6 +7,7 @@ add_custom_command(
       ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/../common/src/contract_loader.rs
     COMMAND 
       cbindgen --config cbindgen.toml --crate wasmtime_lib --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     WORKING_DIRECTORY

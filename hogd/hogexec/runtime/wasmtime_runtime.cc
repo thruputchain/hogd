@@ -19,11 +19,69 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"
-#include "x23/cpumap.h"
 #include "x23/format.h"
 #include "x23/x23.h"
 
 namespace hogd {
+
+namespace {
+
+constexpr ContractGetResult
+make_err(SystemErrorCode err)
+{
+  return ContractGetResult{.err_code = std::to_underlying(err),
+                           .data = nullptr,
+                           .data_len = 0};
+}
+
+ContractGetResult
+wasmtime_contract_get_fn(void *host_call_context_ptr,
+                         const uint8_t *hash_ptr) noexcept
+{
+  if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr(s) passed to wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  auto *host_call_context =
+      static_cast<HostCallContext *>(host_call_context_ptr);
+  if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr syscall_handler in wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+  SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
+
+  // TODO(geoff): this is an extra copy
+  SHA256Hash hash{};
+  std::memcpy(hash.data(), hash_ptr, hash.size());
+
+  auto res = syscall_handler.resolve_contract(hash);
+
+  if (!res.has_value()) {
+    return make_err(res.error().code());
+  }
+
+  if ((*res)->contract_type() != ContractType::kWasmi) [[unlikely]] {
+    error("Unrecoverable: Attempt to access a non-wasmi contract from inside "
+          "wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  // the try is technically unnecessary (for the ->wasmi_contract() access,
+  // which is checked above); this satisfies clang-tidy
+  try {
+    auto const &wasm = (*res)->wasmi_contract().wasm;
+
+    return ContractGetResult{.err_code = 0,
+                             .data = wasm.data(),
+                             .data_len = wasm.size()};
+  } catch (x23::XdrBadUnionAccess const &e) {
+    error("Unrecoverable: Bad union access: {}", e.what());
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+}
+
+} // namespace
 
 WasmtimeModuleCache::WasmtimeModuleCache(size_t capacity)
   : wasmtime_module_cache_ptr_(new_wasmtime_module_cache(capacity))
@@ -71,10 +129,12 @@ WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
 
   static std::atomic<size_t> threadlocal_alloc = 0;
-  static thread_local size_t engine = threadlocal_alloc.fetch_add(1) % wasmtime_global_context.engine_count;
+  static thread_local size_t engine =
+      threadlocal_alloc.fetch_add(1) % wasmtime_global_context.engine_count;
 
   wasmtime_context_ptr_ =
-      new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_,
+      new_wasmtime_context(&wasmtime_contract_get_fn,
+                           wasmtime_global_context.wasmtime_global_context_ptr_,
                            module_cache ? module_cache->get_inner() : nullptr,
                            engine);
 }
@@ -93,48 +153,17 @@ WasmtimeContext::make_new_runtime(
 {
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
-  // Resolve the contract to get the WASM bytes
-  auto contract_res =
-      syscall_handler->resolve_contract(deployed_contract_hash.hash);
-  if (!contract_res.has_value()) {
-    return contract_res.error();
-  }
+  void *wasmtime_runtime_ptr =
+      new_wasmtime_runtime(deployed_contract_hash.hash.data(),
+                           host_call_context.get(), do_contract_verify,
+                           wasmtime_context_ptr_);
 
-  auto const &contract = *contract_res;
-  // TODO(geoff): When kWasmtime contract type is added, use that instead of
-  // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
-  // wasmi
-  if (contract->contract_type() != ContractType::kWasmi) [[unlikely]] {
-    error("Unrecoverable: Attempt to access a non-wasmi contract from "
-          "inside WasmtimeContext::make_new_runtime");
+  if (wasmtime_runtime_ptr == nullptr) {
     return SystemError{SystemErrorCode::kSystemUnrecoverable};
   }
 
-  // Verify contract if requested
-  if (do_contract_verify) {
-    if (!verify_contract(*contract)) {
-      return SystemError{SystemErrorCode::kSystemValidationFailure};
-    }
-  }
-
-  try {
-    auto const &wasm = contract->wasmi_contract().wasm;
-
-    void *wasmtime_runtime_ptr =
-        new_wasmtime_runtime(wasm.data(), static_cast<uint32_t>(wasm.size()),
-                             deployed_contract_hash.hash.data(),
-                             host_call_context.get(), wasmtime_context_ptr_);
-
-    if (wasmtime_runtime_ptr == nullptr) {
-      return SystemError{SystemErrorCode::kSystemUnrecoverable};
-    }
-
-    return std::make_unique<WasmtimeRuntime>(std::move(host_call_context),
-                                             wasmtime_runtime_ptr);
-  } catch (x23::XdrBadUnionAccess const &e) {
-    error("Unrecoverable: Bad union access: {}", e.what());
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
-  }
+  return std::make_unique<WasmtimeRuntime>(std::move(host_call_context),
+                                           wasmtime_runtime_ptr);
 }
 
 bool

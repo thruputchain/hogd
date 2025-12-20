@@ -1,6 +1,6 @@
 use lru::LruCache;
 
-use wasmtime::{InstancePre, Linker, Module};
+use wasmtime::InstancePre;
 
 use crate::SHA256Hash;
 use core::ffi::c_void;
@@ -23,7 +23,11 @@ impl ModuleCache {
         }
     }
 
-    pub fn get(&mut self, engine_index: usize, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
+    pub fn get(
+        &mut self,
+        engine_index: usize,
+        hash: &SHA256Hash,
+    ) -> Option<ModuleCacheEntry> {
         self.cache.get(&(engine_index, *hash)).cloned()
     }
 

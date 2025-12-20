@@ -97,9 +97,7 @@ impl WasmtimeRuntime {
         } else {
             let linker = context.linker();
             let module = Module::new(linker.engine(), bytes)
-                .inspect_err(|_e| {
-                    eprintln!("Module new error: {_e}")
-                })
+                .inspect_err(|_e| eprintln!("Module new error: {_e}"))
                 .ok()?;
 
             if !check_memory_limit(&module) {
@@ -114,9 +112,7 @@ impl WasmtimeRuntime {
             }
             let instance_pre = linker
                 .instantiate_pre(&module)
-                .inspect_err(|_e| {
-                    eprintln!("Error instantiating store: {_e}")
-                })
+                .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
                 .ok()?;
             instance_pre
         };
@@ -124,9 +120,7 @@ impl WasmtimeRuntime {
         let mut store = Store::new(context.engine(), userctx);
         let instance = instance_pre
             .instantiate(&mut store)
-            .inspect_err(|_e| {
-                eprintln!("Error instantiating store: {_e}")
-            })
+            .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
             .ok()?;
         Some(Self { store, instance })
     }
@@ -207,20 +201,18 @@ pub unsafe extern "C" fn wasmtime_invoke(
 /// # Safety
 /// wasmtime_context_ptr must not be a nullptr, and must have been created by new_wasmtime_context.
 /// userctx can be any (null or non-null) pointer.
-/// bytes must be either null or a valid memory slice.
+/// hash must be a valid pointer to 32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_runtime(
-    bytes: *const u8,
-    bytes_len: u32,
-    hash: *const u8, // 32 bytes
-    userctx: *mut c_void,
+    hash: *const u8,      // 32 bytes
+    userctx: *mut c_void, // *HostCallContext
+    do_verify_contract: bool,
     wasmtime_context_ptr: *mut c_void,
 ) -> *mut c_void {
-    if bytes.is_null() {
+    if hash.is_null() || wasmtime_context_ptr.is_null() {
+        println!("hash or wasmtime_context_ptr is null");
         return core::ptr::null_mut();
     }
-    debug_assert!(!hash.is_null());
-    debug_assert!(!wasmtime_context_ptr.is_null());
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
@@ -230,7 +222,22 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
         )
     };
 
-    let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
+    let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
+        Ok(Some(slice)) => slice,
+        Ok(None) => {
+            println!("No contract found");
+            return core::ptr::null_mut();
+        }
+        Err(_code) => {
+            println!("Error fetching contract: {:?}", _code);
+            return core::ptr::null_mut();
+        }
+    };
+
+    if do_verify_contract && !wasmtime_context.verify_contract(slice) {
+        println!("Contract verification failed");
+        return core::ptr::null_mut();
+    }
 
     let b = match WasmtimeRuntime::new(
         slice,
@@ -240,6 +247,7 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     ) {
         Some(res) => Box::new(res),
         None => {
+            println!("Error creating runtime");
             return core::ptr::null_mut();
         }
     };
