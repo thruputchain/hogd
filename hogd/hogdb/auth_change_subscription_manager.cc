@@ -1,6 +1,8 @@
 #include "auth_change_subscription_manager.h"
 
 #include <cassert>
+#include <exception>
+#include <optional>
 #include <utility>
 #include <vector>
 
