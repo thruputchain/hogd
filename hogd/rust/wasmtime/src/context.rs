@@ -45,25 +45,38 @@ impl WasmtimeGlobalContext {
 
     fn new_engine() -> Engine {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let num_slots : u32 = 1024;
+        let num_slots : u32 = 256;
+        let table_size: usize = 64;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
-                .max_unused_warm_slots(0)
+                .max_unused_warm_slots(num_slots)
                 .total_core_instances(num_slots)
                 .total_memories(num_slots)
                 .total_tables(num_slots)
                 .linear_memory_keep_resident(page_size * 2)
                 .max_memory_size(page_size * 2)
-                .table_keep_resident(20000)
+                .table_keep_resident(table_size)
+                .table_elements(table_size)
                 .memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
-        // .table_elements(max_size: default is 20k, leaving that as is)
 
         Engine::new(
                 Config::default()
                     .consume_fuel(true)
                     .wasm_backtrace(false)
                     .strategy(wasmtime::Strategy::Cranelift)
+                    // cranelift-only options
+                    .signals_based_traps(false)
+                    .table_lazy_init(true)
+                    // done cranelift-only
+                    
+                    .cranelift_pcc(false)
+                    
+                    .native_unwind_info(false)
+                    .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
+                    .wasm_backtrace(false)
+                    .debug_info(false)
+
                     .cranelift_opt_level(wasmtime::OptLevel::Speed)
                     .cranelift_nan_canonicalization(true) // deterministic nan
                     .relaxed_simd_deterministic(true)
@@ -78,7 +91,7 @@ impl WasmtimeGlobalContext {
                     .memory_reservation_for_growth(0)
                     .guard_before_linear_memory(false)
                     .memory_may_move(false)
-                    .signals_based_traps(false)
+                    .generate_address_map(false)
                     .allocation_strategy(InstanceAllocationStrategy::Pooling(
                         allocation_config,
                     )),

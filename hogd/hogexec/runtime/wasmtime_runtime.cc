@@ -50,7 +50,7 @@ class WasmtimeGlobalContext {
 public:
   WasmtimeGlobalContext()
   {
-    engine_count = 64;
+    engine_count = 16;
     wasmtime_global_context_ptr_ = new_wasmtime_global_context(engine_count);
   }
 

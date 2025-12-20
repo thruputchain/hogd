@@ -88,7 +88,7 @@ impl WasmtimeRuntime {
                 let instance_pre = linker
                     .instantiate_pre(&module)
                     .inspect_err(|_e| {
-                        debug_log!(eprintln!("Error instantiating store: {_e}"))
+                        eprintln!("Error instantiating store: {_e}")
                     })
                     .ok()?;
                 context.put_cached_module(hash, &instance_pre);
@@ -98,7 +98,7 @@ impl WasmtimeRuntime {
             let linker = context.linker();
             let module = Module::new(linker.engine(), bytes)
                 .inspect_err(|_e| {
-                    debug_log!(eprintln!("Module new error: {_e}"))
+                    eprintln!("Module new error: {_e}")
                 })
                 .ok()?;
 
@@ -115,7 +115,7 @@ impl WasmtimeRuntime {
             let instance_pre = linker
                 .instantiate_pre(&module)
                 .inspect_err(|_e| {
-                    debug_log!(eprintln!("Error instantiating store: {_e}"))
+                    eprintln!("Error instantiating store: {_e}")
                 })
                 .ok()?;
             instance_pre
@@ -125,7 +125,7 @@ impl WasmtimeRuntime {
         let instance = instance_pre
             .instantiate(&mut store)
             .inspect_err(|_e| {
-                debug_log!(eprintln!("Error instantiating store: {_e}"))
+                eprintln!("Error instantiating store: {_e}")
             })
             .ok()?;
         Some(Self { store, instance })
@@ -152,9 +152,9 @@ impl WasmtimeRuntime {
                 }
                 err.downcast_ref::<TrampolineError>().map_or_else(
                     || {
-                        debug_log!(eprintln!(
-                            "Unknown error from func.call: {err:?}"
-                        ));
+                        eprintln!(
+                            "Unrecoverable: Unknown error from func.call: {err:?}"
+                        );
                         WasmtimeInvokeResult::error(
                             InvokeErrorCode::kInvokeUnrecoverable,
                         )
