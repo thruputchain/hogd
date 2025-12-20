@@ -1,6 +1,7 @@
 #include "hogd/auth/auth_server.h"
 
 #include <cassert>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
