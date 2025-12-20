@@ -46,7 +46,7 @@ impl WasmtimeGlobalContext {
     fn new_engine() -> Engine {
 
         let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let num_slots : usize = 1024;
+        let num_slots : u32 = 1024;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
                 .max_unused_warm_slots(num_slots)
