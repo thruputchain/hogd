@@ -30,6 +30,9 @@ private:
   using auth_db_client_t =
       decltype(make_rpc_client<AuthDB1>(x23::HostPort{})());
 
+  x23::Async<std::optional<auth_db_client_t>>
+  create_client(const sockaddr_storage &address, const AuthCard &card);
+
   x23::CoroLock lock_;
   std::map<AuthCard, auth_db_client_t> auth_db_clients_;
   x23::DestroyInhibit inhibit_;
