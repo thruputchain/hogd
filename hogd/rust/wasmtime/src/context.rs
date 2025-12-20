@@ -53,6 +53,7 @@ impl WasmtimeGlobalContext {
                 .linear_memory_keep_resident(page_size * 2)
                 .max_memory_size(page_size * 2)
                 .table_keep_resident(20000)
+                .memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
         // .table_elements(max_size: default is 20k, leaving that as is)
 
