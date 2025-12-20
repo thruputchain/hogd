@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"
+#include "x23/cpumap.h"
 #include "x23/format.h"
 #include "x23/x23.h"
 
@@ -49,7 +50,8 @@ class WasmtimeGlobalContext {
 public:
   WasmtimeGlobalContext()
   {
-    wasmtime_global_context_ptr_ = new_wasmtime_global_context();
+    size_t max_llc_count = x23::llc_map->nbuckets();
+    wasmtime_global_context_ptr_ = new_wasmtime_global_context(max_llc_count);
   }
   ~WasmtimeGlobalContext()
   {
@@ -63,11 +65,15 @@ public:
 
 WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
 {
+  
   static WasmtimeGlobalContext wasmtime_global_context;
   CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
+  
+  size_t current_llc = x23::llc_map->bucket();
   wasmtime_context_ptr_ =
       new_wasmtime_context(wasmtime_global_context.wasmtime_global_context_ptr_,
-                           module_cache ? module_cache->get_inner() : nullptr);
+                           module_cache ? module_cache->get_inner() : nullptr,
+                           current_llc);
 }
 
 WasmtimeContext::~WasmtimeContext()

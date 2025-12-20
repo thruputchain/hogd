@@ -121,7 +121,7 @@ impl WasmtimeRuntime {
             instance_pre
         };
 
-        let mut store = Store::new(&context.global_context.engine, userctx);
+        let mut store = Store::new(context.engine(), userctx);
         let instance = instance_pre
             .instantiate(&mut store)
             .inspect_err(|_e| {
