@@ -95,14 +95,28 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
     co_return false;
   }
 
-  auth_db_client_t client = co_await make_rpc_client<AuthDB1>(*addr, false);
+  std::optional<auth_db_client_t> client =
+      co_await [&]() -> x23::Async<std::optional<auth_db_client_t>> {
+    try {
+      co_return co_await make_rpc_client<AuthDB1>(*addr, false);
+    } catch (const std::exception &e) {
+      error("AuthChangeSubscriptionManager: Failed to create RPC client for "
+            "{}: {}",
+            card.address_for_db, e.what());
+      co_return std::nullopt;
+    }
+  }();
+
+  if (!client) {
+    co_return false;
+  }
 
   x23::CoroGuard guard;
   co_await guard(lock_);
 
   auth_db_clients_.erase(card);
   [[maybe_unused]] auto [_, inserted] =
-      auth_db_clients_.emplace(card, std::move(client));
+      auth_db_clients_.emplace(card, std::move(*client));
   assert(inserted);
   co_return true;
 }
