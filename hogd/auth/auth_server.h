@@ -50,6 +50,13 @@ public:
   x23::Async<void>
   register_auth_data_updates(BlockHeight height,
                              KeyChangeBatch const &key_changes);
+  void add_auth_data_updates_callback(
+      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
+          &callback)
+  {
+    std::lock_guard<std::mutex> lock(auth_data_changes_callbacks_lock_);
+    auth_data_changes_callbacks_.push_back(callback);
+  }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
@@ -75,6 +82,11 @@ private:
   // Used to stall incoming requests until the updates from the db are present,
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
+
+  std::mutex auth_data_changes_callbacks_lock_;
+  std::vector<
+      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>>
+      auth_data_changes_callbacks_;
 };
 
 class AuthDBRpc {

@@ -65,6 +65,17 @@ public:
     return nullptr;
   }
 
+  SignedTransactionBatch get_txs_for_account(const ContractAddress &address)
+  {
+    auto [txs, lock] = account_to_tx_[address];
+    SignedTransactionBatch ret;
+    ret.reserve(txs.size());
+    for (const auto &[_, tx_value] : txs) {
+      ret.push_back(tx_value->tx);
+    }
+    return ret;
+  }
+
   void reenqueue_txs(const auto &begin, const auto &end)
   {
     for (auto it = begin; it != end; it++) {

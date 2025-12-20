@@ -944,8 +944,38 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
   // read/write indices that do not exist.
   nominated_block_cache_.block_id = 0;
   validated_block_cache_.clear();
+
+  scheduler_->increment_current_block();
   info("schedulercoord_commit_block ret");
   co_return SchedulerCommitOutcome::SchedulerCommitOK;
+}
+
+x23::Async<void>
+MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
+                                         const KeyChangeBatch &key_changes)
+{
+  SignedTransactionBatch txs;
+  for (const KeyChange &change : key_changes) {
+    // Get all txs for [change.address] and re-verify them. Remove any that fail
+    // verification.
+    SignedTransactionBatch change_txs =
+        scheduler_->get_txs_for_account(change.address);
+    txs += change_txs;
+  }
+  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
+      /*height=*/scheduler_->current_block(), txs);
+  x23::Vec<SignedTransactionHash> to_remove;
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      // TODO(jhumphri): The scheduler already has the hashes.
+      to_remove.push_back(sha256(txs[i]));
+    }
+  }
+  // The txs are on the runqueue and need to be removed, so we set
+  // [validated_block] to true.
+  co_await scheduler_->remove_from_scheduler(to_remove,
+                                             /*validated_block=*/true);
 }
 
 } // namespace hogd

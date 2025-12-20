@@ -240,6 +240,9 @@ private:
     dbauth_client_t dbauth_client =
         co_await make_dbauth_client(cards[0].address_for_auth.c_str());
     auth_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_);
+    auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+    co_await auth_->subscribe_to_auth_data_changes(auth_rpc_->make_auth_card());
 
     ready_.store(true, std::memory_order_release);
   }
@@ -303,6 +306,9 @@ private:
     num_validations_in_progress_--;
   }
 
+  x23::Async<void> auth_data_changed(BlockHeight height,
+                                     const KeyChangeBatch &key_changes);
+
   MempoolDbRpc *db_rpc_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
@@ -313,6 +319,7 @@ private:
   // TODO(jhumphri): Make the mempool work with multiple threads.
   std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<AuthServer> auth_;
+  std::unique_ptr<AuthRpcServers> auth_rpc_;
 
   // Ensures only one block is nominated at a time.
   x23::CoroLock nominated_block_cache_lock_;
