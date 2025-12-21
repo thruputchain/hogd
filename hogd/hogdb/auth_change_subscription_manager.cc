@@ -3,6 +3,7 @@
 #include <cassert>
 #include <exception>
 #include <optional>
+#include <sys/socket.h>
 #include <utility>
 #include <vector>
 
