@@ -5,6 +5,8 @@ add_custom_command(
     DEPENDS 
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/cbindgen.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
+      ${CMAKE_SOURCE_DIR}/protocol/account.x
     COMMAND 
       cbindgen --config cbindgen.toml --crate contract_types --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
     WORKING_DIRECTORY
