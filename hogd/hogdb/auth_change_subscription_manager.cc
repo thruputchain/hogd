@@ -100,7 +100,8 @@ AuthChangeSubscriptionManager::add_full_auth_change_subscriber(AuthCard card)
   std::optional<auth_db_client_t> client =
       co_await [&]() -> x23::Async<std::optional<auth_db_client_t>> {
     try {
-      info("AuthChangeSubscriptionManager: Creating RPC client for {}", card.address_for_db);
+      info("AuthChangeSubscriptionManager: Creating RPC client for {}",
+           card.address_for_db);
       co_return co_await make_rpc_client<AuthDB1>(*addr, false);
     } catch (const std::exception &e) {
       error("AuthChangeSubscriptionManager: Failed to create RPC client for "

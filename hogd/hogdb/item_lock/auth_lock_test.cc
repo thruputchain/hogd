@@ -720,21 +720,21 @@ TEST(AuthLockTest, SetGasPermissionConfigs)
 
   // Create an item that sets gas permission configs
   PointerItem<AuthDataItem> item(base);
-  
+
   GasConfigChange gas_config_change;
   GasPermissionConfig config0;
   config0.limit = GasAmount{1000};
   config0.accepted_keys = 0x01; // Accept key 0
   config0.required_weight = Weight{1};
-  
+
   GasPermissionConfig config1;
   config1.limit = GasAmount{2000};
   config1.accepted_keys = 0x06; // Accept keys 1 and 2
   config1.required_weight = Weight{2};
-  
+
   gas_config_change.new_gas_permission_configs.push_back(config0);
   gas_config_change.new_gas_permission_configs.push_back(config1);
-  
+
   item.get()->set_new_gas_configs(gas_config_change);
 
   // Acquire lock
@@ -777,7 +777,8 @@ TEST(AuthLockTest, NonceConfigRollback)
                                           make_dummy_context())
                   .has_value());
 
-  // Second change: change nonce config (this is the "middle" state we'll rollback to)
+  // Second change: change nonce config (this is the "middle" state we'll
+  // rollback to)
   PointerItem<AuthDataItem> item2(base);
   NonceConfig nonce2;
   nonce2.accepted_keys = 0x03; // Accept keys 0 and 1

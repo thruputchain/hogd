@@ -335,7 +335,8 @@ AccountAuthDataItem::get_delta() const
     delta.auth_data_change().new_nonce_config = nonce_config_.value();
   }
   if (gas_permission_configs_.has_value()) {
-    delta.auth_data_change().new_gas_config_change = GasConfigChange{.new_gas_permission_configs = gas_permission_configs_.value()};
+    delta.auth_data_change().new_gas_config_change = GasConfigChange{
+        .new_gas_permission_configs = gas_permission_configs_.value()};
   }
   return delta;
 }

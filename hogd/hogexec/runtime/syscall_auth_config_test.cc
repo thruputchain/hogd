@@ -30,7 +30,11 @@ namespace hogd {
 class SyscallAuthConfigTest : public ::testing::Test,
                               public NativeContractTestFramework {
 public:
-  SyscallAuthConfigTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB) {}
+  SyscallAuthConfigTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
 };
 
 // Test WriteAddressNonceConfig_inner with a valid nonce config
@@ -50,7 +54,8 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
              ffi_nonce_config.required_weight = Weight{1};
 
              auto [status, gas] =
-                 syscall_WriteAddressNonceConfig_inner(handler, ffi_nonce_config);
+                 syscall_WriteAddressNonceConfig_inner(handler,
+                                                       ffi_nonce_config);
 
              if (!status.has_value() ||
                  status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -422,8 +427,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
   for (int i = 0; i < 5; i++) {
     ASSERT_EQ(auth_data.gas_permissions[i].limit,
               GasAmount{static_cast<uint64_t>(1000 + (i * 100))});
-    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys,
-              BitMap{1ULL << i});
+    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys, BitMap{1ULL << i});
     ASSERT_EQ(auth_data.gas_permissions[i].required_weight,
               Weight{static_cast<uint32_t>(i + 1)});
   }
@@ -440,67 +444,65 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
   auto [public_key, _] = ed25519_keygen();
 
   // Create a native contract with a method that calls all three syscalls
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [public_key](SystemCallHandler &handler,
-                        NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             // 1. Set a public key at index 0
-             int32_t key_scheme =
-                 std::to_underlying(CryptographicScheme::Ed25519);
-             uint32_t key_weight = 5;
-             std::span<const std::byte> key_bytes(
-                 reinterpret_cast<const std::byte *>(public_key.data()),
-                 public_key.size());
+  auto native_contract = std::make_unique<
+      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      {0,
+       [public_key](SystemCallHandler &handler,
+                    NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         // 1. Set a public key at index 0
+         int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
+         uint32_t key_weight = 5;
+         std::span<const std::byte> key_bytes(
+             reinterpret_cast<const std::byte *>(public_key.data()),
+             public_key.size());
 
-             auto [pk_status, pk_gas] =
-                 syscall_ChangePublicKeyRegistration_inner(
-                     handler, 0, &key_scheme, key_bytes, &key_weight);
+         auto [pk_status, pk_gas] =
+             syscall_ChangePublicKeyRegistration_inner(handler, 0, &key_scheme,
+                                                       key_bytes, &key_weight);
 
-             if (!pk_status.has_value() ||
-                 pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+         if (!pk_status.has_value() ||
+             pk_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
 
-             // 2. Set nonce config
-             generated::NonceConfig ffi_nonce_config{};
-             ffi_nonce_config.accepted_keys = 0x01; // Accept key 0
-             ffi_nonce_config.required_weight = Weight{3};
+         // 2. Set nonce config
+         generated::NonceConfig ffi_nonce_config{};
+         ffi_nonce_config.accepted_keys = 0x01; // Accept key 0
+         ffi_nonce_config.required_weight = Weight{3};
 
-             auto [nonce_status, nonce_gas] =
-                 syscall_WriteAddressNonceConfig_inner(handler,
-                                                        ffi_nonce_config);
+         auto [nonce_status, nonce_gas] =
+             syscall_WriteAddressNonceConfig_inner(handler, ffi_nonce_config);
 
-             if (!nonce_status.has_value() ||
-                 nonce_status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+         if (!nonce_status.has_value() ||
+             nonce_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
 
-             // 3. Set gas permission configs
-             generated::GasPermissionConfig ffi_config0{};
-             ffi_config0.limit = GasAmount{5000};
-             ffi_config0.accepted_keys = 0x01; // Accept key 0
-             ffi_config0.required_weight = Weight{3};
+         // 3. Set gas permission configs
+         generated::GasPermissionConfig ffi_config0{};
+         ffi_config0.limit = GasAmount{5000};
+         ffi_config0.accepted_keys = 0x01; // Accept key 0
+         ffi_config0.required_weight = Weight{3};
 
-             generated::GasPermissionConfig ffi_config1{};
-             ffi_config1.limit = GasAmount{10000};
-             ffi_config1.accepted_keys = 0x01; // Accept key 0
-             ffi_config1.required_weight = Weight{5};
+         generated::GasPermissionConfig ffi_config1{};
+         ffi_config1.limit = GasAmount{10000};
+         ffi_config1.accepted_keys = 0x01; // Accept key 0
+         ffi_config1.required_weight = Weight{5};
 
-             auto [gas_status, gas_gas] =
-                 syscall_WriteAddressGasPermissionConfigs_inner(
-                     handler, &ffi_config0, &ffi_config1, nullptr, nullptr,
-                     nullptr);
+         auto [gas_status, gas_gas] =
+             syscall_WriteAddressGasPermissionConfigs_inner(handler,
+                                                            &ffi_config0,
+                                                            &ffi_config1,
+                                                            nullptr, nullptr,
+                                                            nullptr);
 
-             if (!gas_status.has_value() ||
-                 gas_status.value() !=
-                     SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+         if (!gas_status.has_value() ||
+             gas_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
 
-             return {};
-           }}});
+         return {};
+       }}});
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -558,4 +560,3 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
-

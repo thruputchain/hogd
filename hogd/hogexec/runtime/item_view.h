@@ -143,7 +143,8 @@ public:
     nonce_config_ = nonce_config;
   }
 
-  void set_gas_permission_configs(x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
+  void set_gas_permission_configs(
+      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
   {
     gas_permission_configs_ = std::move(gas_permission_configs);
   }
@@ -151,7 +152,8 @@ public:
 private:
   std::unordered_map<uint32_t, PublicKeyConfigOpt> pk_changes_;
   std::optional<NonceConfig> nonce_config_;
-  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>> gas_permission_configs_;
+  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
+      gas_permission_configs_;
 };
 
 // Represent state of an ItemView that has not been modified during

@@ -56,7 +56,8 @@ private:
   bool locked_{false};
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
   std::optional<NonceConfig> nonce_config_;
-  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>> gas_permission_configs_;
+  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
+      gas_permission_configs_;
 
   friend class AuthDataItem;
 };

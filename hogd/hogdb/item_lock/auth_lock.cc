@@ -136,7 +136,8 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
   }
 
   if (after_item.gas_config_change_.has_value()) {
-    gas_permission_configs_ = after_item.gas_config_change_.value().new_gas_permission_configs;
+    gas_permission_configs_ =
+        after_item.gas_config_change_.value().new_gas_permission_configs;
   }
 
   // TODO(geoff): cost for gas configs

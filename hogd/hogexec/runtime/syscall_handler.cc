@@ -1039,11 +1039,13 @@ SystemCallHandler::modify_native_token_balance(
 // == Authentication syscalls ==
 
 namespace {
-AddressAndKey auth_data_addrkey(ContractAddress const &address)
+AddressAndKey
+auth_data_addrkey(ContractAddress const &address)
 {
-  return {.address = address, .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
+  return {.address = address,
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
 }
-}
+} // namespace
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
@@ -1095,8 +1097,9 @@ SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
   return item_view->set(new_item);
 }
 
-SystemStatus<SyscallStatus<void>> SystemCallHandler::set_address_gas_permission_configs(
-x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::set_address_gas_permission_configs(
+    x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
 {
   auto addr = invocation_frame_stack_.get_active_frame().address();
   auto addrkey = auth_data_addrkey(addr);
@@ -1104,7 +1107,8 @@ x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
   assert(item_view);
 
   if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
-    account_auth_data_item->set_gas_permission_configs(std::move(gas_permission_configs));
+    account_auth_data_item->set_gas_permission_configs(
+        std::move(gas_permission_configs));
     return {};
   }
 
