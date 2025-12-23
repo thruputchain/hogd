@@ -242,6 +242,8 @@ private:
     auth_ = std::make_unique<AuthServer>(std::move(dbauth_client));
     auth_rpc_ = std::make_unique<AuthRpcServers>(*auth_);
     auth_rpc_->start_servers(/*port_for_db=*/0, /*port_for_mempool=*/0);
+    auth_->add_auth_data_updates_callback(
+        std::bind_front(&MempoolCoordinatorRpc::auth_data_changed, this));
     co_await auth_->subscribe_to_auth_data_changes(auth_rpc_->make_auth_card());
 
     ready_.store(true, std::memory_order_release);
