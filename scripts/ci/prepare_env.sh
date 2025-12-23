@@ -1,5 +1,7 @@
 echo "prepare the environment for building hogd"
 
+set -ex
+
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
