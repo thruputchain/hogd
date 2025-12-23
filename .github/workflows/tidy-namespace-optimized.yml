@@ -1,19 +1,18 @@
-name: Tidy (Namespace - Custom Base Image)
+name: Tidy (Namespace)
 
 # This workflow uses a custom base image with pre-installed toolchain.
 # Requires: Configure namespace-profile-hogd-linux with docker/Dockerfile as custom base image.
 
 on:
-  workflow_dispatch:  # Manual trigger for testing
-  # Uncomment once validated:
-  # push:
-  #   branches: ["main"]
-  # pull_request:
-  #   branches: ["main"]
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   tidy:
-    runs-on: namespace-profile-hogd-linux  # Must have custom base image configured
+    runs-on: namespace-profile-hogd-linux # Must have custom base image configured
 
     steps:
       - name: Setup SSH Agent
@@ -41,7 +40,7 @@ jobs:
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
-          submodules: false  # We handle submodules manually for selective init
+          submodules: false # We handle submodules manually for selective init
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
