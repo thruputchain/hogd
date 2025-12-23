@@ -90,24 +90,24 @@ jobs:
       - name: Add LLVM Repository
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake \
-            clang-22 \
-            clang-tidy-22 \
-            clang-tools-22 \
+            clang-21 \
+            clang-tidy-21 \
+            clang-tools-21 \
             gcc-14 \
             g++-14 \
             ccache \
             python3 \
             python3-flake8 \
             libjemalloc-dev \
-            libc++-22-dev \
-            libc++abi-22-dev \
+            libc++-21-dev \
+            libc++abi-21-dev \
             lz4 \
             liblz4-dev \
             libsnappy-dev \
@@ -117,35 +117,35 @@ jobs:
             flex \
             bison \
             lld \
-            llvm-22
+            llvm-21
 
-          # Set clang-22 as the default
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 200
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 200
-          sudo update-alternatives --set clang /usr/bin/clang-22
-          sudo update-alternatives --set clang++ /usr/bin/clang++-22
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-22 100
-          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-22 100
+          # Set clang-21 as the default
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-21 200
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 200
+          sudo update-alternatives --set clang /usr/bin/clang-21
+          sudo update-alternatives --set clang++ /usr/bin/clang++-21
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
+          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-21 100
 
           # Set up LLVM tools
           for tool in llvm-ar llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-config; do
-            if [ -f /usr/bin/${tool}-22 ]; then
-              sudo update-alternatives --install /usr/bin/${tool} ${tool} /usr/bin/${tool}-22 100
+            if [ -f /usr/bin/${tool}-21 ]; then
+              sudo update-alternatives --install /usr/bin/${tool} ${tool} /usr/bin/${tool}-21 100
             fi
           done
 
       - name: Configure Environment
         run: |
-          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-22
+          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-21
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
           echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
-          echo 'CLANG_CC=/usr/bin/clang-22' >> ./scripts/conf.sh
-          echo 'CLANG_CXX=/usr/bin/clang++-22' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
           cat ./scripts/conf.sh
           # Verify the compilers
-          /usr/bin/clang-22 --version
-          /usr/bin/clang++-22 --version
+          /usr/bin/clang-21 --version
+          /usr/bin/clang++-21 --version
 
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
