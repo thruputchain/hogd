@@ -39,6 +39,7 @@ CLIPPY_PID=$!
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
   xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
+    -clang-tidy-binary /usr/bin/clang-tidy-21 \
     -header-filter="${ROOT_DIR}/hogd/.*" -quiet \
     -extra-arg=-std=c++23 \
     -extra-arg=-stdlib=libc++ \
