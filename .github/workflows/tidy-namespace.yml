@@ -87,6 +87,12 @@ jobs:
       - name: Install cbindgen
         run: cargo install cbindgen
 
+      - name: Add LLVM Repository
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo "deb-src http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee -a /etc/apt/sources.list.d/llvm.list
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
