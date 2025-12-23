@@ -561,6 +561,7 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 x23::Async<SchedulerNominationResult>
 MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 {
+  ElapsedTimer timer;
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   std::chrono::steady_clock::duration delta = end - last;
   std::chrono::milliseconds delta_raw =
@@ -655,6 +656,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.block_id() = nominated_block_cache_.block_id;
   info("ret");
+  info("nominate() took {}", timer.elapsed());
   last = std::chrono::steady_clock::now();
   co_return result;
 }
