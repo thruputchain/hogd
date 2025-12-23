@@ -1,22 +1,5 @@
 version: 2
 updates:
-  # Rust dependencies - main contract workspace
-  - package-ecosystem: "cargo"
-    directory: "/built_contracts"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "gramseyer"
-    labels:
-      - "dependencies"
-      - "rust"
-    commit-message:
-      prefix: "deps"
-      include: "scope"
-
   # Rust dependencies - hogd rust workspace
   - package-ecosystem: "cargo"
     directory: "/hogd/rust"
