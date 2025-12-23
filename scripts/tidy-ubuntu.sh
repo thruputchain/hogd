@@ -60,7 +60,7 @@ cd ${ROOT_DIR}
 PYTHON_FILES=$(find hogd/ -name '*.py')
 if [ -n "$PYTHON_FILES" ]; then
   printf "Running flake8 on python files\n"
-  flake8 $PYTHON_FILES
+  python3 -m flake8 $PYTHON_FILES
   if [ $? -ne 0 ]; then
     printf "flake8 failed!\n"
     exit 1
