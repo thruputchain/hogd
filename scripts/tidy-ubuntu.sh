@@ -35,11 +35,14 @@ BUILD_DIR=$(readlink -f "$BUILD_DIR")
 } &
 CLIPPY_PID=$!
 
-# Run clang-tidy (using -extra-arg to pass warnings-as-errors to clang-tidy directly)
+# Run clang-tidy (using -extra-arg to pass flags to clang-tidy directly)
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' |
   xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p "${BUILD_DIR}" \
-    -header-filter="${ROOT_DIR}/hogd/.*" -quiet -extra-arg=-Werror ${FIX_FLAG}
+    -header-filter="${ROOT_DIR}/hogd/.*" -quiet \
+    -extra-arg=-std=c++23 \
+    -extra-arg=-stdlib=libc++ \
+    -extra-arg=-Werror ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
   exit 1
