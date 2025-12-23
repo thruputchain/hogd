@@ -115,7 +115,8 @@ jobs:
             libbz2-dev \
             libzstd-dev \
             flex \
-            bison
+            bison \
+            lld
 
           # Set clang-20 as the default
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 200
