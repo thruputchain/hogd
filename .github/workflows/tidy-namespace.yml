@@ -126,7 +126,13 @@ jobs:
           sudo update-alternatives --set clang++ /usr/bin/clang++-20
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
           sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-20 100
-          sudo update-alternatives --install /usr/bin/llvm-ar llvm-ar /usr/bin/llvm-ar-20 100
+
+          # Set up LLVM tools
+          for tool in llvm-ar llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-config; do
+            if [ -f /usr/bin/${tool}-20 ]; then
+              sudo update-alternatives --install /usr/bin/${tool} ${tool} /usr/bin/${tool}-20 100
+            fi
+          done
 
       - name: Configure Environment
         run: |
