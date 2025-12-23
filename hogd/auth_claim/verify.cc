@@ -40,15 +40,15 @@ namespace {
 constexpr bool
 valid_pk_claim(size_t idx)
 {
-  return idx < MAX_SIGNERS;
+  return idx < kMaxSigners;
 }
 
 constexpr bool
 valid_pk_bitmap(BitMap bitmap)
 {
-  // no pk has an index higher than MAX_SIGNERS
-  static_assert(MAX_SIGNERS <= 32);
-  return (bitmap & (0xFFFF'FFFF << (MAX_SIGNERS))) == 0;
+  // no pk has an index higher than kMaxSigners
+  static_assert(kMaxSigners <= 32);
+  return (bitmap & (0xFFFF'FFFF << (kMaxSigners))) == 0;
 }
 
 constexpr bool
@@ -63,8 +63,8 @@ static_assert(!valid_pk_claim(21));
 
 static_assert(valid_pk_bitmap(0));
 static_assert(!valid_pk_bitmap(0xFFFF'FFFF));
-static_assert(!valid_pk_bitmap(1 << MAX_SIGNERS));
-static_assert(valid_pk_bitmap(1 << (MAX_SIGNERS - 1)));
+static_assert(!valid_pk_bitmap(1 << kMaxSigners));
+static_assert(valid_pk_bitmap(1 << (kMaxSigners - 1)));
 
 static_assert(!bitmap_accepts_key(0, 0));
 static_assert(bitmap_accepts_key(0xF, 2));
@@ -294,8 +294,8 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
                         const AccountAuthData &auth_data)
 {
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
-  x23::Vec<Weight, MAX_GAS_CONFIGS> gas_weights(
-      auth_data.gas_permissions.size(), 0);
+  x23::Vec<Weight, kMaxGasConfigs> gas_weights(auth_data.gas_permissions.size(),
+                                               0);
 
   for (size_t i = 0; i < stx.signatures.size(); i++) {
     const DecoratedSignatureList &sigs = stx.signatures[i];

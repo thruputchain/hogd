@@ -15,6 +15,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "storage_item.hh"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -154,7 +155,7 @@ HogConservationInvariant::handle_account_auth_data_item_change(
       return 0;
     }
     size_t active_keys = 0;
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    for (size_t i = 0; i < kMaxSigners; ++i) {
       if (auth_data.public_keys[i]) {
         active_keys++;
       }
