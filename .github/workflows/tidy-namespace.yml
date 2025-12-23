@@ -40,18 +40,32 @@ jobs:
         with:
           submodules: false  # We handle submodules manually for selective init
 
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: |
+            rust
+            apt
+          path: |
+            ~/.cache/ccache
+            ~/.ccache
+            ~/.cache/hogcache
+
       - name: Configure Git for Submodule Caching
         run: |
-          mkdir -p /tmp/hogcache/
+          mkdir -p ~/.cache/hogcache/
           git config --global protocol.file.allow always
 
-          # Cache function for submodule repos
+          # Cache function for submodule repos (uses persistent cache dir)
           cache_repo() {
             local repo_path="$1"
-            local cache_dir="/tmp/hogcache/$repo_path"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
             if [[ ! -d "$cache_dir" ]]; then
               mkdir -p "$(dirname "$cache_dir")"
               git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              # Update existing mirror
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
             fi
             git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
           }
