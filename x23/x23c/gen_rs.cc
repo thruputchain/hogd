@@ -522,7 +522,8 @@ GenRs::show_type(const StructBody &s, string const &tname)
     if (s.transparent)
       prtop("#[repr(transparent)]\n");
     else
-      // Do we actually need this?
+      // We want this, at least optionally on some structs,
+      // to enable FFI usage via memcpy instead of a full de/serialize via XDR.
       prtop("#[repr(C)]\n");
 
     prtop("pub struct {} ", tname);
@@ -1034,9 +1035,9 @@ GenRs::type_name(const Declaration &d, bool generate,
   case kArray:
   {
     if (needs_box) {
-      return std::format("[Box<{}>; {}]", tname, d.bound);
+      return std::format("[Box<{}>; {} as usize]", tname, d.bound);
     }
-    return std::format("[{}; {}]", tname, d.bound);
+    return std::format("[{}; {} as usize]", tname, d.bound);
   }
   case kVec:
   {
