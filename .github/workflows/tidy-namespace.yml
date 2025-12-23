@@ -90,24 +90,24 @@ jobs:
       - name: Add LLVM Repository
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake \
-            clang-20 \
-            clang-tidy-20 \
-            clang-tools-20 \
+            clang-19 \
+            clang-tidy-19 \
+            clang-tools-19 \
             gcc-14 \
             g++-14 \
             ccache \
             python3 \
             python3-flake8 \
             libjemalloc-dev \
-            libc++-20-dev \
-            libc++abi-20-dev \
+            libc++-19-dev \
+            libc++abi-19-dev \
             lz4 \
             liblz4-dev \
             libsnappy-dev \
@@ -117,35 +117,35 @@ jobs:
             flex \
             bison \
             lld \
-            llvm-20
+            llvm-19
 
-          # Set clang-20 as the default
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 200
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 200
-          sudo update-alternatives --set clang /usr/bin/clang-20
-          sudo update-alternatives --set clang++ /usr/bin/clang++-20
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
-          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-20 100
+          # Set clang-19 as the default
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 200
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 200
+          sudo update-alternatives --set clang /usr/bin/clang-19
+          sudo update-alternatives --set clang++ /usr/bin/clang++-19
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-19 100
+          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-19 100
 
           # Set up LLVM tools
           for tool in llvm-ar llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-strip llvm-config; do
-            if [ -f /usr/bin/${tool}-20 ]; then
-              sudo update-alternatives --install /usr/bin/${tool} ${tool} /usr/bin/${tool}-20 100
+            if [ -f /usr/bin/${tool}-19 ]; then
+              sudo update-alternatives --install /usr/bin/${tool} ${tool} /usr/bin/${tool}-19 100
             fi
           done
 
       - name: Configure Environment
         run: |
-          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-20
+          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-19
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
           echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
-          echo 'CLANG_CC=/usr/bin/clang-20' >> ./scripts/conf.sh
-          echo 'CLANG_CXX=/usr/bin/clang++-20' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-19' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-19' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
           cat ./scripts/conf.sh
           # Verify the compilers
-          /usr/bin/clang-20 --version
-          /usr/bin/clang++-20 --version
+          /usr/bin/clang-19 --version
+          /usr/bin/clang++-19 --version
 
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
