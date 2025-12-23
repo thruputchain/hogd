@@ -90,17 +90,16 @@ jobs:
       - name: Add LLVM Repository
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          echo "deb-src http://apt.llvm.org/noble/ llvm-toolchain-noble main" | sudo tee -a /etc/apt/sources.list.d/llvm.list
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             cmake \
-            clang-21 \
-            clang-tidy-21 \
-            clang-tools-21 \
+            clang-20 \
+            clang-tidy-20 \
+            clang-tools-20 \
             gcc-14 \
             g++-14 \
             ccache \
@@ -110,11 +109,11 @@ jobs:
           # Install flake8 for Python linting
           pip3 install flake8
 
-          # Set up alternatives so 'clang' points to clang-21
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-21 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
-          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-21 100
+          # Set up alternatives so 'clang' points to clang-20
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+          sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-20 100
 
       - name: Configure Environment
         run: |
