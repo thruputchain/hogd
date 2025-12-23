@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -218,6 +219,12 @@ public:
   SystemStatus<SyscallStatus<void>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
+
+  SystemStatus<SyscallStatus<void>>
+  set_address_nonce_config(NonceConfig const &nonce_config);
+
+  SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
+      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
 
   // == General access methods ==
   //

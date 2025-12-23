@@ -41,12 +41,12 @@ make_test_pk_config(uint8_t value, Weight weight = 100)
 AccountAuthData
 make_base_auth_data(std::vector<uint8_t> const &key_ids = {})
 {
-  AccountAuthData auth_data;
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+  AccountAuthData auth_data{};
+  for (size_t i = 0; i < kMaxSigners; ++i) {
     auth_data.public_keys[i] = nullptr;
   }
   for (uint8_t id : key_ids) {
-    if (id < MAX_SIGNERS) {
+    if (id < kMaxSigners) {
       auth_data.public_keys[id] = make_test_pk_config(id);
     }
   }
@@ -683,6 +683,136 @@ TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
                   .has_value());
 }
 
+TEST(AuthLockTest, SetNonceConfig)
+{
+  AccountAuthData base = make_base_auth_data({0, 1});
+  AuthLock lock(base);
+
+  // Create an item that sets nonce config
+  PointerItem<AuthDataItem> item(base);
+  NonceConfig nonce_config;
+  nonce_config.accepted_keys = 0x03; // Accept keys 0 and 1
+  nonce_config.required_weight = Weight{2};
+  item.get()->set_new_nonce(nonce_config);
+
+  // Acquire lock
+  int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
+  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
+                                            make_dummy_context());
+  EXPECT_TRUE(status.has_value());
+  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(2));
+
+  // Commit the change
+  int128_t commit_cost =
+      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+  EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
+
+  // Verify the nonce config was set
+  AccountAuthData result = lock.build_result();
+  EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
+  EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
+}
+
+TEST(AuthLockTest, SetGasPermissionConfigs)
+{
+  AccountAuthData base = make_base_auth_data({0, 1, 2});
+  AuthLock lock(base);
+
+  // Create an item that sets gas permission configs
+  PointerItem<AuthDataItem> item(base);
+  
+  GasConfigChange gas_config_change;
+  GasPermissionConfig config0;
+  config0.limit = GasAmount{1000};
+  config0.accepted_keys = 0x01; // Accept key 0
+  config0.required_weight = Weight{1};
+  
+  GasPermissionConfig config1;
+  config1.limit = GasAmount{2000};
+  config1.accepted_keys = 0x06; // Accept keys 1 and 2
+  config1.required_weight = Weight{2};
+  
+  gas_config_change.new_gas_permission_configs.push_back(config0);
+  gas_config_change.new_gas_permission_configs.push_back(config1);
+  
+  item.get()->set_new_gas_configs(gas_config_change);
+
+  // Acquire lock
+  int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(3);
+  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
+                                            make_dummy_context());
+  EXPECT_TRUE(status.has_value());
+  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(3));
+
+  // Commit the change
+  int128_t commit_cost =
+      lock.commit_change(true, snapshot_cost, item, &kTestCostModel);
+  EXPECT_EQ(commit_cost, 0); // No key count change, so no cost change
+
+  // Verify the gas configs were set
+  AccountAuthData result = lock.build_result();
+  EXPECT_EQ(result.gas_permissions.size(), 2);
+  EXPECT_EQ(result.gas_permissions[0].limit, GasAmount{1000});
+  EXPECT_EQ(result.gas_permissions[0].accepted_keys, 0x01);
+  EXPECT_EQ(result.gas_permissions[0].required_weight, Weight{1});
+  EXPECT_EQ(result.gas_permissions[1].limit, GasAmount{2000});
+  EXPECT_EQ(result.gas_permissions[1].accepted_keys, 0x06);
+  EXPECT_EQ(result.gas_permissions[1].required_weight, Weight{2});
+}
+
+TEST(AuthLockTest, NonceConfigRollback)
+{
+  AccountAuthData base = make_base_auth_data({0, 1});
+  AuthLock lock(base);
+
+  // First change: set nonce config
+  PointerItem<AuthDataItem> item1(base);
+  NonceConfig nonce1;
+  nonce1.accepted_keys = 0x01; // Accept key 0
+  nonce1.required_weight = Weight{1};
+  item1.get()->set_new_nonce(nonce1);
+
+  int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
+                                          make_dummy_context())
+                  .has_value());
+
+  // Second change: change nonce config (this is the "middle" state we'll rollback to)
+  PointerItem<AuthDataItem> item2(base);
+  NonceConfig nonce2;
+  nonce2.accepted_keys = 0x03; // Accept keys 0 and 1
+  nonce2.required_weight = Weight{2};
+  item2.get()->set_new_nonce(nonce2);
+
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
+                                          make_dummy_context())
+                  .has_value());
+
+  // Third change: change nonce config again
+  PointerItem<AuthDataItem> item3(base);
+  NonceConfig nonce3;
+  nonce3.accepted_keys = 0x07; // Accept keys 0, 1, and 2
+  nonce3.required_weight = Weight{3};
+  item3.get()->set_new_nonce(nonce3);
+
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item2, &item3, &kTestCostModel,
+                                          make_dummy_context())
+                  .has_value());
+
+  // Rollback: transition from item3 back to item2
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item3, &item2, &kTestCostModel,
+                                          make_dummy_context())
+                  .has_value());
+
+  // Commit the rollback (item2)
+  lock.commit_change(false, snapshot_cost, item2, &kTestCostModel);
+
+  // Verify final state matches item2 (the middle state)
+  AccountAuthData result = lock.build_result();
+  EXPECT_EQ(result.nonce_config.accepted_keys, 0x03);
+  EXPECT_EQ(result.nonce_config.required_weight, Weight{2});
+}
+
 TEST(AuthLockTest, AllKeysUsed)
 {
   AccountAuthData base = make_base_auth_data();
@@ -690,8 +820,8 @@ TEST(AuthLockTest, AllKeysUsed)
 
   // Create a transaction that modifies all MAX_SIGNERS keys
   std::vector<std::pair<uint32_t, PublicKeyConfigOpt>> all_keys;
-  all_keys.reserve(MAX_SIGNERS);
-  for (uint32_t i = 0; i < MAX_SIGNERS; ++i) {
+  all_keys.reserve(kMaxSigners);
+  for (uint32_t i = 0; i < kMaxSigners; ++i) {
     all_keys.emplace_back(i, make_test_pk_config(static_cast<uint8_t>(i)));
   }
 
@@ -699,11 +829,11 @@ TEST(AuthLockTest, AllKeysUsed)
   auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
                                             make_dummy_context());
   EXPECT_TRUE(status.has_value());
-  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(MAX_SIGNERS));
+  EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(kMaxSigners));
 
   // Commit
   int128_t cost = lock.commit_change(true, 0, item, &kTestCostModel);
-  EXPECT_EQ(cost, kTestCostModel.get_auth_data_cost(MAX_SIGNERS));
+  EXPECT_EQ(cost, kTestCostModel.get_auth_data_cost(kMaxSigners));
 }
 
 TEST(AuthLockTest, DISABLED_PartialRelease)

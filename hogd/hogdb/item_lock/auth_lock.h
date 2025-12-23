@@ -14,6 +14,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -54,6 +55,8 @@ private:
   x23::TestLock lock_;
   bool locked_{false};
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
+  std::optional<NonceConfig> nonce_config_;
+  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>> gas_permission_configs_;
 
   friend class AuthDataItem;
 };
