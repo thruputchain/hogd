@@ -104,11 +104,24 @@ jobs:
             g++-14 \
             ccache \
             python3 \
-            python3-flake8
+            python3-flake8 \
+            libjemalloc-dev \
+            libc++-dev \
+            libc++abi-dev \
+            lz4 \
+            liblz4-dev \
+            libsnappy-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            libzstd-dev \
+            flex \
+            bison
 
-          # Set up alternatives so 'clang' points to clang-20
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+          # Set clang-20 as the default
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 200
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 200
+          sudo update-alternatives --set clang /usr/bin/clang-20
+          sudo update-alternatives --set clang++ /usr/bin/clang++-20
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
           sudo update-alternatives --install /usr/bin/run-clang-tidy run-clang-tidy /usr/bin/run-clang-tidy-20 100
 
