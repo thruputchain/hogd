@@ -106,8 +106,8 @@ jobs:
             python3 \
             python3-flake8 \
             libjemalloc-dev \
-            libc++-dev \
-            libc++abi-dev \
+            libc++-20-dev \
+            libc++abi-20-dev \
             lz4 \
             liblz4-dev \
             libsnappy-dev \
@@ -128,9 +128,16 @@ jobs:
 
       - name: Configure Environment
         run: |
-          # Create conf.sh for scripts/env.sh to pick up gcc-14
-          echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh
+          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-20
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-20' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
+          cat ./scripts/conf.sh
+          # Verify the compilers
+          /usr/bin/clang-20 --version
+          /usr/bin/clang++-20 --version
 
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
