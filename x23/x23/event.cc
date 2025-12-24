@@ -204,8 +204,9 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
   int err = 0;
   reset(fd);
   auto tok = write_clear(fd);
-  if (::connect(fd.get(), sa, len) == -1)
+  if (::connect(fd.get(), sa, len) == -1) {
     err = errno;
+  }
 
   for (;;) {
     if (err == 0)

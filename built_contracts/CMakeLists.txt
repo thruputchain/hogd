@@ -294,12 +294,40 @@ function(add_contract_header target_name)
 endfunction()
 
 # Build all WASMs in one cargo invocation
-add_wasm_builds(fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20)
+add_wasm_builds(
+  fibonacci 
+  fibonacci_call 
+  cxs_roundtrip 
+  txs_roundtrip 
+  read_only_test 
+  manual_revert_test
+  manual_revert_caller 
+  simple_wallet
+  simple_wallet_authclaim
+  initial_token_claim 
+  itc_erc20 
+  authclaim_test)
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
 add_spec_and_types_generation(
-  SPEC_TARGETS fibonacci fibonacci_call cxs_roundtrip txs_roundtrip read_only_test manual_revert_test manual_revert_caller simple_wallet initial_token_claim itc_erc20
-  TYPES_TARGETS itc_erc20 manual_revert_test txs_roundtrip cxs_roundtrip
+  SPEC_TARGETS 
+    fibonacci 
+    fibonacci_call 
+    cxs_roundtrip 
+    txs_roundtrip 
+    read_only_test 
+    manual_revert_test 
+    manual_revert_caller 
+    simple_wallet 
+    simple_wallet_authclaim
+    initial_token_claim 
+    itc_erc20 
+    authclaim_test
+  TYPES_TARGETS 
+    itc_erc20 
+    manual_revert_test 
+    txs_roundtrip 
+    cxs_roundtrip 
 )
 
 # Make all headers wait for all specs to be generated
@@ -316,6 +344,7 @@ add_contract_header(manual_revert_caller)
 add_contract_header(simple_wallet)
 add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+add_contract_header(authclaim_test)
 
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)

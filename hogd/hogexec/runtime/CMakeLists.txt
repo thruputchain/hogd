@@ -64,6 +64,7 @@ target_link_libraries(
 )
 
 add_library(runtime_test_objects OBJECT
+  authclaim_test.cc
   contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc
@@ -104,6 +105,7 @@ add_library(runtime_test_objects OBJECT
   serialize_roundtrip_test.cc
   shutdown_test.cc
   snapshot_storage_item_test.cc
+  syscall_auth_config_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   try_invoke_test.cc

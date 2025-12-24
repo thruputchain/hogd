@@ -24,10 +24,8 @@
 #include <format>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <span>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -323,8 +321,13 @@ public:
 
   void set_new_pk(uint32_t key_id, PublicKeyConfigOpt pk)
   {
-    assert(key_id < MAX_SIGNERS);
+    assert(key_id < kMaxSigners);
     pk_changes_[key_id].emplace(std::move(pk));
+  }
+  void set_new_nonce(NonceConfig nonce) { nonce_change_ = std::move(nonce); }
+  void set_new_gas_configs(GasConfigChange gas_config)
+  {
+    gas_config_change_ = std::move(gas_config);
   }
 
   bool narrow(const AuthDataItem &auth_data_item) const;
@@ -332,7 +335,9 @@ public:
   AccountAuthData const &base_auth_data() const { return base_auth_data_; }
 
 private:
-  std::array<std::optional<PublicKeyConfigOpt>, MAX_SIGNERS> pk_changes_;
+  std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
+  std::optional<NonceConfig> nonce_change_;
+  std::optional<GasConfigChange> gas_config_change_;
   AccountAuthData base_auth_data_;
 
   friend struct std::formatter<AuthDataItem>;
@@ -347,7 +352,7 @@ template<> struct std::formatter<hogd::AuthDataItem> {
   static auto format(const hogd::AuthDataItem &auth_data_item, auto &ctx)
   {
     format_to(ctx.out(), "AuthDataItem{{");
-    for (size_t i = 0; i < hogd::MAX_SIGNERS; i++) {
+    for (size_t i = 0; i < hogd::kMaxSigners; i++) {
       auto pk = auth_data_item.pk_changes_[i];
       if (pk) {
         format_to(ctx.out(), "{{index:{}, pk:{}}}", i, x23::show(*pk));
