@@ -15,8 +15,6 @@ on:
 
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
-  CCACHE_DIR: ~/.cache/ccache
-  CCACHE_MAXSIZE: 10G
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
@@ -151,6 +149,10 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
+          # Configure ccache with proper path expansion
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
@@ -244,6 +246,10 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
+          # Configure ccache with proper path expansion
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
@@ -259,9 +265,9 @@ jobs:
         if: always()
         run: ccache -s
 
-  # GCC Release build (after gcc-debug to benefit from shared ccache)
+  # GCC Release build (parallel with debug builds - different flags = no ccache benefit)
   gcc-release:
-    needs: gcc-debug
+    needs: format
     runs-on: namespace-profile-hogd-linux
     steps:
       - name: Setup SSH Agent
@@ -336,6 +342,10 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
+
+          # Configure ccache with proper path expansion
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
