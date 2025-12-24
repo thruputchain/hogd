@@ -12,6 +12,7 @@ members = [
     "integration_test_contracts/manual_revert_caller",
     "integration_test_contracts/initial_token_claim",
     "integration_test_contracts/itc_erc20",
+    "integration_test_contracts/simple_wallet_authclaim",
     "integration_test_contracts/authclaim_test",
 ]
 resolver = "2"

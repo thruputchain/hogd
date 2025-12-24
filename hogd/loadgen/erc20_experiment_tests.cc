@@ -11,6 +11,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -19,13 +20,13 @@
 
 namespace hogd {
 
-class ERC20ExperimentTest : public ::testing::TestWithParam<TestDB>,
+class ERC20ExperimentTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
-          false)
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB, false)
   {}
 
 protected:
@@ -50,12 +51,8 @@ protected:
   }
 };
 
-TEST_P(ERC20ExperimentTest, Basic)
+TEST_F(ERC20ExperimentTest, Basic)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
-                    "storage cost changes";
-  }
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_accounts = 10,
   });
@@ -100,7 +97,54 @@ TEST_P(ERC20ExperimentTest, Basic)
   }
 }
 
-TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
+TEST_F(ERC20ExperimentTest, BasicAuth)
+{
+  auto state =
+      std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
+          .num_accounts = 10,
+      });
+  auto result = state->generate_experiment();
+  ASSERT_TRUE(result.has_value());
+
+  run_genesis_initialization(result.value().genesis_configuration);
+  check_initial_balance();
+
+  for (auto &init_block : result.value().initialization_txs) {
+    for (auto &tx : init_block) {
+      check_uniquifier(tx.tx.uniquifier);
+      auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+      auto invoke_res = handler.root_invoke();
+      ASSERT_TRUE(invoke_res.is_root_success());
+      auto res = handler.try_commit_transaction();
+      ASSERT_TRUE(res == ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.emit_events()());
+    }
+
+    advance_block();
+  }
+
+  std::optional<GasAmount> gas_used;
+
+  auto work_txs = state->extend_experiment(100, 10);
+  ASSERT_TRUE(work_txs.has_value());
+  ASSERT_EQ(work_txs.value().work_txs.size(), 100);
+
+  for (auto &tx : work_txs.value().work_txs) {
+    check_uniquifier(tx.tx.uniquifier);
+    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto invoke_res = handler.root_invoke();
+    ASSERT_TRUE(invoke_res.is_root_success());
+    auto res = handler.try_commit_transaction();
+    ASSERT_TRUE(res == ExecResult::ExecResultOK);
+    if (!gas_used) {
+      gas_used = invoke_res.gas_consumed_;
+    }
+    ASSERT_EQ(invoke_res.gas_consumed_, gas_used.value());
+    ASSERT_TRUE(handler.emit_events()());
+  }
+}
+
+TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
       .num_accounts = 1000,
@@ -144,11 +188,6 @@ TEST_P(ERC20ExperimentTest, DISABLED_ManyAccounts)
     ASSERT_TRUE(handler.emit_events()());
   }
 }
-
-INSTANTIATE_TEST_SUITE_P(ERC20ExperimentTest, ERC20ExperimentTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDB),
-                         test_db_to_string);
 
 } // namespace hogd
 

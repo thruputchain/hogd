@@ -12,6 +12,7 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <sys/syslimits.h>
 #include <vector> // IWYU pragma: keep
 #endif
 

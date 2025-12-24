@@ -1,0 +1,267 @@
+#include "hogd/loadgen/erc20_basic_auth_experiment.h"
+
+#include <algorithm>
+#include <cassert>
+#include <future>
+#include <limits>
+#include <random>
+#include <utility>
+#include <vector>
+
+#include "auth_claim.hh"
+#include "built_contracts/itc_erc20.h"
+#include "built_contracts/simple_wallet_authclaim.h"
+#include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/loadgen/status.h"
+#include "loadgen.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+namespace {
+SHA256Hash
+make_nonce(uint64_t value)
+{
+  return sha256(value);
+}
+} // namespace
+
+void
+ERC20BasicAuthExperimentState::initialize_wallets(
+    SHA256Hash const &wallet_contract_hash)
+{
+  wallets_.reserve(config_.num_accounts + 1);
+  for (size_t i = 0; i < config_.num_accounts + 1; ++i) {
+    auto keys = ed25519_keygen();
+    wallets_.push_back(WalletInfo{
+        .public_key = keys.first,
+        .secret_key = keys.second,
+        .address = GenesisConfigurationLoader::calculate_deployed_address(
+            wallet_contract_hash, make_nonce(i)),
+        .initial_nonce = make_nonce(i),
+    });
+  }
+}
+
+void
+ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
+                                             size_t wallet_index)
+{
+  assert(wallet_index < wallets_.size());
+
+  DecoratedSignatureList list;
+  Signature sig(CryptographicScheme::Ed25519);
+  sig.ed25519() =
+      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx));
+  list.list.push_back(DecoratedSignature{
+      .public_key_id = 0,
+      .signature = sig,
+  });
+  tx.signatures.push_back(list);
+}
+
+LoadgenStatus<LoadgenSuccessResult>
+ERC20BasicAuthExperimentState::generate_experiment()
+{
+  using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  using wallet_meta =
+      ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+
+  const static AuthClaim self_auth_claim = [] {
+    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+    claim.invoked_address_signature_id() = 0;
+    return claim;
+  }();
+
+  auto erc20_contract = erc20_meta::load_wasm();
+  auto wallet_contract = wallet_meta::load_wasm();
+  assert(erc20_contract);
+  assert(wallet_contract);
+
+  initialize_wallets(sha256(*wallet_contract));
+
+  if (!check_config_valid()) {
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+  }
+
+  const ContractAddress owner_address = get_owner_address();
+
+  GenesisConfigurationBuilder builder;
+  builder.add_initial_config(erc20_contract, make_nonce(0),
+                             erc20_meta::entrypoint<"initialize">(),
+                             erc20_meta::make_calldata<"initialize">(
+                                 owner_address),
+                             // The number of hogs each wallet starts with.
+                             int128_t{500'000} * config_.num_accounts);
+  erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
+      sha256(*erc20_contract), make_nonce(0));
+
+  // initialize wallets
+  for (auto const &wallet : wallets_) {
+    // Initialize with an arbitrarily large amount, so that the wallets have
+    // storage available to support their token balances. This will be changed
+    // in the future, with whatever initialization procedures we use, but it
+    // works for now.
+    builder.add_initial_config(wallet_contract, wallet.initial_nonce,
+                               wallet_meta::entrypoint<"initialize">(),
+                               wallet_meta::make_calldata<"initialize">(
+                                   wallet.public_key),
+                               500'000);
+  }
+
+  // make unfurl txs
+  x23::Vec<SignedTransaction> unfurl_txs;
+  unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
+
+  // make mint txs
+  x23::Vec<SignedTransaction> mint_txs;
+  mint_txs.reserve(config_.num_accounts);
+  for (size_t i = 1; i <= config_.num_accounts; ++i) {
+
+    // has to match the deserialized objects in simple_wallet::do_action
+    Calldata internal_calldata = x23::serialize(
+        erc20_address_, erc20_meta::entrypoint<"mint">(), GasAmount{1'000'000},
+        erc20_meta::make_calldata<"mint">(wallets_[i].address,
+                                          to_xdr(uint128_t{1'000'000'000})));
+
+    auto calldata = wallet_meta::make_calldata<"do_action">(internal_calldata);
+
+    auto tx = SignedTransaction{
+        .tx =
+            Transaction{
+                .invocation =
+                    Invocation{
+                        .invoked_address = owner_address,
+                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                        .gas_limit = GasAmount{20'000},
+                        .calldata = std::move(calldata),
+                    },
+                .uniquifier =
+                    Uniquifier{.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = unfurl_txs.size() + i},
+                .auth_claims = {self_auth_claim},
+            },
+    };
+    add_signature(tx, 0);
+    mint_txs.push_back(tx);
+  }
+
+  x23::Vec<InitializationBlock> initialization_txs;
+  initialization_txs.reserve(2);
+  initialization_txs.emplace_back(std::move(unfurl_txs));
+  initialization_txs.emplace_back(std::move(mint_txs));
+
+  return LoadgenSuccessResult{
+      .genesis_configuration = builder.build(),
+      .initialization_txs = std::move(initialization_txs),
+  };
+}
+
+LoadgenStatus<LoadgenExtension>
+ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
+                                                 BlockHeight expiry_height)
+{
+  const static AuthClaim self_auth_claim = [] {
+    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+    claim.invoked_address_signature_id() = 0;
+    return claim;
+  }();
+
+  if (!check_config_valid()) {
+    return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
+  }
+
+  x23::Vec<SignedTransaction> work_txs;
+  work_txs.resize(num_txs);
+
+  size_t nthread = WorkerPool::get_default_pool().worker_count();
+
+  size_t batch_size = num_txs / nthread;
+  if (num_txs % nthread != 0) {
+    batch_size++;
+  }
+
+  std::vector<std::future<void>> futures;
+  futures.reserve(nthread);
+  for (size_t i = 0; i < nthread; ++i) {
+    size_t start = i * batch_size;
+    size_t end = std::min<size_t>(start + batch_size, num_txs);
+    if (i == nthread - 1) {
+      assert(end == num_txs);
+    }
+
+    futures.emplace_back(WorkerPool::get_default_pool().submit(
+        [this, &work_txs, start, end, expiry_height]() {
+          std::random_device rd;
+          std::mt19937 gen(rd());
+
+          std::uniform_int_distribution<size_t> dist(1, config_.num_accounts);
+
+          uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
+              0, std::numeric_limits<uint64_t>::max())(gen);
+
+          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
+            auto sender = dist(gen);
+            auto receiver = sender;
+            while (receiver == sender) {
+              receiver = dist(gen);
+            }
+            return std::make_pair(sender, receiver);
+          };
+
+          using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+          using wallet_meta =
+              ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+
+          for (size_t j = start; j < end; ++j) {
+            auto [sender, receiver] = make_account_pair();
+            uint128_t amount = 10;
+
+            // has to match the deserialized objects in simple_wallet::do_action
+            Calldata internal_calldata =
+                x23::serialize(erc20_address_,
+                               erc20_meta::entrypoint<"transfer">(),
+                               GasAmount{1'000'000},
+                               erc20_meta::make_calldata<"transfer">(
+                                   wallets_[receiver].address, to_xdr(amount)));
+
+            Invocation invocation = {
+                .invoked_address = wallets_[sender].address,
+                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .gas_limit = GasAmount{20'000},
+                .calldata =
+                    wallet_meta::make_calldata<"do_action">(internal_calldata),
+            };
+
+            work_txs[j] = SignedTransaction{
+                .tx = Transaction{.invocation = std::move(invocation),
+                                  .uniquifier =
+                                      Uniquifier{.block_expiry_height =
+                                                     expiry_height,
+                                                 .nonce = base_nonce + j},
+                                  .auth_claims = {self_auth_claim}},
+            };
+            add_signature(work_txs[j], sender);
+          }
+        }));
+  }
+
+  for (auto &future : futures) {
+    future.wait();
+  }
+
+  return LoadgenExtension{
+      .work_txs = std::move(work_txs),
+  };
+}
+
+} // namespace hogd
