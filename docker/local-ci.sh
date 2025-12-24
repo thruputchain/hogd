@@ -219,9 +219,10 @@ CONF
 echo "NPROC=\${CI_CPUS:-\$(nproc)}" >> ./scripts/conf.sh
 chmod +x ./scripts/conf.sh
 
+echo "=== Using ${CI_CPUS:-$(nproc)} CPUs (limited to prevent OOM) ==="
+
 echo "=== Fetching Rust dependencies ==="
-cd /workspace/hogd/rust && cargo fetch
-cd /workspace
+./scripts/fetch.sh
 
 echo "=== Configuring Clang build ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
