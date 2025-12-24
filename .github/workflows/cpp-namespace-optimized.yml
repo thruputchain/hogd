@@ -119,10 +119,10 @@ jobs:
         run: |
           # Run check.sh with:
           #   -p: run tests in parallel
-          #   -b: do builds in parallel (GCC debug, GCC release, LLVM concurrently)
           #   -s: skip tidy check (handled by separate tidy-namespace-optimized.yml)
+          # NOTE: -b (parallel builds) removed - causes OOM on Namespace.so runners
           CHECK_RESULT=0
-          ./scripts/check.sh -p -b -s > check.log 2>&1 || CHECK_RESULT=$?
+          ./scripts/check.sh -p -s > check.log 2>&1 || CHECK_RESULT=$?
 
           if [ $CHECK_RESULT -ne 0 ]; then
             printf 'C++ checks failed!\n'
