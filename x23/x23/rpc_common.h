@@ -254,7 +254,7 @@ struct RpcLogger {
     if (logfd_ < 0)
       return;
     auto logmsg = std::format("{} CALL xid={} ==> {}\n", peername_, xid, text);
-    [[maybe_unused]] auto r = write(logfd_, logmsg.data(), logmsg.size());
+    [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());
     assert(r == logmsg.size());
   }
   template<typename Meta = void>
@@ -264,7 +264,7 @@ struct RpcLogger {
     if (logfd_ < 0)
       return;
     auto logmsg = make_log_message<Meta>(true, peername_, msg, pl...);
-    [[maybe_unused]] auto r = write(logfd_, logmsg.data(), logmsg.size());
+    [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());
     assert(r == logmsg.size());
   }
 
@@ -276,7 +276,7 @@ struct RpcLogger {
     std::string msg = peername_ + ' ';
     uvformat_to(&msg, fmt.get(), std::make_format_args(args...));
     msg += '\n';
-    [[maybe_unused]] auto r = write(logfd_, msg.data(), msg.size());
+    [[maybe_unused]] size_t r = write(logfd_, msg.data(), msg.size());
     assert(r == msg.size());
   }
 };
@@ -306,7 +306,7 @@ struct RpcCsvLogger {
                               msg.xid, srcdest_);
     RpcLogger::append_proc<Meta>(&logmsg, msg);
     logmsg += '\n';
-    [[maybe_unused]] auto r = write(logfd_, logmsg.data(), logmsg.size());
+    [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());
     assert(r == logmsg.size());
   }
 
@@ -321,7 +321,7 @@ struct RpcCsvLogger {
   {
     auto logmsg =
         std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
-    [[maybe_unused]] auto r = write(logfd_, logmsg.data(), logmsg.size());
+    [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());
     assert(r == logmsg.size());
   }
 
