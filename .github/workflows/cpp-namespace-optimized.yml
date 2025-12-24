@@ -108,7 +108,7 @@ jobs:
         with:
           cache: rust
           path: |
-            ~/.cache/ccache
+            ~/.cache/ccache-gcc-debug
             ~/.cache/hogcache
 
       - name: Configure Git for Submodule Caching
@@ -149,8 +149,8 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with proper path expansion
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          # Configure ccache with proper path expansion (separate dir per build type)
+          echo "CCACHE_DIR=$HOME/.cache/ccache-gcc-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
@@ -205,7 +205,7 @@ jobs:
         with:
           cache: rust
           path: |
-            ~/.cache/ccache
+            ~/.cache/ccache-llvm-debug
             ~/.cache/hogcache
 
       - name: Configure Git for Submodule Caching
@@ -246,8 +246,8 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with proper path expansion
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          # Configure ccache with proper path expansion (separate dir per build type)
+          echo "CCACHE_DIR=$HOME/.cache/ccache-llvm-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
@@ -265,7 +265,7 @@ jobs:
         if: always()
         run: ccache -s
 
-  # GCC Release build (parallel with debug builds - different flags = no ccache benefit)
+  # GCC Release build (parallel with debug builds)
   gcc-release:
     needs: format
     runs-on: namespace-profile-hogd-linux
@@ -302,7 +302,7 @@ jobs:
         with:
           cache: rust
           path: |
-            ~/.cache/ccache
+            ~/.cache/ccache-gcc-release
             ~/.cache/hogcache
 
       - name: Configure Git for Submodule Caching
@@ -343,8 +343,8 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with proper path expansion
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          # Configure ccache with proper path expansion (separate dir per build type)
+          echo "CCACHE_DIR=$HOME/.cache/ccache-gcc-release" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
       - name: Cargo Fetch
