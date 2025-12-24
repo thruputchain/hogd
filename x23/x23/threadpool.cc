@@ -16,8 +16,8 @@
 #include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
-#include "x23/threadpool.h"
 #include "x23/signal.h"
+#include "x23/threadpool.h"
 #include "x23/utility.h"
 #include "x23/vec.h"
 

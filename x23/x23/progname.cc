@@ -12,8 +12,8 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
-#include <vector> // IWYU pragma: keep
 #include <sys/syslimits.h>
+#include <vector> // IWYU pragma: keep
 #endif
 
 namespace x23 {
