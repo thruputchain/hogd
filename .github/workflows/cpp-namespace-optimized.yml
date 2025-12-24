@@ -120,9 +120,11 @@ jobs:
             local repo_path="$1"
             local cache_dir="$HOME/.cache/hogcache/$repo_path"
             if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
               git clone --mirror https://github.com/$repo_path.git "$cache_dir"
             else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
             fi
             git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
@@ -218,9 +220,11 @@ jobs:
             local repo_path="$1"
             local cache_dir="$HOME/.cache/hogcache/$repo_path"
             if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
               git clone --mirror https://github.com/$repo_path.git "$cache_dir"
             else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
             fi
             git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
@@ -316,9 +320,11 @@ jobs:
             local repo_path="$1"
             local cache_dir="$HOME/.cache/hogcache/$repo_path"
             if [[ ! -d "$cache_dir" ]]; then
+              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
               mkdir -p "$(dirname "$cache_dir")"
               git clone --mirror https://github.com/$repo_path.git "$cache_dir"
             else
+              echo "HOGCACHE: Using cached mirror for $repo_path"
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
             fi
             git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
