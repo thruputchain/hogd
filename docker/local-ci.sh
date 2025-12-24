@@ -33,6 +33,7 @@ Commands:
     build           Build the Docker image
     shell           Start interactive shell in container
     tidy            Run tidy checks (clang-tidy + clippy + flake8)
+    cpp             Run C++ CI checks (format, build, test - skips tidy)
     full            Run full build + tidy checks
     clean           Remove Docker image and ccache volume
 
@@ -45,8 +46,9 @@ Examples:
     $0 build                    # Build the Docker image
     $0 shell                    # Interactive shell for debugging
     $0 tidy                     # Run tidy checks only
+    $0 cpp                      # Run C++ CI (format, build, test)
     $0 full                     # Full build + tidy (like CI)
-    $0 full --rebuild           # Rebuild image, then run full checks
+    $0 cpp --rebuild            # Rebuild image, then run C++ checks
 EOF
 }
 
@@ -125,9 +127,17 @@ run_container() {
     max_cpus=$((max_cpus > 8 ? 8 : max_cpus))
     max_cpus=$((max_cpus < 2 ? 2 : max_cpus))
 
+    # Memory limit: leave 2GB for host system, min 4GB for container
+    local mem_limit_gb=$((mem_gb - 2))
+    mem_limit_gb=$((mem_limit_gb < 4 ? 4 : mem_limit_gb))
+
+    log_info "Container limits: ${max_cpus} CPUs, ${mem_limit_gb}GB RAM (host has ${mem_gb}GB)"
+
     $CONTAINER_CMD run ${interactive_flag} --rm --replace \
         --name "${CONTAINER_NAME}" \
         --cpus="${max_cpus}" \
+        --memory="${mem_limit_gb}g" \
+        --memory-swap="${mem_limit_gb}g" \
         -v "${REPO_ROOT}:/workspace:rw" \
         -v "hogd-ccache:/root/.cache/ccache:rw" \
         -v "hogd-cargo-registry:/usr/local/cargo/registry:rw" \
@@ -136,34 +146,36 @@ run_container() {
         -e "CCACHE_DIR=/root/.cache/ccache" \
         -e "CCACHE_MAXSIZE=5G" \
         -e "CARGO_NET_GIT_FETCH_WITH_CLI=true" \
+        -e "MAKEFLAGS=-j${max_cpus}" \
+        -e "CI_CPUS=${max_cpus}" \
+        -e "NPROC=${max_cpus}" \
         -w /workspace \
         "${IMAGE_NAME}:${IMAGE_TAG}" \
         ${cmd}
-}
-
-# Create conf.sh for compiler configuration
-create_conf_sh() {
-    cat > "${REPO_ROOT}/scripts/conf.sh" <<'EOF'
-GCC_CC=gcc-14
-GCC_CXX=g++-14
-CLANG_CC=/usr/bin/clang-21
-CLANG_CXX=/usr/bin/clang++-21
-EOF
-    chmod +x "${REPO_ROOT}/scripts/conf.sh"
 }
 
 # Run tidy checks
 run_tidy() {
     log_info "Running tidy checks..."
     init_submodules
-    create_conf_sh
 
     # Create temp script to avoid quoting issues
+    # Note: conf.sh is created inside container and cleaned up after
     cat > "${REPO_ROOT}/.ci-tidy.sh" << 'TIDY_SCRIPT'
 #!/bin/bash
 set -e
 
-echo "=== Using $(nproc) CPUs (container limited to prevent OOM) ==="
+# Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
+cat > ./scripts/conf.sh << 'CONF'
+GCC_CC=gcc-14
+GCC_CXX=g++-14
+CLANG_CC=/usr/bin/clang-21
+CLANG_CXX=/usr/bin/clang++-21
+CONF
+echo "NPROC=\${CI_CPUS:-\$(nproc)}" >> ./scripts/conf.sh
+chmod +x ./scripts/conf.sh
+
+echo "=== Using ${CI_CPUS:-$(nproc)} CPUs (limited to prevent OOM) ==="
 
 echo "=== Fetching Rust dependencies ==="
 ./scripts/fetch.sh
@@ -172,7 +184,7 @@ echo "=== Configuring build for tidy ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -j $(nproc) -C build/llvm tidy_targets
+make -C build/llvm tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm
@@ -183,18 +195,29 @@ TIDY_SCRIPT
 
     run_container "bash /workspace/.ci-tidy.sh"
     rm -f "${REPO_ROOT}/.ci-tidy.sh"
+    rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
 
 # Run full build + tidy
 run_full() {
     log_info "Running full build + tidy checks..."
     init_submodules
-    create_conf_sh
 
     # Create temp script to avoid quoting issues
+    # Note: conf.sh is created inside container and cleaned up after
     cat > "${REPO_ROOT}/.ci-full.sh" << 'FULL_SCRIPT'
 #!/bin/bash
 set -e
+
+# Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
+cat > ./scripts/conf.sh << 'CONF'
+GCC_CC=gcc-14
+GCC_CXX=g++-14
+CLANG_CC=/usr/bin/clang-21
+CLANG_CXX=/usr/bin/clang++-21
+CONF
+echo "NPROC=\${CI_CPUS:-\$(nproc)}" >> ./scripts/conf.sh
+chmod +x ./scripts/conf.sh
 
 echo "=== Fetching Rust dependencies ==="
 cd /workspace/hogd/rust && cargo fetch
@@ -204,7 +227,7 @@ echo "=== Configuring Clang build ==="
 ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror" -x "-DBUILD_BENCHMARKS=OFF" -n
 
 echo "=== Building tidy targets ==="
-make -j $(nproc) -C build/llvm tidy_targets
+make -C build/llvm tidy_targets
 
 echo "=== Running tidy checks ==="
 ./scripts/tidy-ubuntu.sh -d build/llvm
@@ -215,6 +238,49 @@ FULL_SCRIPT
 
     run_container "bash /workspace/.ci-full.sh"
     rm -f "${REPO_ROOT}/.ci-full.sh"
+    rm -f "${REPO_ROOT}/scripts/conf.sh"
+}
+
+# Run C++ CI checks (mirrors cpp-namespace-optimized.yml)
+run_cpp() {
+    log_info "Running C++ CI checks (format, build, test)..."
+    init_submodules
+
+    # Create temp script to avoid quoting issues
+    # Note: conf.sh is created inside container and cleaned up after
+    cat > "${REPO_ROOT}/.ci-cpp.sh" << 'CPP_SCRIPT'
+#!/bin/bash
+set -e
+
+# Create conf.sh inside container (uses CI_CPUS env var for parallelism limit)
+cat > ./scripts/conf.sh << 'CONF'
+GCC_CC=gcc-14
+GCC_CXX=g++-14
+CLANG_CC=/usr/bin/clang-21
+CLANG_CXX=/usr/bin/clang++-21
+CONF
+echo "NPROC=\${CI_CPUS:-\$(nproc)}" >> ./scripts/conf.sh
+chmod +x ./scripts/conf.sh
+
+echo "=== Using ${CI_CPUS:-$(nproc)} CPUs (limited to prevent OOM) ==="
+
+echo "=== Fetching Rust dependencies ==="
+./scripts/fetch.sh
+
+echo "=== Running C++ checks (format, build, test - skipping tidy) ==="
+# -p: run tests in parallel
+# -s: skip tidy check (handled separately by 'tidy' command)
+# NOTE: -b (parallel builds) removed - causes OOM on machines with <32GB RAM
+#       as it runs GCC debug, GCC release, and LLVM builds concurrently
+./scripts/check.sh -p -s
+
+echo "=== All C++ checks passed! ==="
+CPP_SCRIPT
+    chmod +x "${REPO_ROOT}/.ci-cpp.sh"
+
+    run_container "bash /workspace/.ci-cpp.sh"
+    rm -f "${REPO_ROOT}/.ci-cpp.sh"
+    rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
 
 # Clean up
@@ -234,7 +300,7 @@ REBUILD=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        build|shell|tidy|full|clean)
+        build|shell|tidy|cpp|full|clean)
             COMMAND="$1"
             shift
             ;;
@@ -275,6 +341,9 @@ case "$COMMAND" in
         ;;
     tidy)
         run_tidy
+        ;;
+    cpp)
+        run_cpp
         ;;
     full)
         run_full

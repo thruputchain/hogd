@@ -1,0 +1,129 @@
+name: C++ CI (Namespace)
+
+# This workflow uses a custom base image with pre-installed toolchain.
+# Requires: Configure namespace-profile-hogd-linux with docker/Dockerfile as custom base image.
+
+on:
+  workflow_dispatch:
+  # Enable push/PR triggers after confirming workflow works on Namespace.so
+  # push:
+  #   branches: ["main"]
+  # pull_request:
+  #   branches: ["main"]
+
+jobs:
+  build:
+    runs-on: namespace-profile-hogd-linux  # Must have custom base image configured
+
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false  # We handle submodules manually for caching
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.ccache
+            ~/.cache/hogcache
+
+      # Note: 'apt' cache removed since toolchain is in base image
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          # Cache function for submodule repos (uses persistent cache dir)
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              # Update existing mirror
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          # Cache the repos we need for cpp.yml (all submodules)
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: |
+          # cpp.yml needs ALL submodules (unlike tidy which is selective)
+          git submodule update --init --recursive
+
+      # REMOVED: Install Rust/Cargo - baked into base image
+      # REMOVED: Install cbindgen - baked into base image
+      # REMOVED: Add LLVM Repository - baked into base image
+      # REMOVED: Install Build Dependencies - baked into base image
+
+      - name: Configure Environment
+        run: |
+          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-21
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+          # Verify the compilers (should be pre-installed)
+          clang-21 --version
+          gcc-14 --version
+          cargo --version
+
+      - name: Cargo Fetch
+        run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
+
+      - name: Run C++ Checks
+        run: |
+          # Run check.sh with:
+          #   -p: run tests in parallel
+          #   -b: do builds in parallel (GCC debug, GCC release, LLVM concurrently)
+          #   -s: skip tidy check (handled by separate tidy-namespace-optimized.yml)
+          CHECK_RESULT=0
+          ./scripts/check.sh -p -b -s > check.log 2>&1 || CHECK_RESULT=$?
+
+          if [ $CHECK_RESULT -ne 0 ]; then
+            printf 'C++ checks failed!\n'
+            printf '\n===== check log =====\n'
+            cat check.log
+            printf '===== end check log =====\n\n'
+            exit 1
+          fi
+
+          printf 'All C++ checks passed!\n'
