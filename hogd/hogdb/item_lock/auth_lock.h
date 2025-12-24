@@ -7,14 +7,14 @@
 #include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -54,7 +54,10 @@ private:
   AccountAuthData base_auth_data_;
   x23::TestLock lock_;
   bool locked_{false};
-  std::array<std::optional<PublicKeyConfigOpt>, MAX_SIGNERS> pk_changes_;
+  std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;
+  std::optional<NonceConfig> nonce_config_;
+  std::optional<x23::Vec<GasPermissionConfig, kMaxGasConfigs>>
+      gas_permission_configs_;
 
   friend class AuthDataItem;
 };

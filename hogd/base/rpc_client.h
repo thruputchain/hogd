@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <expected>
 #include <sys/socket.h>
 #include <system_error>
 #include <thread>
@@ -8,7 +9,9 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
@@ -62,6 +65,7 @@ auto
 make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
+  info("make_rpc_client: Creating RPC client for {}", host_port.show());
   auto ss = host_port.to_addr(true);
   if (!ss) {
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
