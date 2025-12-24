@@ -5,9 +5,8 @@ name: C++ CI (Namespace)
 
 on:
   workflow_dispatch:
-  # Enable push/PR triggers after confirming workflow works on Namespace.so
-  # push:
-  #   branches: ["main"]
+  push:
+    branches: ["mmayo/namespace-cpp-workflow"]  # Temporary: test on feature branch
   # pull_request:
   #   branches: ["main"]
 
