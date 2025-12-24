@@ -35,7 +35,8 @@ make_nonce(uint64_t value)
 } // namespace
 
 void
-ERC20BasicAuthExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
+ERC20BasicAuthExperimentState::initialize_wallets(
+    SHA256Hash const &wallet_contract_hash)
 {
   wallets_.reserve(config_.num_accounts + 1);
   for (size_t i = 0; i < config_.num_accounts + 1; ++i) {
@@ -51,24 +52,28 @@ ERC20BasicAuthExperimentState::initialize_wallets(SHA256Hash const &wallet_contr
 }
 
 void
-ERC20BasicAuthExperimentState::add_signature(SignedTransaction& tx, size_t wallet_index) {
-    assert(wallet_index < wallets_.size());
+ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
+                                             size_t wallet_index)
+{
+  assert(wallet_index < wallets_.size());
 
-    DecoratedSignatureList list;
-    Signature sig(CryptographicScheme::Ed25519);
-    sig.ed25519() = ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx));
-    list.list.push_back(DecoratedSignature {
-        .public_key_id = 0,
-        .signature = sig,
-    });
-    tx.signatures.push_back(list);
+  DecoratedSignatureList list;
+  Signature sig(CryptographicScheme::Ed25519);
+  sig.ed25519() =
+      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx));
+  list.list.push_back(DecoratedSignature{
+      .public_key_id = 0,
+      .signature = sig,
+  });
+  tx.signatures.push_back(list);
 }
 
 LoadgenStatus<LoadgenSuccessResult>
 ERC20BasicAuthExperimentState::generate_experiment()
 {
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-  using wallet_meta = ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+  using wallet_meta =
+      ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
   const static AuthClaim self_auth_claim = [] {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
@@ -127,8 +132,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
         erc20_meta::make_calldata<"mint">(wallets_[i].address,
                                           to_xdr(uint128_t{1'000'000'000})));
 
-    auto calldata = wallet_meta::make_calldata<"do_action">(
-        internal_calldata);
+    auto calldata = wallet_meta::make_calldata<"do_action">(internal_calldata);
 
     auto tx = SignedTransaction{
         .tx =
@@ -144,9 +148,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                     Uniquifier{.block_expiry_height =
                                    std::numeric_limits<BlockHeight>::max(),
                                .nonce = unfurl_txs.size() + i},
-                .auth_claims = {
-                    self_auth_claim
-                },
+                .auth_claims = {self_auth_claim},
             },
     };
     add_signature(tx, 0);
@@ -166,13 +168,13 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
 LoadgenStatus<LoadgenExtension>
 ERC20BasicAuthExperimentState::extend_experiment(uint64_t num_txs,
-                                        BlockHeight expiry_height)
+                                                 BlockHeight expiry_height)
 {
-const static AuthClaim self_auth_claim = [] {
+  const static AuthClaim self_auth_claim = [] {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
     claim.invoked_address_signature_id() = 0;
     return claim;
-    }();
+  }();
 
   if (!check_config_valid()) {
     return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
@@ -217,7 +219,8 @@ const static AuthClaim self_auth_claim = [] {
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-          using wallet_meta = ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+          using wallet_meta =
+              ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
           for (size_t j = start; j < end; ++j) {
             auto [sender, receiver] = make_account_pair();
@@ -235,21 +238,17 @@ const static AuthClaim self_auth_claim = [] {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = wallet_meta::entrypoint<"do_action">(),
                 .gas_limit = GasAmount{20'000},
-                .calldata = wallet_meta::make_calldata<"do_action">(
-                    internal_calldata),
+                .calldata =
+                    wallet_meta::make_calldata<"do_action">(internal_calldata),
             };
 
             work_txs[j] = SignedTransaction{
-                .tx =
-                    Transaction{
-                        .invocation = std::move(invocation),
-                        .uniquifier =
-                            Uniquifier{.block_expiry_height = expiry_height,
-                                       .nonce = base_nonce + j},
-                        .auth_claims = {
-                            self_auth_claim
-                        }
-                    },
+                .tx = Transaction{.invocation = std::move(invocation),
+                                  .uniquifier =
+                                      Uniquifier{.block_expiry_height =
+                                                     expiry_height,
+                                                 .nonce = base_nonce + j},
+                                  .auth_claims = {self_auth_claim}},
             };
             add_signature(work_txs[j], sender);
           }

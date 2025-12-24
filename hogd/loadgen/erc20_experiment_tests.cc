@@ -25,8 +25,8 @@ class ERC20ExperimentTest : public ::testing::Test,
 public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDB,
-          false)
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB, false)
   {}
 
 protected:
@@ -97,12 +97,12 @@ TEST_F(ERC20ExperimentTest, Basic)
   }
 }
 
-
 TEST_F(ERC20ExperimentTest, BasicAuth)
 {
-  auto state = std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
-      .num_accounts = 10,
-  });
+  auto state =
+      std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
+          .num_accounts = 10,
+      });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
 

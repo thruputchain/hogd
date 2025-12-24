@@ -13,7 +13,9 @@ namespace hogd {
 
 class ERC20BasicAuthExperimentState : public ExperimentState {
 public:
-  ERC20BasicAuthExperimentState(const ERC20PaymentsConfig &config) : config_(config) {}
+  ERC20BasicAuthExperimentState(const ERC20PaymentsConfig &config)
+    : config_(config)
+  {}
 
   LoadgenStatus<LoadgenSuccessResult> generate_experiment();
 
@@ -43,7 +45,7 @@ private:
     SHA256Hash initial_nonce;
   };
 
-  void add_signature(SignedTransaction& tx, size_t wallet_index);
+  void add_signature(SignedTransaction &tx, size_t wallet_index);
 
   // Owner wallet is wallet 0
   std::vector<WalletInfo> wallets_;
