@@ -8,10 +8,8 @@ name: C++ CI (Namespace)
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["mmayo/namespace-cpp-workflow"]  # Temporary: test on feature branch
-  # pull_request:
-  #   branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
