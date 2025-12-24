@@ -2,6 +2,9 @@ name: C++ CI (Namespace)
 
 # This workflow uses a custom base image with pre-installed toolchain.
 # Requires: Configure namespace-profile-hogd-linux with docker/Dockerfile as custom base image.
+#
+# Jobs run in parallel where possible:
+#   format (fast) -> gcc-debug + llvm-debug (parallel) -> gcc-release (after gcc-debug)
 
 on:
   workflow_dispatch:
@@ -10,10 +13,16 @@ on:
   # pull_request:
   #   branches: ["main"]
 
-jobs:
-  build:
-    runs-on: namespace-profile-hogd-linux  # Must have custom base image configured
+# Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
+env:
+  CCACHE_DIR: ~/.cache/ccache
+  CCACHE_MAXSIZE: 10G
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
+jobs:
+  # Fast format check - gates all other jobs
+  format:
+    runs-on: namespace-profile-hogd-linux
     steps:
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -40,7 +49,64 @@ jobs:
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
-          submodules: false  # We handle submodules manually for caching
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+
+      - name: Initialize Submodules (minimal for format)
+        run: |
+          # Format check only needs rust crates for cargo fmt
+          git submodule update --init rust/wasmi rust/crypto
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Format Check
+        run: ./scripts/format.sh -c
+
+  # GCC Debug build + tests
+  gcc-debug:
+    needs: format
+    runs-on: namespace-profile-hogd-linux
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
@@ -50,14 +116,11 @@ jobs:
             ~/.cache/ccache
             ~/.cache/hogcache
 
-      # Note: 'apt' cache removed since toolchain is in base image
-
       - name: Configure Git for Submodule Caching
         run: |
           mkdir -p ~/.cache/hogcache/
           git config --global protocol.file.allow always
 
-          # Cache function for submodule repos (uses persistent cache dir)
           cache_repo() {
             local repo_path="$1"
             local cache_dir="$HOME/.cache/hogcache/$repo_path"
@@ -65,13 +128,11 @@ jobs:
               mkdir -p "$(dirname "$cache_dir")"
               git clone --mirror https://github.com/$repo_path.git "$cache_dir"
             else
-              # Update existing mirror
               git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
             fi
             git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
           }
 
-          # Cache the repos we need for cpp.yml (all submodules)
           cache_repo facebook/rocksdb
           cache_repo gramseyer/model-checker
           cache_repo google/googletest
@@ -82,18 +143,10 @@ jobs:
           cache_repo corrosion-rs/corrosion
 
       - name: Initialize Submodules
-        run: |
-          # cpp.yml needs ALL submodules (unlike tidy which is selective)
-          git submodule update --init --recursive
-
-      # REMOVED: Install Rust/Cargo - baked into base image
-      # REMOVED: Install cbindgen - baked into base image
-      # REMOVED: Add LLVM Repository - baked into base image
-      # REMOVED: Install Build Dependencies - baked into base image
+        run: git submodule update --init --recursive
 
       - name: Configure Environment
         run: |
-          # Create conf.sh for scripts/env.sh to pick up gcc-14 and clang-21
           echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
           echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
@@ -101,38 +154,197 @@ jobs:
           echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache to use the cached directory
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
 
-          # Verify the compilers (should be pre-installed)
-          clang-21 --version
-          gcc-14 --version
-          cargo --version
-          ccache --version
-          clang-format-21 --version
+      - name: Build GCC Debug
+        run: ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
+
+      - name: Run Tests
+        run: |
+          cd build/gcc
+          ctest --output-on-failure --parallel $(nproc)
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
+
+  # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
+  llvm-debug:
+    needs: format
+    runs-on: namespace-profile-hogd-linux
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
 
       - name: Cargo Fetch
-        run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
+        run: ./scripts/fetch.sh
 
-      - name: Run C++ Checks
+      - name: Build LLVM Debug
+        run: ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror"
+
+      - name: Run Tests
         run: |
-          # Run check.sh with:
-          #   -p: run tests in parallel
-          #   -s: skip tidy check (handled by separate tidy-namespace-optimized.yml)
-          # NOTE: -b (parallel builds) removed - causes OOM on Namespace.so runners
-          CHECK_RESULT=0
-          ./scripts/check.sh -p -s > check.log 2>&1 || CHECK_RESULT=$?
+          cd build/llvm
+          ctest --output-on-failure --parallel $(nproc)
 
-          if [ $CHECK_RESULT -ne 0 ]; then
-            printf 'C++ checks failed!\n'
-            printf '\n===== check log =====\n'
-            cat check.log
-            printf '===== end check log =====\n\n'
-            exit 1
-          fi
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
 
-          printf 'All C++ checks passed!\n'
+  # GCC Release build (after gcc-debug to benefit from shared ccache)
+  gcc-release:
+    needs: gcc-debug
+    runs-on: namespace-profile-hogd-linux
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: |
+            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+            ${{ secrets.HOGD_TO_SCP_KEY }}
+            ${{ secrets.HOGD_TO_XDR_RPC }}
+
+      - name: Checkout
+        uses: namespacelabs/nscloud-checkout-action@v8
+        with:
+          submodules: false
+
+      - name: Configure Namespace Cache
+        uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: |
+            ~/.cache/ccache
+            ~/.cache/hogcache
+
+      - name: Configure Git for Submodule Caching
+        run: |
+          mkdir -p ~/.cache/hogcache/
+          git config --global protocol.file.allow always
+
+          cache_repo() {
+            local repo_path="$1"
+            local cache_dir="$HOME/.cache/hogcache/$repo_path"
+            if [[ ! -d "$cache_dir" ]]; then
+              mkdir -p "$(dirname "$cache_dir")"
+              git clone --mirror https://github.com/$repo_path.git "$cache_dir"
+            else
+              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
+            fi
+            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
+          }
+
+          cache_repo facebook/rocksdb
+          cache_repo gramseyer/model-checker
+          cache_repo google/googletest
+          cache_repo google/benchmark
+          cache_repo google/crc32c
+          cache_repo google/glog
+          cache_repo BLAKE3-team/BLAKE3
+          cache_repo corrosion-rs/corrosion
+
+      - name: Initialize Submodules
+        run: git submodule update --init --recursive
+
+      - name: Configure Environment
+        run: |
+          echo 'GCC_CC=gcc-14' > ./scripts/conf.sh
+          echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
+          echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
+          echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
+          chmod u+x ./scripts/conf.sh
+
+      - name: Cargo Fetch
+        run: ./scripts/fetch.sh
+
+      - name: Build GCC Release
+        run: ./scripts/build.sh -d build/gcc_release -t Release -c gcc
 
       - name: Show ccache stats
         if: always()
