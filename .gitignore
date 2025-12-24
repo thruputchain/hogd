@@ -25,3 +25,6 @@ build/**
 metrics_history
 remote-exec.env
 scp/
+
+# Local CI temp scripts
+docker/.ci-*.sh

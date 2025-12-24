@@ -161,7 +161,7 @@ run_tidy() {
 
     # Create temp script to avoid quoting issues
     # Note: conf.sh is created inside container and cleaned up after
-    cat > "${REPO_ROOT}/.ci-tidy.sh" << 'TIDY_SCRIPT'
+    cat > "${SCRIPT_DIR}/.ci-tidy.sh" << 'TIDY_SCRIPT'
 #!/bin/bash
 set -e
 
@@ -191,10 +191,10 @@ echo "=== Running tidy checks ==="
 
 echo "=== All tidy checks passed! ==="
 TIDY_SCRIPT
-    chmod +x "${REPO_ROOT}/.ci-tidy.sh"
+    chmod +x "${SCRIPT_DIR}/.ci-tidy.sh"
 
-    run_container "bash /workspace/.ci-tidy.sh"
-    rm -f "${REPO_ROOT}/.ci-tidy.sh"
+    run_container "bash /workspace/docker/.ci-tidy.sh"
+    rm -f "${SCRIPT_DIR}/.ci-tidy.sh"
     rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
 
@@ -205,7 +205,7 @@ run_full() {
 
     # Create temp script to avoid quoting issues
     # Note: conf.sh is created inside container and cleaned up after
-    cat > "${REPO_ROOT}/.ci-full.sh" << 'FULL_SCRIPT'
+    cat > "${SCRIPT_DIR}/.ci-full.sh" << 'FULL_SCRIPT'
 #!/bin/bash
 set -e
 
@@ -235,10 +235,10 @@ echo "=== Running tidy checks ==="
 
 echo "=== All checks passed! ==="
 FULL_SCRIPT
-    chmod +x "${REPO_ROOT}/.ci-full.sh"
+    chmod +x "${SCRIPT_DIR}/.ci-full.sh"
 
-    run_container "bash /workspace/.ci-full.sh"
-    rm -f "${REPO_ROOT}/.ci-full.sh"
+    run_container "bash /workspace/docker/.ci-full.sh"
+    rm -f "${SCRIPT_DIR}/.ci-full.sh"
     rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
 
@@ -249,7 +249,7 @@ run_cpp() {
 
     # Create temp script to avoid quoting issues
     # Note: conf.sh is created inside container and cleaned up after
-    cat > "${REPO_ROOT}/.ci-cpp.sh" << 'CPP_SCRIPT'
+    cat > "${SCRIPT_DIR}/.ci-cpp.sh" << 'CPP_SCRIPT'
 #!/bin/bash
 set -e
 
@@ -277,10 +277,10 @@ echo "=== Running C++ checks (format, build, test - skipping tidy) ==="
 
 echo "=== All C++ checks passed! ==="
 CPP_SCRIPT
-    chmod +x "${REPO_ROOT}/.ci-cpp.sh"
+    chmod +x "${SCRIPT_DIR}/.ci-cpp.sh"
 
-    run_container "bash /workspace/.ci-cpp.sh"
-    rm -f "${REPO_ROOT}/.ci-cpp.sh"
+    run_container "bash /workspace/docker/.ci-cpp.sh"
+    rm -f "${SCRIPT_DIR}/.ci-cpp.sh"
     rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
 
