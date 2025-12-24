@@ -98,6 +98,7 @@ jobs:
           echo 'GCC_CXX=g++-14' >> ./scripts/conf.sh
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
+          echo 'CLANG_FORMAT=clang-format-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
           # Configure ccache to use the cached directory
@@ -109,6 +110,7 @@ jobs:
           gcc-14 --version
           cargo --version
           ccache --version
+          clang-format-21 --version
 
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
