@@ -63,20 +63,45 @@ The script auto-detects SSH agent availability:
 - `--no-cache`: Build Docker image without cache
 - `--rebuild`: Force rebuild of Docker image before running command
 
-### What Gets Tested Locally
+### CPP Workflow Steps
 
-**`cpp` command** (fastest, recommended for C++ development):
-- Code format checks (clang-format, shfmt)
-- GCC Debug build with `-Werror` + tests
-- GCC Release build + tests
-- LLVM/Clang Debug build with `-Werror` + tests
+The `cpp` command runs `scripts/check.sh -p -s` which executes these steps:
 
-**`tidy` command** (code quality checks):
-- clang-tidy on all `hogd/*.{h,cc}` files
-- Cargo clippy on `hogd/rust/{wasmi,crypto}`
-- flake8 on Python files
+| Step | Name | Description | Time Est. |
+|------|------|-------------|-----------|
+| 1 | Format Check | clang-format on `*.cc/*.h`, cargo fmt on Rust, shfmt on shell | ~10s |
+| 2 | GCC Debug Build | Full build with gcc-14, `-Werror`, Debug mode | ~5-8 min |
+| 3 | GCC Debug Tests | Run all ~814 tests via ctest (parallel) | ~3-5 min |
+| 4 | LLVM Debug Build | Full build with clang-21, `-Werror`, Debug mode | ~5-8 min |
+| 5 | LLVM Debug Tests | Run all ~814 tests via ctest (parallel) | ~3-5 min |
+| 6 | Tidy | clang-tidy + clippy + flake8 | SKIPPED (`-s`) |
+| 7 | GCC Release Build | Full build with gcc-14, Release mode (optimized) | ~5-8 min |
 
-**`full` command**: Clang build + all tidy checks
+**Total: ~20-35 minutes** (depending on cache hits)
+
+Extra steps (only with `-e` flag, not run by default):
+- Step 8: TSan - Thread Sanitizer build + tests
+- Step 9: ASan - Address Sanitizer build + tests
+- Step 10: UBSan - Undefined Behavior Sanitizer build + tests
+
+Notes:
+- The `-p` flag runs tests in parallel via `ctest --parallel`
+- The `-b` flag (used on Namespace.so, not locally) runs builds 2/4/7 concurrently
+- Local CI skips `-b` to prevent OOM on machines with <32GB RAM
+
+### Tidy Workflow Steps
+
+The `tidy` command runs these checks:
+
+| Check | Tool | Target |
+|-------|------|--------|
+| C++ linting | clang-tidy-21 | `hogd/*.{h,cc}` |
+| Rust linting | cargo clippy | `hogd/rust/{wasmi,crypto}` |
+| Python linting | flake8 | `hogd/**/*.py` |
+
+### Full Workflow
+
+The `full` command combines: Clang Debug build + all tidy checks
 
 ### What Is Skipped Locally (without SSH agent)
 
