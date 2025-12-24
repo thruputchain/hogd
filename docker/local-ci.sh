@@ -41,12 +41,14 @@ Options:
     -h, --help      Show this help message
     --no-cache      Build Docker image without cache
     --rebuild       Force rebuild of Docker image before running
+    --no-test       Skip tests (cpp command only) - useful for verifying cache
 
 Examples:
     $0 build                    # Build the Docker image
     $0 shell                    # Interactive shell for debugging
     $0 tidy                     # Run tidy checks only
     $0 cpp                      # Run C++ CI (format, build, test)
+    $0 cpp --no-test            # Run builds only, skip tests (verify cache)
     $0 full                     # Full build + tidy (like CI)
     $0 cpp --rebuild            # Rebuild image, then run C++ checks
 EOF
@@ -107,6 +109,7 @@ init_submodules() {
 run_container() {
     local cmd="${1:-/bin/bash}"
     local interactive_flag="${2:--it}"
+    local extra_args="${3:-}"
 
     # Ensure cache volumes exist
     $CONTAINER_CMD volume create hogd-ccache 2>/dev/null || true
@@ -143,6 +146,7 @@ run_container() {
         -v "hogd-cargo-registry:/usr/local/cargo/registry:rw" \
         -v "hogd-cargo-git:/usr/local/cargo/git:rw" \
         ${ssh_agent_args} \
+        ${extra_args} \
         -e "CCACHE_DIR=/root/.cache/ccache" \
         -e "CCACHE_MAXSIZE=5G" \
         -e "CARGO_NET_GIT_FETCH_WITH_CLI=true" \
@@ -244,7 +248,11 @@ FULL_SCRIPT
 
 # Run C++ CI checks (mirrors cpp-namespace-optimized.yml)
 run_cpp() {
-    log_info "Running C++ CI checks (format, build, test)..."
+    if [[ -n "$NO_TEST" ]]; then
+        log_info "Running C++ CI checks (format, build only - skipping tests)..."
+    else
+        log_info "Running C++ CI checks (format, build, test)..."
+    fi
     init_submodules
 
     # Create temp script to avoid quoting issues
@@ -268,18 +276,43 @@ echo "=== Using ${CI_CPUS:-$(nproc)} CPUs (limited to prevent OOM) ==="
 echo "=== Fetching Rust dependencies ==="
 ./scripts/fetch.sh
 
-echo "=== Running C++ checks (format, build, test - skipping tidy) ==="
-# -p: run tests in parallel
-# -s: skip tidy check (handled separately by 'tidy' command)
-# NOTE: -b (parallel builds) removed - causes OOM on machines with <32GB RAM
-#       as it runs GCC debug, GCC release, and LLVM builds concurrently
-./scripts/check.sh -p -s
+if [[ "${NO_TEST:-}" == "yes" ]]; then
+    # Build only mode - skip tests, useful for verifying cache
+    echo "=== Running format check ==="
+    ./scripts/format.sh -c
 
-echo "=== All C++ checks passed! ==="
+    echo "=== Building GCC Debug ==="
+    ./scripts/build.sh -d bcheck/gcc -t Debug -c gcc -f "-Werror"
+
+    echo "=== Building LLVM Debug ==="
+    ./scripts/build.sh -d bcheck/llvm -t Debug -c clang -f "-Werror"
+
+    echo "=== Building GCC Release ==="
+    ./scripts/build.sh -d bcheck/gcc_release -t Release -c gcc
+
+    echo "=== ccache stats ==="
+    ccache -s
+
+    echo "=== All builds passed! ==="
+else
+    echo "=== Running C++ checks (format, build, test - skipping tidy) ==="
+    # -p: run tests in parallel
+    # -s: skip tidy check (handled separately by 'tidy' command)
+    # NOTE: -b (parallel builds) removed - causes OOM on machines with <32GB RAM
+    #       as it runs GCC debug, GCC release, and LLVM builds concurrently
+    ./scripts/check.sh -p -s
+
+    echo "=== All C++ checks passed! ==="
+fi
 CPP_SCRIPT
     chmod +x "${SCRIPT_DIR}/.ci-cpp.sh"
 
-    run_container "bash /workspace/docker/.ci-cpp.sh"
+    # Pass NO_TEST flag to container
+    local extra_env=""
+    if [[ -n "$NO_TEST" ]]; then
+        extra_env="-e NO_TEST=yes"
+    fi
+    run_container "bash /workspace/docker/.ci-cpp.sh" "-it" "$extra_env"
     rm -f "${SCRIPT_DIR}/.ci-cpp.sh"
     rm -f "${REPO_ROOT}/scripts/conf.sh"
 }
@@ -298,6 +331,7 @@ clean() {
 COMMAND=""
 NO_CACHE=""
 REBUILD=""
+NO_TEST=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -311,6 +345,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --rebuild)
             REBUILD="yes"
+            shift
+            ;;
+        --no-test)
+            NO_TEST="yes"
             shift
             ;;
         -h|--help)
