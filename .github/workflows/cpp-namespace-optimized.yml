@@ -49,7 +49,6 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
-            ~/.ccache
             ~/.cache/hogcache
 
       # Note: 'apt' cache removed since toolchain is in base image
@@ -101,10 +100,16 @@ jobs:
           echo 'CLANG_CC=/usr/bin/clang-21' >> ./scripts/conf.sh
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
+
+          # Configure ccache to use the cached directory
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
+
           # Verify the compilers (should be pre-installed)
           clang-21 --version
           gcc-14 --version
           cargo --version
+          ccache --version
 
       - name: Cargo Fetch
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
@@ -127,3 +132,7 @@ jobs:
           fi
 
           printf 'All C++ checks passed!\n'
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache -s
