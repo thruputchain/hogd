@@ -16,7 +16,7 @@
 
 namespace hogd {
 
-// split creates a vector of string views delineated by a seperator character
+// split creates a vector of string views delineated by a separator character
 constexpr std::vector<std::string_view>
 split(std::string_view text, char sep = ' ',
       std::optional<size_t> max = std::nullopt)
@@ -24,7 +24,7 @@ split(std::string_view text, char sep = ' ',
   std::vector<std::string_view> tokens;
   std::string_view::size_type start = 0, end;
 
-  // segment tokens based on seperator character
+  // segment tokens based on separator character
   while ((end = text.find(sep, start)) != std::string_view::npos) {
     tokens.push_back(text.substr(start, end - start));
     start = end + 1;

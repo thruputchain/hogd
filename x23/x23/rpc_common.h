@@ -247,7 +247,8 @@ struct RpcLogger {
     if (logfd_ < 0)
       return;
     auto logmsg = make_log_message<Meta>(false, peername_, msg, pl...);
-    write(logfd_, logmsg.data(), logmsg.size());
+    [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());
+    assert(r == logmsg.size());
   }
   void log_client_fail(std::uint32_t xid, std::string_view text)
   {
