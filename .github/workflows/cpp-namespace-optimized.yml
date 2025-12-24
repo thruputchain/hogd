@@ -56,10 +56,7 @@ jobs:
         with:
           cache: rust
 
-      - name: Initialize Submodules (minimal for format)
-        run: |
-          # Format check only needs rust crates for cargo fmt
-          git submodule update --init rust/wasmi rust/crypto
+      # No submodules needed - format.sh formats files in main repo only
 
       - name: Configure Environment
         run: |
