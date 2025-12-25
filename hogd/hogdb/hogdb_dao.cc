@@ -484,7 +484,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         return HogDBError(HogDBCode::kNotFound);
       }
       size_t active_keys = 0;
-      for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+      for (size_t i = 0; i < kMaxSigners; ++i) {
         if (r.value().public_keys[i]) {
           active_keys++;
         }

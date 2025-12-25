@@ -2,9 +2,9 @@
 
 #include <unordered_set>
 
-#include "account.hh"
 #include "hogd/base/types.h"
 #include "storage_item.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -18,7 +18,7 @@ is_valid_delta(StorageDelta const &delta)
     for (const auto &signer :
          delta.auth_data_change().auth_data_change_signers) {
       key_ids.insert(signer.public_key_id);
-      if (signer.public_key_id >= MAX_SIGNERS) {
+      if (signer.public_key_id >= kMaxSigners) {
         return false;
       }
     }

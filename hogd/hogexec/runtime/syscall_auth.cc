@@ -15,6 +15,7 @@
 #include "hogd/rust/contract_types/bindings.h"
 #include "syscall_error.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -85,6 +86,72 @@ syscall_ChangePublicKeyRegistration_inner(
     return {status.value().error().code(), 0};
   }
 
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_WriteAddressNonceConfig_inner(
+    SystemCallHandler &syscall_handler,
+    const generated::NonceConfig &input_nonce_config)
+{
+  auto nonce_config =
+      FFIHelperType<generated::NonceConfig>::to_cpp(input_nonce_config);
+  auto status = syscall_handler.set_address_nonce_config(nonce_config);
+  if (!status) {
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_WriteAddressGasPermissionConfigs_inner(
+    SystemCallHandler &syscall_handler,
+    const generated::GasPermissionConfig *optional_input_permission_0,
+    const generated::GasPermissionConfig *optional_input_permission_1,
+    const generated::GasPermissionConfig *optional_input_permission_2,
+    const generated::GasPermissionConfig *optional_input_permission_3,
+    const generated::GasPermissionConfig *optional_input_permission_4)
+{
+  x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs;
+  bool no_gaps = false;
+  bool found_gap = false;
+  auto add_gas_permission =
+      [&](const generated::GasPermissionConfig *permission) {
+        if (permission) {
+          if (no_gaps) {
+            found_gap = true;
+            return;
+          }
+          gas_permission_configs.push_back(
+              FFIHelperType<generated::GasPermissionConfig>::to_cpp(
+                  *permission));
+        }
+        else {
+          no_gaps = true;
+        }
+      };
+
+  add_gas_permission(optional_input_permission_0);
+  add_gas_permission(optional_input_permission_1);
+  add_gas_permission(optional_input_permission_2);
+  add_gas_permission(optional_input_permission_3);
+  add_gas_permission(optional_input_permission_4);
+
+  if (found_gap) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
+  }
+
+  auto status = syscall_handler.set_address_gas_permission_configs(
+      std::move(gas_permission_configs));
+  if (!status) {
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
+  }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 

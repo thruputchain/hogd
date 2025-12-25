@@ -331,6 +331,13 @@ AccountAuthDataItem::get_delta() const
         AuthDataChangeSigner{.public_key_id = key_index,
                              .public_key = new_key});
   }
+  if (nonce_config_.has_value()) {
+    delta.auth_data_change().new_nonce_config = nonce_config_.value();
+  }
+  if (gas_permission_configs_.has_value()) {
+    delta.auth_data_change().new_gas_config_change = GasConfigChange{
+        .new_gas_permission_configs = gas_permission_configs_.value()};
+  }
   return delta;
 }
 

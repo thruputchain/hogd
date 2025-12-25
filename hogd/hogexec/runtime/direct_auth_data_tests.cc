@@ -531,7 +531,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
       {0, make_pk_config(Weight{1})});
   auth_data_init.auth_data_change_signers.push_back(
       {1, make_pk_config(Weight{2})});
-  for (uint32_t i = 2; i < MAX_SIGNERS; i++) {
+  for (uint32_t i = 2; i < kMaxSigners; i++) {
     auth_data_init.auth_data_change_signers.push_back({i, nullptr});
   }
   auto contract_addr = make_contract_address(0);

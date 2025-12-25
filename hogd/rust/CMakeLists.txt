@@ -5,6 +5,14 @@ add_subdirectory(contract_types)
 
 include(cmake/check_rust_version.cmake)
 
+# Check for sccache and configure it if available
+find_program(SCCACHE_EXECUTABLE sccache)
+if(SCCACHE_EXECUTABLE)
+    message(STATUS "sccache found: ${SCCACHE_EXECUTABLE}")
+else()
+    message(STATUS "sccache not found - Rust builds will not use caching")
+endif()
+
 set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/common/src/ffi_enums.rs
     PROPERTIES GENERATED TRUE)
@@ -12,7 +20,12 @@ set_source_files_properties(
 # Import targets defined in the workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
-corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
+if(SCCACHE_EXECUTABLE)
+    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true RUSTC_WRAPPER=${SCCACHE_EXECUTABLE})
+else()
+    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
+endif()
+
 
 corrosion_add_target_rustflags(unified_lib "-C target-cpu=native")
 

@@ -486,7 +486,7 @@ ReplayCacheArgs::get_marginal_cost_upper_bound(
 bool
 AuthDataArgs::try_reserve_change_signer(uint32_t key_id)
 {
-  if (key_id >= MAX_SIGNERS) {
+  if (key_id >= kMaxSigners) {
     return false;
   }
   auto [_, inserted] = modified_key_ids_.insert(key_id);
@@ -527,14 +527,14 @@ AuthDataArgs::to_item(
   }
   else {
     // Initialize default auth data
-    for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+    for (size_t i = 0; i < kMaxSigners; ++i) {
       new_auth_data.public_keys[i] = nullptr;
     }
   }
 
   // Apply committed changes
   for (const auto &[key_id, new_key] : committed_changes_) {
-    if (key_id < MAX_SIGNERS) {
+    if (key_id < kMaxSigners) {
       new_auth_data.public_keys[key_id] = new_key;
     }
   }

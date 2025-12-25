@@ -2,6 +2,7 @@
 
 #include <type_traits>
 
+#include "account.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -124,9 +125,54 @@ template<> struct FFIHelperType<generated::AuthClaim> {
   constexpr static bool kFFIHelperRequired = true;
 };
 
+template<> struct FFIHelperType<generated::NonceConfig> {
+  static NonceConfig to_cpp(generated::NonceConfig const &ffi_nonce_config)
+  {
+    return NonceConfig{
+        .accepted_keys = ffi_nonce_config.accepted_keys,
+        .required_weight = ffi_nonce_config.required_weight,
+    };
+  }
+
+  static generated::NonceConfig to_ffi(NonceConfig const &cpp_nonce_config)
+  {
+    return generated::NonceConfig{
+        .accepted_keys = cpp_nonce_config.accepted_keys,
+        .required_weight = cpp_nonce_config.required_weight,
+    };
+  }
+  constexpr static bool kFFIHelperRequired = true;
+};
+
+template<> struct FFIHelperType<generated::GasPermissionConfig> {
+  static GasPermissionConfig
+  to_cpp(generated::GasPermissionConfig const &ffi_gas_permission_config)
+  {
+    return GasPermissionConfig{
+        .limit = ffi_gas_permission_config.limit,
+        .accepted_keys = ffi_gas_permission_config.accepted_keys,
+        .required_weight = ffi_gas_permission_config.required_weight,
+    };
+  }
+
+  static generated::GasPermissionConfig
+  to_ffi(GasPermissionConfig const &cpp_gas_permission_config)
+  {
+    return generated::GasPermissionConfig{
+        .limit = cpp_gas_permission_config.limit,
+        .accepted_keys = cpp_gas_permission_config.accepted_keys,
+        .required_weight = cpp_gas_permission_config.required_weight,
+    };
+  }
+  constexpr static bool kFFIHelperRequired = true;
+};
+
 template<typename T>
 concept is_ffi_helper_required = FFIHelperType<T>::kFFIHelperRequired;
 
 static_assert(is_ffi_helper_required<generated::AuthClaim>);
+static_assert(is_ffi_helper_required<generated::NonceConfig>);
+static_assert(is_ffi_helper_required<generated::GasPermissionConfig>);
+
 static_assert(!is_ffi_helper_required<int64_t>);
 } // namespace hogd

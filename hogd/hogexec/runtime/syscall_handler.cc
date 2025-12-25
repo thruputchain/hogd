@@ -1039,15 +1039,22 @@ SystemCallHandler::modify_native_token_balance(
 
 // == Authentication syscalls ==
 
+namespace {
+AddressAndKey
+auth_data_addrkey(ContractAddress const &address)
+{
+  return {.address = address,
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
+}
+} // namespace
+
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
   assert(!invocation_frame_stack_.empty());
   auto addr = invocation_frame_stack_.get_active_frame().address();
-  AddressAndKey addrkey{.address = addr,
-                        .key = StorageKey(
-                            StorageKeyType::kStorageKeyTypeAccountAuthData)};
+  AddressAndKey addrkey = auth_data_addrkey(addr);
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1065,6 +1072,55 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   assert(item_view->get<UnmodifiedItem>());
   AccountAuthDataItem new_item;
   new_item.change_public_key(key_index, std::move(new_key));
+  return item_view->set(new_item);
+}
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
+{
+  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addrkey = auth_data_addrkey(addr);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
+    account_auth_data_item->set_nonce_config(nonce_config);
+    return {};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+  assert(item_view->get<UnmodifiedItem>());
+  AccountAuthDataItem new_item;
+  new_item.set_nonce_config(nonce_config);
+  return item_view->set(new_item);
+}
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::set_address_gas_permission_configs(
+    x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
+{
+  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addrkey = auth_data_addrkey(addr);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
+    account_auth_data_item->set_gas_permission_configs(
+        std::move(gas_permission_configs));
+    return {};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+
+  assert(item_view->get<UnmodifiedItem>());
+  AccountAuthDataItem new_item;
+  new_item.set_gas_permission_configs(std::move(gas_permission_configs));
   return item_view->set(new_item);
 }
 
