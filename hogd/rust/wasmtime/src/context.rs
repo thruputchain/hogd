@@ -41,7 +41,7 @@ impl LinkEntry {
 
 #[derive(Clone)]
 pub struct WasmtimeGlobalContext {
-    engines: Vec<Engine>,
+    engine: Engine,
     // TODO(geoff): we could stick the Linker here
 }
 
@@ -60,7 +60,7 @@ impl WasmtimeGlobalContext {
                 .max_memory_size(page_size * 2)
                 .table_keep_resident(table_size)
                 .table_elements(table_size)
-                .memory_protection_keys(wasmtime::Enabled::No)
+                //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
         Engine::new(
@@ -99,23 +99,17 @@ impl WasmtimeGlobalContext {
         .unwrap()
     }
 
-    pub fn new(engine_count: usize) -> WasmtimeGlobalContext {
-        debug_assert!(engine_count > 0);
-
-        let engines = (0..engine_count).map(|_| Self::new_engine()).collect();
-        Self { engines }
-    }
-
-    pub fn get_engine(&self, index: usize) -> &Engine {
-        &self.engines[index]
+    pub fn new() -> WasmtimeGlobalContext {
+        Self {
+            engine: Self::new_engine(),
+        }
     }
 }
 
 pub struct WasmtimeContext<'a> {
     global_context: WasmtimeGlobalContext,
     pub entries: Vec<LinkEntry>,
-    pub engine_index: usize,
-    pub module_cache: Option<&'a mut ModuleCache>,
+    module_cache: Option<&'a mut ModuleCache>,
     contract_get_fn: ContractGetFn,
 }
 
@@ -174,14 +168,12 @@ macro_rules! link_function_nargs {
 impl<'a> WasmtimeContext<'a> {
     fn new(
         global_context: &WasmtimeGlobalContext,
-        engine_index: usize,
         module_cache: Option<&'a mut ModuleCache>,
         get_fn: ContractGetFn,
     ) -> WasmtimeContext<'a> {
         Self {
             global_context: global_context.clone(),
             entries: Vec::new(),
-            engine_index,
             module_cache,
             contract_get_fn: get_fn,
         }
@@ -200,7 +192,7 @@ impl<'a> WasmtimeContext<'a> {
     }
 
     pub fn engine(&self) -> &Engine {
-        self.global_context.get_engine(self.engine_index)
+        &self.global_context.engine
     }
 
     pub fn has_module_cache(&self) -> bool {
@@ -211,9 +203,7 @@ impl<'a> WasmtimeContext<'a> {
         &mut self,
         hash: &[u8; 32],
     ) -> Option<ModuleCacheEntry> {
-        self.module_cache
-            .as_mut()
-            .and_then(|cache| cache.get(self.engine_index, hash))
+        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
     }
 
     pub fn put_cached_module(
@@ -222,7 +212,7 @@ impl<'a> WasmtimeContext<'a> {
         instance: &InstancePre<*mut c_void>,
     ) {
         if let Some(cache) = self.module_cache.as_mut() {
-            cache.put(self.engine_index, hash, instance);
+            cache.put(hash, instance);
         }
     }
 
@@ -231,7 +221,7 @@ impl<'a> WasmtimeContext<'a> {
     }
 
     pub fn linker(&self) -> Linker<*mut c_void> {
-        let engine = &self.global_context.get_engine(self.engine_index);
+        let engine = &self.global_context.engine;
         let mut linker = Linker::new(engine);
 
         for entry in &self.entries {
@@ -301,7 +291,7 @@ impl<'a> WasmtimeContext<'a> {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        let engine = &self.global_context.get_engine(self.engine_index);
+        let engine = &self.global_context.engine;
         Module::validate(&engine, contract_data).is_ok()
     }
 
@@ -411,10 +401,8 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 /// Creates a global context that can be shared across threads.
 /// Global context is threadsafe.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context(
-    engines: usize,
-) -> *mut c_void {
-    let b = Box::new(WasmtimeGlobalContext::new(engines));
+pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
+    let b = Box::new(WasmtimeGlobalContext::new());
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 
@@ -441,7 +429,6 @@ pub unsafe extern "C" fn new_wasmtime_context(
     get_fn: ContractGetFn,
     global_context: *mut c_void,
     module_cache: *mut c_void,
-    engine_index: usize,
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
     let global_context: &WasmtimeGlobalContext = unsafe {
@@ -451,16 +438,10 @@ pub unsafe extern "C" fn new_wasmtime_context(
     };
 
     let b = if module_cache.is_null() {
-        Box::new(WasmtimeContext::new(
-            global_context,
-            engine_index,
-            None,
-            get_fn,
-        ))
+        Box::new(WasmtimeContext::new(global_context, None, get_fn))
     } else {
         Box::new(WasmtimeContext::new(
             global_context,
-            engine_index,
             unsafe {
                 Some(
                     &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(

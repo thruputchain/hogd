@@ -14,6 +14,18 @@ namespace hogd {
 
 struct Contract;
 
+class WasmtimeGlobalContext {
+public:
+  explicit WasmtimeGlobalContext(size_t engine_count);
+  ~WasmtimeGlobalContext();
+
+  void *get_inner(size_t engine_index) const;
+  size_t alloc_engine_index();
+
+private:
+  std::vector<void *> engines_;
+};
+
 // Wrapper around a Rust-side module cache.
 // Thread-safe and can be shared across transactions.
 class WasmtimeModuleCache {
@@ -50,7 +62,8 @@ class WasmtimeContext : public RuntimeContext {
 public:
   // module_cache can be nullptr, in which case no module cache is used.
   // module_cache must outlive this WasmtimeContext.
-  WasmtimeContext(WasmtimeModuleCache *module_cache = nullptr);
+  WasmtimeContext(WasmtimeGlobalContext &global_context,
+                  WasmtimeModuleCache *module_cache = nullptr);
 
   // wrapper around a manual drop call on the rust side
   ~WasmtimeContext() override;
@@ -66,6 +79,7 @@ private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
+  size_t engine_index_;
   void *wasmtime_context_ptr_ = nullptr;
 };
 

@@ -13,7 +13,7 @@ pub struct ModuleCacheEntry {
 
 // Module cache is NOT threadsafe, and should NOT be shared across threads.
 pub struct ModuleCache {
-    cache: LruCache<(usize, SHA256Hash), ModuleCacheEntry>,
+    cache: LruCache<SHA256Hash, ModuleCacheEntry>,
 }
 
 impl ModuleCache {
@@ -23,22 +23,17 @@ impl ModuleCache {
         }
     }
 
-    pub fn get(
-        &mut self,
-        engine_index: usize,
-        hash: &SHA256Hash,
-    ) -> Option<ModuleCacheEntry> {
-        self.cache.get(&(engine_index, *hash)).cloned()
+    pub fn get(&mut self, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
+        self.cache.get(hash).cloned()
     }
 
     pub fn put(
         &mut self,
-        engine_index: usize,
         hash: &SHA256Hash,
         instance: &InstancePre<*mut c_void>,
     ) {
         self.cache.put(
-            (engine_index, *hash),
+            *hash,
             ModuleCacheEntry {
                 instance: instance.clone(),
             },

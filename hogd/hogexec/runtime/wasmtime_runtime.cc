@@ -8,6 +8,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "account.hh"
 #include "contract.hh"
@@ -95,6 +96,38 @@ WasmtimeModuleCache::~WasmtimeModuleCache()
   }
 }
 
+WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
+{
+  engines_.resize(engine_count);
+  for (size_t i = 0; i < engine_count; ++i) {
+    engines_[i] = new_wasmtime_global_context();
+    CHECK(engines_[i] != nullptr);
+  }
+}
+
+WasmtimeGlobalContext::~WasmtimeGlobalContext()
+{
+  for (auto &engine : engines_) {
+    if (engine != nullptr) {
+      free_wasmtime_global_context(engine);
+    }
+  }
+}
+
+void *
+WasmtimeGlobalContext::get_inner(size_t engine_index) const
+{
+  assert(engine_index < engines_.size());
+  return engines_[engine_index];
+}
+
+size_t
+WasmtimeGlobalContext::alloc_engine_index()
+{
+  static std::atomic<size_t> threadlocal_alloc = 0;
+  return threadlocal_alloc.fetch_add(1) % engines_.size();
+}
+
 void
 WasmtimeModuleCache::test_reset_cache(size_t capacity)
 {
@@ -105,39 +138,14 @@ WasmtimeModuleCache::test_reset_cache(size_t capacity)
   wasmtime_module_cache_ptr_ = new_wasmtime_module_cache(capacity);
 }
 
-class WasmtimeGlobalContext {
-public:
-  WasmtimeGlobalContext()
-  {
-    engine_count = 16;
-    wasmtime_global_context_ptr_ = new_wasmtime_global_context(engine_count);
-  }
-
-  ~WasmtimeGlobalContext()
-  {
-    if (wasmtime_global_context_ptr_ != nullptr) {
-      free_wasmtime_global_context(wasmtime_global_context_ptr_);
-    }
-  }
-
-  void *wasmtime_global_context_ptr_;
-  size_t engine_count;
-};
-
-WasmtimeContext::WasmtimeContext(WasmtimeModuleCache *module_cache)
+WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context,
+                                 WasmtimeModuleCache *module_cache)
+  : engine_index_(global_context.alloc_engine_index())
 {
-  static WasmtimeGlobalContext wasmtime_global_context;
-  CHECK(wasmtime_global_context.wasmtime_global_context_ptr_ != nullptr);
-
-  static std::atomic<size_t> threadlocal_alloc = 0;
-  static thread_local size_t engine =
-      threadlocal_alloc.fetch_add(1) % wasmtime_global_context.engine_count;
-
   wasmtime_context_ptr_ =
       new_wasmtime_context(&wasmtime_contract_get_fn,
-                           wasmtime_global_context.wasmtime_global_context_ptr_,
-                           module_cache ? module_cache->get_inner() : nullptr,
-                           engine);
+                           global_context.get_inner(engine_index_),
+                           module_cache ? module_cache->get_inner() : nullptr);
 }
 
 WasmtimeContext::~WasmtimeContext()

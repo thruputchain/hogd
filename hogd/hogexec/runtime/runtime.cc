@@ -37,9 +37,14 @@ make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
-    return std::make_unique<WasmtimeContext>(&wasmtime_module_cache);
+  {
+    static WasmtimeGlobalContext wasmtime_global_context =
+        WasmtimeGlobalContext(8);
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context,
+                                             &wasmtime_module_cache);
     // return std::make_unique<WasmiContext>(&module_cache);
     break;
+  }
   default:
     return nullptr;
   }
