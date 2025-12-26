@@ -52,7 +52,7 @@ public:
   register_auth_data_updates(BlockHeight height,
                              KeyChangeBatch const &key_changes);
   void add_auth_data_updates_callback(
-      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
+      const std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
           &callback)
   {
     std::lock_guard<std::mutex> lock(auth_data_changes_callbacks_lock_);
