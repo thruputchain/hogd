@@ -474,10 +474,16 @@ InvokeTX::request_auth_data(Address const &addr,
 
   AuthDataItem auth_data_item(std::move(base_auth_data.value()));
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
-    if (signer.public_key_id >= MAX_SIGNERS) {
+    if (signer.public_key_id >= kMaxSigners) {
       return HogDBError(HogDBCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
+  }
+  if (auth_data_change.new_nonce_config) {
+    auth_data_item.set_new_nonce(*auth_data_change.new_nonce_config);
+  }
+  if (auth_data_change.new_gas_config_change) {
+    auth_data_item.set_new_gas_configs(*auth_data_change.new_gas_config_change);
   }
   auto change = ItemChange(std::move(auth_data_item));
   if (flags & std::to_underlying(StorageItemRPCFlags::kStorageExclusiveLock)) {

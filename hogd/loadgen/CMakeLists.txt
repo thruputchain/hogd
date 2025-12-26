@@ -1,6 +1,7 @@
 add_library(
   loadgen
   erc20_experiment.cc
+  erc20_basic_auth_experiment.cc
   loadgen_server.cc
   status.cc
 )

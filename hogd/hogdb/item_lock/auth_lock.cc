@@ -15,6 +15,7 @@
 #include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/testlock.h"
 
@@ -24,11 +25,17 @@ AccountAuthData
 AuthLock::build_result() const
 {
   AccountAuthData result = base_auth_data_;
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+  for (size_t i = 0; i < kMaxSigners; ++i) {
     if (pk_changes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       result.public_keys[i] = pk_changes_[i].value();
     }
+  }
+  if (nonce_config_.has_value()) {
+    result.nonce_config = nonce_config_.value();
+  }
+  if (gas_permission_configs_.has_value()) {
+    result.gas_permissions = gas_permission_configs_.value();
   }
   return result;
 }
@@ -37,7 +44,7 @@ size_t
 AuthLock::count_active_keys() const
 {
   size_t active_keys = 0;
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+  for (size_t i = 0; i < kMaxSigners; ++i) {
     if (pk_changes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (pk_changes_[i].value()) {
@@ -79,7 +86,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
 
   size_t keys = 0;
   // count number of keys created by after
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+  for (size_t i = 0; i < kMaxSigners; ++i) {
     if (after != nullptr && after->get()->pk_changes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto const &change = after->get()->pk_changes_[i].value();
@@ -94,6 +101,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
     }
   }
 
+  // TODO(geoff): cost for gas configs
   return cost_model->get_auth_data_cost(keys);
 }
 
@@ -114,7 +122,7 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
       did_finalize ? snapshot_cost
                    : cost_model->get_auth_data_cost(count_active_keys());
 
-  for (size_t i = 0; i < MAX_SIGNERS; ++i) {
+  for (size_t i = 0; i < kMaxSigners; ++i) {
 
     if (after_item.pk_changes_[i].has_value()) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -123,6 +131,16 @@ AuthLock::commit_change(bool did_finalize, int128_t snapshot_cost,
     }
   }
 
+  if (after_item.nonce_change_.has_value()) {
+    nonce_config_ = after_item.nonce_change_.value();
+  }
+
+  if (after_item.gas_config_change_.has_value()) {
+    gas_permission_configs_ =
+        after_item.gas_config_change_.value().new_gas_permission_configs;
+  }
+
+  // TODO(geoff): cost for gas configs
   int128_t new_cost = cost_model->get_auth_data_cost(count_active_keys());
   return new_cost - previous_cost;
 }

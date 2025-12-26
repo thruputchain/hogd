@@ -5,6 +5,7 @@
 #include <ostream>
 #include <random>
 
+#include <utility>
 #include <x23/async.h>
 #include <x23/format.h>
 #include <x23/serialize.h>
@@ -147,7 +148,7 @@ TEST(CommentParsing, MultilineComments)
 
 TEST(ExtensionPoint, CompileCheck)
 {
-  ParseFailure pf;
+  ParseFailure pf{};
 
   x23::Buf buf = x23::serialize(pf);
 
