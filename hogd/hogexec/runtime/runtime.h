@@ -22,6 +22,10 @@
 
 namespace hogd {
 
+namespace  test {
+  void reset_module_cache();
+}
+
 // Context to be passed into a host function call
 class SystemCallHandler;
 class Runtime;
@@ -160,10 +164,6 @@ std::unique_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // create RuntimeContext for running wasm contracts, and initialize with
 // hogexec's imported function(s)
 std::unique_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
-
-namespace test {
-void reset_module_cache();
-} // namespace test
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.

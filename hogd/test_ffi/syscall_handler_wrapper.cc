@@ -1,6 +1,5 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 
-#include <memory>
 #include <utility>
 
 #include "ffi_enums.hh"
@@ -20,7 +19,7 @@ SyscallHandlerContext::SyscallHandlerContext(MockRuntimeContext *context,
   : identifier_(db.allocate_identifier()), db_(db),
     handler_(stx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             context->clone())
+             *context)
 
 {}
 

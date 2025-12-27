@@ -49,6 +49,10 @@ protected:
     // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
     // NOLINTEND(bugprone-unchecked-optional-access)
   }
+
+  std::unique_ptr<RuntimeContext> runtime_context_;
+
+  void SetUp() override { runtime_context_ = make_hogexec_context(); }
 };
 
 TEST_F(ERC20ExperimentTest, Basic)
@@ -65,7 +69,7 @@ TEST_F(ERC20ExperimentTest, Basic)
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
       check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+      auto handler = make_new_system_call_handler(tx, *runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
@@ -84,7 +88,7 @@ TEST_F(ERC20ExperimentTest, Basic)
 
   for (auto &tx : work_txs.value().work_txs) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
     auto res = handler.try_commit_transaction();
@@ -112,7 +116,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
       check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+      auto handler = make_new_system_call_handler(tx, *runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
@@ -131,7 +135,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
 
   for (auto &tx : work_txs.value().work_txs) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
     auto res = handler.try_commit_transaction();
@@ -158,7 +162,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   for (auto &init_block : result.value().initialization_txs) {
     for (auto &tx : init_block) {
       check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+      auto handler = make_new_system_call_handler(tx, *runtime_context_);
       auto invoke_res = handler.root_invoke();
       ASSERT_TRUE(invoke_res.is_root_success());
       auto res = handler.try_commit_transaction();
@@ -176,7 +180,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 
   for (auto &tx : work_txs.value().work_txs) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *runtime_context_);
     auto invoke_res = handler.root_invoke();
     ASSERT_TRUE(invoke_res.is_root_success());
     auto res = handler.try_commit_transaction();

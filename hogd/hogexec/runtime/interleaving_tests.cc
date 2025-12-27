@@ -48,7 +48,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   constexpr static StorageKeyContractData kKey = make_storage_key("test");
   constexpr static int32_t kTestContractId = 0;
 
-  auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
+  static auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     // perform a set_add_nnint
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
@@ -77,6 +77,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  static auto context = make_context();
+
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
   write_contract(test_contract_xdr);
@@ -100,7 +102,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                    .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        make_context());
+        *context);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       throw std::runtime_error("root invoke for reset transaction failed");
@@ -118,12 +120,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
     model::RunnableActionSet actions(work_queue);
 
-    auto add_set_add_action = [this, &make_context]<int64_t SetAmount,
-                                                    int64_t AddAmount>(
+    auto add_set_add_action = [this]<int64_t SetAmount, int64_t AddAmount>(
                                   model::RunnableActionSet &actions,
                                   bool &action_result) {
       actions.add_action(
-          [](model::RunnableActionSet &set, auto self, auto &make_context,
+          [](model::RunnableActionSet &set, auto self,
              bool &action_result) -> model::Async {
             // set_amount
             co_await set.bg();
@@ -145,7 +146,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = *calldata}}},
-                make_context());
+                *context);
             auto res = handler.root_invoke();
             if (!res.is_root_success()) {
               throw std::runtime_error("root invoke failed");
@@ -161,7 +162,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
             }
             co_return;
           },
-          this, make_context, action_result);
+          this, action_result);
     };
 
     bool action_1 = true;

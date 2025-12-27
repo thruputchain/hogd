@@ -87,7 +87,10 @@ protected:
     auto contract_0 = make_native_contract(0);
     write_contract(contract_0);
     write_deployment(contract_address_, contract_0);
+    context_ = make_context();
   }
+
+  std::unique_ptr<RuntimeContext> context_;
 
   ContractAddress contract_address_{
       make_contract_address(0)}; // Default address
@@ -124,7 +127,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4, 3, 2, 1}},
                 }},
-        make_context());
+        *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -144,7 +147,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4}},
                 }},
-        make_context());
+        *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -167,7 +170,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {0, 100}},
                 }},
-        make_context());
+        *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();
@@ -191,7 +194,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {1, 2, 3, 0, 100}},
                 }},
-        make_context());
+        *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction();

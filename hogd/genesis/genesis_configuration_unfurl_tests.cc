@@ -12,7 +12,6 @@
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -28,16 +27,20 @@
 
 namespace hogd {
 
-class GenesisConfigurationUnfurlTest : public ::testing::TestWithParam<TestDB>,
+class GenesisConfigurationUnfurlTest : public ::testing::Test,
                                        public NativeContractTestFramework {
 public:
   GenesisConfigurationUnfurlTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
-          false)
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB, false)
   {}
 
+  void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
+
 protected:
+  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+
   void check_uniquifier(const Uniquifier &uniquifier)
   {
     auto r = uniquifiers_.insert(uniquifier);
@@ -56,12 +59,8 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
+TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
-                    "storage cost changes";
-  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 
@@ -100,7 +99,7 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -121,7 +120,7 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        make_hogexec_context());
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -137,12 +136,7 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(token_item_opt.has_value());
     ASSERT_EQ(token_item_opt.value().type(),
               StorageItemType::kItemTypeNonnegativeInt);
-    if (GetParam() == TestDB::kMockInMemory) {
-      EXPECT_LE(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
-    }
-    else {
-      warn("Hogdb storage cost accounting is backwards");
-    }
+    EXPECT_LE(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
   }
 
   {
@@ -152,25 +146,16 @@ TEST_P(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
     ASSERT_TRUE(token_item_opt.has_value());
     ASSERT_EQ(token_item_opt.value().type(),
               StorageItemType::kItemTypeNonnegativeInt);
-    if (GetParam() == TestDB::kMockInMemory) {
-      // LE, not EQ, because storage cost of the fibonacci contract is nonzero
-      EXPECT_LE(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
-    }
-    else {
-      warn("Hogdb storage cost accounting is backwards");
-    }
+    // LE, not EQ, because storage cost of the fibonacci contract is nonzero
+    EXPECT_LE(from_xdr(token_item_opt.value().nnint()), 1'000'000'000);
   }
 }
 
 // Test that the genesis block unfurls correctly both when proposing and
 // validating. This catches an early bug in which contract deployments and
 // creations were not included in the db blocktx workflow
-TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
+TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
-                    "storage cost changes";
-  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 
@@ -209,7 +194,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -225,7 +210,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
   // run the unfurl transactions
   for (auto const &tx : unfurl_txns) {
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -249,7 +234,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        make_hogexec_context());
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -258,7 +243,7 @@ TEST_P(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
   }
 }
 
-TEST_P(GenesisConfigurationUnfurlTest, DoubleLoadError)
+TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
   GenesisConfiguration genesis_configuration{};
 
@@ -270,13 +255,9 @@ TEST_P(GenesisConfigurationUnfurlTest, DoubleLoadError)
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);
 }
 
-TEST_P(GenesisConfigurationUnfurlTest,
+TEST_F(GenesisConfigurationUnfurlTest,
        AllocateEntireTokenSupplyMultipleContracts)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
-                    "storage cost changes";
-  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
   auto caller_contract = load_contract("fibonacci_call.wasm");
 
@@ -315,7 +296,7 @@ TEST_P(GenesisConfigurationUnfurlTest,
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -339,7 +320,7 @@ TEST_P(GenesisConfigurationUnfurlTest,
                 Transaction{.invocation =
                                 caller_client.make_invocation<"call_fibonacci">(
                                     UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        make_hogexec_context());
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -348,12 +329,8 @@ TEST_P(GenesisConfigurationUnfurlTest,
   }
 }
 
-TEST_P(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
+TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when combining balance transfers + "
-                    "storage cost changes";
-  }
   auto fibonacci_contract = load_contract("fibonacci.wasm");
 
   auto fibonacci_nonce = make_nonce(0);
@@ -377,7 +354,7 @@ TEST_P(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
 
   for (auto const &tx : unfurl_txns) {
     check_uniquifier(tx.tx.uniquifier);
-    auto handler = make_new_system_call_handler(tx, make_hogexec_context());
+    auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -391,7 +368,7 @@ TEST_P(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
   EXPECT_TRUE(lookup_contract_from_db(sha256(*fibonacci_contract)));
 }
 
-TEST_P(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
+TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
 {
   // Assert that if a contract reverts during the initial token claim's init
   // call, the entire transaction reverts. In the actual implementation
@@ -420,16 +397,11 @@ TEST_P(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
   // run the unfurl transactions
 
   auto const &stx = unfurl_txns[0];
-  auto handler = make_new_system_call_handler(stx, make_hogexec_context());
+  auto handler = make_new_system_call_handler(stx, *wasm_runtime_context_);
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, GenesisConfigurationUnfurlTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDB),
-                         test_db_to_string);
 
 } // namespace hogd

@@ -179,7 +179,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                             .calldata = {},
                         },
                 }},
-        std::move(runtime_context));
+        *runtime_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

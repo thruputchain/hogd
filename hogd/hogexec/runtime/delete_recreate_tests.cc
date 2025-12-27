@@ -160,6 +160,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -181,7 +183,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -315,6 +317,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -336,7 +340,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -474,6 +478,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -495,7 +501,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -516,7 +522,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
   // Verify there's exactly one item by consuming: first consume should succeed,
   // second should fail
-  auto verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
+  auto make_verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
@@ -550,6 +556,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto verify_context = make_verify_context();
+
   auto verify_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
@@ -560,7 +568,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      verify_context());
+      *verify_context);
 
   auto verify_res = verify_handler.root_invoke();
   ASSERT_TRUE(verify_res.is_root_success());

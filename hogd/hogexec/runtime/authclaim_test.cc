@@ -73,6 +73,10 @@ protected:
 
     return auth_claims;
   }
+
+  std::unique_ptr<RuntimeContext> context_;
+
+  void SetUp() override { context_ = make_context(); }
 };
 
 TEST_F(AuthClaimTestFixture, TestInvokedAddressSignature)
@@ -92,7 +96,7 @@ TEST_F(AuthClaimTestFixture, TestInvokedAddressSignature)
         client.make_invocation<"test_invoked_address_signature">(UINT64_MAX);
     stx.tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, make_context());
+    auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -118,7 +122,7 @@ TEST_F(AuthClaimTestFixture, TestInvokedAddressSignedWeight)
             UINT64_MAX);
     stx.tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, make_context());
+    auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -143,7 +147,7 @@ TEST_F(AuthClaimTestFixture, TestOtherAddressSignature)
         client.make_invocation<"test_other_address_signature">(UINT64_MAX);
     stx.tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, make_context());
+    auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -168,7 +172,7 @@ TEST_F(AuthClaimTestFixture, TestOtherAddressSignedWeight)
         client.make_invocation<"test_other_address_signed_weight">(UINT64_MAX);
     stx.tx.auth_claims = auth_claims;
 
-    auto handler = make_new_system_call_handler(stx, make_context());
+    auto handler = make_new_system_call_handler(stx, *context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

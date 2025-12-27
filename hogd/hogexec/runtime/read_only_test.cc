@@ -95,6 +95,8 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
             {ContractType::kNative, {native_context.get(), false}}});
   };
 
+  auto context = make_context();
+
   auto native_contract_addr = make_contract_address(1);
   auto native_contract_xdr = make_native_contract(0);
   write_contract(native_contract_xdr);
@@ -113,7 +115,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -133,7 +135,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -217,7 +219,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        std::move(multiplexed_context));
+        *multiplexed_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

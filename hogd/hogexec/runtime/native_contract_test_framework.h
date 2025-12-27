@@ -234,6 +234,7 @@ public:
     if (log) {
       enable_logging();
     }
+    test::reset_module_cache();
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();
@@ -278,7 +279,7 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::unique_ptr<RuntimeContext> runtime_context,
+                               RuntimeContext &runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);
@@ -290,7 +291,7 @@ public:
     return SystemCallHandler(tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
-                             ProposalModeCtor{}, std::move(runtime_context));
+                             ProposalModeCtor{}, runtime_context);
   }
 
   std::optional<StorageItem>
@@ -541,8 +542,6 @@ private:
 
   void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
-    test::reset_module_cache();
-
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
                    db_wrapper_);

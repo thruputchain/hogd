@@ -99,7 +99,7 @@ TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -216,7 +216,7 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);

@@ -9,7 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/wasmtime_runtime.h"
 #include "x23/format.h"
 
@@ -17,7 +17,6 @@ namespace hogd {
 
 namespace {
 
-thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
 thread_local WasmtimeModuleCache wasmtime_module_cache =
     WasmtimeModuleCache(200);
 
@@ -27,7 +26,6 @@ namespace test {
 void
 reset_module_cache()
 {
-  module_cache.test_reset_cache(10);
   wasmtime_module_cache.test_reset_cache(200);
 }
 } // namespace test

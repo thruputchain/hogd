@@ -51,8 +51,6 @@ protected:
     write_deployment(contract_addr_, contract);
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
-
-  std::shared_ptr<RuntimeContext> wasm_runtime_context_;
   ContractAddress contract_addr_;
 
   constexpr static GasAmount kSufficientGas = 100000;
@@ -167,7 +165,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      std::move(multiplexed_context));
+      *multiplexed_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "Manual revert test should succeed";
@@ -251,7 +249,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      std::move(multiplexed_context));
+      *multiplexed_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "No revert test should succeed";
@@ -322,7 +320,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      std::move(multiplexed_context));
+      *multiplexed_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())
@@ -397,7 +395,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        std::move(multiplexed_context));
+        *multiplexed_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -470,7 +468,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = kSufficientGas,
                                  .calldata = {}}}},
-      std::move(multiplexed_context));
+      *multiplexed_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success()) << "Error type 0 should succeed normally";
@@ -544,7 +542,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        std::move(multiplexed_context));
+        *multiplexed_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -604,7 +602,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
                                    .calldata = {}}}},
-        std::move(multiplexed_context));
+        *multiplexed_context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())

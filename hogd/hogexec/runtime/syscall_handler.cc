@@ -98,10 +98,9 @@ SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
-    ExecutionModeCtor execution_mode_ctor,
-    std::unique_ptr<RuntimeContext> runtime_context)
-  : runtime_context_(std::move(runtime_context)),
-    signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
+    ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
+  : runtime_context_(runtime_context), signed_tx_(std::move(signed_tx)),
+    db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
@@ -127,9 +126,7 @@ SystemCallHandler::SystemCallHandler(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
-{
-  assert(runtime_context_);
-}
+{}
 
 void
 SystemCallHandler::perform_initial_validation()
@@ -149,7 +146,7 @@ SystemCallHandler::perform_initial_validation()
   // to the executor, this check could be removed.
 
   for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-    auto res = runtime_context_->verify_contract(contract);
+    auto res = runtime_context_.verify_contract(contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
       cumulative_invoke_result_.result_ =
@@ -501,7 +498,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_->make_new_runtime(*deployed_hash, this, false);
+  return runtime_context_.make_new_runtime(*deployed_hash, this, false);
 }
 
 Calldata const &

@@ -42,12 +42,16 @@ protected:
     return make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   };
 
+  std::unique_ptr<RuntimeContext> runtime_context_;
+
   using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
   // An amount of gas that suffices for correct tests, but means that if there's
   // another calldata parsing error, we'll run out of gas and error out quickly
   // instead of trying to compute an absurdly high fibonacci.
   constexpr static GasAmount kSufficientGas = 10000;
+
+  void SetUp() override { runtime_context_ = make_context(); }
 };
 
 // Simple test for sdk, to verify that calls actually happen.
@@ -66,7 +70,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
         SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
                                   kSufficientGas, 5U)}},
-        make_context());
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -91,7 +95,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
                 Transaction{
                     .invocation =
                         client.make_invocation<"slow_fibonacci">(2000, 20U)}},
-        make_context());
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 2000);
@@ -149,6 +153,8 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
             {ContractType::kWasmi, {wasm_context.release(), true}}});
   };
 
+  auto context = make_multiplexed_context();
+
   fib_client_t client(kFibContractAddr);
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -168,7 +174,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(10U, 55U)
                                         .value()}}},
-        make_multiplexed_context());
+        *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -192,7 +198,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                     serialize<uint32_t, uint32_t>(40U,
                                                                   102334155U)
                                         .value()}}},
-        make_multiplexed_context());
+        *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
