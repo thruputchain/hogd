@@ -62,21 +62,19 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
-  SystemCallHandler
-  make_handler(SignedTransaction const &signed_tx,
-               StorageSnapshotCache &snapshot, BlockID block_id,
-               TransactionID tx_id,
-               std::unique_ptr<RuntimeContext> runtime_context)
+  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
+                                 StorageSnapshotCache &snapshot,
+                                 BlockID block_id, TransactionID tx_id,
+                                 RuntimeContext &runtime_context)
   {
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
-    assert(runtime_context != nullptr);
 
     return SystemCallHandler(
         signed_tx, snapshot,
         PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
-        ProposalModeCtor{}, std::move(runtime_context));
+        ProposalModeCtor{}, runtime_context);
   }
 };
 
@@ -139,13 +137,11 @@ TEST_F(NativeContractTest, BasicInstantiate)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
   auto context = make_context();
-  auto *context_ptr = context.get();
 
   SignedTransaction signed_tx;
   signed_tx.tx.contracts_to_deploy.push_back(contract);
 
-  SystemCallHandler handler =
-      make_handler(signed_tx, snapshot, 0, 0, std::move(context));
+  SystemCallHandler handler = make_handler(signed_tx, snapshot, 0, 0, *context);
 
   auto deployed_contract_hash = DeployedContractHash{
       .hash = sha256(contract),
@@ -154,7 +150,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
 
   auto runtime_res =
-      context_ptr->make_new_runtime(deployed_contract_hash, &handler, true);
+      context->make_new_runtime(deployed_contract_hash, &handler, true);
   ASSERT_TRUE(runtime_res.has_value());
   auto runtime = std::move(runtime_res.value());
   ASSERT_TRUE(runtime != nullptr);
@@ -286,7 +282,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                           .calldata = {},
                       },
               }},
-      snapshot, 0, 0, std::move(runtime_context));
+      snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -374,7 +370,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
                       },
               },
       },
-      snapshot, 0, 0, std::move(runtime_context));
+      snapshot, 0, 0, *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -469,6 +465,8 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   StorageSnapshotCache snapshot(0, *db_proxy_);
 
   Contract contract(ContractType::kNative);
@@ -496,7 +494,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, 0, 0, make_context());
+        snapshot, 0, 0, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -515,7 +513,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                         },
                 },
         },
-        snapshot, 0, 1, make_context());
+        snapshot, 0, 1, *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);

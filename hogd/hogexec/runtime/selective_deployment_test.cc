@@ -30,9 +30,6 @@ public:
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
-
-protected:
-  void SetUp() override {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -88,6 +85,8 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Mark the deployer contract as existing and deployed within the database
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);
@@ -116,7 +115,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
                   .contracts_to_deploy = {contract_to_deploy_1,
                                           contract_to_deploy_2},
               }},
-      make_context());
+      *context);
 
   // Invoke the contract
   auto res = handler.root_invoke();

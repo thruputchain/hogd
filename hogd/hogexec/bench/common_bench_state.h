@@ -11,7 +11,7 @@
 
 #include "db_sched.hh"
 #include "event_rpc.hh"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -72,6 +72,8 @@ public:
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid = 0)
   {
+    static thread_local auto context = make_hogexec_context();
+
     if (txid == 0) {
       txid = allocate_txid();
     }
@@ -80,7 +82,7 @@ public:
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
                              std::move(event_proxy), ProposalModeCtor{},
-                             make_hogexec_context());
+                             *context);
   }
 
   void advance_block();

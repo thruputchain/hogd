@@ -32,16 +32,13 @@ public:
 
   void make_syscall_handler(Contract const &contract)
   {
-    std::unique_ptr<RuntimeContext> runtime_context =
-        make_runtime_context(RuntimeEngine::kWasmi);
-
     SignedTransaction signed_tx = SignedTransaction{};
     signed_tx.tx.contracts_to_deploy.push_back(contract);
     syscall_handler_ = std::make_unique<SystemCallHandler>(
         std::move(signed_tx), snapshot_cache_,
         PerTransactionDatabaseProxy(db_proxy_, 0, 0),
         PerTransactionEventServerProxy(event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, std::move(runtime_context));
+        ProposalModeCtor{}, *runtime_context_);
   }
 
 private:
@@ -56,6 +53,9 @@ private:
   StorageSnapshotCache snapshot_cache_ = StorageSnapshotCache(0, db_proxy_);
   EventServerProxy event_server_proxy_ = EventServerProxy(
       x23::HostPort{"localhost", event_server_exec_rpc_.start_server(0)});
+
+  std::unique_ptr<RuntimeContext> runtime_context_ =
+      make_runtime_context(RuntimeEngine::kWasmi);
 };
 
 } // namespace hogd

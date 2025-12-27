@@ -161,7 +161,7 @@ TEST_F(EventTest, EventSuccess)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      std::move(runtime_context), &tx_id);
+      *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -279,7 +279,7 @@ TEST_F(EventTest, BadEventInputs)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      std::move(runtime_context), &tx_id);
+      *runtime_context, &tx_id);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -535,6 +535,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
   // Now invoke the contract with method 3
   EphemeralTxIdentifier tx_id_1;
 
+  auto context = make_context();
+
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
@@ -545,7 +547,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context(), &tx_id_1);
+      *context, &tx_id_1);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -565,7 +567,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context(), &tx_id_2);
+      *context, &tx_id_2);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
