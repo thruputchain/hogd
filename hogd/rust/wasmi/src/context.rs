@@ -139,11 +139,9 @@ impl WasmiContext {
     fn new(get_fn: ContractGetFn) -> WasmiContext {
         Self {
             entries: Vec::new(),
-            // Note: This previously defaulted as 10, not 100.
-            // I suspect that that extra allocation block is causing the (minor) perf regression
-            // on the fib(15) benchmark, just because of the extra memory usage.
-            // We need to change the caching strategy anyways oncc we go to winch.
-            module_cache: Some(ModuleCache::new(100)),
+            // Performance is somewhat sensitive to module cache size.
+            // We need to change the caching strategy anyways once we go to winch.
+            module_cache: Some(ModuleCache::new(10)),
             contract_get_fn: get_fn,
         }
     }
