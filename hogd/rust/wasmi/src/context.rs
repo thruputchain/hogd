@@ -23,25 +23,26 @@ use common::SystemErrorCode;
 // This is what stellar-core does
 // https://github.com/stellar/rs-soroban-env/blob/0a1c157deb1214f963a4e3dbc9abdce8ab5ef84a/soroban-env-host/src/vm/module_cache.rs#L87
 //
-// However, the internal data structures of EngineInner have the potential to be contended,
-// especially under Groundhog's concurrent execution model.
-//
 // The memory usage savings of a shared Engine are nonzero (we save when one Module is used by many transactions).
 // By size, (I suspect) the biggest costs are the the Wasmi codemap and the instance stacks
 // https://docs.rs/wasmi/latest/src/wasmi/engine/mod.rs.html#429
 // The codemap is what stores compiled wasm functions -- this could be deduplicated across shared modules.
 // The instance stacks store the wasm stack, which must be distinct for every instance (so no savings possible there).
 //
-// However, there is one big problem with the Wasmi API.  Unless I (geoff) am misreading wasmi,
-// entries in the CodeMap are never garbage collected.  That means that if an engine is reused across transactions,
+// However, there are two problems with the current Wasmi API.
+// (1) There is an internal lock on the recycled Stacks object inside the engine,
+// which, in effect, prevents any concurrent execution on one engine.  This is likely fixable
+// by a slight API change.
+//
+// (2) Entries in the CodeMap are never garbage collected.  That means that if an engine is reused across transactions,
 // without a module cache, we will leak (nontrivial amounts of) memory.  This also means that, for example,
-// an LRU cache of modules cannot be implemented.
+// a cache of modules cannot be effectively implemented on a shared engine.
 //
 // Each transaction requires its own Store.  It would be nice if we could share Modules and InstancePres
 // across transactions, but that's not viable -- Module requires an Engine parameter (we could share engines, in principle)
 // and InstancePre requires a Store parameter (unlike, for example, the wasmtime api).
 //
-// This implementation borrows some of the wasmi use patterns from stellar (without the module cache)
+// This implementation borrows some of the wasmi use patterns from stellar
 // e.g. https://github.com/stellar/rs-soroban-env/blob/f9a51971d3ca66216e290b074a1feee5334b58ff/soroban-env-host/src/vm.rs#L166
 //
 // The WASM official C API spec says that only one Engine should be created
@@ -138,6 +139,10 @@ impl WasmiContext {
     fn new(get_fn: ContractGetFn) -> WasmiContext {
         Self {
             entries: Vec::new(),
+            // Note: This previously defaulted as 10, not 100.
+            // I suspect that that extra allocation block is causing the (minor) perf regression
+            // on the fib(15) benchmark, just because of the extra memory usage.
+            // We need to change the caching strategy anyways oncc we go to winch.
             module_cache: Some(ModuleCache::new(100)),
             contract_get_fn: get_fn,
         }
