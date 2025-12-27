@@ -161,10 +161,6 @@ std::unique_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // hogexec's imported function(s)
 std::unique_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
 
-namespace test {
-void reset_module_cache();
-} // namespace test
-
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.
 class Runtime {

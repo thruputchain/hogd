@@ -76,9 +76,9 @@ impl LinkEntry {
     }
 }
 
-pub struct WasmiContext<'a> {
+pub struct WasmiContext {
     pub entries: Vec<LinkEntry>,
-    pub module_cache: Option<&'a mut ModuleCache>,
+    pub module_cache: Option<ModuleCache>,
     contract_get_fn: ContractGetFn,
 }
 
@@ -134,25 +134,24 @@ macro_rules! link_function_nargs {
     };
 }
 
-impl<'a> WasmiContext<'a> {
-    fn new(
-        get_fn: ContractGetFn,
-        module_cache: Option<&'a mut ModuleCache>,
-    ) -> WasmiContext<'a> {
+impl WasmiContext {
+    fn new(get_fn: ContractGetFn) -> WasmiContext {
         Self {
             entries: Vec::new(),
-            module_cache,
+            module_cache: Some(ModuleCache::new(100)),
             contract_get_fn: get_fn,
         }
     }
 
     /// # Safety
     /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
-    pub unsafe fn fetch_contract(
+    /// The lifetime of the returned contract is tied to the lifetime of the `hash` parameter,
+    /// ensuring the slice doesn't outlive the calling function scope.
+    pub unsafe fn fetch_contract<'a>(
         &self,
         user_context: *mut c_void,
-        hash: &SHA256Hash,
-    ) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        hash: &'a SHA256Hash,
+    ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
         get_res.to_data()
@@ -384,26 +383,12 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 
 // Rust FFI needs no_mangle and extern "C"
 /// # Safety
-/// module_cache can be nullptr, in which case no module cache is used.
-/// module_cache is threadsafe, so it can be safely shared across threads.
-/// module_cache must outlive WasmiContext.
+/// get_fn must not be a nullptr.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
     get_fn: ContractGetFn,
-    module_cache: *mut c_void,
 ) -> *mut c_void {
-    let b = if module_cache.is_null() {
-        Box::new(WasmiContext::new(get_fn, None))
-    } else {
-        Box::new(WasmiContext::new(get_fn, unsafe {
-            Some(
-                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
-                    module_cache,
-                )),
-            )
-        }))
-    };
-
+    let b = Box::new(WasmiContext::new(get_fn));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 

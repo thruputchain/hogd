@@ -541,8 +541,6 @@ private:
 
   void initialize(BlockExecutionMode mode, bool empty_genesis)
   {
-    test::reset_module_cache();
-
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
                    db_wrapper_);

@@ -19,9 +19,9 @@ pub type ContractGetFn = unsafe extern "C" fn(
     *const u8,
 ) -> ContractGetResult;
 
-// Lifetime is be lifetime of the block, not static.
+// Lifetime is lifetime of the transaction/user_context, not static.
 impl ContractGetResult {
-    pub fn to_data(&self) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+    pub fn to_data<'a>(&self) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),
