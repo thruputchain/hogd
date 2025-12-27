@@ -153,6 +153,8 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -174,7 +176,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -195,7 +197,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
 
@@ -248,6 +250,8 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -266,7 +270,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -390,6 +394,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -410,7 +416,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(2),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        make_context());
+        *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -444,7 +450,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(3),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        make_context());
+        *context);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
     auto commit_res = handler.try_commit_transaction();
@@ -474,7 +480,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
                                    .entrypoint = entrypoint_from_method_id(4),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
-        make_context());
+        *context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -580,6 +586,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
@@ -595,7 +603,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res = handler.root_invoke();
   // The transaction should fail because method 1 returns a deterministic error
@@ -725,6 +733,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
@@ -741,7 +751,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -756,7 +766,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -869,6 +879,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
@@ -885,7 +897,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -900,7 +912,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1038,6 +1050,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Deploy contract and grant storage tokens
   auto contract = make_native_contract(0);
   write_contract(contract);
@@ -1053,7 +1067,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -1068,7 +1082,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      make_context());
+      *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
@@ -1220,6 +1234,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   auto contract_template = make_native_contract(0); // native_id = 0
   write_contract(contract_template);
 
@@ -1243,7 +1259,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1, 1}},
               }},
-      make_context());
+      *context);
   {
     auto res = tc1_handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1263,7 +1279,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0}},
               }},
-      make_context());
+      *context);
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1290,7 +1306,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}},
               }},
-      make_context());
+      *context);
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1324,7 +1340,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {1}}, // true
               }},
-      make_context());
+      *context);
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1344,7 +1360,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {0, 1}}, // {false, true}
               }},
-      make_context());
+      *context);
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -1461,7 +1477,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1614,7 +1630,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1782,7 +1798,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -1902,7 +1918,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                                                entrypoint_from_method_id(2),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -2048,7 +2064,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                                                entrypoint_from_method_id(3),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();
@@ -2201,7 +2217,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2344,6 +2360,8 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  static auto context = make_context();
+
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
   write_contract(test_contract_xdr);
@@ -2376,7 +2394,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                              entrypoint_from_method_id(2),
                                          .gas_limit = UINT64_MAX,
                                          .calldata = {}}}},
-              make_context());
+              *context);
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
             throw std::runtime_error("root invoke 0 failed");
@@ -2412,7 +2430,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                              entrypoint_from_method_id(0),
                                          .gas_limit = UINT64_MAX,
                                          .calldata = calldata}}},
-              make_context());
+              *context);
           auto res = handler.root_invoke();
           co_await set.bg();
           if (!res.is_root_success()) {
@@ -2438,7 +2456,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                      .entrypoint = entrypoint_from_method_id(3),
                                      .gas_limit = UINT64_MAX,
                                      .calldata = {}}}},
-          make_context());
+          *context);
 
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
@@ -2640,7 +2658,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                                  .entrypoint = entrypoint_from_method_id(0),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -2763,7 +2781,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction();

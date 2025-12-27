@@ -33,6 +33,8 @@ run_gas_usage_metric(uint32_t num_accounts)
       .num_accounts = num_accounts,
   });
 
+  auto context = make_hogexec_context();
+
   // Generate experiment (creates genesis configuration and init txs)
   auto init_result = exp.generate_experiment();
   if (!init_result.has_value()) {
@@ -48,8 +50,7 @@ run_gas_usage_metric(uint32_t num_accounts)
     for (auto const &tx : init_block) {
       // Create a new runtime context for each transaction (it's moved into
       // handler)
-      auto handler =
-          framework.make_new_system_call_handler(tx, make_hogexec_context());
+      auto handler = framework.make_new_system_call_handler(tx, *context);
       auto invoke_result = handler.root_invoke();
       if (!invoke_result.is_root_success()) {
         throw std::runtime_error("Initialization transaction execution failed");
@@ -78,8 +79,7 @@ run_gas_usage_metric(uint32_t num_accounts)
   std::println("Executing transaction...");
 
   // Create a new runtime context for the transaction (it's moved into handler)
-  auto handler =
-      framework.make_new_system_call_handler(tx, make_hogexec_context());
+  auto handler = framework.make_new_system_call_handler(tx, *context);
   auto invoke_result = handler.root_invoke();
 
   if (!invoke_result.is_root_success()) {

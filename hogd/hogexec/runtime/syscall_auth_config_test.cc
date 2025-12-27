@@ -80,7 +80,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -151,7 +151,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -217,7 +217,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsEmpty)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -292,7 +292,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapError)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -346,7 +346,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsGapAtEnd)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -406,7 +406,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls the syscall
   auto root_res = handler.root_invoke();
@@ -520,7 +520,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(context));
+      *context);
 
   // Invoke the contract method which calls all three syscalls
   auto root_res = handler.root_invoke();

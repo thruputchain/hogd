@@ -171,7 +171,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -382,7 +382,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -516,7 +516,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success())

@@ -120,7 +120,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -200,7 +200,7 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -267,6 +267,8 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
   write_contract(contract_0);
@@ -288,7 +290,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res1 = handler1.root_invoke();
   ASSERT_TRUE(res1.is_root_success());
@@ -306,7 +308,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res2 = handler2.root_invoke();
   ASSERT_TRUE(res2.is_root_success());
@@ -335,7 +337,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res3 = handler3.root_invoke();
   ASSERT_TRUE(res3.is_root_success());
@@ -353,7 +355,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}},
               }},
-      make_context());
+      *context);
 
   auto res4 = handler4.root_invoke();
   ASSERT_TRUE(res4.is_root_success());

@@ -278,7 +278,7 @@ public:
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
-                               std::unique_ptr<RuntimeContext> runtime_context,
+                               RuntimeContext &runtime_context,
                                EphemeralTxIdentifier *identifier = nullptr)
   {
     assert(storage_snapshot_cache_);
@@ -290,7 +290,7 @@ public:
     return SystemCallHandler(tx, *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
-                             ProposalModeCtor{}, std::move(runtime_context));
+                             ProposalModeCtor{}, runtime_context);
   }
 
   std::optional<StorageItem>
