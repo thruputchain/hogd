@@ -15,21 +15,6 @@
 
 namespace hogd {
 
-namespace {
-
-thread_local WasmtimeModuleCache wasmtime_module_cache =
-    WasmtimeModuleCache(200);
-
-} // namespace
-
-namespace test {
-void
-reset_module_cache()
-{
-  wasmtime_module_cache.test_reset_cache(200);
-}
-} // namespace test
-
 std::unique_ptr<RuntimeContext>
 make_runtime_context(RuntimeEngine engine)
 {
@@ -38,8 +23,7 @@ make_runtime_context(RuntimeEngine engine)
   {
     static WasmtimeGlobalContext wasmtime_global_context =
         WasmtimeGlobalContext(8);
-    return std::make_unique<WasmtimeContext>(wasmtime_global_context,
-                                             &wasmtime_module_cache);
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
     // return std::make_unique<WasmiContext>(&module_cache);
     break;
   }

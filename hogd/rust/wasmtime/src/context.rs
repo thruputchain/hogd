@@ -1,15 +1,18 @@
 use core::ffi::c_void;
 use core::slice;
 
+use crate::debug_log;
 use common::string_from_parts;
 
 use wasmtime::{
-    Caller, Config, Engine, InstanceAllocationStrategy, InstancePre, Linker,
+    Caller, Config, Engine, InstanceAllocationStrategy, Linker,
     Module, PoolingAllocationConfig,
 };
 
 use crate::error::TrampolineError;
-use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::module_cache::CompiledCodeGetFn;
+use crate::module_cache::CompiledCodePutFn;
+use crate::module_cache::ModuleCache;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
@@ -106,10 +109,10 @@ impl WasmtimeGlobalContext {
     }
 }
 
-pub struct WasmtimeContext<'a> {
+pub struct WasmtimeContext {
     global_context: WasmtimeGlobalContext,
-    pub entries: Vec<LinkEntry>,
-    module_cache: Option<&'a mut ModuleCache>,
+    linker: Linker<*mut c_void>,
+    module_cache: ModuleCache,
     contract_get_fn: ContractGetFn,
 }
 
@@ -165,15 +168,15 @@ macro_rules! link_function_nargs {
     };
 }
 
-impl<'a> WasmtimeContext<'a> {
+impl WasmtimeContext {
     fn new(
         global_context: &WasmtimeGlobalContext,
-        module_cache: Option<&'a mut ModuleCache>,
         get_fn: ContractGetFn,
-    ) -> WasmtimeContext<'a> {
+        module_cache: ModuleCache,
+    ) -> WasmtimeContext {
         Self {
             global_context: global_context.clone(),
-            entries: Vec::new(),
+            linker: Linker::new(&global_context.engine),
             module_cache,
             contract_get_fn: get_fn,
         }
@@ -181,11 +184,11 @@ impl<'a> WasmtimeContext<'a> {
 
     /// # Safety
     /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
-    pub unsafe fn fetch_contract(
+    pub unsafe fn fetch_contract<'a>(
         &self,
         user_context: *mut c_void,
-        hash: &SHA256Hash,
-    ) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        hash: &'a SHA256Hash,
+    ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
         get_res.to_data()
@@ -195,104 +198,92 @@ impl<'a> WasmtimeContext<'a> {
         &self.global_context.engine
     }
 
-    pub fn has_module_cache(&self) -> bool {
-        self.module_cache.is_some()
-    }
-
     pub fn get_cached_module(
         &mut self,
         hash: &[u8; 32],
-    ) -> Option<ModuleCacheEntry> {
-        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
+    ) -> Result<Option<Module>, SystemErrorCode> {
+        self.module_cache.get(hash, self.linker.engine())
     }
 
     pub fn put_cached_module(
         &mut self,
         hash: &[u8; 32],
-        instance: &InstancePre<*mut c_void>,
-    ) {
-        if let Some(cache) = self.module_cache.as_mut() {
-            cache.put(hash, instance);
-        }
+        module: &Module,
+    ) -> Result<(), SystemErrorCode> {
+        self.module_cache.put(hash, module).inspect_err(|_e| {
+            debug_log!(eprintln!("Module cache put error: {_e:?}"));
+        })
     }
 
-    pub fn add_entry(&mut self, entry: LinkEntry) {
-        self.entries.push(entry);
+    pub fn link_function(&mut self, entry: LinkEntry) {
+        match entry.nargs {
+            0 => Self::link_function_0args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            1 => Self::link_function_1args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            2 => Self::link_function_2args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            3 => Self::link_function_3args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            4 => Self::link_function_4args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            5 => Self::link_function_5args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            6 => Self::link_function_6args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            7 => Self::link_function_7args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            8 => Self::link_function_8args(
+                &mut self.linker,
+                entry.fn_pointer,
+                &entry.module,
+                &entry.function,
+            ),
+            _ => panic!("Unsupported number of arguments: {}", entry.nargs),
+        }
+        .unwrap();
     }
 
-    pub fn linker(&self) -> Linker<*mut c_void> {
-        let engine = &self.global_context.engine;
-        let mut linker = Linker::new(engine);
-
-        for entry in &self.entries {
-            match entry.nargs {
-                0 => Self::link_function_0args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                1 => Self::link_function_1args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                2 => Self::link_function_2args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                3 => Self::link_function_3args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                4 => Self::link_function_4args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                5 => Self::link_function_5args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                6 => Self::link_function_6args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                7 => Self::link_function_7args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                8 => Self::link_function_8args(
-                    &mut linker,
-                    entry.fn_pointer,
-                    &entry.module,
-                    &entry.function,
-                ),
-                _ => {
-                    panic!("Unsupported number of arguments: {}", entry.nargs);
-                }
-            }
-            .unwrap();
-        }
-
-        linker
+    pub fn linker(&self) -> &Linker<*mut c_void> {
+        &self.linker
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         let engine = &self.global_context.engine;
         Module::validate(&engine, contract_data).is_ok()
+        // TODO(geoff): consider validating that contract memory exports are good and no start function
     }
 
     link_function_nargs!(link_function_0args, c_call_0args);
@@ -393,7 +384,7 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 
     let c = unsafe { &mut *context };
 
-    c.add_entry(LinkEntry::new(module, method, nargs, function_pointer));
+    c.link_function(LinkEntry::new(module, method, nargs, function_pointer));
     true
 }
 
@@ -427,8 +418,9 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_context(
     get_fn: ContractGetFn,
+    compiled_code_get_fn: CompiledCodeGetFn,
+    compiled_code_put_fn: CompiledCodePutFn,
     global_context: *mut c_void,
-    module_cache: *mut c_void,
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
     let global_context: &WasmtimeGlobalContext = unsafe {
@@ -437,22 +429,11 @@ pub unsafe extern "C" fn new_wasmtime_context(
         )
     };
 
-    let b = if module_cache.is_null() {
-        Box::new(WasmtimeContext::new(global_context, None, get_fn))
-    } else {
-        Box::new(WasmtimeContext::new(
-            global_context,
-            unsafe {
-                Some(
-                    &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
-                        module_cache,
-                    )),
-                )
-            },
-            get_fn,
-        ))
-    };
-
+    let b = Box::new(WasmtimeContext::new(
+        global_context,
+        get_fn,
+        ModuleCache::new(compiled_code_get_fn, compiled_code_put_fn),
+    ));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 

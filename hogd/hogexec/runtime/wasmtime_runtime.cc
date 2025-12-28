@@ -85,17 +85,6 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
 
 } // namespace
 
-WasmtimeModuleCache::WasmtimeModuleCache(size_t capacity)
-  : wasmtime_module_cache_ptr_(new_wasmtime_module_cache(capacity))
-{}
-
-WasmtimeModuleCache::~WasmtimeModuleCache()
-{
-  if (wasmtime_module_cache_ptr_ != nullptr) {
-    free_wasmtime_module_cache(wasmtime_module_cache_ptr_);
-  }
-}
-
 WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
 {
   engines_.resize(engine_count);
@@ -124,28 +113,19 @@ WasmtimeGlobalContext::get_inner(size_t engine_index) const
 size_t
 WasmtimeGlobalContext::alloc_engine_index()
 {
-  static std::atomic<size_t> threadlocal_alloc = 0;
-  return threadlocal_alloc.fetch_add(1) % engines_.size();
+  static std::atomic<size_t> allocator = 0;
+  static thread_local size_t threadlocal_alloc = allocator.fetch_add(1) % engines_.size();
+
+  return threadlocal_alloc;
 }
 
-void
-WasmtimeModuleCache::test_reset_cache(size_t capacity)
-{
-  assert(capacity > 0);
-  if (wasmtime_module_cache_ptr_ != nullptr) {
-    free_wasmtime_module_cache(wasmtime_module_cache_ptr_);
-  }
-  wasmtime_module_cache_ptr_ = new_wasmtime_module_cache(capacity);
-}
-
-WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context,
-                                 WasmtimeModuleCache *module_cache)
+WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
   : engine_index_(global_context.alloc_engine_index())
 {
   wasmtime_context_ptr_ =
       new_wasmtime_context(&wasmtime_contract_get_fn,
                            global_context.get_inner(engine_index_),
-                           module_cache ? module_cache->get_inner() : nullptr);
+                           nullptr);
 }
 
 WasmtimeContext::~WasmtimeContext()

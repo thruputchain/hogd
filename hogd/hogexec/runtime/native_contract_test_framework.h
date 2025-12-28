@@ -234,7 +234,6 @@ public:
     if (log) {
       enable_logging();
     }
-    test::reset_module_cache();
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();

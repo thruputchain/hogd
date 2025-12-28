@@ -1,79 +1,101 @@
-use lru::LruCache;
+use wasmtime::Engine;
+use wasmtime::Module;
 
-use wasmtime::InstancePre;
-
+use crate::debug_log;
 use crate::SHA256Hash;
-use core::ffi::c_void;
-use std::num::NonZeroUsize;
+use common::SystemErrorCode;
 
-#[derive(Clone)]
-pub struct ModuleCacheEntry {
-    pub instance: InstancePre<*mut c_void>,
+#[repr(C)]
+pub struct CompiledCodeGetResult {
+    pub data: *const u8,
+    pub data_len: usize,
+}
+
+// The lifetime of the returned compiled code is at least until the end of the block (hence until the end of the transaction).
+// So it is safe to use the returned slices for the duration of a running transaction,
+// although we will need more work to be done if we want to copy some modules into a threadlocal InstancePre cache.
+pub type CompiledCodeGetFn = unsafe extern "C" fn(
+    hash: *const u8,
+    hash_len: usize,
+) -> CompiledCodeGetResult;
+
+pub type CompiledCodePutFn = unsafe extern "C" fn(
+    hash: *const u8,
+    hash_len: usize,
+    data: *const u8,
+    data_len: usize,
+);
+
+impl CompiledCodeGetResult {
+    pub fn as_slice<'a>(&self) -> Option<&'a [u8]> {
+        if self.data.is_null() {
+            None
+        } else {
+            Some(unsafe {
+                core::slice::from_raw_parts(self.data, self.data_len)
+            })
+        }
+    }
 }
 
 // Module cache is NOT threadsafe, and should NOT be shared across threads.
 pub struct ModuleCache {
-    cache: LruCache<SHA256Hash, ModuleCacheEntry>,
+    compiled_code_get_fn: CompiledCodeGetFn,
+    compiled_code_put_fn: CompiledCodePutFn,
 }
 
 impl ModuleCache {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(
+        compiled_code_get_fn: CompiledCodeGetFn,
+        compiled_code_put_fn: CompiledCodePutFn,
+    ) -> Self {
         Self {
-            cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
+            compiled_code_get_fn,
+            compiled_code_put_fn,
         }
     }
 
-    pub fn get(&mut self, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
-        self.cache.get(hash).cloned()
+    pub fn get(
+        &mut self,
+        hash: &SHA256Hash,
+        engine: &Engine,
+    ) -> Result<Option<Module>, SystemErrorCode> {
+        let result =
+            unsafe { (self.compiled_code_get_fn)(hash.as_ptr(), hash.len()) };
+        let slice = match result.as_slice() {
+            Some(slice) => slice,
+            None => return Ok(None),
+        };
+        // The deserialize_raw API does not work on environments that use virtual memory.
+        // TODO(geoff): It would be really nice if we could avoid doing a full copy of the module,
+        // followed by an mprotect.
+        //
+        //let module = unsafe { Module::deserialize_raw(engine, slice.into()) }
+        let module = unsafe { Module::deserialize(engine, slice) }
+            .map_err(|_e| {
+            debug_log!(eprintln!("Module deserialize error: {_e}"));
+            SystemErrorCode::kSystemUnrecoverable
+        })?;
+        Ok(Some(module))
     }
 
     pub fn put(
         &mut self,
         hash: &SHA256Hash,
-        instance: &InstancePre<*mut c_void>,
-    ) {
-        self.cache.put(
-            *hash,
-            ModuleCacheEntry {
-                instance: instance.clone(),
-            },
-        );
+        module: &Module,
+    ) -> Result<(), SystemErrorCode> {
+        let bytes = module.serialize().map_err(|_e| {
+            debug_log!(eprintln!("Module serialize error: {_e}"));
+            SystemErrorCode::kSystemUnrecoverable
+        })?;
+        unsafe {
+            (self.compiled_code_put_fn)(
+                hash.as_ptr(),
+                hash.len(),
+                bytes.as_ptr(),
+                bytes.len(),
+            )
+        };
+        Ok(())
     }
-
-    pub fn cached_size(&self) -> usize {
-        self.cache.len()
-    }
-}
-
-/// # Safety
-/// capacity must be nonzero.
-#[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_module_cache(
-    capacity: usize,
-) -> *mut c_void {
-    let b = Box::new(ModuleCache::new(capacity));
-    let ptr = Box::into_raw(b);
-    core::mem::transmute(ptr)
-}
-
-/// # Safety
-/// ptr must be a pointer to a ModuleCache, which was produced by new_wasmtime_module_cache.
-#[no_mangle]
-pub unsafe extern "C" fn free_wasmtime_module_cache(ptr: *mut c_void) {
-    debug_assert!(!ptr.is_null());
-    unsafe {
-        drop(Box::from_raw(ptr as *mut ModuleCache));
-    }
-}
-
-/// # Safety
-/// ptr must be a pointer to a ModuleCache, which was produced by new_wasmtime_module_cache.
-#[no_mangle]
-pub unsafe extern "C" fn wasmtime_module_cache_cached_size(
-    ptr: *mut c_void,
-) -> usize {
-    debug_assert!(!ptr.is_null());
-    let cache: *mut ModuleCache = unsafe { core::mem::transmute(ptr) };
-    let cache = unsafe { &mut *cache };
-    cache.cached_size()
 }

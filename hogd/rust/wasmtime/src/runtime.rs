@@ -63,41 +63,20 @@ impl WasmtimeRuntime {
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let instance_pre = if context.has_module_cache() {
-            if let Some(cached) = context.get_cached_module(hash) {
-                cached.instance
-            } else {
-                let linker = context.linker();
-                let module = Module::new(linker.engine(), bytes)
-                    .inspect_err(|_e| {
-                        debug_log!(eprintln!("Module new error: {_e}"))
-                    })
-                    .ok()?;
-
-                if !check_memory_limit(&module) {
-                    debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                    return None;
-                }
-                if !check_no_start(&module) {
-                    debug_log!(eprintln!(
-                        "Module instantiation failed: Has start function"
-                    ));
-                    return None;
-                }
-
-                let instance_pre = linker
-                    .instantiate_pre(&module)
-                    .inspect_err(|_e| {
-                        eprintln!("Error instantiating store: {_e}")
-                    })
-                    .ok()?;
-                context.put_cached_module(hash, &instance_pre);
-                instance_pre
-            }
+        let instance_pre = if let Some(module) = context.get_cached_module(hash).unwrap()
+        {
+            let instance_pre = context
+                .linker()
+                .instantiate_pre(&module)
+                .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
+                .ok()?;
+            instance_pre
         } else {
             let linker = context.linker();
             let module = Module::new(linker.engine(), bytes)
-                .inspect_err(|_e| eprintln!("Module new error: {_e}"))
+                .inspect_err(|_e| {
+                    debug_log!(eprintln!("Module new error: {_e}"))
+                })
                 .ok()?;
 
             if !check_memory_limit(&module) {
@@ -110,10 +89,12 @@ impl WasmtimeRuntime {
                 ));
                 return None;
             }
+
             let instance_pre = linker
                 .instantiate_pre(&module)
                 .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
                 .ok()?;
+            context.put_cached_module(hash, &module).unwrap();
             instance_pre
         };
 

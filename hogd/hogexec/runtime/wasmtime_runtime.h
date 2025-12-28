@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "account.hh"
 #include "hogd/base/types.h"
@@ -15,37 +16,16 @@ namespace hogd {
 struct Contract;
 
 class WasmtimeGlobalContext {
-public:
-  explicit WasmtimeGlobalContext(size_t engine_count);
-  ~WasmtimeGlobalContext();
-
-  void *get_inner(size_t engine_index) const;
-  size_t alloc_engine_index();
-
-private:
-  std::vector<void *> engines_;
-};
-
-// Wrapper around a Rust-side module cache.
-// Thread-safe and can be shared across transactions.
-class WasmtimeModuleCache {
-public:
-  WasmtimeModuleCache(size_t capacity);
-  ~WasmtimeModuleCache();
-
-  WasmtimeModuleCache(WasmtimeModuleCache const &) = delete;
-  WasmtimeModuleCache &operator=(WasmtimeModuleCache const &) = delete;
-
-  // Not threadsafe with any transaction using the cache.
-  // should ONLY be used in test setup/teardown.
-  void test_reset_cache(size_t capacity);
-
-private:
-  friend class WasmtimeContext;
-  void *get_inner() const { return wasmtime_module_cache_ptr_; }
-
-  void *wasmtime_module_cache_ptr_ = nullptr;
-};
+  public:
+    explicit WasmtimeGlobalContext(size_t engine_count);
+    ~WasmtimeGlobalContext();
+  
+    void *get_inner(size_t engine_index) const;
+    size_t alloc_engine_index();
+  
+  private:
+    std::vector<void *> engines_;
+  };
 
 // Context shared between WasmtimeRuntime objects.
 // Guarantee isolation between transactions
@@ -62,8 +42,7 @@ class WasmtimeContext : public RuntimeContext {
 public:
   // module_cache can be nullptr, in which case no module cache is used.
   // module_cache must outlive this WasmtimeContext.
-  WasmtimeContext(WasmtimeGlobalContext &global_context,
-                  WasmtimeModuleCache *module_cache = nullptr);
+  WasmtimeContext(WasmtimeGlobalContext &global_context);
 
   // wrapper around a manual drop call on the rust side
   ~WasmtimeContext() override;

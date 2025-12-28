@@ -1,17 +1,19 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 // Import the FFI functions from wasmtime_lib
 use common::SystemErrorCode;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context,
-    free_wasmtime_module_cache, free_wasmtime_runtime, new_wasmtime_context,
-    new_wasmtime_global_context, new_wasmtime_module_cache,
+    free_wasmtime_runtime, new_wasmtime_context,
+    new_wasmtime_global_context,
     new_wasmtime_runtime, wasmtime_get_available_gas, wasmtime_get_memory,
-    wasmtime_invoke, wasmtime_module_cache_cached_size,
+    wasmtime_invoke,
     wasmtime_set_available_gas, wasmtime_verify_contract, ContractGetResult,
+    CompiledCodeGetResult,
 };
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
@@ -161,6 +163,119 @@ unsafe extern "C" fn no_get_mock_contract_get_fn(
     ContractGetResult::new(SystemErrorCode::kSystemUnrecoverable as i32, &[])
 }
 
+type SHA256Hash = [u8; 32];
+
+pub struct TestModuleCache {
+    compiled_modules: HashMap<SHA256Hash, Vec<u8>>,
+}
+
+impl TestModuleCache {
+    fn new() -> Self {
+        Self {
+            compiled_modules: HashMap::new(),
+        }
+    }
+
+    fn get(&self, hash: &SHA256Hash) -> Option<&Vec<u8>> {
+        self.compiled_modules.get(hash)
+    }
+
+    fn put(&mut self, hash: SHA256Hash, data: Vec<u8>) {
+        self.compiled_modules.insert(hash, data);
+    }
+
+    fn len(&self) -> usize {
+        self.compiled_modules.len()
+    }
+
+    fn clear(&mut self) {
+        self.compiled_modules.clear();
+    }
+}
+
+// Thread-local cache for testing module caching
+thread_local! {
+    static TEST_MODULE_CACHE: RefCell<TestModuleCache> = RefCell::new(TestModuleCache::new());
+}
+
+// CompiledCodeGetFn that uses the thread-local cache
+unsafe extern "C" fn test_compiled_code_get_fn(
+    hash: *const u8,
+    hash_len: usize,
+) -> CompiledCodeGetResult {
+    if hash_len != 32 {
+        return CompiledCodeGetResult {
+            data: std::ptr::null(),
+            data_len: 0,
+        };
+    }
+
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    let mut hash_array: SHA256Hash = [0u8; 32];
+    hash_array.copy_from_slice(hash_slice);
+    
+    // Clone the data while holding the borrow, then release it before leaking
+    let data_opt: Option<Vec<u8>> = TEST_MODULE_CACHE.with(|cache| {
+        cache.borrow().get(&hash_array).cloned()
+    });
+
+    if let Some(data) = data_opt {
+        // Leak the data to create a 'static lifetime for the test
+        let leaked: &'static mut [u8] = Box::leak(data.into_boxed_slice());
+        CompiledCodeGetResult {
+            data: leaked.as_ptr(),
+            data_len: leaked.len(),
+        }
+    } else {
+        CompiledCodeGetResult {
+            data: std::ptr::null(),
+            data_len: 0,
+        }
+    }
+}
+
+// CompiledCodePutFn that uses the thread-local cache
+unsafe extern "C" fn test_compiled_code_put_fn(
+    hash: *const u8,
+    hash_len: usize,
+    data: *const u8,
+    data_len: usize,
+) {
+    if hash_len != 32 {
+        return;
+    }
+
+    let hash_slice = std::slice::from_raw_parts(hash, 32);
+    let mut hash_array: SHA256Hash = [0u8; 32];
+    hash_array.copy_from_slice(hash_slice);
+    let data_slice = std::slice::from_raw_parts(data, data_len);
+    
+    TEST_MODULE_CACHE.with(|cache| {
+        cache.borrow_mut().put(hash_array, data_slice.to_vec());
+    });
+}
+
+// Mock CompiledCodeGetFn for testing - returns no cached code (for tests that don't need caching)
+unsafe extern "C" fn no_get_compiled_code_get_fn(
+    _hash: *const u8,
+    _hash_len: usize,
+) -> CompiledCodeGetResult {
+    CompiledCodeGetResult {
+        data: std::ptr::null(),
+        data_len: 0,
+    }
+}
+
+// Mock CompiledCodePutFn for testing - does nothing (for tests that don't need caching)
+unsafe extern "C" fn no_put_compiled_code_put_fn(
+    _hash: *const u8,
+    _hash_len: usize,
+    _data: *const u8,
+    _data_len: usize,
+) {
+    // No-op for tests that don't need caching
+}
+
 // Helper function to load a WASM file from the test_wasms directory
 // Leaks the memory to create a 'static lifetime, which is fine for tests
 fn load_wasm_file(filename: &str) -> &'static [u8] {
@@ -183,16 +298,16 @@ fn load_wasm_file(filename: &str) -> &'static [u8] {
 fn test_create_context() {
     // Test that we can create and destroy a wasmtime context
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         assert!(
             !global_context.is_null(),
             "Global context should be created"
         );
         let context = new_wasmtime_context(
             no_get_mock_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         assert!(!context.is_null(), "Context should be created");
         free_wasmtime_context(context);
@@ -203,12 +318,12 @@ fn test_create_context() {
 #[test]
 fn test_verify_valid_wasm() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             no_get_mock_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         assert!(!context.is_null());
 
@@ -269,13 +384,13 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
 #[test]
 fn test_create_runtime() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         println!("global_context created");
         let context = new_wasmtime_context(
             test_get_simple_add_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         println!("context created");
         // Create a dummy contract hash
@@ -300,12 +415,12 @@ fn test_create_runtime() {
 #[test]
 fn test_get_memory() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_simple_add_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [0u8; 32];
 
@@ -337,12 +452,12 @@ fn test_get_memory() {
 #[test]
 fn test_invoke_function() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [1u8; 32];
 
@@ -373,12 +488,12 @@ fn test_invoke_function() {
 #[test]
 fn test_gas_metering() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [1u8; 32];
 
@@ -415,12 +530,12 @@ fn test_missing_wasm_file() {
 #[test]
 fn test_verify_invalid_wasm() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             no_get_mock_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
 
         // Create some invalid WASM bytes
@@ -443,12 +558,12 @@ fn test_verify_invalid_wasm() {
 #[test]
 fn test_multiple_runtimes() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [1u8; 32];
 
@@ -482,12 +597,12 @@ fn test_fibonacci_computation() {
     // Test that we can invoke the fibonacci function and verify results
     // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [1u8; 32];
 
@@ -524,12 +639,12 @@ fn test_fibonacci_computation() {
 #[test]
 fn test_fibonacci_computation_overflow() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        let global_context = new_wasmtime_global_context();
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
+            no_get_compiled_code_get_fn,
+            no_put_compiled_code_put_fn,
             global_context,
-            std::ptr::null_mut(),
-            0,
         );
         let contract_hash = [1u8; 32];
 
@@ -581,26 +696,28 @@ unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
     );
 }
 
+// Test that module cache functions actually cache and retrieve compiled modules
 #[test]
 fn test_module_cache() {
     unsafe {
-        let global_context = new_wasmtime_global_context(1);
+        // Clear the cache before starting
+        TEST_MODULE_CACHE.with(|cache| {
+            cache.borrow_mut().clear();
+        });
+
+        let global_context = new_wasmtime_global_context();
         assert!(!global_context.is_null());
 
-        // Create a module cache with capacity 10
-        let module_cache = new_wasmtime_module_cache(10);
-        assert!(!module_cache.is_null());
-
-        // Create context with module cache
+        // Create context with module cache functions
         let context = new_wasmtime_context(
             test_get_simple_add_and_fibonacci_contract_get_fn,
+            test_compiled_code_get_fn,
+            test_compiled_code_put_fn,
             global_context,
-            module_cache,
-            0,
         );
         assert!(!context.is_null());
 
-        // Create first runtime - this should cache the module
+        // Create first runtime - this should compile and cache the module
         let hash1: [u8; 32] = [0u8; 32];
         let runtime1 = new_wasmtime_runtime(
             hash1.as_ptr(),
@@ -609,11 +726,15 @@ fn test_module_cache() {
             context,
         );
         assert!(!runtime1.is_null(), "First runtime should be created");
+        
+        // Verify the module was cached
+        let cache_len = TEST_MODULE_CACHE.with(|cache| cache.borrow().len());
         assert_eq!(
-            wasmtime_module_cache_cached_size(module_cache),
+            cache_len,
             1,
-            "Module cache should have 1 cached module"
+            "Module cache should have 1 cached module after first runtime"
         );
+        
         // Create second runtime with same hash - should use cached module
         let runtime2 = new_wasmtime_runtime(
             hash1.as_ptr(),
@@ -625,11 +746,15 @@ fn test_module_cache() {
             !runtime2.is_null(),
             "Second runtime should be created from cache"
         );
+        
+        // Cache should still have 1 entry (same hash)
+        let cache_len = TEST_MODULE_CACHE.with(|cache| cache.borrow().len());
         assert_eq!(
-            wasmtime_module_cache_cached_size(module_cache),
+            cache_len,
             1,
-            "Module cache should still have 1 cached module"
+            "Module cache should still have 1 cached module (same hash)"
         );
+        
         // Create third runtime with different hash - should cache a new module
         let hash2: [u8; 32] = [1u8; 32];
         let runtime3 = new_wasmtime_runtime(
@@ -639,17 +764,20 @@ fn test_module_cache() {
             context,
         );
         assert!(!runtime3.is_null(), "Third runtime should be created");
+        
+        // Cache should now have 2 entries (different hashes)
+        let cache_len = TEST_MODULE_CACHE.with(|cache| cache.borrow().len());
         assert_eq!(
-            wasmtime_module_cache_cached_size(module_cache),
+            cache_len,
             2,
-            "Module cache should have 2 cached modules"
+            "Module cache should have 2 cached modules (different hashes)"
         );
+        
         // Clean up
         free_wasmtime_runtime(runtime1);
         free_wasmtime_runtime(runtime2);
         free_wasmtime_runtime(runtime3);
         free_wasmtime_context(context);
-        free_wasmtime_module_cache(module_cache);
         free_wasmtime_global_context(global_context);
     }
 }
