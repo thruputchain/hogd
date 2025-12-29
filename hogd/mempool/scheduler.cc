@@ -226,12 +226,14 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 
   std::vector<AccountKey> account_keys;
   account_keys.reserve(accounts.size());
+  // [get_account_key()] accesses [ready_accounts_], so we need to protect if
+  // with the lock.
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     account_keys.push_back(get_account_key(account));
   }
 
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
   for (const AccountKey &account_key : account_keys) {
     ready_accounts_.insert(account_key);
   }
