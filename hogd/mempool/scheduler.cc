@@ -231,13 +231,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
-    account_keys.push_back(get_account_key(account));
+    ready_accounts_.insert(get_account_key(account));
   }
-
-  for (const AccountKey &account_key : account_keys) {
-    ready_accounts_.insert(account_key);
-  }
-  cg.reset();
 }
 
 void
