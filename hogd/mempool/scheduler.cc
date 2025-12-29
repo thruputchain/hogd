@@ -130,6 +130,7 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 Scheduler::AccountKey
 Scheduler::get_account_key(const ContractAddress &account)
 {
+  // TODO(jhumphri): If the age is 0 (due to no hogs), set the age to INT_MAX.
   const auto [hog_age, lock] = get_cached_hog_age(account);
   BlockHeight average_hog_age = hog_age->average_ages[kHogAgeGroupToSchedule];
   return {.average_hog_age = average_hog_age, .account = account};
@@ -226,12 +227,12 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 
   std::vector<AccountKey> account_keys;
   account_keys.reserve(accounts.size());
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     account_keys.push_back(get_account_key(account));
   }
 
-  x23::CoroGuard cg;
-  co_await cg(global_lock_);
   for (const AccountKey &account_key : account_keys) {
     ready_accounts_.insert(account_key);
   }
@@ -632,12 +633,12 @@ Scheduler::schedule(size_t num_txs,
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
           // It is possible that the account is already in
-          // [accounts_excluded_from_block], so we do not CHECK that the insert
-          // was successful. This happens when [add_txs()] above is called in
-          // parallel with [schedule()]. [add_txs()] can enqueue another tx for
-          // [account], and then if [schedule()] cycles the accounts above via
-          // [cycle_accounts_during_schedule_helper()], we end up adding
-          // [account] back into [ready_accounts_].
+          // [accounts_excluded_from_block], so we do not CHECK that the
+          // insert was successful. This happens when [add_txs()] above is
+          // called in parallel with [schedule()]. [add_txs()] can enqueue
+          // another tx for [account], and then if [schedule()] cycles the
+          // accounts above via [cycle_accounts_during_schedule_helper()], we
+          // end up adding [account] back into [ready_accounts_].
           accounts_excluded_from_block.insert(account);
         }
         else {
@@ -661,11 +662,7 @@ Scheduler::schedule(size_t num_txs,
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   ready_accounts_.erase(ready_accounts_.begin(), account_it);
-  info("REMOVED {} accounts",
-       std::distance(ready_accounts_.begin(), account_it));
-  info("removed_accounts.size() is {}", removed_accounts.size());
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
-  info("DONE");
 
   for (const ContractAddress &account : accounts_excluded_from_block) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
@@ -682,6 +679,9 @@ Scheduler::remove_from_scheduler(
   accounts.clear();
 
   ElapsedTimer timer;
+
+  x23::CoroGuard cg;
+  co_await cg(global_lock_);
 
   constexpr size_t kNumThreads = 120;
   const std::vector<ChunkRange> chunks =
