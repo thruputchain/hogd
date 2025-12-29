@@ -22,28 +22,26 @@ namespace hogd {
 template<typename RpcService>
 x23::Async<typename RpcService::template client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>>
-make_rpc_client(sockaddr_storage &ss, x23::CoroPoll &cp, bool retry = false,
+// This function creates a coroutine, so be careful to only pass parameters by
+// reference if you know their lifetime will outlast the coroutine.
+make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
-    x23::UniqueFd fd;
-
-    try {
-      std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
-      if (!res) {
-        res.error().raise();
-      }
-      fd = x23::UniqueFd(*res);
-    } catch (const std::system_error &e) {
-      if (retry && e.code() == std::errc::connection_refused) {
+    std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
+    if (!res) {
+      if (retry && res.error().error_code() == std::errc::connection_refused) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         warn_every_n_sec(5.0F, "RPC client on {} is not ready",
                          x23::show_ipaddr(ss));
         continue;
       }
-      error("caught system error: {} {}", e.what(), e.code().message());
-      throw;
+      throw std::runtime_error(
+          std::format("could not create RPC client on {}: {}",
+                      x23::show_ipaddr(ss),
+                      res.error().error_code().message()));
     }
+    x23::UniqueFd fd = x23::UniqueFd(*res);
 
     auto client_config = x23::rpc_stream_logged(cp, fd.release());
     client_config->max_message_size = max_message_size;
