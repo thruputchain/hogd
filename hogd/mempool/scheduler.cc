@@ -226,7 +226,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 
   std::vector<AccountKey> account_keys;
   account_keys.reserve(accounts.size());
-  // [get_account_key()] accesses [ready_accounts_], so we need to protect if
+  // [get_account_key()] accesses [ready_accounts_], so we need to protect it
   // with the lock.
   x23::CoroGuard cg;
   co_await cg(global_lock_);
