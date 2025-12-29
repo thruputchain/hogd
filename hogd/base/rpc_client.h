@@ -36,9 +36,10 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
                          x23::show_ipaddr(ss));
         continue;
       }
-      error("could not create RPC client on {}: {}", x23::show_ipaddr(ss),
-            res.error().error_code().message());
-      CHECK(false);
+      throw std::runtime_error(
+          std::format("could not create RPC client on {}: {}",
+                      x23::show_ipaddr(ss),
+                      res.error().error_code().message()));
     }
     x23::UniqueFd fd = x23::UniqueFd(*res);
 
