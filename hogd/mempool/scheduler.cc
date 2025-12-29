@@ -661,7 +661,11 @@ Scheduler::schedule(size_t num_txs,
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   ready_accounts_.erase(ready_accounts_.begin(), account_it);
+  info("REMOVED {} accounts",
+       std::distance(ready_accounts_.begin(), account_it));
+  info("removed_accounts.size() is {}", removed_accounts.size());
   cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+  info("DONE");
 
   for (const ContractAddress &account : accounts_excluded_from_block) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
