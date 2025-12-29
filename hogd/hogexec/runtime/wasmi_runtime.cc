@@ -97,10 +97,8 @@ wasmi_contract_get_fn(void *host_call_context_ptr,
 
 } // namespace
 
-WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
-  : wasmi_context_ptr_(
-        new_wasmi_context(&wasmi_contract_get_fn,
-                          module_cache ? module_cache->get_inner() : nullptr))
+WasmiContext::WasmiContext()
+  : wasmi_context_ptr_(new_wasmi_context(&wasmi_contract_get_fn))
 {}
 
 WasmiContext::~WasmiContext()
@@ -215,27 +213,6 @@ WasmiRuntime::~WasmiRuntime()
   if (wasmi_runtime_ptr_ != nullptr) {
     free_wasmi_runtime(wasmi_runtime_ptr_);
   }
-}
-
-WasmiModuleCache::WasmiModuleCache(size_t capacity)
-  : wasmi_module_cache_ptr_(new_wasmi_module_cache(capacity))
-{}
-
-WasmiModuleCache::~WasmiModuleCache()
-{
-  if (wasmi_module_cache_ptr_ != nullptr) {
-    free_wasmi_module_cache(wasmi_module_cache_ptr_);
-  }
-}
-
-void
-WasmiModuleCache::test_reset_cache(size_t capacity)
-{
-  assert(capacity > 0);
-  if (wasmi_module_cache_ptr_ != nullptr) {
-    free_wasmi_module_cache(wasmi_module_cache_ptr_);
-  }
-  wasmi_module_cache_ptr_ = new_wasmi_module_cache(capacity);
 }
 
 } // namespace hogd

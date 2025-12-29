@@ -92,7 +92,7 @@ TEST_P(RevertTest, RootFrameReverts)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   // Execute the transaction - it should succeed
   auto res = handler.root_invoke();
@@ -264,7 +264,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   // Execute the transaction - it should succeed
   auto res = handler.root_invoke();

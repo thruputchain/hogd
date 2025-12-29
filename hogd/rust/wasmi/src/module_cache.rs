@@ -43,24 +43,3 @@ impl ModuleCache {
         );
     }
 }
-
-/// # Safety
-/// capacity must be nonzero.
-#[no_mangle]
-pub unsafe extern "C" fn new_wasmi_module_cache(
-    capacity: usize,
-) -> *mut c_void {
-    let b = Box::new(ModuleCache::new(capacity));
-    let ptr = Box::into_raw(b);
-    core::mem::transmute(ptr)
-}
-
-/// # Safety
-/// ptr must be a pointer to an ModuleCache, which was produced by new_wasmi_module_cache.
-#[no_mangle]
-pub unsafe extern "C" fn free_wasmi_module_cache(ptr: *mut c_void) {
-    debug_assert!(!ptr.is_null());
-    unsafe {
-        drop(Box::from_raw(ptr as *mut ModuleCache));
-    }
-}

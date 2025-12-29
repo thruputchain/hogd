@@ -117,7 +117,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -246,7 +246,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -333,6 +333,8 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
+  auto context = make_context();
+
   // Deploy contract
   auto contract = make_native_contract(0);
   write_contract(contract);
@@ -349,7 +351,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                                  entrypoint_from_method_id(0),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success()); // Manual revert should succeed
@@ -371,7 +373,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                                  entrypoint_from_method_id(1),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success()); // Normal failure should fail
@@ -457,7 +459,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                                                entrypoint_from_method_id(0),
                                            .gas_limit = gas_limit,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -612,7 +614,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                                                entrypoint_from_method_id(1),
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}}}},
-      std::move(runtime_context));
+      *runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -750,6 +752,8 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
   write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
+  auto context = make_context();
+
   // Test error types 0-2 (should all trigger manual revert and succeed)
   for (uint32_t error_type = 0; error_type < 3; ++error_type) {
     auto handler = make_new_system_call_handler(
@@ -761,7 +765,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                                      error_type),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())
@@ -791,7 +795,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                                  entrypoint_from_method_id(3),
                                              .gas_limit = UINT64_MAX,
                                              .calldata = {}}}},
-        make_context());
+        *context);
 
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success())

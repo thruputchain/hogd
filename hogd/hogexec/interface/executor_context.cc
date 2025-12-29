@@ -114,11 +114,12 @@ ExecProposeResult
 ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
                                          TransactionID tx_id)
 {
+  static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
-                                    ProposalModeCtor{}, make_hogexec_context());
+                                    ProposalModeCtor{}, *context);
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
@@ -154,13 +155,14 @@ ExecResult
 ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
                                           TransactionID tx_id)
 {
+  static thread_local auto context = make_hogexec_context();
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(tx.signed_tx, *snapshot_cache_, proxy,
                                     make_per_tx_event_server_proxy(tx_id),
                                     ValidationModeCtor{
                                         tx.nondeterministic_proposal_data},
-                                    make_hogexec_context());
+                                    *context);
   syscall_handler.root_invoke();
   auto exec_res = syscall_handler.try_commit_transaction();
 
