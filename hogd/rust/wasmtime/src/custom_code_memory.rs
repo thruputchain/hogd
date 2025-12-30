@@ -18,14 +18,18 @@ impl CustomCodeMemory for MprotectCodeMemory {
         self.page_size
     }
 
-    fn publish_executable(&self, ptr: *const u8, len: usize) -> Result<(), WasmtimeError> {
+    fn publish_executable(
+        &self,
+        ptr: *const u8,
+        len: usize,
+    ) -> Result<(), WasmtimeError> {
         // Wasmtime guarantees that ptr and ptr.offset(len) are aligned as per required_alignment()
         debug_assert_eq!((ptr as usize) % self.page_size, 0);
         debug_assert_eq!(((ptr as usize) + len) % self.page_size, 0);
 
-        // We don't actually need to do anything here, as the memory is already set 
+        // We don't actually need to do anything here, as the memory is already set
         // as executable by the mmap in the ModuleCacheEntry constructor
-        
+
         // Use mprotect to set memory to read and execute
         let result = unsafe {
             libc::mprotect(
@@ -43,7 +47,11 @@ impl CustomCodeMemory for MprotectCodeMemory {
         Ok(())
     }
 
-    fn unpublish_executable(&self, ptr: *const u8, len: usize) -> Result<(), WasmtimeError> {
+    fn unpublish_executable(
+        &self,
+        ptr: *const u8,
+        len: usize,
+    ) -> Result<(), WasmtimeError> {
         // Wasmtime guarantees that ptr and ptr.offset(len) are aligned as per required_alignment()
         debug_assert_eq!((ptr as usize) % self.page_size, 0);
         debug_assert_eq!(((ptr as usize) + len) % self.page_size, 0);
@@ -58,4 +66,3 @@ impl Default for MprotectCodeMemory {
         Self::new()
     }
 }
-

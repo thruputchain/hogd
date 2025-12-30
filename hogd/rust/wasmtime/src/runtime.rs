@@ -1,11 +1,25 @@
 use core::ffi::c_void;
 use std::slice;
-use wasmtime::{Instance, Module, Store};
+use wasmtime::{Instance, Store};
 
 use crate::context::WasmtimeContext;
 use crate::error::TrampolineError;
 use crate::invoke_result::WasmtimeInvokeResult;
 use common::InvokeErrorCode;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct WasmtimeModuleStats {
+    pub serialized_module_size: usize,
+}
+
+impl WasmtimeModuleStats {
+    pub fn new() -> Self {
+        Self {
+            serialized_module_size: 0,
+        }
+    }
+}
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
@@ -34,12 +48,10 @@ use crate::debug_log;
 impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
-        bytes: &[u8],
         hash: &[u8; 32],
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-
         let instance_pre = context.get_instance_pre(hash, userctx).unwrap()?;
         let mut store = Store::new(context.engine(), userctx);
         let instance = instance_pre.instantiate(&mut store).unwrap();
@@ -80,6 +92,14 @@ impl WasmtimeRuntime {
                 )
             }
         }
+    }
+
+    fn get_stats(&self) -> Result<WasmtimeModuleStats, wasmtime::Error> {
+        let module = self.instance.module(&self.store);
+        let serialized = module.serialize()?;
+        Ok(WasmtimeModuleStats {
+            serialized_module_size: serialized.len(),
+        })
     }
 }
 
@@ -143,29 +163,26 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
         )
     };
 
-    let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
-        Ok(Some(slice)) => slice,
-        Ok(None) => {
-            println!("No contract found");
-            return core::ptr::null_mut();
-        }
-        Err(_code) => {
-            println!("Error fetching contract: {:?}", _code);
-            return core::ptr::null_mut();
-        }
-    };
+    if do_verify_contract {
+        let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
+            Ok(Some(slice)) => slice,
+            Ok(None) => {
+                println!("No contract found");
+                return core::ptr::null_mut();
+            }
+            Err(_code) => {
+                println!("Error fetching contract: {:?}", _code);
+                return core::ptr::null_mut();
+            }
+        };
 
-    if do_verify_contract && !wasmtime_context.verify_contract(slice) {
-        println!("Contract verification failed");
-        return core::ptr::null_mut();
+        if !wasmtime_context.verify_contract(slice) {
+            println!("Contract verification failed");
+            return core::ptr::null_mut();
+        }
     }
 
-    let b = match WasmtimeRuntime::new(
-        slice,
-        hash_slice,
-        wasmtime_context,
-        userctx,
-    ) {
+    let b = match WasmtimeRuntime::new(hash_slice, wasmtime_context, userctx) {
         Some(res) => Box::new(res),
         None => {
             println!("Error creating runtime");
@@ -185,4 +202,38 @@ pub unsafe extern "C" fn free_wasmtime_runtime(p: *mut c_void) {
     debug_assert!(!runtime.is_null());
 
     unsafe { drop(Box::from_raw(runtime)) };
+}
+
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmtime_runtime.
+/// stats_out must be a valid pointer to a WasmtimeModuleStats struct.
+/// Returns true on success, false on failure (e.g., serialization error).
+#[no_mangle]
+pub unsafe extern "C" fn wasmtime_get_module_stats(
+    runtime_void: *const c_void,
+    stats_out: *mut WasmtimeModuleStats,
+) -> bool {
+    debug_assert!(!runtime_void.is_null());
+    debug_assert!(!stats_out.is_null());
+
+    let runtime: *const WasmtimeRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
+    let r = unsafe { &*runtime };
+
+    match r.get_stats() {
+        Ok(stats) => {
+            unsafe {
+                *stats_out = stats;
+            }
+            true
+        }
+        Err(_) => {
+            // On error, set stats to zero values
+            unsafe {
+                *stats_out = WasmtimeModuleStats::new();
+            }
+            false
+        }
+    }
 }

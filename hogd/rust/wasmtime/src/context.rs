@@ -1,25 +1,23 @@
 use core::ffi::c_void;
 use core::slice;
-use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
 
 use wasmtime::{
-    Caller, Config, Engine, InstanceAllocationStrategy, Linker, Module,
-    PoolingAllocationConfig, InstancePre,
+    Caller, Config, Engine, InstanceAllocationStrategy, InstancePre, Linker,
+    Module, PoolingAllocationConfig,
 };
 
-use crate::custom_code_memory::MprotectCodeMemory;
 use crate::error::TrampolineError;
+use crate::instance_pre_cache::InstancePreCache;
+use crate::instance_pre_cache::InstancePreGetFn;
+use crate::instance_pre_cache::InstancePrePutFn;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::SystemErrorCode;
 use common::TrampolineResult;
-use crate::instance_pre_cache::InstancePreGetFn;
-use crate::instance_pre_cache::InstancePrePutFn;
-use crate::instance_pre_cache::InstancePreCache;
 
 pub struct LinkEntry {
     module: String,
@@ -130,9 +128,7 @@ impl WasmtimeGlobalContext {
         Engine::new(&config).unwrap()
     }
 
-    pub fn new(
-        instance_pre_cache: InstancePreCache,
-    ) -> WasmtimeGlobalContext {
+    pub fn new(instance_pre_cache: InstancePreCache) -> WasmtimeGlobalContext {
         Self {
             engine: Self::new_engine(),
             instance_pre_cache,
@@ -226,9 +222,14 @@ impl WasmtimeContext {
         &self.global_context.engine
     }
 
-    pub fn get_instance_pre(&mut self, hash: &[u8; 32], user_context: *mut c_void) -> Result<Option<InstancePre<*mut c_void>>, SystemErrorCode> {
-        
-        if let Some(instance_pre) = self.global_context.instance_pre_cache.get(hash) {
+    pub fn get_instance_pre(
+        &mut self,
+        hash: &[u8; 32],
+        user_context: *mut c_void,
+    ) -> Result<Option<InstancePre<*mut c_void>>, SystemErrorCode> {
+        if let Some(instance_pre) =
+            self.global_context.instance_pre_cache.get(hash)
+        {
             return Ok(Some(instance_pre));
         }
         // otherwise compile the module and cache it
@@ -239,9 +240,7 @@ impl WasmtimeContext {
         let bytes = bytes.unwrap();
         let linker = self.linker();
         let module = Module::new(linker.engine(), bytes)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Module new error: {_e}"))
-            })
+            .inspect_err(|_e| debug_log!(eprintln!("Module new error: {_e}")))
             .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
 
         if !check_memory_limit(&module) {
@@ -249,15 +248,23 @@ impl WasmtimeContext {
             return Ok(None);
         }
         if !check_no_start(&module) {
-            debug_log!(eprintln!("Module instantiation failed: Has start function"));
+            debug_log!(eprintln!(
+                "Module instantiation failed: Has start function"
+            ));
             return Ok(None);
         }
 
-        let instance_pre = self.linker.instantiate_pre(&module).inspect_err(|_e| {
-            debug_log!(eprintln!("Error instantiating store: {_e}"));
-        }).map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
+        let instance_pre = self
+            .linker
+            .instantiate_pre(&module)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Error instantiating store: {_e}"));
+            })
+            .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
 
-        self.global_context.instance_pre_cache.put(hash, &instance_pre);
+        self.global_context
+            .instance_pre_cache
+            .put(hash, &instance_pre);
 
         return Ok(Some(instance_pre));
     }
@@ -476,7 +483,6 @@ pub unsafe extern "C" fn new_wasmtime_context(
     get_fn: ContractGetFn,
     global_context: *mut c_void,
 ) -> *mut c_void {
-
     debug_assert!(!global_context.is_null());
 
     let global_context: &WasmtimeGlobalContext = unsafe {
@@ -485,10 +491,7 @@ pub unsafe extern "C" fn new_wasmtime_context(
         )
     };
 
-    let b = Box::new(WasmtimeContext::new(
-        global_context,
-        get_fn,
-    ));
+    let b = Box::new(WasmtimeContext::new(global_context, get_fn));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 

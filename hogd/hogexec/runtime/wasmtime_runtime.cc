@@ -87,9 +87,10 @@ void *
 wasmtime_instance_pre_get_fn(const uint8_t *hash_ptr,
                              void *external_cache) noexcept
 {
-  auto *instance_pre_cache = static_cast<WasmtimeInstancePreCache *>(external_cache);
+  auto *instance_pre_cache =
+      static_cast<WasmtimeInstancePreCache *>(external_cache);
   assert(instance_pre_cache != nullptr);
-  
+
   // TODO(geoff): this is an extra copy
   SHA256Hash hash{};
   std::memcpy(hash.data(), hash_ptr, hash.size());
@@ -108,7 +109,8 @@ wasmtime_instance_pre_put_fn(const uint8_t *hash_ptr, void *instance_pre_ptr,
   SHA256Hash hash{};
   std::memcpy(hash.data(), hash_ptr, hash.size());
   assert(instance_pre_ptr != nullptr);
-  auto *instance_pre_cache = static_cast<WasmtimeInstancePreCache *>(external_cache);
+  auto *instance_pre_cache =
+      static_cast<WasmtimeInstancePreCache *>(external_cache);
   instance_pre_cache->put(hash, instance_pre_ptr);
 }
 
@@ -119,11 +121,11 @@ WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
   engines_.resize(engine_count);
   instance_pre_caches_.reserve(engine_count);
   for (size_t i = 0; i < engine_count; ++i) {
-    instance_pre_caches_.emplace_back(std::make_unique<WasmtimeInstancePreCache>());
-    engines_[i] = new_wasmtime_global_context(
-        &wasmtime_instance_pre_get_fn,
-        &wasmtime_instance_pre_put_fn,
-        instance_pre_caches_[i].get());
+    instance_pre_caches_.emplace_back(
+        std::make_unique<WasmtimeInstancePreCache>());
+    engines_[i] = new_wasmtime_global_context(&wasmtime_instance_pre_get_fn,
+                                              &wasmtime_instance_pre_put_fn,
+                                              instance_pre_caches_[i].get());
     CHECK(engines_[i] != nullptr);
   }
 }
@@ -234,6 +236,14 @@ WasmtimeRuntime::get_memory() noexcept
   assert(wasmtime_runtime_ptr_ != nullptr);
   auto slice = wasmtime_get_memory(wasmtime_runtime_ptr_);
   return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
+}
+
+bool
+WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+  assert(stats_out != nullptr);
+  return wasmtime_get_module_stats(wasmtime_runtime_ptr_, stats_out);
 }
 
 InvokeStatus<void>

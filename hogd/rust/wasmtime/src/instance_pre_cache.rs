@@ -1,12 +1,11 @@
-use wasmtime::{InstancePre, Engine};
+use wasmtime::InstancePre;
 
 use core::ffi::c_void;
-
 
 pub type InstancePreGetFn = unsafe extern "C" fn(
     hash: *const u8, // 32 bytes
     external_cache: *mut c_void,
-) -> *mut c_void;  // returns a pointer to the InstancePre object
+) -> *mut c_void; // returns a pointer to the InstancePre object
 
 pub type InstancePrePutFn = unsafe extern "C" fn(
     hash: *const u8, // 32 bytes
@@ -27,7 +26,11 @@ impl InstancePreCache {
         instance_pre_put_fn: InstancePrePutFn,
         external_cache: *mut c_void,
     ) -> Self {
-        Self { instance_pre_get_fn, instance_pre_put_fn, external_cache }
+        Self {
+            instance_pre_get_fn,
+            instance_pre_put_fn,
+            external_cache,
+        }
     }
 
     pub fn get(
@@ -42,7 +45,8 @@ impl InstancePreCache {
         } else {
             // The pointer points to a boxed InstancePre that we need to clone
             // We create a reference to it, clone the InstancePre, and leave the box intact
-            let instance_pre_ptr: *mut InstancePre<*mut c_void> = instance_pre as *mut InstancePre<*mut c_void>;
+            let instance_pre_ptr: *mut InstancePre<*mut c_void> =
+                instance_pre as *mut InstancePre<*mut c_void>;
             let instance_pre_ref = unsafe { &*instance_pre_ptr };
             Some(instance_pre_ref.clone())
         }
@@ -59,7 +63,11 @@ impl InstancePreCache {
         let instance_pre_ptr = Box::into_raw(instance_pre_box);
         let instance_pre_ptr_void = instance_pre_ptr as *mut c_void;
         unsafe {
-            (self.instance_pre_put_fn)(hash.as_ptr(), instance_pre_ptr_void, self.external_cache)
+            (self.instance_pre_put_fn)(
+                hash.as_ptr(),
+                instance_pre_ptr_void,
+                self.external_cache,
+            )
         }
     }
 }
@@ -68,7 +76,9 @@ impl InstancePreCache {
 pub unsafe extern "C" fn free_instance_pre_from_cache(
     instance_pre: *mut c_void,
 ) {
-
-    let inst: *mut InstancePre<*mut c_void> = unsafe { core::mem::transmute(instance_pre) };
-    unsafe { drop(Box::from_raw(inst)); }
+    let inst: *mut InstancePre<*mut c_void> =
+        unsafe { core::mem::transmute(instance_pre) };
+    unsafe {
+        drop(Box::from_raw(inst));
+    }
 }

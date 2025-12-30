@@ -6,15 +6,16 @@ use std::path::PathBuf;
 
 // Import the FFI functions from wasmtime_lib
 use common::SystemErrorCode;
+use wasmtime::InstancePre;
+use wasmtime_lib::instance_pre_cache::{
+    free_instance_pre_from_cache, InstancePreGetFn, InstancePrePutFn,
+};
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
     new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
     wasmtime_get_available_gas, wasmtime_get_memory, wasmtime_invoke,
-    wasmtime_set_available_gas, wasmtime_verify_contract,
-    ContractGetResult,
+    wasmtime_set_available_gas, wasmtime_verify_contract, ContractGetResult,
 };
-use wasmtime_lib::instance_pre_cache::{InstancePreGetFn, InstancePrePutFn, free_instance_pre_from_cache};
-use wasmtime::InstancePre;
 
 // Stub implementations of the C trampoline functions that the wasmtime library expects.
 // These are normally provided by the C++ build system, but for standalone Rust tests
@@ -192,7 +193,8 @@ impl TestInstancePreCache {
         if !self.instance_pres.contains_key(&hash) {
             // The instance_pre is a pointer to a Box<InstancePre> that was created by the caller
             // We need to take ownership of it
-            let instance_pre_ptr: *mut InstancePre<*mut c_void> = instance_pre as *mut InstancePre<*mut c_void>;
+            let instance_pre_ptr: *mut InstancePre<*mut c_void> =
+                instance_pre as *mut InstancePre<*mut c_void>;
             let instance_pre_box = unsafe { Box::from_raw(instance_pre_ptr) };
             self.instance_pres.insert(hash, instance_pre_box);
         } else {
@@ -242,8 +244,9 @@ unsafe extern "C" fn test_cache_get_instance_pre_get_fn(
     }
 
     let cache = &*(external_cache as *const RefCell<TestInstancePreCache>);
-    let hash_slice: &[u8; 32] = std::slice::from_raw_parts(hash, 32).try_into().unwrap();
-    
+    let hash_slice: &[u8; 32] =
+        std::slice::from_raw_parts(hash, 32).try_into().unwrap();
+
     match cache.borrow().get(hash_slice) {
         Some(ptr) => ptr,
         None => std::ptr::null_mut(),
@@ -264,8 +267,9 @@ unsafe extern "C" fn test_cache_put_instance_pre_put_fn(
     }
 
     let cache = &*(external_cache as *mut RefCell<TestInstancePreCache>);
-    let hash_slice: &[u8; 32] = std::slice::from_raw_parts(hash, 32).try_into().unwrap();
-    
+    let hash_slice: &[u8; 32] =
+        std::slice::from_raw_parts(hash, 32).try_into().unwrap();
+
     cache.borrow_mut().put(*hash_slice, instance_pre);
 }
 
@@ -292,7 +296,8 @@ fn test_create_context() {
     // Test that we can create and destroy a wasmtime context
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -302,10 +307,8 @@ fn test_create_context() {
             !global_context.is_null(),
             "Global context should be created"
         );
-        let context = new_wasmtime_context(
-            no_get_mock_contract_get_fn,
-            global_context,
-        );
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
         assert!(!context.is_null(), "Context should be created");
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
@@ -316,16 +319,15 @@ fn test_create_context() {
 fn test_verify_valid_wasm() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
             cache_ptr,
         );
-        let context = new_wasmtime_context(
-            no_get_mock_contract_get_fn,
-            global_context,
-        );
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
         assert!(!context.is_null());
 
         // Load a test WASM file
@@ -386,7 +388,8 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
 fn test_create_runtime() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -421,7 +424,8 @@ fn test_create_runtime() {
 fn test_get_memory() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -462,7 +466,8 @@ fn test_get_memory() {
 fn test_invoke_function() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -502,7 +507,8 @@ fn test_invoke_function() {
 fn test_gas_metering() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -548,16 +554,15 @@ fn test_missing_wasm_file() {
 fn test_verify_invalid_wasm() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
             cache_ptr,
         );
-        let context = new_wasmtime_context(
-            no_get_mock_contract_get_fn,
-            global_context,
-        );
+        let context =
+            new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
 
         // Create some invalid WASM bytes
         let invalid_wasm = vec![0x00, 0x01, 0x02, 0x03];
@@ -580,7 +585,8 @@ fn test_verify_invalid_wasm() {
 fn test_multiple_runtimes() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -623,7 +629,8 @@ fn test_fibonacci_computation() {
     // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -669,7 +676,8 @@ fn test_fibonacci_computation() {
 fn test_fibonacci_computation_overflow() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
         let global_context = new_wasmtime_global_context(
             test_cache_get_instance_pre_get_fn,
             test_cache_put_instance_pre_put_fn,
@@ -733,7 +741,8 @@ unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
 fn test_module_cache() {
     unsafe {
         let cache = RefCell::new(TestInstancePreCache::new());
-        let cache_ptr = &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
+        let cache_ptr =
+            &cache as *const RefCell<TestInstancePreCache> as *mut c_void;
 
         // Verify cache is initially empty
         assert_eq!(cache.borrow().len(), 0, "Cache should be empty initially");
@@ -758,7 +767,7 @@ fn test_module_cache() {
         );
 
         assert!(!runtime1.is_null(), "First runtime should be created");
-        
+
         // Verify cache now has one entry
         assert_eq!(
             cache.borrow().len(),
@@ -781,7 +790,7 @@ fn test_module_cache() {
         );
 
         assert!(!runtime2.is_null(), "Second runtime should be created");
-        
+
         // Cache should still have one entry (not duplicated)
         assert_eq!(
             cache.borrow().len(),
@@ -799,7 +808,7 @@ fn test_module_cache() {
         );
 
         assert!(!runtime3.is_null(), "Third runtime should be created");
-        
+
         // Cache should now have two entries (simple_add and fibonacci)
         assert_eq!(
             cache.borrow().len(),
@@ -821,7 +830,7 @@ fn test_module_cache() {
         let mem1 = wasmtime_get_memory(runtime1);
         let mem2 = wasmtime_get_memory(runtime2);
         let mem3 = wasmtime_get_memory(runtime3);
-        
+
         assert!(!mem1.mem.is_null(), "First runtime should have memory");
         assert!(mem1.sz > 0, "First runtime memory should be non-zero");
         assert!(!mem2.mem.is_null(), "Second runtime should have memory");

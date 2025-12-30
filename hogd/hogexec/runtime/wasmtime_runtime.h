@@ -82,10 +82,13 @@ public:
   void put(SHA256Hash const &hash, void *instance_pre_ptr)
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    // Only put if not already cached to avoid replacing entries that might still be in use
+    // Only put if not already cached to avoid replacing entries that might
+    // still be in use
     if (!instance_pre_cache_.contains(hash)) {
-      instance_pre_cache_.emplace(hash, ExternalInstancePreType(instance_pre_ptr));
-    } else {
+      instance_pre_cache_.emplace(hash,
+                                  ExternalInstancePreType(instance_pre_ptr));
+    }
+    else {
       // If already cached, free the duplicate
       free_instance_pre_from_cache(instance_pre_ptr);
     }
@@ -164,6 +167,9 @@ public:
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
   std::span<std::byte> get_memory() noexcept override;
+
+  // Get module statistics (e.g., serialized module size)
+  bool get_module_stats(WasmtimeModuleStats *stats_out) const noexcept;
 
 private:
   InvokeStatus<void> invoke_internal(std::string_view method_name) override;
