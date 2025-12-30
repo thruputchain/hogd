@@ -1,15 +1,18 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <sys/mman.h>
 #include <unordered_map>
 #include <vector>
 
 #include "account.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
@@ -40,6 +43,32 @@ public:
   }
 
 private:
+  class ModuleCacheEntry {
+  public:
+    ModuleCacheEntry(uint8_t* data, size_t data_len)
+    {
+      data_ = static_cast<uint8_t*>(mmap(nullptr, data_len, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+      data_len_ = data_len;
+      if (data_ == MAP_FAILED) {
+        panic("Failed to mmap module cache entry");
+      }
+      std::memcpy(data_, data, data_len);
+      if (mprotect(data_, data_len, PROT_READ | PROT_EXEC) != 0) {
+        panic("Failed to mprotect module cache entry");
+      }
+    }
+    ~ModuleCacheEntry() 
+    {
+      if (munmap(data_, data_len_) != 0) {
+        panic("Failed to munmap module cache entry");
+      }
+    }
+
+  private:
+    uint8_t* data_;
+    size_t data_len_;
+  };
+
   // TODO(geoff): better impl
   std::mutex mtx_;
   std::unordered_map<SHA256Hash, std::vector<uint8_t>> module_cache_;

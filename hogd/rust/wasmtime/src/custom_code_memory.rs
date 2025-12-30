@@ -23,6 +23,9 @@ impl CustomCodeMemory for MprotectCodeMemory {
         debug_assert_eq!((ptr as usize) % self.page_size, 0);
         debug_assert_eq!(((ptr as usize) + len) % self.page_size, 0);
 
+        // We don't actually need to do anything here, as the memory is already set 
+        // as executable by the mmap in the ModuleCacheEntry constructor
+        
         // Use mprotect to set memory to read and execute
         let result = unsafe {
             libc::mprotect(
