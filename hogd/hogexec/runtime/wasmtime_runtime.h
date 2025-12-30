@@ -2,30 +2,63 @@
 
 #include <cstddef>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "account.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
 struct Contract;
 
+class WasmtimeModuleCache {
+public:
+  void put(SHA256Hash const &hash, std::span<uint8_t const> module)
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    std::vector<uint8_t> module_copy(module.begin(), module.end());
+    module_cache_.insert({hash, std::move(module_copy)});
+  }
+
+  std::optional<std::span<uint8_t>> get(SHA256Hash const &hash)
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = module_cache_.find(hash);
+    if (it == module_cache_.end()) {
+      return std::nullopt;
+    }
+    return std::span<uint8_t>(it->second.data(), it->second.size());
+  }
+
+private:
+  // TODO(geoff): better impl
+  std::mutex mtx_;
+  std::unordered_map<SHA256Hash, std::vector<uint8_t>> module_cache_;
+};
+
 class WasmtimeGlobalContext {
-  public:
-    explicit WasmtimeGlobalContext(size_t engine_count);
-    ~WasmtimeGlobalContext();
-  
-    void *get_inner(size_t engine_index) const;
-    size_t alloc_engine_index();
-  
-  private:
-    std::vector<void *> engines_;
-  };
+public:
+  explicit WasmtimeGlobalContext(size_t engine_count);
+  ~WasmtimeGlobalContext();
+
+  void *get_inner(size_t engine_index) const;
+  size_t alloc_engine_index();
+
+  WasmtimeModuleCache &module_cache() { return module_cache_; }
+
+private:
+  std::vector<void *> engines_;
+  WasmtimeModuleCache module_cache_;
+};
 
 // Context shared between WasmtimeRuntime objects.
 // Guarantee isolation between transactions

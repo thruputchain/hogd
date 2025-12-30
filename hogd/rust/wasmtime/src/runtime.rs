@@ -63,7 +63,8 @@ impl WasmtimeRuntime {
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let instance_pre = if let Some(module) = context.get_cached_module(hash).unwrap()
+        let instance_pre = if let Some(module) =
+            context.get_cached_module(hash).unwrap()
         {
             let instance_pre = context
                 .linker()

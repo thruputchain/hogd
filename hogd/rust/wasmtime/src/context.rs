@@ -5,8 +5,8 @@ use crate::debug_log;
 use common::string_from_parts;
 
 use wasmtime::{
-    Caller, Config, Engine, InstanceAllocationStrategy, Linker,
-    Module, PoolingAllocationConfig,
+    Caller, Config, Engine, InstanceAllocationStrategy, Linker, Module,
+    PoolingAllocationConfig,
 };
 
 use crate::error::TrampolineError;
@@ -421,6 +421,7 @@ pub unsafe extern "C" fn new_wasmtime_context(
     compiled_code_get_fn: CompiledCodeGetFn,
     compiled_code_put_fn: CompiledCodePutFn,
     global_context: *mut c_void,
+    external_cache_context: *mut c_void,
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
     let global_context: &WasmtimeGlobalContext = unsafe {
@@ -432,7 +433,11 @@ pub unsafe extern "C" fn new_wasmtime_context(
     let b = Box::new(WasmtimeContext::new(
         global_context,
         get_fn,
-        ModuleCache::new(compiled_code_get_fn, compiled_code_put_fn),
+        ModuleCache::new(
+            compiled_code_get_fn,
+            compiled_code_put_fn,
+            external_cache_context,
+        ),
     ));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }

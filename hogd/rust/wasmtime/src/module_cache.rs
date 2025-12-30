@@ -15,15 +15,15 @@ pub struct CompiledCodeGetResult {
 // So it is safe to use the returned slices for the duration of a running transaction,
 // although we will need more work to be done if we want to copy some modules into a threadlocal InstancePre cache.
 pub type CompiledCodeGetFn = unsafe extern "C" fn(
-    hash: *const u8,
-    hash_len: usize,
+    hash: *const u8, // 32 bytes
+    external_cache: *mut core::ffi::c_void,
 ) -> CompiledCodeGetResult;
 
 pub type CompiledCodePutFn = unsafe extern "C" fn(
-    hash: *const u8,
-    hash_len: usize,
+    hash: *const u8, // 32 bytes
     data: *const u8,
     data_len: usize,
+    external_cache: *mut core::ffi::c_void,
 );
 
 impl CompiledCodeGetResult {
@@ -42,16 +42,19 @@ impl CompiledCodeGetResult {
 pub struct ModuleCache {
     compiled_code_get_fn: CompiledCodeGetFn,
     compiled_code_put_fn: CompiledCodePutFn,
+    external_cache: *mut core::ffi::c_void,
 }
 
 impl ModuleCache {
     pub fn new(
         compiled_code_get_fn: CompiledCodeGetFn,
         compiled_code_put_fn: CompiledCodePutFn,
+        external_cache: *mut core::ffi::c_void,
     ) -> Self {
         Self {
             compiled_code_get_fn,
             compiled_code_put_fn,
+            external_cache,
         }
     }
 
@@ -60,8 +63,9 @@ impl ModuleCache {
         hash: &SHA256Hash,
         engine: &Engine,
     ) -> Result<Option<Module>, SystemErrorCode> {
-        let result =
-            unsafe { (self.compiled_code_get_fn)(hash.as_ptr(), hash.len()) };
+        let result = unsafe {
+            (self.compiled_code_get_fn)(hash.as_ptr(), self.external_cache)
+        };
         let slice = match result.as_slice() {
             Some(slice) => slice,
             None => return Ok(None),
@@ -71,11 +75,11 @@ impl ModuleCache {
         // followed by an mprotect.
         //
         //let module = unsafe { Module::deserialize_raw(engine, slice.into()) }
-        let module = unsafe { Module::deserialize(engine, slice) }
-            .map_err(|_e| {
-            debug_log!(eprintln!("Module deserialize error: {_e}"));
-            SystemErrorCode::kSystemUnrecoverable
-        })?;
+        let module =
+            unsafe { Module::deserialize(engine, slice) }.map_err(|_e| {
+                debug_log!(eprintln!("Module deserialize error: {_e}"));
+                SystemErrorCode::kSystemUnrecoverable
+            })?;
         Ok(Some(module))
     }
 
@@ -91,9 +95,9 @@ impl ModuleCache {
         unsafe {
             (self.compiled_code_put_fn)(
                 hash.as_ptr(),
-                hash.len(),
                 bytes.as_ptr(),
                 bytes.len(),
+                self.external_cache,
             )
         };
         Ok(())

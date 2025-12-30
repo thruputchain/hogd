@@ -114,18 +114,51 @@ size_t
 WasmtimeGlobalContext::alloc_engine_index()
 {
   static std::atomic<size_t> allocator = 0;
-  static thread_local size_t threadlocal_alloc = allocator.fetch_add(1) % engines_.size();
+  static thread_local size_t threadlocal_alloc =
+      allocator.fetch_add(1) % engines_.size();
 
   return threadlocal_alloc;
 }
+
+namespace {
+
+CompiledCodeGetResult
+wasmtime_compiled_code_get_fn(const uint8_t *hash_ptr,
+                              void *external_cache) noexcept
+{
+  auto *module_cache = static_cast<WasmtimeModuleCache *>(external_cache);
+  // TODO(geoff): this is an extra copy
+  SHA256Hash hash{};
+  std::memcpy(hash.data(), hash_ptr, hash.size());
+  auto module = module_cache->get(hash);
+  if (module.has_value()) {
+    return {.data = module.value().data(), .data_len = module.value().size()};
+  }
+  return {.data = nullptr, .data_len = 0};
+}
+
+void
+wasmtime_compiled_code_put_fn(const uint8_t *hash_ptr, const uint8_t *data,
+                              size_t data_len, void *external_cache) noexcept
+{
+  // TODO(geoff): this is an extra copy
+  SHA256Hash hash{};
+  std::memcpy(hash.data(), hash_ptr, hash.size());
+  auto *module_cache = static_cast<WasmtimeModuleCache *>(external_cache);
+  module_cache->put(hash, std::span<uint8_t const>(data, data_len));
+}
+
+} // namespace
 
 WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
   : engine_index_(global_context.alloc_engine_index())
 {
   wasmtime_context_ptr_ =
       new_wasmtime_context(&wasmtime_contract_get_fn,
+                           &wasmtime_compiled_code_get_fn,
+                           &wasmtime_compiled_code_put_fn,
                            global_context.get_inner(engine_index_),
-                           nullptr);
+                           &global_context.module_cache());
 }
 
 WasmtimeContext::~WasmtimeContext()

@@ -22,9 +22,9 @@
 
 namespace hogd {
 
-namespace  test {
-  void reset_module_cache();
-}
+namespace test {
+void reset_module_cache();
+} // namespace test
 
 // Context to be passed into a host function call
 class SystemCallHandler;
