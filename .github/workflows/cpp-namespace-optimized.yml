@@ -167,7 +167,7 @@ jobs:
       - name: Run Tests
         run: |
           cd build/gcc
-          ctest --output-on-failure --parallel $(nproc)
+          ctest --output-on-failure --parallel $(nproc) --timeout 100
 
       - name: Show ccache stats
         if: always()
@@ -269,7 +269,7 @@ jobs:
       - name: Run Tests
         run: |
           cd build/llvm
-          ctest --output-on-failure --parallel $(nproc)
+          ctest --output-on-failure --parallel $(nproc) --timeout 100
 
       - name: Show ccache stats
         if: always()
