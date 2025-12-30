@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -7,71 +8,92 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <sys/mman.h>
 #include <unordered_map>
 #include <vector>
 
 #include "account.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"
 
 namespace hogd {
 
 struct Contract;
 
-class WasmtimeModuleCache {
+// Wrapper around a void* that represents an InstancePre from Rust
+// The dtor calls free_instance_pre_from_cache to properly clean up
+class ExternalInstancePreType {
 public:
-  void put(SHA256Hash const &hash, std::span<uint8_t const> module)
+  explicit ExternalInstancePreType(void *instance_pre_ptr)
+    : instance_pre_ptr_(instance_pre_ptr)
+  {}
+
+  ~ExternalInstancePreType()
   {
-    std::lock_guard<std::mutex> lock(mtx_);
-    std::vector<uint8_t> module_copy(module.begin(), module.end());
-    module_cache_.insert({hash, std::move(module_copy)});
+    if (instance_pre_ptr_ != nullptr) {
+      free_instance_pre_from_cache(instance_pre_ptr_);
+    }
   }
 
-  std::optional<std::span<uint8_t>> get(SHA256Hash const &hash)
+  // Non-copyable
+  ExternalInstancePreType(ExternalInstancePreType const &) = delete;
+  ExternalInstancePreType &operator=(ExternalInstancePreType const &) = delete;
+
+  // Movable
+  ExternalInstancePreType(ExternalInstancePreType &&other) noexcept
+    : instance_pre_ptr_(other.instance_pre_ptr_)
+  {
+    other.instance_pre_ptr_ = nullptr;
+  }
+
+  ExternalInstancePreType &operator=(ExternalInstancePreType &&other) noexcept
+  {
+    if (this != &other) {
+      if (instance_pre_ptr_ != nullptr) {
+        free_instance_pre_from_cache(instance_pre_ptr_);
+      }
+      instance_pre_ptr_ = other.instance_pre_ptr_;
+      other.instance_pre_ptr_ = nullptr;
+    }
+    return *this;
+  }
+
+  void *get() const { return instance_pre_ptr_; }
+
+private:
+  void *instance_pre_ptr_;
+};
+
+class WasmtimeInstancePreCache {
+public:
+  std::optional<void *> get(SHA256Hash const &hash)
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    auto it = module_cache_.find(hash);
-    if (it == module_cache_.end()) {
+    auto it = instance_pre_cache_.find(hash);
+    if (it == instance_pre_cache_.end()) {
       return std::nullopt;
     }
-    return std::span<uint8_t>(it->second.data(), it->second.size());
+    return it->second.get();
+  }
+
+  void put(SHA256Hash const &hash, void *instance_pre_ptr)
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    // Only put if not already cached to avoid replacing entries that might still be in use
+    if (!instance_pre_cache_.contains(hash)) {
+      instance_pre_cache_.emplace(hash, ExternalInstancePreType(instance_pre_ptr));
+    } else {
+      // If already cached, free the duplicate
+      free_instance_pre_from_cache(instance_pre_ptr);
+    }
   }
 
 private:
-  class ModuleCacheEntry {
-  public:
-    ModuleCacheEntry(uint8_t* data, size_t data_len)
-    {
-      data_ = static_cast<uint8_t*>(mmap(nullptr, data_len, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
-      data_len_ = data_len;
-      if (data_ == MAP_FAILED) {
-        panic("Failed to mmap module cache entry");
-      }
-      std::memcpy(data_, data, data_len);
-      if (mprotect(data_, data_len, PROT_READ | PROT_EXEC) != 0) {
-        panic("Failed to mprotect module cache entry");
-      }
-    }
-    ~ModuleCacheEntry() 
-    {
-      if (munmap(data_, data_len_) != 0) {
-        panic("Failed to munmap module cache entry");
-      }
-    }
-
-  private:
-    uint8_t* data_;
-    size_t data_len_;
-  };
-
-  // TODO(geoff): better impl
   std::mutex mtx_;
-  std::unordered_map<SHA256Hash, std::vector<uint8_t>> module_cache_;
+  std::unordered_map<SHA256Hash, ExternalInstancePreType> instance_pre_cache_;
 };
 
 class WasmtimeGlobalContext {
@@ -82,11 +104,9 @@ public:
   void *get_inner(size_t engine_index) const;
   size_t alloc_engine_index();
 
-  WasmtimeModuleCache &module_cache() { return module_cache_; }
-
 private:
   std::vector<void *> engines_;
-  WasmtimeModuleCache module_cache_;
+  std::vector<std::unique_ptr<WasmtimeInstancePreCache>> instance_pre_caches_;
 };
 
 // Context shared between WasmtimeRuntime objects.

@@ -6,8 +6,8 @@ pub mod context;
 pub mod custom_code_memory;
 pub mod error;
 pub mod invoke_result;
-mod module_cache;
 pub mod runtime;
+pub mod instance_pre_cache;
 
 type SHA256Hash = [u8; 32];
 
@@ -18,11 +18,11 @@ pub use context::{
     ContractGetFn, ContractGetResult,
 };
 pub use invoke_result::WasmtimeInvokeResult;
-pub use module_cache::{
-    CompiledCodeGetFn, CompiledCodeGetResult, CompiledCodePutFn,
-};
 pub use runtime::{
     free_wasmtime_runtime, new_wasmtime_runtime, wasmtime_invoke,
+};
+pub use instance_pre_cache::{
+    InstancePreGetFn, InstancePrePutFn, free_instance_pre_from_cache,
 };
 
 #[cfg(feature = "debug_logging")]

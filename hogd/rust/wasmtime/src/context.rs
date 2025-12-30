@@ -7,19 +7,19 @@ use common::string_from_parts;
 
 use wasmtime::{
     Caller, Config, Engine, InstanceAllocationStrategy, Linker, Module,
-    PoolingAllocationConfig,
+    PoolingAllocationConfig, InstancePre,
 };
 
 use crate::custom_code_memory::MprotectCodeMemory;
 use crate::error::TrampolineError;
-use crate::module_cache::CompiledCodeGetFn;
-use crate::module_cache::CompiledCodePutFn;
-use crate::module_cache::ModuleCache;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::SystemErrorCode;
 use common::TrampolineResult;
+use crate::instance_pre_cache::InstancePreGetFn;
+use crate::instance_pre_cache::InstancePrePutFn;
+use crate::instance_pre_cache::InstancePreCache;
 
 pub struct LinkEntry {
     module: String,
@@ -43,10 +43,34 @@ impl LinkEntry {
         }
     }
 }
+// assert that the memory is exported and starts at at most 1 page
+fn check_memory_limit(module: &Module) -> bool {
+    let export = module.get_export("memory");
+    if export.is_none() {
+        debug_log!(eprintln!("\"memory\" not exported from module"));
+        return false;
+    }
+    let export_unwrapped = export.unwrap();
+
+    if let wasmtime::ExternType::Memory(memory_type) = export_unwrapped {
+        debug_log!(if memory_type.minimum() > 1u64 {
+            eprintln!("Wasm initial memory exceeds limit: {memory_type:?}")
+        });
+        return memory_type.minimum() <= 1u64;
+    }
+    debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
+    false
+}
+
+fn check_no_start(module: &Module) -> bool {
+    let export = module.get_export("start");
+    export.is_none()
+}
 
 #[derive(Clone)]
 pub struct WasmtimeGlobalContext {
     engine: Engine,
+    instance_pre_cache: InstancePreCache,
     // TODO(geoff): we could stick the Linker here
 }
 
@@ -101,15 +125,17 @@ impl WasmtimeGlobalContext {
                 allocation_config,
             ));
 
-        // Set custom code memory allocator
-        config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
+        //config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
 
         Engine::new(&config).unwrap()
     }
 
-    pub fn new() -> WasmtimeGlobalContext {
+    pub fn new(
+        instance_pre_cache: InstancePreCache,
+    ) -> WasmtimeGlobalContext {
         Self {
             engine: Self::new_engine(),
+            instance_pre_cache,
         }
     }
 }
@@ -117,7 +143,6 @@ impl WasmtimeGlobalContext {
 pub struct WasmtimeContext {
     global_context: WasmtimeGlobalContext,
     linker: Linker<*mut c_void>,
-    module_cache: ModuleCache,
     contract_get_fn: ContractGetFn,
 }
 
@@ -177,12 +202,10 @@ impl WasmtimeContext {
     fn new(
         global_context: &WasmtimeGlobalContext,
         get_fn: ContractGetFn,
-        module_cache: ModuleCache,
     ) -> WasmtimeContext {
         Self {
             global_context: global_context.clone(),
             linker: Linker::new(&global_context.engine),
-            module_cache,
             contract_get_fn: get_fn,
         }
     }
@@ -203,21 +226,40 @@ impl WasmtimeContext {
         &self.global_context.engine
     }
 
-    pub fn get_cached_module(
-        &mut self,
-        hash: &[u8; 32],
-    ) -> Result<Option<Module>, SystemErrorCode> {
-        self.module_cache.get(hash, self.linker.engine())
-    }
+    pub fn get_instance_pre(&mut self, hash: &[u8; 32], user_context: *mut c_void) -> Result<Option<InstancePre<*mut c_void>>, SystemErrorCode> {
+        
+        if let Some(instance_pre) = self.global_context.instance_pre_cache.get(hash) {
+            return Ok(Some(instance_pre));
+        }
+        // otherwise compile the module and cache it
+        let bytes = unsafe { self.fetch_contract(user_context, hash)? };
+        if bytes.is_none() {
+            return Ok(None);
+        }
+        let bytes = bytes.unwrap();
+        let linker = self.linker();
+        let module = Module::new(linker.engine(), bytes)
+            .inspect_err(|_e| {
+                debug_log!(eprintln!("Module new error: {_e}"))
+            })
+            .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
 
-    pub fn put_cached_module(
-        &mut self,
-        hash: &[u8; 32],
-        module: &Module,
-    ) -> Result<(), SystemErrorCode> {
-        self.module_cache.put(hash, module).inspect_err(|_e| {
-            debug_log!(eprintln!("Module cache put error: {_e:?}"));
-        })
+        if !check_memory_limit(&module) {
+            debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
+            return Ok(None);
+        }
+        if !check_no_start(&module) {
+            debug_log!(eprintln!("Module instantiation failed: Has start function"));
+            return Ok(None);
+        }
+
+        let instance_pre = self.linker.instantiate_pre(&module).inspect_err(|_e| {
+            debug_log!(eprintln!("Error instantiating store: {_e}"));
+        }).map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
+
+        self.global_context.instance_pre_cache.put(hash, &instance_pre);
+
+        return Ok(Some(instance_pre));
     }
 
     pub fn link_function(&mut self, entry: LinkEntry) {
@@ -397,8 +439,17 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 /// Creates a global context that can be shared across threads.
 /// Global context is threadsafe.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
-    let b = Box::new(WasmtimeGlobalContext::new());
+pub unsafe extern "C" fn new_wasmtime_global_context(
+    instance_pre_get_fn: InstancePreGetFn,
+    instance_pre_put_fn: InstancePrePutFn,
+    external_cache: *mut c_void,
+) -> *mut c_void {
+    let instance_pre_cache = InstancePreCache::new(
+        instance_pre_get_fn,
+        instance_pre_put_fn,
+        external_cache,
+    );
+    let b = Box::new(WasmtimeGlobalContext::new(instance_pre_cache));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 
@@ -423,12 +474,11 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_context(
     get_fn: ContractGetFn,
-    compiled_code_get_fn: CompiledCodeGetFn,
-    compiled_code_put_fn: CompiledCodePutFn,
     global_context: *mut c_void,
-    external_cache_context: *mut c_void,
 ) -> *mut c_void {
+
     debug_assert!(!global_context.is_null());
+
     let global_context: &WasmtimeGlobalContext = unsafe {
         &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(
             global_context,
@@ -438,11 +488,6 @@ pub unsafe extern "C" fn new_wasmtime_context(
     let b = Box::new(WasmtimeContext::new(
         global_context,
         get_fn,
-        ModuleCache::new(
-            compiled_code_get_fn,
-            compiled_code_put_fn,
-            external_cache_context,
-        ),
     ));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }

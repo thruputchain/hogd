@@ -31,30 +31,6 @@ pub struct WasmtimeRuntime {
 
 use crate::debug_log;
 
-// assert that the memory is exported and starts at at most 1 page
-fn check_memory_limit(module: &Module) -> bool {
-    let export = module.get_export("memory");
-    if export.is_none() {
-        debug_log!(eprintln!("\"memory\" not exported from module"));
-        return false;
-    }
-    let export_unwrapped = export.unwrap();
-
-    if let wasmtime::ExternType::Memory(memory_type) = export_unwrapped {
-        debug_log!(if memory_type.minimum() > 1u64 {
-            eprintln!("Wasm initial memory exceeds limit: {memory_type:?}")
-        });
-        return memory_type.minimum() <= 1u64;
-    }
-    debug_log!(eprintln!("\"memory\" not exported as wasm memory"));
-    false
-}
-
-fn check_no_start(module: &Module) -> bool {
-    let export = module.get_export("start");
-    export.is_none()
-}
-
 impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
@@ -63,47 +39,10 @@ impl WasmtimeRuntime {
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let instance_pre = if let Some(module) =
-            context.get_cached_module(hash).unwrap()
-        {
-            let instance_pre = context
-                .linker()
-                .instantiate_pre(&module)
-                .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
-                .ok()?;
-            instance_pre
-        } else {
-            let linker = context.linker();
-            let module = Module::new(linker.engine(), bytes)
-                .inspect_err(|_e| {
-                    debug_log!(eprintln!("Module new error: {_e}"))
-                })
-                .ok()?;
 
-            if !check_memory_limit(&module) {
-                debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
-                return None;
-            }
-            if !check_no_start(&module) {
-                debug_log!(eprintln!(
-                    "Module instantiation failed: Has start function"
-                ));
-                return None;
-            }
-
-            let instance_pre = linker
-                .instantiate_pre(&module)
-                .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
-                .ok()?;
-            context.put_cached_module(hash, &module).unwrap();
-            instance_pre
-        };
-
+        let instance_pre = context.get_instance_pre(hash, userctx).unwrap()?;
         let mut store = Store::new(context.engine(), userctx);
-        let instance = instance_pre
-            .instantiate(&mut store)
-            .inspect_err(|_e| eprintln!("Error instantiating store: {_e}"))
-            .ok()?;
+        let instance = instance_pre.instantiate(&mut store).unwrap();
         Some(Self { store, instance })
     }
 

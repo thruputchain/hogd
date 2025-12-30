@@ -38,7 +38,6 @@ impl CompiledCodeGetResult {
     }
 }
 
-// Module cache is NOT threadsafe, and should NOT be shared across threads.
 pub struct ModuleCache {
     compiled_code_get_fn: CompiledCodeGetFn,
     compiled_code_put_fn: CompiledCodePutFn,
@@ -70,12 +69,8 @@ impl ModuleCache {
             Some(slice) => slice,
             None => return Ok(None),
         };
-        // The deserialize_raw API does not work on environments that use virtual memory.
-        // TODO(geoff): It would be really nice if we could avoid doing a full copy of the module,
-        // followed by an mprotect.
-        //
-        let module = unsafe { Module::deserialize_raw(engine, slice.into()) }
-        //let module =  unsafe { Module::deserialize(engine, slice) }
+
+        let module =  unsafe { Module::deserialize(engine, slice) }
             .map_err(|_e| {
                 debug_log!(eprintln!("Module deserialize error: {_e}"));
                 SystemErrorCode::kSystemUnrecoverable
