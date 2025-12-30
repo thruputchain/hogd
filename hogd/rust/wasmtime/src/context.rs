@@ -81,7 +81,7 @@ impl WasmtimeGlobalContext {
         let table_size: usize = 64;
         let allocation_config: PoolingAllocationConfig =
             PoolingAllocationConfig::default()
-                .max_unused_warm_slots(num_slots)
+                .max_unused_warm_slots(0)
                 .total_core_instances(num_slots)
                 .total_memories(num_slots)
                 .total_tables(num_slots)
