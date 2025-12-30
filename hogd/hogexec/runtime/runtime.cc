@@ -22,7 +22,7 @@ make_runtime_context(RuntimeEngine engine)
   case RuntimeEngine::kWasmi:
   {
     static WasmtimeGlobalContext wasmtime_global_context =
-        WasmtimeGlobalContext(4);
+        WasmtimeGlobalContext(8);
     return std::make_unique<WasmtimeContext>(wasmtime_global_context);
     // return std::make_unique<WasmiContext>(&module_cache);
     break;
