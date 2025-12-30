@@ -61,9 +61,9 @@ process_contract(std::string const &contract_name, std::string const &filename)
   // Compute hash
   SHA256Hash hash = sha256(contract);
   DeployedContractHash deployed_hash{.hash = hash,
-                                      .contract_size =
-                                          static_cast<uint32_t>(contract_size),
-                                      .contract_type = ContractType::kWasmi};
+                                     .contract_size =
+                                         static_cast<uint32_t>(contract_size),
+                                     .contract_type = ContractType::kWasmi};
 
   static WasmTestFramework framework;
   framework.make_syscall_handler(contract);
@@ -71,8 +71,10 @@ process_contract(std::string const &contract_name, std::string const &filename)
   auto runtime_context = make_hogexec_context();
 
   // Create runtime
-  auto runtime_result = runtime_context->make_new_runtime(
-      deployed_hash, framework.syscall_handler_.get(), false);
+  auto runtime_result =
+      runtime_context->make_new_runtime(deployed_hash,
+                                        framework.syscall_handler_.get(),
+                                        false);
 
   if (!runtime_result.has_value()) {
     std::println(stderr, "Failed to create runtime for {}", contract_name);
@@ -82,7 +84,8 @@ process_contract(std::string const &contract_name, std::string const &filename)
   auto *wasmtime_runtime =
       dynamic_cast<WasmtimeRuntime *>(runtime_result.value().get());
   if (wasmtime_runtime == nullptr) {
-    std::println(stderr, "Runtime is not a WasmtimeRuntime for {}", contract_name);
+    std::println(stderr, "Runtime is not a WasmtimeRuntime for {}",
+                 contract_name);
     return;
   }
 
@@ -91,9 +94,12 @@ process_contract(std::string const &contract_name, std::string const &filename)
   bool success = wasmtime_runtime->get_module_stats(&stats);
 
   if (success) {
-    std::println("contract={} contract_size={} serialized_module_size={} ratio={}", contract_name, contract_size,
-                 stats.serialized_module_size, static_cast<double>(stats.serialized_module_size) / contract_size);
-  } else {
+    std::println(
+        "contract={} contract_size={} serialized_module_size={} ratio={}",
+        contract_name, contract_size, stats.serialized_module_size,
+        static_cast<double>(stats.serialized_module_size) / contract_size);
+  }
+  else {
     std::println(stderr, "Failed to get stats for {}", contract_name);
   }
 }
