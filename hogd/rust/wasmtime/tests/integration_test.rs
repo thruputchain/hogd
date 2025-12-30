@@ -199,15 +199,8 @@ thread_local! {
 // CompiledCodeGetFn that uses the thread-local cache
 unsafe extern "C" fn test_compiled_code_get_fn(
     hash: *const u8,
-    hash_len: usize,
     _external_cache: *mut c_void,
 ) -> CompiledCodeGetResult {
-    if hash_len != 32 {
-        return CompiledCodeGetResult {
-            data: std::ptr::null(),
-            data_len: 0,
-        };
-    }
 
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     let mut hash_array: SHA256Hash = [0u8; 32];
@@ -235,15 +228,10 @@ unsafe extern "C" fn test_compiled_code_get_fn(
 // CompiledCodePutFn that uses the thread-local cache
 unsafe extern "C" fn test_compiled_code_put_fn(
     hash: *const u8,
-    hash_len: usize,
     data: *const u8,
     data_len: usize,
     _external_cache: *mut c_void,
 ) {
-    if hash_len != 32 {
-        return;
-    }
-
     let hash_slice = std::slice::from_raw_parts(hash, 32);
     let mut hash_array: SHA256Hash = [0u8; 32];
     hash_array.copy_from_slice(hash_slice);
@@ -257,7 +245,6 @@ unsafe extern "C" fn test_compiled_code_put_fn(
 // Mock CompiledCodeGetFn for testing - returns no cached code (for tests that don't need caching)
 unsafe extern "C" fn no_get_compiled_code_get_fn(
     _hash: *const u8,
-    _hash_len: usize,
     _external_cache: *mut c_void,
 ) -> CompiledCodeGetResult {
     CompiledCodeGetResult {
@@ -269,7 +256,6 @@ unsafe extern "C" fn no_get_compiled_code_get_fn(
 // Mock CompiledCodePutFn for testing - does nothing (for tests that don't need caching)
 unsafe extern "C" fn no_put_compiled_code_put_fn(
     _hash: *const u8,
-    _hash_len: usize,
     _data: *const u8,
     _data_len: usize,
     _external_cache: *mut c_void,

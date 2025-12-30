@@ -3,6 +3,7 @@ use core::ffi::c_void;
 use crate::runtime::WasmtimeRuntime;
 
 pub mod context;
+pub mod custom_code_memory;
 pub mod error;
 pub mod invoke_result;
 mod module_cache;

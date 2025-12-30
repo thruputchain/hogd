@@ -74,9 +74,9 @@ impl ModuleCache {
         // TODO(geoff): It would be really nice if we could avoid doing a full copy of the module,
         // followed by an mprotect.
         //
-        //let module = unsafe { Module::deserialize_raw(engine, slice.into()) }
-        let module =
-            unsafe { Module::deserialize(engine, slice) }.map_err(|_e| {
+        let module = unsafe { Module::deserialize_raw(engine, slice.into()) }
+        //let module =  unsafe { Module::deserialize(engine, slice) }
+            .map_err(|_e| {
                 debug_log!(eprintln!("Module deserialize error: {_e}"));
                 SystemErrorCode::kSystemUnrecoverable
             })?;

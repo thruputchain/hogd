@@ -8,6 +8,7 @@ rust-version = "1.81"
 lru = { workspace = true }
 wasmtime = { workspace = true }
 common = {path = "../common"}
+libc = "0.2"
 
 [build-dependencies]
 wat = "1.219.1"

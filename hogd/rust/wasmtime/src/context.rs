@@ -1,5 +1,6 @@
 use core::ffi::c_void;
 use core::slice;
+use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
@@ -9,6 +10,7 @@ use wasmtime::{
     PoolingAllocationConfig,
 };
 
+use crate::custom_code_memory::MprotectCodeMemory;
 use crate::error::TrampolineError;
 use crate::module_cache::CompiledCodeGetFn;
 use crate::module_cache::CompiledCodePutFn;
@@ -66,40 +68,43 @@ impl WasmtimeGlobalContext {
                 //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
-        Engine::new(
-            Config::default()
-                .consume_fuel(true)
-                .wasm_backtrace(false)
-                .strategy(wasmtime::Strategy::Winch)
-                // cranelift-only options
-                //.signals_based_traps(false)
-                //.table_lazy_init(true)
-                // done cranelift-only
-                .cranelift_pcc(false)
-                .native_unwind_info(false)
-                .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
-                .wasm_backtrace(false)
-                .debug_info(false)
-                .cranelift_opt_level(wasmtime::OptLevel::Speed)
-                .cranelift_nan_canonicalization(true) // deterministic nan
-                .relaxed_simd_deterministic(true)
-                .wasm_multi_memory(false)
-                .epoch_interruption(false)
-                .max_wasm_stack(16 * 1024)
-                // Configs set as per wasmtime documentation to eliminate vmm in steady state
-                // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
-                .memory_init_cow(false)
-                .memory_guard_size(0)
-                .memory_reservation(2 * page_size as u64)
-                .memory_reservation_for_growth(0)
-                .guard_before_linear_memory(false)
-                .memory_may_move(false)
-                .generate_address_map(false)
-                .allocation_strategy(InstanceAllocationStrategy::Pooling(
-                    allocation_config,
-                )),
-        )
-        .unwrap()
+        let mut config = Config::default();
+        config
+            .consume_fuel(true)
+            .wasm_backtrace(false)
+            .strategy(wasmtime::Strategy::Winch)
+            // cranelift-only options
+            //.signals_based_traps(false)
+            //.table_lazy_init(true)
+            // done cranelift-only
+            .cranelift_pcc(false)
+            .native_unwind_info(false)
+            .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
+            .wasm_backtrace(false)
+            .debug_info(false)
+            .cranelift_opt_level(wasmtime::OptLevel::Speed)
+            .cranelift_nan_canonicalization(true) // deterministic nan
+            .relaxed_simd_deterministic(true)
+            .wasm_multi_memory(false)
+            .epoch_interruption(false)
+            .max_wasm_stack(16 * 1024)
+            // Configs set as per wasmtime documentation to eliminate vmm in steady state
+            // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
+            .memory_init_cow(false)
+            .memory_guard_size(0)
+            .memory_reservation(2 * page_size as u64)
+            .memory_reservation_for_growth(0)
+            .guard_before_linear_memory(false)
+            .memory_may_move(false)
+            .generate_address_map(false)
+            .allocation_strategy(InstanceAllocationStrategy::Pooling(
+                allocation_config,
+            ));
+
+        // Set custom code memory allocator
+        config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
+
+        Engine::new(&config).unwrap()
     }
 
     pub fn new() -> WasmtimeGlobalContext {
