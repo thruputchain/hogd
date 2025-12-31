@@ -431,7 +431,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_serializable auto &...args)
-  try {
+  {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
@@ -444,20 +444,32 @@ struct RpcStream : public detail::RpcStreamImpl {
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
     cp_->awrite(fd_, std::move(record));
 
-    Buf rbuf = co_await a;
-    BufView rv = rbuf.subspan(deserialize_from(&msg, rbuf));
+    Buf rbuf;
+    BufView rv;
+    try {
+      rbuf = co_await a;
+      rv = rbuf.subspan(deserialize_from(&msg, rbuf));
+    } catch (const XdrBadInput &e) {
+      throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());
+    } catch (const std::exception &e) {
+      // Throwing away some information about the exception type here,
+      // but it's more useful to know what function caused the error.
+      throw XdrException("{}: {}", ProcMeta::proc_name, e.what());
+    }
+
     if (!rpc_is_success(msg)) {
       logger_.template log_client<ProcMeta>(msg);
-      throw XdrCallFailed(msg);
+      throw XdrCallFailed(msg, ProcMeta::proc_name);
     }
 
     typename ProcMeta::return_wire_type ret;
     try {
       deserialize(&ret, rv);
-    } catch (XdrException &e) {
+    } catch (const XdrException &e) {
       if constexpr (!std::same_as<Logger, RpcNoLogger>)
         logger_.template log_client<ProcMeta>(
-            msg, uformat(" deserialization error: {}", e.what()));
+            msg, uformat(" deserialization error in {}: {}",
+                         ProcMeta::proc_name, e.what()));
       throw;
     }
 
@@ -466,10 +478,6 @@ struct RpcStream : public detail::RpcStreamImpl {
       co_return;
     else
       co_return ret;
-  } catch (XdrException &e) {
-    e.what_ = std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
-                          ProcMeta::proc_name, e.what_);
-    throw;
   }
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
