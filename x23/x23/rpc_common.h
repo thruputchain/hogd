@@ -32,20 +32,28 @@ namespace x23 {
 struct XdrCallFailed : XdrException {
   using enum msg_type;
   rpc_msg m_;
-  XdrCallFailed(const rpc_msg &m) : XdrException(make_message(m)), m_(m) {}
-  XdrCallFailed(rpc_msg &&m) : XdrException(make_message(m)), m_(std::move(m))
+  XdrCallFailed(const rpc_msg &m, std::string prefix = {})
+    : XdrException(make_message(m, std::move(prefix))), m_(m)
+  {}
+  XdrCallFailed(rpc_msg &&m, std::string prefix = {})
+    : XdrException(make_message(m, std::move(prefix))), m_(std::move(m))
   {}
 
-  static std::string make_message(const rpc_msg &m)
+  static std::string make_message(const rpc_msg &m, std::string ret)
   {
+    if (!ret.empty())
+      ret += ": ";
     using enum reply_stat;
     x23assert(m.body.mtype() == REPLY);
     if (m.body.rbody().stat() == MSG_ACCEPTED) {
       auto stat = m.body.rbody().areply().reply_data.stat();
-      return std::format("RPC call failed ({})", stat);
+      ret += std::format("RPC call failed ({})", stat);
     }
-    auto stat = m.body.rbody().rreply().stat();
-    return std::format("RPC call rejected ({})", stat);
+    else {
+      auto stat = m.body.rbody().rreply().stat();
+      ret += std::format("RPC call rejected ({})", stat);
+    }
+    return ret;
   }
 };
 
