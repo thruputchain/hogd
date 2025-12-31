@@ -98,7 +98,7 @@ echo 'launch coordinator and scp'
 ./$BUILD_DIR/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
-  --skip 120 \
+  --skip 20 \
   --stack \
   --rpc-log-stats \
   --config ./scripts/config-chuckd.json \
