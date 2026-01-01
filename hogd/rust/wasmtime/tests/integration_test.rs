@@ -7,7 +7,7 @@ use std::path::PathBuf;
 // Import the FFI functions from wasmtime_lib
 use common::SystemErrorCode;
 use wasmtime_lib::instance_pre_cache::{
-    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref
+    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref,
 };
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
@@ -382,7 +382,9 @@ fn test_create_runtime() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime.is_null(), "Should successfully create runtime");
 
@@ -414,7 +416,9 @@ fn test_get_memory() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
         assert!(!runtime.is_null());
 
         // Get the memory
@@ -455,7 +459,9 @@ fn test_invoke_function() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -496,7 +502,9 @@ fn test_gas_metering() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -575,14 +583,18 @@ fn test_multiple_runtimes() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime1.is_null());
         assert!(!runtime2.is_null());
@@ -618,7 +630,9 @@ fn test_fibonacci_computation() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -665,7 +679,9 @@ fn test_fibonacci_computation_overflow() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime.is_null());
 
@@ -735,7 +751,9 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime1.is_null(), "First runtime should be created");
 
@@ -758,7 +776,9 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime2.is_null(), "Second runtime should be created");
 
@@ -776,7 +796,9 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        ).get().unwrap();
+        )
+        .get()
+        .unwrap();
 
         assert!(!runtime3.is_null(), "Third runtime should be created");
 
