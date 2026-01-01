@@ -1131,6 +1131,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "synchronized_map"
+version = "0.1.0"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1512,6 +1519,7 @@ dependencies = [
  "common",
  "libc",
  "lru",
+ "synchronized_map",
  "wasmtime",
  "wat",
 ]

@@ -45,7 +45,6 @@ add_library(runtime_objects OBJECT
   syscall_stats.cc
   transaction_stats.cc
   wasmi_runtime.cc
-  wasmtime_instance_cache.cc
   wasmtime_runtime.cc
 )
 

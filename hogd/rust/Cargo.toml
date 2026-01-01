@@ -5,7 +5,8 @@ members = [
     "wasmtime",
     "unified",
     "contract_types",
-    "common"
+    "common",
+    "synchronized_map"
 ]
 resolver = "2"
 
@@ -16,6 +17,7 @@ lru = "0.14.0"
 wasmi = "0.36.0"
 bindgen = "0.71"
 wasmtime = { version = "39.0.1", features = ["winch", "runtime", "cranelift", "pooling-allocator"], default-features = false }
+siphasher = { version = "1.0.1", default-features = false }
 
 # Shared optimization profiles
 [profile.release]

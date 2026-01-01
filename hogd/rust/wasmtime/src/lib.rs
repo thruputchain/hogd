@@ -16,10 +16,8 @@ pub use context::{
     new_wasmtime_global_context, wasmtime_link_nargs, wasmtime_verify_contract,
     ContractGetFn, ContractGetResult,
 };
-pub use instance_pre_cache::{
-    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref, InstancePreGetFn,
-    InstancePrePutFn,
-};
+pub use instance_pre_cache::InstancePreCache;
+
 pub use invoke_result::WasmtimeInvokeResult;
 pub use runtime::{
     free_wasmtime_runtime, new_wasmtime_runtime, wasmtime_get_module_stats,

@@ -13,7 +13,6 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/wasmtime_instance_cache.h"
 #include "hogd/rust/wasmtime/bindings.h"
 
 namespace hogd {
@@ -30,7 +29,6 @@ public:
 
 private:
   std::vector<void *> engines_;
-  std::vector<std::unique_ptr<WasmtimeInstanceCache>> instance_pre_caches_;
 };
 
 // Context shared between WasmtimeRuntime objects.
