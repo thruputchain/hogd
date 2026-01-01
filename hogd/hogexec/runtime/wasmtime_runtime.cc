@@ -173,17 +173,21 @@ WasmtimeContext::make_new_runtime(
 {
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
-  void *wasmtime_runtime_ptr =
+  NewWasmtimeRuntimeResult new_runtime_result =
       new_wasmtime_runtime(deployed_contract_hash.hash.data(),
                            host_call_context.get(), do_contract_verify,
                            wasmtime_context_ptr_);
 
-  if (wasmtime_runtime_ptr == nullptr) {
-    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  if (new_runtime_result.err_code != 0) [[unlikely]] {
+    return SystemError::from_raw_error_code(new_runtime_result.err_code);
+  }
+
+  if (new_runtime_result.runtime_pointer == nullptr) {
+    return nullptr;
   }
 
   return std::make_unique<WasmtimeRuntime>(std::move(host_call_context),
-                                           wasmtime_runtime_ptr);
+                                           new_runtime_result.runtime_pointer);
 }
 
 bool
@@ -279,7 +283,9 @@ WasmtimeRuntime::WasmtimeRuntime(
     void *wasmtime_runtime_ptr)
   : Runtime(std::move(host_call_context)),
     wasmtime_runtime_ptr_(wasmtime_runtime_ptr)
-{}
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+}
 
 WasmtimeRuntime::~WasmtimeRuntime()
 {

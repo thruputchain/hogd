@@ -255,14 +255,24 @@ impl WasmtimeContext {
             return Ok(None);
         }
 
-        let instance_pre = Arc::new(
-            self.linker
-                .instantiate_pre(&module)
-                .inspect_err(|_e| {
-                    debug_log!(eprintln!("Error instantiating store: {_e}"));
-                })
-                .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?,
-        );
+        let instance_pre =
+            Arc::new(match self.linker.instantiate_pre(&module) {
+                Ok(instance_pre) => instance_pre,
+                Err(e) => {
+                    debug_log!(eprintln!("Error instantiating store: {e}"));
+                    match e.downcast_ref::<wasmtime::UnknownImportError>() {
+                        Some(_) => {
+                            return Ok(None);
+                        }
+                        None => {
+                            debug_log!(eprintln!(
+                                "Error instantiating store: {e}"
+                            ));
+                            return Err(SystemErrorCode::kSystemUnrecoverable);
+                        }
+                    }
+                }
+            });
 
         self.global_context
             .instance_pre_cache

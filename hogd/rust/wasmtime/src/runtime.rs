@@ -5,7 +5,7 @@ use wasmtime::{Instance, Store};
 use crate::context::WasmtimeContext;
 use crate::error::TrampolineError;
 use crate::invoke_result::WasmtimeInvokeResult;
-use common::InvokeErrorCode;
+use common::{InvokeErrorCode, SystemErrorCode};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -139,6 +139,36 @@ pub unsafe extern "C" fn wasmtime_invoke(
     r.invoke(string)
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct NewWasmtimeRuntimeResult {
+    err_code: i32, // SystemErrorCode
+    runtime_pointer: *mut c_void,
+}
+
+impl NewWasmtimeRuntimeResult {
+    pub fn err(err_code: SystemErrorCode) -> Self {
+        Self {
+            err_code: err_code as i32,
+            runtime_pointer: core::ptr::null_mut(),
+        }
+    }
+
+    pub fn ok(runtime_pointer: *mut c_void) -> Self {
+        Self {
+            err_code: 0i32,
+            runtime_pointer,
+        }
+    }
+
+    pub fn get(&self) -> Option<*mut c_void> {
+        if self.err_code != 0 {
+            return None;
+        }
+        Some(self.runtime_pointer)
+    }
+}
+
 /// # Safety
 /// wasmtime_context_ptr must not be a nullptr, and must have been created by new_wasmtime_context.
 /// userctx can be any (null or non-null) pointer.
@@ -149,10 +179,12 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     userctx: *mut c_void, // *HostCallContext
     do_verify_contract: bool,
     wasmtime_context_ptr: *mut c_void,
-) -> *mut c_void {
+) -> NewWasmtimeRuntimeResult {
     if hash.is_null() || wasmtime_context_ptr.is_null() {
         println!("hash or wasmtime_context_ptr is null");
-        return core::ptr::null_mut();
+        return NewWasmtimeRuntimeResult::err(
+            SystemErrorCode::kSystemUnrecoverable,
+        );
     }
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
@@ -167,30 +199,31 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
         let slice = match wasmtime_context.fetch_contract(userctx, hash_slice) {
             Ok(Some(slice)) => slice,
             Ok(None) => {
-                println!("No contract found");
-                return core::ptr::null_mut();
+                return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
             }
-            Err(_code) => {
-                println!("Error fetching contract: {:?}", _code);
-                return core::ptr::null_mut();
+            Err(code) => {
+                debug_log!(eprintln!("Error fetching contract: {:?}", code));
+                return NewWasmtimeRuntimeResult::err(code);
             }
         };
 
         if !wasmtime_context.verify_contract(slice) {
-            println!("Contract verification failed");
-            return core::ptr::null_mut();
+            debug_log!(eprintln!("Contract verification failed"));
+            return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
         }
     }
 
     let b = match WasmtimeRuntime::new(hash_slice, wasmtime_context, userctx) {
         Some(res) => Box::new(res),
         None => {
-            println!("Error creating runtime");
-            return core::ptr::null_mut();
+            debug_log!(eprintln!("Error creating runtime"));
+            return NewWasmtimeRuntimeResult::ok(core::ptr::null_mut());
         }
     };
 
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+    NewWasmtimeRuntimeResult::ok(unsafe {
+        core::mem::transmute(Box::into_raw(b))
+    })
 }
 
 /// # Safety
