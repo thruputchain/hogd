@@ -65,7 +65,9 @@ public:
 
   std::optional<ExternalInstancePreType> get(const uint8_t (*hash)[32])
   {
-    auto span = std::span<const uint8_t, 32>(reinterpret_cast<const uint8_t *>(hash), 32);
+    auto span =
+        std::span<const uint8_t, 32>(reinterpret_cast<const uint8_t *>(hash),
+                                     32);
     auto [ul, map] = get_bucket(span);
     auto it = map.find(span);
     if (it == map.end()) {
