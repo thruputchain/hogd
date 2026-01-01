@@ -8,6 +8,9 @@
 // its operations, allowing the caller to control when the lock is released so
 // it can synchronize access to the map's elements.
 //
+// API design is largely mirrored from hogd/base/synchronized_map.h,
+// with some of the features there stripped out (i.e. parallel iteration).
+//
 // Example:
 // let map = SynchronizedMap::<i32, String>::new();
 // let mut guard = map.get_or_insert_with(10, || "foo".to_string());
@@ -253,33 +256,6 @@ where
     pub fn clear(&self) {
         for lock in &self.locks {
             lock.lock().unwrap().clear();
-        }
-    }
-
-    /// Execute a function on each element.
-    /// The function receives a reference to each (key, value) pair.
-    pub fn for_each<F>(&self, mut f: F)
-    where
-        F: FnMut(&K, &V),
-    {
-        for lock in &self.locks {
-            let guard = lock.lock().unwrap();
-            for (k, v) in guard.iter() {
-                f(k, v);
-            }
-        }
-    }
-
-    /// Execute a function on each element with mutable access.
-    pub fn for_each_mut<F>(&self, mut f: F)
-    where
-        F: FnMut(&K, &mut V),
-    {
-        for lock in &self.locks {
-            let mut guard = lock.lock().unwrap();
-            for (k, v) in guard.iter_mut() {
-                f(k, v);
-            }
         }
     }
 }
