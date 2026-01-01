@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -67,10 +68,11 @@ public:
 
   std::optional<ExternalInstancePreType> get(const uint8_t (*hash)[32])
   {
-    auto span = std::span<const uint8_t, 32>(hash[0], 32);
+    auto span = std::span<const uint8_t, 32>(reinterpret_cast<const uint8_t *>(hash), 32);
     auto [ul, map] = get_bucket(span);
     auto it = map.find(span);
     if (it == map.end()) {
+      info("get: hash not found");
       return std::nullopt;
     }
     return std::move(it->second);
@@ -106,7 +108,7 @@ private:
 
     size_t operator()(std::span<const uint8_t, 32> b) const
     {
-      return SipHash24::get_default()(std::as_bytes(std::span(b.data(), 32)));
+      return SipHash24::get_default()(std::as_bytes(b));
     }
   };
 
