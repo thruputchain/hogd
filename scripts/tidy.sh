@@ -30,6 +30,7 @@ BUILD_DIR=$(readlink -f "$BUILD_DIR")
   cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings
   cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings
   cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings
+  cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnings
 } &
 CLIPPY_PID=$!
 
