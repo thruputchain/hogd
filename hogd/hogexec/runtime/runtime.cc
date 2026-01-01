@@ -9,7 +9,8 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h" // IWYU pragma: keep
+#include "hogd/hogexec/runtime/wasmtime_runtime.h"
 #include "x23/format.h"
 
 namespace hogd {
@@ -19,8 +20,13 @@ make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
-    return std::make_unique<WasmiContext>();
+  {
+    static WasmtimeGlobalContext wasmtime_global_context =
+        WasmtimeGlobalContext(8);
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
+    // return std::make_unique<WasmiContext>(&module_cache);
     break;
+  }
   default:
     return nullptr;
   }

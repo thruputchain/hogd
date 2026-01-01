@@ -63,3 +63,7 @@ BUILD_DIR=$1
 ## gas usage metric
 ./metrics_history/scripts/make_metric_file.sh gas-usage-metric $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/gas_usage_metric.sh $BUILD_DIR >metrics_history/metrics/gas-usage-metric/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+## artifact sizes
+./metrics_history/scripts/make_metric_file.sh artifact-sizes $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/artifact_sizes.sh $BUILD_DIR >metrics_history/metrics/artifact-sizes/$GIT_branch/${GIT_commit_time}_$GIT_commit

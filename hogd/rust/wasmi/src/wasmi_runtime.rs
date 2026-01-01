@@ -2,9 +2,9 @@ use core::ffi::c_void;
 use std::slice;
 use wasmi::{Instance, Module, Store};
 
-use crate::context::WasmiContext;
-use crate::error::TrampolineError;
-use crate::invoke_result::WasmiInvokeResult;
+use crate::wasmi_context::WasmiContext;
+use crate::wasmi_error::TrampolineError;
+use crate::wasmi_invoke_result::WasmiInvokeResult;
 use common::InvokeErrorCode;
 use common::SystemErrorCode;
 
@@ -30,7 +30,7 @@ pub struct WasmiRuntime {
     pub instance: Instance,
 }
 
-use crate::debug_log;
+use crate::wasmi_debug_log as debug_log;
 
 // assert that the memory is exported and starts at at most 1 page
 fn check_memory_limit(module: &Module) -> bool {

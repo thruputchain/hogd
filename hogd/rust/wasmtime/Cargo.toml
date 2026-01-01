@@ -1,0 +1,24 @@
+[package]
+name = "wasmtime_lib"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+
+[dependencies]
+lru = { workspace = true }
+wasmtime = { workspace = true }
+common = {path = "../common"}
+libc = "0.2"
+synchronized_map = { path = "../synchronized_map" }
+
+[build-dependencies]
+wat = "1.219.1"
+
+[features]
+debug_logging = []
+
+[lib]
+crate-type = ["rlib"]
+
+# Optimization profiles are inherited from workspace
+
