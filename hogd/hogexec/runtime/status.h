@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "syscall_error.hh"
@@ -78,6 +79,21 @@ public:
 
 struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   explicit SystemError(SystemErrorCode err) : EnumError(err) {}
+
+  static SystemError from_raw_error_code(int32_t raw_error_code)
+  {
+    switch (raw_error_code) {
+    case std::to_underlying(SystemErrorCode::kSystemUnrecoverable):
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    case std::to_underlying(SystemErrorCode::kSystemAbortTransaction):
+      return SystemError{SystemErrorCode::kSystemAbortTransaction};
+    case std::to_underlying(SystemErrorCode::kSystemValidationFailure):
+      return SystemError{SystemErrorCode::kSystemValidationFailure};
+    default:
+      error("Unrecoverable: Unknown system error code: {}", raw_error_code);
+      return SystemError{SystemErrorCode::kSystemUnrecoverable};
+    }
+  }
 
   HostFnError to_host_fn_error() const
   {

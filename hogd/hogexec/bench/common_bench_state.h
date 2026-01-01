@@ -11,7 +11,7 @@
 
 #include "db_sched.hh"
 #include "event_rpc.hh"
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -70,17 +70,15 @@ public:
   // NOLINTEND(bugprone-exception-escape)
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
-                                 TransactionID txid = 0)
+                                 TransactionID txid,
+                                 RuntimeContext &runtime_context)
   {
-    if (txid == 0) {
-      txid = allocate_txid();
-    }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, std::move(proxy),
                              std::move(event_proxy), ProposalModeCtor{},
-                             make_hogexec_context());
+                             runtime_context);
   }
 
   void advance_block();
@@ -90,6 +88,11 @@ public:
   void run_genesis_configuration(
       GenesisConfiguration const &genesis_configuration,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
+
+  TransactionID allocate_txid()
+  {
+    return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
+  }
 
 private:
   void connect_coord()
@@ -174,11 +177,6 @@ private:
 
   uint16_t exec_port_;
   uint16_t coord_port_;
-
-  TransactionID allocate_txid()
-  {
-    return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
-  }
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
@@ -270,9 +268,11 @@ CommonBenchState::run_genesis_configuration(
 
   open_event_block(block_number_);
 
+  auto runtime_context = make_hogexec_context();
+
   for (auto const &block : initialization_txs) {
     for (auto const &tx : block) {
-      auto handler = make_handler(tx);
+      auto handler = make_handler(tx, allocate_txid(), *runtime_context);
       if (!handler.root_invoke().is_root_success()) {
         throw std::runtime_error("Failed to invoke transaction");
       }

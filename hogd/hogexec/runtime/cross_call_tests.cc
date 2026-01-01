@@ -51,6 +51,9 @@ protected:
           ContractTraitClient<fibonacci_call::FibonacciCaller>(
               fibonacci_caller_contract_address_);
 
+  std::unique_ptr<RuntimeContext> wasm_runtime_context_ =
+      make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+
   void initialize_fibonacci_caller()
   {
     auto handler = make_new_system_call_handler(
@@ -60,7 +63,7 @@ protected:
                     .invocation =
                         fibonacci_caller_client_.make_invocation<"initialize">(
                             UINT64_MAX, fibonacci_contract_address_)}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -83,7 +86,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                 fibonacci_caller_client_
                                     .make_invocation<"call_fibonacci">(
                                         UINT64_MAX, uint32_t{5}, UINT64_MAX)}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -99,7 +102,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                 fibonacci_caller_client_
                                     .make_invocation<"call_fibonacci">(
                                         UINT64_MAX, uint32_t{20}, UINT64_MAX)}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -119,7 +122,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
                                       .make_invocation<"call_fibonacci">(
                                           UINT64_MAX, uint32_t{20},
                                           uint64_t{1000})}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.result_.error().code(),
@@ -138,7 +141,7 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
                                   fibonacci_caller_client_
                                       .make_invocation<"call_fibonacci">(
                                           1000, uint32_t{20}, UINT64_MAX)}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 1000);
@@ -159,7 +162,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                 fibonacci_caller_client_.make_invocation<
                                     "call_fibonacci_expect_out_of_gas">(
                                     UINT64_MAX, uint32_t{20}, uint64_t{1000})}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -176,7 +179,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                 fibonacci_caller_client_.make_invocation<
                                     "call_fibonacci_expect_out_of_gas">(
                                     UINT64_MAX, uint32_t{20}, uint64_t{1010})}},
-        make_hogexec_wasm_context(RuntimeEngine::kWasmi));
+        *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

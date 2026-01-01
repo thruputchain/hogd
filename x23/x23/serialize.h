@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -230,7 +231,7 @@ xdr_size(const X &x)
 }
 
 inline size_t
-xdr_size(std::monostate)
+xdr_size(std::monostate /*unused*/)
 {
   return 0;
 }
@@ -591,7 +592,8 @@ struct Deserializer
       if (p > ee) {
         // We may have read beyond the buffer, crash whole program
         static const char msg[] = "x23::Deserializer: buffer overrun";
-        write(2, msg, sizeof(msg) - 1);
+        [[maybe_unused]] size_t r = write(2, msg, sizeof(msg) - 1);
+        assert(r == sizeof(msg) - 1);
         std::terminate();
       }
       throw XdrBadInput("x23::Deserializer: input too short");

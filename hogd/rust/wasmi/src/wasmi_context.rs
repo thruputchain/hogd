@@ -5,10 +5,11 @@ use wasmi::{
 use core::ffi::c_void;
 use core::slice;
 
-use crate::contract_loader::ContractGetFn;
-use crate::error::TrampolineError;
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::wasmi_error::TrampolineError;
 use crate::SHA256Hash;
+pub use common::contract_loader::ContractGetFn;
+pub use common::contract_loader::ContractGetResult;
 use common::string_from_parts;
 use common::SystemErrorCode;
 
@@ -23,25 +24,26 @@ use common::SystemErrorCode;
 // This is what stellar-core does
 // https://github.com/stellar/rs-soroban-env/blob/0a1c157deb1214f963a4e3dbc9abdce8ab5ef84a/soroban-env-host/src/vm/module_cache.rs#L87
 //
-// However, the internal data structures of EngineInner have the potential to be contended,
-// especially under Groundhog's concurrent execution model.
-//
 // The memory usage savings of a shared Engine are nonzero (we save when one Module is used by many transactions).
 // By size, (I suspect) the biggest costs are the the Wasmi codemap and the instance stacks
 // https://docs.rs/wasmi/latest/src/wasmi/engine/mod.rs.html#429
 // The codemap is what stores compiled wasm functions -- this could be deduplicated across shared modules.
 // The instance stacks store the wasm stack, which must be distinct for every instance (so no savings possible there).
 //
-// However, there is one big problem with the Wasmi API.  Unless I (geoff) am misreading wasmi,
-// entries in the CodeMap are never garbage collected.  That means that if an engine is reused across transactions,
+// However, there are two problems with the current Wasmi API.
+// (1) There is an internal lock on the recycled Stacks object inside the engine,
+// which, in effect, prevents any concurrent execution on one engine.  This is likely fixable
+// by a slight API change.
+//
+// (2) Entries in the CodeMap are never garbage collected.  That means that if an engine is reused across transactions,
 // without a module cache, we will leak (nontrivial amounts of) memory.  This also means that, for example,
-// an LRU cache of modules cannot be implemented.
+// a cache of modules cannot be effectively implemented on a shared engine.
 //
 // Each transaction requires its own Store.  It would be nice if we could share Modules and InstancePres
 // across transactions, but that's not viable -- Module requires an Engine parameter (we could share engines, in principle)
 // and InstancePre requires a Store parameter (unlike, for example, the wasmtime api).
 //
-// This implementation borrows some of the wasmi use patterns from stellar (without the module cache)
+// This implementation borrows some of the wasmi use patterns from stellar
 // e.g. https://github.com/stellar/rs-soroban-env/blob/f9a51971d3ca66216e290b074a1feee5334b58ff/soroban-env-host/src/vm.rs#L166
 //
 // The WASM official C API spec says that only one Engine should be created
@@ -76,9 +78,9 @@ impl LinkEntry {
     }
 }
 
-pub struct WasmiContext<'a> {
+pub struct WasmiContext {
     pub entries: Vec<LinkEntry>,
-    pub module_cache: Option<&'a mut ModuleCache>,
+    pub module_cache: Option<ModuleCache>,
     contract_get_fn: ContractGetFn,
 }
 
@@ -104,7 +106,7 @@ pub fn handle_trampoline_error(
     let error = error.unwrap();
     match error {
         common::HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
-        _ => Err(Error::host(crate::error::TrampolineError { error })),
+        _ => Err(Error::host(TrampolineError { error })),
     }
 }
 
@@ -134,25 +136,26 @@ macro_rules! link_function_nargs {
     };
 }
 
-impl<'a> WasmiContext<'a> {
-    fn new(
-        get_fn: ContractGetFn,
-        module_cache: Option<&'a mut ModuleCache>,
-    ) -> WasmiContext<'a> {
+impl WasmiContext {
+    fn new(get_fn: ContractGetFn) -> WasmiContext {
         Self {
             entries: Vec::new(),
-            module_cache,
+            // Performance is somewhat sensitive to module cache size.
+            // We need to change the caching strategy anyways once we go to winch.
+            module_cache: Some(ModuleCache::new(10)),
             contract_get_fn: get_fn,
         }
     }
 
     /// # Safety
     /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
-    pub unsafe fn fetch_contract(
+    /// The lifetime of the returned contract is tied to the lifetime of the `hash` parameter,
+    /// ensuring the slice doesn't outlive the calling function scope.
+    pub unsafe fn fetch_contract<'a>(
         &self,
         user_context: *mut c_void,
-        hash: &SHA256Hash,
-    ) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+        hash: &'a SHA256Hash,
+    ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
         get_res.to_data()
@@ -384,26 +387,12 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 
 // Rust FFI needs no_mangle and extern "C"
 /// # Safety
-/// module_cache can be nullptr, in which case no module cache is used.
-/// module_cache is threadsafe, so it can be safely shared across threads.
-/// module_cache must outlive WasmiContext.
+/// get_fn must not be a nullptr.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
     get_fn: ContractGetFn,
-    module_cache: *mut c_void,
 ) -> *mut c_void {
-    let b = if module_cache.is_null() {
-        Box::new(WasmiContext::new(get_fn, None))
-    } else {
-        Box::new(WasmiContext::new(get_fn, unsafe {
-            Some(
-                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
-                    module_cache,
-                )),
-            )
-        }))
-    };
-
+    let b = Box::new(WasmiContext::new(get_fn));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 

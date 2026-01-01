@@ -18,6 +18,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/bench/common_bench_state.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/metrics.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
@@ -110,11 +111,14 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
       futures.emplace_back(exec_pool.submit([&bs, work_txs, offset, cur_count,
                                              &pending_events,
                                              &events_done]() -> void {
+        auto runtime_context = make_hogexec_context();
+
         for (int j = 0; j < cur_count; j++) {
 
           auto const &tx = work_txs[offset + j];
 
-          auto handler = bs.make_handler(tx);
+          auto handler =
+              bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
           if (!handler.root_invoke().is_root_success()) {
             error("Failed to invoke transaction");
             throw std::runtime_error("Failed to invoke transaction");
@@ -152,6 +156,11 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
                      finish_time - start_time)
                      .count(),
                  num_txs_per_rep, bs.num_accounts_, num_exec_threads);
+    info("bench rep tps: {}",
+         num_txs_per_rep * 1'000'000.0 /
+             std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
+                                                                   start_time)
+                 .count());
     bs.advance_block();
   }
 }

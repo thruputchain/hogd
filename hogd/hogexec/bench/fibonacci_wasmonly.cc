@@ -74,12 +74,14 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
 
     for (int i = 0; i < num_txs; i++) {
       auto f = exec_pool.submit([&bs, &fib_client, &nfib]() -> uint64_t {
+        auto runtime_context = make_hogexec_context();
         auto tx = SignedTransaction{
             .tx = Transaction{
                 .invocation =
                     fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
                                                                  nfib)}};
-        auto handler = bs.make_handler(tx);
+        auto handler =
+            bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
         auto r = handler.root_invoke();
         if (!r.is_root_success()) {
           throw std::runtime_error("Failed to invoke transaction");
@@ -141,9 +143,10 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 
       futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
                                              cur_count]() -> void {
+        auto runtime_context = make_hogexec_context();
         for (int j = 0; j < cur_count; j++) {
 
-          auto handler = bs.make_handler(tx, offset + j);
+          auto handler = bs.make_handler(tx, offset + j, *runtime_context);
           if (!handler.root_invoke().is_root_success()) {
             error("Failed to invoke transaction");
             throw std::runtime_error("Failed to invoke transaction");
@@ -166,6 +169,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
                                                               start_time)
             .count(),
         num_txs, nfib, do_commit, num_exec_threads);
+    info("bench rep tps: {}",
+         num_txs * 1'000'000.0 /
+             std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
+                                                                   start_time)
+                 .count());
   }
 }
 

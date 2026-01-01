@@ -207,10 +207,13 @@ protected:
     // Grant storage tokens to both contracts
     setup_grant_storage_token(kTestContractAddr, 1'000'000'000);
     setup_grant_storage_token(kCallerContractAddr, 1'000'000'000);
+    context_ = make_context();
   }
 
   caller_contract_client_t caller_contract_client_ =
       caller_contract_client_t(kCallerContractAddr);
+
+  std::unique_ptr<RuntimeContext> context_;
 };
 
 TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
@@ -224,7 +227,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_ok_void">(0)}},
-      make_context());
+      *context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -243,7 +246,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_ok_int">(0)}},
-      make_context());
+      *context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -261,7 +264,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetErrVoid)
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
                                   "call_return_err_void">(0)}},
-      make_context());
+      *context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -280,7 +283,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetErrInt)
                   .invocation =
                       caller_contract_client_
                           .template make_invocation<"call_return_err_int">(0)}},
-      make_context());
+      *context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());

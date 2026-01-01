@@ -98,10 +98,9 @@ SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
-    ExecutionModeCtor execution_mode_ctor,
-    std::unique_ptr<RuntimeContext> runtime_context)
-  : runtime_context_(std::move(runtime_context)),
-    signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
+    ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
+  : runtime_context_(runtime_context), signed_tx_(std::move(signed_tx)),
+    db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &&last_frame) {
@@ -127,9 +126,7 @@ SystemCallHandler::SystemCallHandler(
                                        execution_mode_ctor)};
         }(std::move(execution_mode_ctor))),
     snapshot_cache_(snapshot_cache)
-{
-  assert(runtime_context_);
-}
+{}
 
 void
 SystemCallHandler::perform_initial_validation()
@@ -149,7 +146,7 @@ SystemCallHandler::perform_initial_validation()
   // to the executor, this check could be removed.
 
   for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-    auto res = runtime_context_->verify_contract(contract);
+    auto res = runtime_context_.verify_contract(contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
       cumulative_invoke_result_.result_ =
@@ -306,6 +303,7 @@ SystemCallHandler::try_commit_transaction()
       return to_exec_result(abort_status.error().code());
     }
 
+    // abort_transaction() sets transaction_committed_or_aborted_ to true
     return ExecResult::ExecResultTxNonDeterministicError;
   }
 
@@ -500,7 +498,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_->make_new_runtime(*deployed_hash, this, false);
+  return runtime_context_.make_new_runtime(*deployed_hash, this, false);
 }
 
 Calldata const &
@@ -1038,15 +1036,22 @@ SystemCallHandler::modify_native_token_balance(
 
 // == Authentication syscalls ==
 
+namespace {
+AddressAndKey
+auth_data_addrkey(ContractAddress const &address)
+{
+  return {.address = address,
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeAccountAuthData)};
+}
+} // namespace
+
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
   assert(!invocation_frame_stack_.empty());
   auto addr = invocation_frame_stack_.get_active_frame().address();
-  AddressAndKey addrkey{.address = addr,
-                        .key = StorageKey(
-                            StorageKeyType::kStorageKeyTypeAccountAuthData)};
+  AddressAndKey addrkey = auth_data_addrkey(addr);
 
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1064,6 +1069,55 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
   assert(item_view->get<UnmodifiedItem>());
   AccountAuthDataItem new_item;
   new_item.change_public_key(key_index, std::move(new_key));
+  return item_view->set(new_item);
+}
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::set_address_nonce_config(NonceConfig const &nonce_config)
+{
+  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addrkey = auth_data_addrkey(addr);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
+    account_auth_data_item->set_nonce_config(nonce_config);
+    return {};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+  assert(item_view->get<UnmodifiedItem>());
+  AccountAuthDataItem new_item;
+  new_item.set_nonce_config(nonce_config);
+  return item_view->set(new_item);
+}
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::set_address_gas_permission_configs(
+    x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs)
+{
+  auto addr = invocation_frame_stack_.get_active_frame().address();
+  auto addrkey = auth_data_addrkey(addr);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *account_auth_data_item = item_view->get<AccountAuthDataItem>()) {
+    account_auth_data_item->set_gas_permission_configs(
+        std::move(gas_permission_configs));
+    return {};
+  }
+
+  if (item_view->get<DeletedItem>()) [[unlikely]] {
+    error("Unrecoverable: unexpected manual delete of authentication data");
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+
+  assert(item_view->get<UnmodifiedItem>());
+  AccountAuthDataItem new_item;
+  new_item.set_gas_permission_configs(std::move(gas_permission_configs));
   return item_view->set(new_item);
 }
 

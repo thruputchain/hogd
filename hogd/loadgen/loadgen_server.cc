@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "types.hh"
@@ -22,6 +23,22 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
     if (!res) {
       return LoadgenResult(res.error().code());
     }
+    LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
+    out.success() = std::move(res.value());
+    uint64_t context_id = context_id_counter_++;
+    out.success().context_id = context_id;
+    experiment_states_.take()->emplace(context_id, state);
+    return out;
+  }
+  case ExperimentType::kExperimentTypeERC20BasicAuthPayments:
+  {
+    auto state = std::make_shared<ERC20BasicAuthExperimentState>(
+        config.erc20_payments());
+    auto res = state->generate_experiment();
+    if (!res) {
+      return LoadgenResult(res.error().code());
+    }
+
     LoadgenResult out(LoadgenRPCError::kLoadgenRPCErrorOK);
     out.success() = std::move(res.value());
     uint64_t context_id = context_id_counter_++;

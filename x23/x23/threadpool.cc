@@ -1,13 +1,24 @@
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <format>
+#include <functional>
 #include <memory>
 
 #include <signal.h>
+#include <string>
+#include <thread>
+#include <vector>
 
+#include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
+#include "x23/signal.h"
 #include "x23/threadpool.h"
+#include "x23/utility.h"
 #include "x23/vec.h"
 
 namespace x23 {
@@ -158,18 +169,17 @@ ThreadPool::drain() noexcept
 std::string
 ThreadPool::show()
 {
-  using namespace std::chrono;
   std::vector<uint64_t> oldest(nqueues_);
-  std::vector<uint> nt(nqueues_);
+  std::vector<unsigned int> nt(nqueues_);
   uint64_t now = fastclock::get_ns();
-  for (uint i = 0; i < nqueues_; ++i) {
+  for (unsigned int i = 0; i < nqueues_; ++i) {
     oldest[i] = runqueues_[i].qtime();
     nt[i] = queue_nthreads(i);
   }
   std::string ret =
       std::format("ThreadPool {}: {} threads, {} run queues, {} ns\n",
                   (void *)this, nthreads_, nqueues_, now);
-  for (uint i = 0; i < nqueues_; ++i) {
+  for (unsigned int i = 0; i < nqueues_; ++i) {
     uformat_to(&ret, "  queue {}: {} threads", i, nt[i]);
     if (oldest[i] == kEmpty)
       ret += ", EMPTY";

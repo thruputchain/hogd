@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -55,8 +56,8 @@ class StorageSnapshotCache;
 //   - Storage Snapshot Cache reference: Object in which lookups to the database
 //   are cached (reads).
 //   - Wasmi Context: Stores any relevant state internal to Wasmi.  Can be
-//   shared across runtime instances (and across transactions, if made
-//   threadsafe by appropriate guards).
+//   shared across runtime instances and across transactions.
+//   Not implemented to be threadsafe.
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
@@ -64,7 +65,7 @@ public:
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
-                    std::unique_ptr<RuntimeContext> runtime_context);
+                    RuntimeContext &runtime_context);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -219,6 +220,12 @@ public:
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
+  SystemStatus<SyscallStatus<void>>
+  set_address_nonce_config(NonceConfig const &nonce_config);
+
+  SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
+      x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
+
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
@@ -229,7 +236,7 @@ public:
   static ExecResult to_exec_result(SystemErrorCode error_code);
 
 private:
-  std::shared_ptr<RuntimeContext> runtime_context_;
+  RuntimeContext &runtime_context_;
   const SignedTransaction signed_tx_;
   PerTransactionDatabaseProxy db_proxy_;
   PerTransactionEventServerProxy event_server_proxy_;

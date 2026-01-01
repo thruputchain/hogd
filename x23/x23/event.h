@@ -15,6 +15,7 @@
 #include <string>
 #include <sys/socket.h>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -442,7 +443,7 @@ private:
 
 #else  // !USE_EPOLL
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
-                                                POLLOUT | POLLERR};
+                                                POLLOUT | POLLHUP | POLLERR};
   struct FdState : BufHolder {
     bool poisoned{false};
     std::array<WorkItem, 2> callbacks;

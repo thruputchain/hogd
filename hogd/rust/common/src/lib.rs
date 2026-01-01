@@ -4,9 +4,12 @@ pub use crate::ffi_enums::*;
 
 pub mod trampoline_bindings;
 pub use trampoline_bindings::*;
+pub mod contract_loader;
 
 use core::slice;
 use core::str::Utf8Error;
+
+type ForeignHostCallContext = *mut core::ffi::c_void;
 
 impl From<SystemErrorCode> for HostFnErrorCode {
     fn from(error_code: SystemErrorCode) -> Self {

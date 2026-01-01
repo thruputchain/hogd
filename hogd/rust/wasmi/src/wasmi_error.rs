@@ -7,7 +7,7 @@ use core::fmt;
 use core::fmt::Display;
 use wasmi::core::HostError;
 
-use crate::invoke_result::WasmiInvokeResult;
+use crate::wasmi_invoke_result::WasmiInvokeResult;
 use common::HostFnErrorCode;
 
 #[derive(Debug, Copy, Clone)]

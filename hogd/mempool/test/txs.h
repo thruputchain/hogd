@@ -7,7 +7,6 @@
 
 #include "account.hh"
 #include "built_contracts/fibonacci.h"
-#include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -48,14 +47,14 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 inline AccountAuthData
 get_default_account()
 {
-  static std::array<PublicKeyConfigOpt, MAX_SIGNERS> public_keys;
+  static std::array<PublicKeyConfigOpt, kMaxSigners> public_keys;
   if (public_keys.empty()) {
     // Initialize [public_keys].
-    for (size_t i = 0; i < MAX_SIGNERS; i++) {
+    for (size_t i = 0; i < kMaxSigners; i++) {
       public_keys[i] = nullptr;
     }
   }
-  CHECK_EQ(public_keys.size(), static_cast<size_t>(MAX_SIGNERS));
+  CHECK_EQ(public_keys.size(), static_cast<size_t>(kMaxSigners));
   constexpr NonceConfig kNonceConfig{.accepted_keys = 0, .required_weight = 0};
 
   return AccountAuthData{.public_keys = public_keys,
@@ -87,7 +86,7 @@ add_gas_config(AccountAuthData &auth_data, GasAmount gas,
                const x23::Vec<size_t> &keys, Weight required_weight)
 {
   CHECK_LT(auth_data.gas_permissions.size(),
-           static_cast<size_t>(MAX_GAS_CONFIGS));
+           static_cast<size_t>(kMaxGasConfigs));
   GasPermissionConfig config{.limit = gas,
                              .accepted_keys = 0,
                              .required_weight = required_weight};

@@ -111,3 +111,23 @@ target_include_directories(
 )
 
 set_property(TARGET multiexec_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  wasm_stats
+  wasm_stats.cc
+)
+target_link_libraries(
+  wasm_stats
+  hogd
+  protocol
+  runtime
+  precompiles
+  runtime_test_lib
+)
+
+target_include_directories(
+  wasm_stats
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+

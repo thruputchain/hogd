@@ -1,21 +1,21 @@
 use core::ffi::c_void;
 
-pub mod context;
-mod contract_loader;
-mod error;
-pub mod invoke_result;
-pub mod module_cache;
-pub mod runtime;
+mod module_cache;
+pub mod wasmi_context;
+mod wasmi_error;
+pub mod wasmi_invoke_result;
+pub mod wasmi_runtime;
 
 type SHA256Hash = [u8; 32];
 
-type ForeignHostCallContext = *mut core::ffi::c_void;
+use crate::wasmi_runtime::WasmiRuntime;
 
-use crate::runtime::WasmiRuntime;
+pub use common::contract_loader::ContractGetFn;
+pub use common::contract_loader::ContractGetResult;
 
 #[cfg(feature = "debug_logging")]
 #[macro_export]
-macro_rules! debug_log {
+macro_rules! wasmi_debug_log {
     ($e:expr) => {
         $e
     };
@@ -23,7 +23,7 @@ macro_rules! debug_log {
 
 #[cfg(not(feature = "debug_logging"))]
 #[macro_export]
-macro_rules! debug_log {
+macro_rules! wasmi_debug_log {
     ($e:expr) => {
         ()
     };

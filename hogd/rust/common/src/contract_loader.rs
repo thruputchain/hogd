@@ -4,7 +4,7 @@ use crate::ForeignHostCallContext;
 /// Warning: this struct returns pointers to external data (i.e. data held within the
 /// WasmiContext on the C++ side).
 /// As such, this struct cannot outlive the WasmiContext.)
-use common::SystemErrorCode;
+use crate::SystemErrorCode;
 use core::slice;
 
 #[repr(C)]
@@ -14,14 +14,24 @@ pub struct ContractGetResult {
     data_len: usize,
 }
 
+impl ContractGetResult {
+    pub fn new(err_code: i32, data: &'static [u8]) -> Self {
+        Self {
+            err_code,
+            data: data.as_ptr(),
+            data_len: data.len(),
+        }
+    }
+}
+
 pub type ContractGetFn = unsafe extern "C" fn(
     ForeignHostCallContext,
     *const u8,
 ) -> ContractGetResult;
 
-// Lifetime is be lifetime of the block, not static.
+// Lifetime is lifetime of the transaction/user_context, not static.
 impl ContractGetResult {
-    pub fn to_data(&self) -> Result<Option<&'static [u8]>, SystemErrorCode> {
+    pub fn to_data<'a>(&self) -> Result<Option<&'a [u8]>, SystemErrorCode> {
         if self.err_code != 0 {
             return match self.err_code.try_into() {
                 Ok(err) => Err(err),

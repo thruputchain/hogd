@@ -10,6 +10,10 @@ set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
+set_source_files_properties(
+    ${CMAKE_BINARY_DIR}/hogd/rust/wasmtime/bindings.h
+    PROPERTIES GENERATED TRUE)
+
 add_subdirectory(test_util)
 
 add_library(runtime_objects OBJECT
@@ -41,6 +45,7 @@ add_library(runtime_objects OBJECT
   syscall_stats.cc
   transaction_stats.cc
   wasmi_runtime.cc
+  wasmtime_runtime.cc
 )
 
 target_link_libraries(
@@ -105,6 +110,7 @@ add_library(runtime_test_objects OBJECT
   serialize_roundtrip_test.cc
   shutdown_test.cc
   snapshot_storage_item_test.cc
+  syscall_auth_config_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   try_invoke_test.cc
@@ -136,6 +142,7 @@ add_dependencies(
   generate_syscall_inner_h
   generate_syscall_meta_h
   generate_wasmi_ffi_h
+  generate_wasmtime_ffi_h
   generate_contract_types_ffi_h
   protocol
 )
@@ -204,6 +211,12 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_unexported_memory.wasm
 )
 
+wat2wasm_target(
+  test_no_start_wasm
+  wat/test_no_start.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_no_start.wasm
+)
+
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
@@ -217,5 +230,6 @@ add_dependencies(
   test_set_memory_wasm
   test_instantiate_fail_wasm
   test_instantiate_unexported_memory_wasm
+  test_no_start_wasm
   all_wasm_contracts
 )
