@@ -169,6 +169,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
                                                               start_time)
             .count(),
         num_txs, nfib, do_commit, num_exec_threads);
+    info("bench rep tps: {}",
+         num_txs * 1'000'000'000.0 /
+             std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
+                                                                   start_time)
+                 .count());
   }
 }
 
