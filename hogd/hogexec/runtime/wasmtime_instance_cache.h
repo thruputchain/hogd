@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -32,13 +31,11 @@ public:
 
   ~ExternalInstancePreType();
 
-  // Non-copyable
   ExternalInstancePreType(ExternalInstancePreType const &);
   ExternalInstancePreType &operator=(ExternalInstancePreType const &) = delete;
 
   // Movable
   ExternalInstancePreType(ExternalInstancePreType &&other) noexcept;
-
   ExternalInstancePreType &operator=(ExternalInstancePreType &&other) noexcept;
 
   void *release()
@@ -72,10 +69,9 @@ public:
     auto [ul, map] = get_bucket(span);
     auto it = map.find(span);
     if (it == map.end()) {
-      info("get: hash not found");
       return std::nullopt;
     }
-    return std::move(it->second);
+    return it->second;
   }
 
 private:
