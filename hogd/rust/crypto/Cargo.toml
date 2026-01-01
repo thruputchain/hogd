@@ -7,7 +7,7 @@ rust-version = "1.81"
 [dependencies]
 ed25519-zebra = { workspace = true }
 rand = "0.8"
-siphasher = { version = "1.0.1", default-features = false }
+siphasher = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]

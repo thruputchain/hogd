@@ -12,8 +12,6 @@ use wasmtime::{
 
 use crate::error::TrampolineError;
 use crate::instance_pre_cache::InstancePreCache;
-use crate::instance_pre_cache::InstancePreGetFn;
-use crate::instance_pre_cache::InstancePrePutFn;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
@@ -69,7 +67,7 @@ fn check_no_start(module: &Module) -> bool {
 #[derive(Clone)]
 pub struct WasmtimeGlobalContext {
     engine: Engine,
-    instance_pre_cache: InstancePreCache,
+    instance_pre_cache: Arc<InstancePreCache>,
     // TODO(geoff): we could stick the Linker here
 }
 
@@ -129,7 +127,9 @@ impl WasmtimeGlobalContext {
         Engine::new(&config).unwrap()
     }
 
-    pub fn new(instance_pre_cache: InstancePreCache) -> WasmtimeGlobalContext {
+    pub fn new(
+        instance_pre_cache: Arc<InstancePreCache>,
+    ) -> WasmtimeGlobalContext {
         Self {
             engine: Self::new_engine(),
             instance_pre_cache,
@@ -458,16 +458,8 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 /// Creates a global context that can be shared across threads.
 /// Global context is threadsafe.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context(
-    instance_pre_get_fn: InstancePreGetFn,
-    instance_pre_put_fn: InstancePrePutFn,
-    external_cache: *mut c_void,
-) -> *mut c_void {
-    let instance_pre_cache = InstancePreCache::new(
-        instance_pre_get_fn,
-        instance_pre_put_fn,
-        external_cache,
-    );
+pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
+    let instance_pre_cache = Arc::new(InstancePreCache::new());
     let b = Box::new(WasmtimeGlobalContext::new(instance_pre_cache));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
@@ -485,7 +477,7 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
     unsafe { drop(Box::from_raw(context)) };
 }
 
-// Rust FFI needs no_mangle and extern "C"
+// Rust FFI needs no_mangxle and extern "C"
 /// # Safety
 /// global_context must not be nullptr and must have been created by new_wasmtime_global_context.
 /// module_cache can be nullptr, in which case no module cache is used.

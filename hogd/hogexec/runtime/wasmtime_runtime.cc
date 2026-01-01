@@ -19,7 +19,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/wasmtime_instance_cache.h"
 #include "hogd/rust/wasmtime/bindings.h"
 #include "types.hh"
 #include "x23/format.h"
@@ -84,43 +83,13 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
   }
 }
 
-void *
-wasmtime_instance_pre_get_fn(const uint8_t (*hash)[32],
-                             void *external_cache) noexcept
-{
-  auto *instance_pre_cache =
-      static_cast<WasmtimeInstanceCache *>(external_cache);
-  assert(instance_pre_cache != nullptr);
-
-  auto instance_pre = instance_pre_cache->get(hash);
-  if (instance_pre.has_value()) {
-    return instance_pre.value().release();
-  }
-  return nullptr;
-}
-
-void
-wasmtime_instance_pre_put_fn(const uint8_t (*hash)[32], void *instance_pre_ptr,
-                             void *external_cache) noexcept
-{
-  assert(instance_pre_ptr != nullptr);
-  auto *instance_pre_cache =
-      static_cast<WasmtimeInstanceCache *>(external_cache);
-  instance_pre_cache->put(hash, ExternalInstancePreType(instance_pre_ptr));
-}
-
 } // namespace
 
 WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
 {
   engines_.resize(engine_count);
-  instance_pre_caches_.reserve(engine_count);
   for (size_t i = 0; i < engine_count; ++i) {
-    instance_pre_caches_.emplace_back(
-        std::make_unique<WasmtimeInstanceCache>());
-    engines_[i] = new_wasmtime_global_context(&wasmtime_instance_pre_get_fn,
-                                              &wasmtime_instance_pre_put_fn,
-                                              instance_pre_caches_[i].get());
+    engines_[i] = new_wasmtime_global_context();
     CHECK(engines_[i] != nullptr);
   }
 }
