@@ -6,10 +6,8 @@ use std::path::PathBuf;
 
 // Import the FFI functions from wasmtime_lib
 use common::SystemErrorCode;
-use wasmtime::InstancePre;
 use wasmtime_lib::instance_pre_cache::{
-    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref, InstancePreGetFn,
-    InstancePrePutFn,
+    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref
 };
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
@@ -213,30 +211,6 @@ impl TestInstancePreCache {
     fn len(&self) -> usize {
         self.instance_pres.len()
     }
-
-    fn clear(&mut self) {
-        self.instance_pres.clear();
-    }
-}
-
-// Mock InstancePreGetFn for testing - returns no cached instance_pre (for tests that don't need caching)
-unsafe extern "C" fn no_get_instance_pre_get_fn(
-    _hash: *const [u8; 32],
-    _external_cache: *mut c_void,
-) -> *mut c_void {
-    std::ptr::null_mut()
-}
-
-// Mock InstancePrePutFn for testing - does nothing (for tests that don't need caching)
-unsafe extern "C" fn no_put_instance_pre_put_fn(
-    _hash: *const [u8; 32],
-    _instance_pre: *mut c_void,
-    _external_cache: *mut c_void,
-) {
-    // Free the instance_pre since we're not caching it
-    if !_instance_pre.is_null() {
-        arc_instance_pre_drop_ref(_instance_pre);
-    }
 }
 
 // InstancePreGetFn that uses TestInstancePreCache
@@ -408,8 +382,8 @@ fn test_create_runtime() {
             std::ptr::null_mut(),
             false,
             context,
-        );
-        println!("runtime created");
+        ).get().unwrap();
+
         assert!(!runtime.is_null(), "Should successfully create runtime");
 
         free_wasmtime_runtime(runtime);
@@ -440,8 +414,7 @@ fn test_get_memory() {
             std::ptr::null_mut(),
             false,
             context,
-        );
-
+        ).get().unwrap();
         assert!(!runtime.is_null());
 
         // Get the memory
@@ -482,7 +455,7 @@ fn test_invoke_function() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         assert!(!runtime.is_null());
 
@@ -523,7 +496,7 @@ fn test_gas_metering() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         assert!(!runtime.is_null());
 
@@ -602,17 +575,17 @@ fn test_multiple_runtimes() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
-        assert!(!runtime1.is_null(), "First runtime should be created");
-        assert!(!runtime2.is_null(), "Second runtime should be created");
+        assert!(!runtime1.is_null());
+        assert!(!runtime2.is_null());
 
         free_wasmtime_runtime(runtime1);
         free_wasmtime_runtime(runtime2);
@@ -645,9 +618,9 @@ fn test_fibonacci_computation() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
-        assert!(!runtime.is_null(), "Runtime should be created");
+        assert!(!runtime.is_null());
 
         wasmtime_set_available_gas(runtime, 1_000_000);
 
@@ -692,9 +665,9 @@ fn test_fibonacci_computation_overflow() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
-        assert!(!runtime.is_null(), "Runtime should be created");
+        assert!(!runtime.is_null());
 
         wasmtime_set_available_gas(runtime, 1_000_000_000_000);
 
@@ -762,7 +735,7 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         assert!(!runtime1.is_null(), "First runtime should be created");
 
@@ -785,7 +758,7 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         assert!(!runtime2.is_null(), "Second runtime should be created");
 
@@ -803,7 +776,7 @@ fn test_module_cache() {
             std::ptr::null_mut(),
             false,
             context,
-        );
+        ).get().unwrap();
 
         assert!(!runtime3.is_null(), "Third runtime should be created");
 

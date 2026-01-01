@@ -212,6 +212,12 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_unexported_memory.wasm
 )
 
+wat2wasm_target(
+  test_no_start_wasm
+  wat/test_no_start.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_no_start.wasm
+)
+
 add_dependencies(
   runtime_test_objects
   all_wasm_headers
@@ -225,5 +231,6 @@ add_dependencies(
   test_set_memory_wasm
   test_instantiate_fail_wasm
   test_instantiate_unexported_memory_wasm
+  test_no_start_wasm
   all_wasm_contracts
 )
