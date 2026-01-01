@@ -1,4 +1,4 @@
-use crate::debug_log;
+use crate::wasmi_debug_log as debug_log;
 use common::InvokeErrorCode;
 
 #[repr(C)]

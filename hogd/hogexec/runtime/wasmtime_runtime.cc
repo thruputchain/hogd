@@ -1,0 +1,291 @@
+#include "hogd/hogexec/runtime/wasmtime_runtime.h"
+
+#include <atomic>
+#include <cassert>
+#include <cstddef>
+#include <cstring>
+#include <memory>
+#include <span>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "account.hh"
+#include "contract.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/wasmtime_instance_cache.h"
+#include "hogd/rust/wasmtime/bindings.h"
+#include "types.hh"
+#include "x23/format.h"
+#include "x23/x23.h"
+
+namespace hogd {
+
+namespace {
+
+constexpr ContractGetResult
+make_err(SystemErrorCode err)
+{
+  return ContractGetResult{.err_code = std::to_underlying(err),
+                           .data = nullptr,
+                           .data_len = 0};
+}
+
+ContractGetResult
+wasmtime_contract_get_fn(void *host_call_context_ptr,
+                         const uint8_t *hash_ptr) noexcept
+{
+  if (host_call_context_ptr == nullptr || hash_ptr == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr(s) passed to wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  auto *host_call_context =
+      static_cast<HostCallContext *>(host_call_context_ptr);
+  if (host_call_context->syscall_handler == nullptr) [[unlikely]] {
+    error("Unrecoverable: nullptr syscall_handler in wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+  SystemCallHandler &syscall_handler = *host_call_context->syscall_handler;
+
+  // TODO(geoff): this is an extra copy
+  SHA256Hash hash{};
+  std::memcpy(hash.data(), hash_ptr, hash.size());
+
+  auto res = syscall_handler.resolve_contract(hash);
+
+  if (!res.has_value()) {
+    return make_err(res.error().code());
+  }
+
+  if ((*res)->contract_type() != ContractType::kWasmi) [[unlikely]] {
+    error("Unrecoverable: Attempt to access a non-wasmi contract from inside "
+          "wasmtime_contract_get_fn");
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+
+  // the try is technically unnecessary (for the ->wasmi_contract() access,
+  // which is checked above); this satisfies clang-tidy
+  try {
+    auto const &wasm = (*res)->wasmi_contract().wasm;
+
+    return ContractGetResult{.err_code = 0,
+                             .data = wasm.data(),
+                             .data_len = wasm.size()};
+  } catch (x23::XdrBadUnionAccess const &e) {
+    error("Unrecoverable: Bad union access: {}", e.what());
+    return make_err(SystemErrorCode::kSystemUnrecoverable);
+  }
+}
+
+void *
+wasmtime_instance_pre_get_fn(const uint8_t (*hash)[32],
+                             void *external_cache) noexcept
+{
+  auto *instance_pre_cache =
+      static_cast<WasmtimeInstanceCache *>(external_cache);
+  assert(instance_pre_cache != nullptr);
+
+  auto instance_pre = instance_pre_cache->get(hash);
+  if (instance_pre.has_value()) {
+    return instance_pre.value().release();
+  }
+  return nullptr;
+}
+
+void
+wasmtime_instance_pre_put_fn(const uint8_t (*hash)[32], void *instance_pre_ptr,
+                             void *external_cache) noexcept
+{
+  assert(instance_pre_ptr != nullptr);
+  auto *instance_pre_cache =
+      static_cast<WasmtimeInstanceCache *>(external_cache);
+  instance_pre_cache->put(hash, ExternalInstancePreType(instance_pre_ptr));
+}
+
+} // namespace
+
+WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
+{
+  engines_.resize(engine_count);
+  instance_pre_caches_.reserve(engine_count);
+  for (size_t i = 0; i < engine_count; ++i) {
+    instance_pre_caches_.emplace_back(
+        std::make_unique<WasmtimeInstanceCache>());
+    engines_[i] = new_wasmtime_global_context(&wasmtime_instance_pre_get_fn,
+                                              &wasmtime_instance_pre_put_fn,
+                                              instance_pre_caches_[i].get());
+    CHECK(engines_[i] != nullptr);
+  }
+}
+
+WasmtimeGlobalContext::~WasmtimeGlobalContext()
+{
+  for (auto &engine : engines_) {
+    if (engine != nullptr) {
+      free_wasmtime_global_context(engine);
+    }
+  }
+}
+
+void *
+WasmtimeGlobalContext::get_inner(size_t engine_index) const
+{
+  assert(engine_index < engines_.size());
+  return engines_[engine_index];
+}
+
+size_t
+WasmtimeGlobalContext::alloc_engine_index()
+{
+  static std::atomic<size_t> allocator = 0;
+  static thread_local size_t threadlocal_alloc =
+      allocator.fetch_add(1) % engines_.size();
+
+  return threadlocal_alloc;
+}
+
+WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
+  : engine_index_(global_context.alloc_engine_index())
+{
+  wasmtime_context_ptr_ =
+      new_wasmtime_context(&wasmtime_contract_get_fn,
+                           global_context.get_inner(engine_index_));
+}
+
+WasmtimeContext::~WasmtimeContext()
+{
+  if (wasmtime_context_ptr_ != nullptr) {
+    free_wasmtime_context(wasmtime_context_ptr_);
+  }
+}
+
+SystemStatus<std::unique_ptr<Runtime>>
+WasmtimeContext::make_new_runtime(
+    DeployedContractHash const &deployed_contract_hash,
+    SystemCallHandler *syscall_handler, bool do_contract_verify)
+{
+  auto host_call_context = make_new_host_call_context(syscall_handler);
+
+  void *wasmtime_runtime_ptr =
+      new_wasmtime_runtime(deployed_contract_hash.hash.data(),
+                           host_call_context.get(), do_contract_verify,
+                           wasmtime_context_ptr_);
+
+  if (wasmtime_runtime_ptr == nullptr) {
+    return SystemError{SystemErrorCode::kSystemUnrecoverable};
+  }
+
+  return std::make_unique<WasmtimeRuntime>(std::move(host_call_context),
+                                           wasmtime_runtime_ptr);
+}
+
+bool
+WasmtimeContext::verify_contract(Contract const &contract) const
+{
+  assert(wasmtime_context_ptr_);
+
+  // TODO(geoff): When kWasmtime contract type is added, use that instead of
+  // kWasmi For now, wasmtime contracts use the same WASM bytecode format as
+  // wasmi
+  if (contract.contract_type() != ContractType::kWasmi) {
+    return false;
+  }
+
+  try {
+    auto const &wasm = contract.wasmi_contract().wasm;
+    return wasmtime_verify_contract(wasmtime_context_ptr_,
+                                    reinterpret_cast<uint8_t const *>(
+                                        wasm.data()),
+                                    wasm.size());
+  } catch (x23::XdrBadUnionAccess const &e) {
+    error("Unrecoverable: Bad union access: {}", e.what());
+    return false;
+  }
+}
+
+bool
+WasmtimeContext::link_fn_nargs(std::string_view module_name,
+                               std::string_view fn_name, void *fn_ptr,
+                               uint8_t nargs)
+{
+  assert(wasmtime_context_ptr_ != nullptr);
+  return wasmtime_link_nargs(wasmtime_context_ptr_,
+                             reinterpret_cast<uint8_t const *>(
+                                 module_name.data()),
+                             static_cast<uint32_t>(module_name.size()),
+                             reinterpret_cast<uint8_t const *>(fn_name.data()),
+                             static_cast<uint32_t>(fn_name.size()), fn_ptr,
+                             nargs);
+}
+
+std::span<std::byte>
+WasmtimeRuntime::get_memory() noexcept
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+  auto slice = wasmtime_get_memory(wasmtime_runtime_ptr_);
+  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
+}
+
+bool
+WasmtimeRuntime::get_module_stats(WasmtimeModuleStats *stats_out) const noexcept
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+  assert(stats_out != nullptr);
+  return wasmtime_get_module_stats(wasmtime_runtime_ptr_, stats_out);
+}
+
+InvokeStatus<void>
+WasmtimeRuntime::invoke_internal(std::string_view method_name)
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+
+  WasmtimeInvokeResult res =
+      wasmtime_invoke(wasmtime_runtime_ptr_,
+                      reinterpret_cast<uint8_t const *>(method_name.data()),
+                      static_cast<uint32_t>(method_name.size()));
+
+  InvokeErrorCode wasmtime_error{static_cast<InvokeErrorCode>(res.error)};
+  trace("Wasmtime Invoke Result: {}",
+        x23::show(static_cast<InvokeErrorCode>(res.error)));
+  if (wasmtime_error != InvokeErrorCode::kInvokeNone) {
+    return InvokeError{wasmtime_error};
+  }
+  return {};
+}
+
+uint64_t
+WasmtimeRuntime::get_available_gas() const noexcept
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+  return wasmtime_get_available_gas(wasmtime_runtime_ptr_);
+}
+
+void
+WasmtimeRuntime::set_available_gas(uint64_t gas) noexcept
+{
+  assert(wasmtime_runtime_ptr_ != nullptr);
+  wasmtime_set_available_gas(wasmtime_runtime_ptr_, gas);
+}
+
+WasmtimeRuntime::WasmtimeRuntime(
+    std::unique_ptr<HostCallContext> host_call_context,
+    void *wasmtime_runtime_ptr)
+  : Runtime(std::move(host_call_context)),
+    wasmtime_runtime_ptr_(wasmtime_runtime_ptr)
+{}
+
+WasmtimeRuntime::~WasmtimeRuntime()
+{
+  if (wasmtime_runtime_ptr_ != nullptr) {
+    free_wasmtime_runtime(wasmtime_runtime_ptr_);
+  }
+}
+
+} // namespace hogd
