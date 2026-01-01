@@ -374,12 +374,11 @@ mod tests {
         }
 
         assert_eq!(map.size(), insertions as usize);
-        let mut total = 0;
-        map.for_each(|_k, v| {
-            assert_eq!(*v, num_threads);
-            total += *v;
-        });
-        assert_eq!(total, insertions * num_threads);
+
+        for i in 0..insertions {
+            let mut guard = map.find(&i).unwrap();
+            assert_eq!(*guard.value(), num_threads);
+        }
     }
 
     #[test]

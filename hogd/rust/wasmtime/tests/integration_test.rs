@@ -1,12 +1,9 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fs;
 use std::path::PathBuf;
 
 // Import the FFI functions from wasmtime_lib
 use common::SystemErrorCode;
-use wasmtime_lib::InstancePreCache;
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
     new_wasmtime_context, new_wasmtime_global_context, new_wasmtime_runtime,
