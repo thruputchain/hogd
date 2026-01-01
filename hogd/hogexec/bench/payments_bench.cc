@@ -156,6 +156,8 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
                      finish_time - start_time)
                      .count(),
                  num_txs_per_rep, bs.num_accounts_, num_exec_threads);
+    info("bench rep tps: {}", num_txs_per_rep * 1'000'000.0 /
+                 std::chrono::duration_cast<std::chrono::microseconds>(finish_time - start_time).count());
     bs.advance_block();
   }
 }
