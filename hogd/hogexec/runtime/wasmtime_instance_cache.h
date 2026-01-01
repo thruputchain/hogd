@@ -84,6 +84,16 @@ private:
     {
       return std::memcmp(a.data(), b.data(), 32) == 0;
     }
+
+    bool operator()(std::span<const uint8_t, 32> a, const SHA256Hash &b) const
+    {
+      return std::memcmp(a.data(), b.data(), 32) == 0;
+    }
+
+    bool operator()(const SHA256Hash &a, const SHA256Hash &b) const
+    {
+      return a == b;
+    }
   };
 
   struct KeyHash {
