@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use common::SystemErrorCode;
 use wasmtime::InstancePre;
 use wasmtime_lib::instance_pre_cache::{
-    free_instance_pre_from_cache, InstancePreGetFn, InstancePrePutFn,
+    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref, InstancePreGetFn,
+    InstancePrePutFn,
 };
 use wasmtime_lib::{
     free_wasmtime_context, free_wasmtime_global_context, free_wasmtime_runtime,
@@ -166,9 +167,21 @@ unsafe extern "C" fn no_get_mock_contract_get_fn(
 
 type SHA256Hash = [u8; 32];
 
+struct InstancePreBoxFreeFn {
+    cached_object: *mut c_void,
+}
+
+impl Drop for InstancePreBoxFreeFn {
+    fn drop(&mut self) {
+        unsafe {
+            arc_instance_pre_drop_ref(self.cached_object);
+        }
+    }
+}
+
 // Test cache that stores InstancePre objects
 struct TestInstancePreCache {
-    instance_pres: HashMap<SHA256Hash, Box<InstancePre<*mut c_void>>>,
+    instance_pres: HashMap<SHA256Hash, InstancePreBoxFreeFn>,
 }
 
 impl TestInstancePreCache {
@@ -184,25 +197,17 @@ impl TestInstancePreCache {
             // The caller (instance_pre_cache.rs) will create a reference from this pointer
             // and immediately clone it, so the pointer just needs to be valid for that operation
             // We return a pointer to the boxed InstancePre in the cache
-            ip.as_ref() as *const InstancePre<*mut c_void> as *mut c_void
+            let ptr = ip.cached_object as *mut c_void;
+            unsafe { arc_instance_pre_clone_ref(ptr) };
+            ptr
         })
     }
 
-    fn put(&mut self, hash: SHA256Hash, instance_pre: *mut c_void) {
+    fn put(&mut self, hash: SHA256Hash, obj: *mut c_void) {
         // Only put if not already cached to avoid replacing entries that might still be in use
-        if !self.instance_pres.contains_key(&hash) {
-            // The instance_pre is a pointer to a Box<InstancePre> that was created by the caller
-            // We need to take ownership of it
-            let instance_pre_ptr: *mut InstancePre<*mut c_void> =
-                instance_pre as *mut InstancePre<*mut c_void>;
-            let instance_pre_box = unsafe { Box::from_raw(instance_pre_ptr) };
-            self.instance_pres.insert(hash, instance_pre_box);
-        } else {
-            // If already cached, free the duplicate
-            unsafe {
-                free_instance_pre_from_cache(instance_pre);
-            }
-        }
+        let instance_pre_box_free_fn =
+            InstancePreBoxFreeFn { cached_object: obj };
+        self.instance_pres.insert(hash, instance_pre_box_free_fn);
     }
 
     fn len(&self) -> usize {
@@ -216,7 +221,7 @@ impl TestInstancePreCache {
 
 // Mock InstancePreGetFn for testing - returns no cached instance_pre (for tests that don't need caching)
 unsafe extern "C" fn no_get_instance_pre_get_fn(
-    _hash: *const u8,
+    _hash: *const [u8; 32],
     _external_cache: *mut c_void,
 ) -> *mut c_void {
     std::ptr::null_mut()
@@ -224,19 +229,19 @@ unsafe extern "C" fn no_get_instance_pre_get_fn(
 
 // Mock InstancePrePutFn for testing - does nothing (for tests that don't need caching)
 unsafe extern "C" fn no_put_instance_pre_put_fn(
-    _hash: *const u8,
+    _hash: *const [u8; 32],
     _instance_pre: *mut c_void,
     _external_cache: *mut c_void,
 ) {
     // Free the instance_pre since we're not caching it
     if !_instance_pre.is_null() {
-        free_instance_pre_from_cache(_instance_pre);
+        arc_instance_pre_drop_ref(_instance_pre);
     }
 }
 
 // InstancePreGetFn that uses TestInstancePreCache
 unsafe extern "C" fn test_cache_get_instance_pre_get_fn(
-    hash: *const u8,
+    hash: *const [u8; 32],
     external_cache: *mut c_void,
 ) -> *mut c_void {
     if external_cache.is_null() {
@@ -244,8 +249,7 @@ unsafe extern "C" fn test_cache_get_instance_pre_get_fn(
     }
 
     let cache = &*(external_cache as *const RefCell<TestInstancePreCache>);
-    let hash_slice: &[u8; 32] =
-        std::slice::from_raw_parts(hash, 32).try_into().unwrap();
+    let hash_slice: &[u8; 32] = unsafe { &*hash };
 
     match cache.borrow().get(hash_slice) {
         Some(ptr) => ptr,
@@ -255,20 +259,14 @@ unsafe extern "C" fn test_cache_get_instance_pre_get_fn(
 
 // InstancePrePutFn that uses TestInstancePreCache
 unsafe extern "C" fn test_cache_put_instance_pre_put_fn(
-    hash: *const u8,
+    hash: *const [u8; 32],
     instance_pre: *mut c_void,
     external_cache: *mut c_void,
 ) {
-    if external_cache.is_null() {
-        if !instance_pre.is_null() {
-            free_instance_pre_from_cache(instance_pre);
-        }
-        return;
-    }
+    assert!(!external_cache.is_null(), "External cache must not be null");
 
     let cache = &*(external_cache as *mut RefCell<TestInstancePreCache>);
-    let hash_slice: &[u8; 32] =
-        std::slice::from_raw_parts(hash, 32).try_into().unwrap();
+    let hash_slice: &[u8; 32] = unsafe { &*hash };
 
     cache.borrow_mut().put(*hash_slice, instance_pre);
 }

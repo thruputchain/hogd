@@ -18,7 +18,8 @@ pub use context::{
     ContractGetFn, ContractGetResult,
 };
 pub use instance_pre_cache::{
-    free_instance_pre_from_cache, InstancePreGetFn, InstancePrePutFn,
+    arc_instance_pre_clone_ref, arc_instance_pre_drop_ref, InstancePreGetFn,
+    InstancePrePutFn,
 };
 pub use invoke_result::WasmtimeInvokeResult;
 pub use runtime::{

@@ -1,14 +1,17 @@
 use wasmtime::InstancePre;
 
 use core::ffi::c_void;
+use std::sync::Arc;
 
+// # Safety:
+// This returns an Arc<InstancePre> reference that is owned by the caller.
 pub type InstancePreGetFn = unsafe extern "C" fn(
-    hash: *const u8, // 32 bytes
+    hash: *const [u8; 32],
     external_cache: *mut c_void,
-) -> *mut c_void; // returns a pointer to the InstancePre object
+) -> *mut c_void;
 
 pub type InstancePrePutFn = unsafe extern "C" fn(
-    hash: *const u8, // 32 bytes
+    hash: *const [u8; 32],
     instance_pre: *mut c_void,
     external_cache: *mut c_void,
 );
@@ -36,35 +39,33 @@ impl InstancePreCache {
     pub fn get(
         &self,
         hash: &[u8; 32], // 32 bytes
-    ) -> Option<InstancePre<*mut c_void>> {
-        let instance_pre = unsafe {
-            (self.instance_pre_get_fn)(hash.as_ptr(), self.external_cache)
-        };
+    ) -> Option<Arc<InstancePre<*mut c_void>>> {
+        let instance_pre =
+            unsafe { (self.instance_pre_get_fn)(hash, self.external_cache) };
         if instance_pre.is_null() {
             None
         } else {
-            // The pointer points to a boxed InstancePre that we need to clone
-            // We create a reference to it, clone the InstancePre, and leave the box intact
-            let instance_pre_ptr: *mut InstancePre<*mut c_void> =
-                instance_pre as *mut InstancePre<*mut c_void>;
-            let instance_pre_ref = unsafe { &*instance_pre_ptr };
-            Some(instance_pre_ref.clone())
+            let instance_pre_arc = unsafe {
+                Arc::from_raw(instance_pre as *mut InstancePre<*mut c_void>)
+            };
+
+            Some(instance_pre_arc)
         }
     }
 
     pub fn put(
         &self,
-        hash: &[u8; 32], // 32 bytes
-        instance_pre: &InstancePre<*mut c_void>,
+        hash: &[u8; 32],
+        instance_pre: Arc<InstancePre<*mut c_void>>,
     ) {
-        // Clone the InstancePre and box it
-        let cloned = instance_pre.clone();
-        let instance_pre_box = Box::new(cloned);
-        let instance_pre_ptr = Box::into_raw(instance_pre_box);
+        debug_assert!(Arc::strong_count(&instance_pre) == 2);
+        let instance_pre_ptr = Arc::into_raw(instance_pre);
         let instance_pre_ptr_void = instance_pre_ptr as *mut c_void;
+        // External cache holds a reference to the InstancePre
+        // That refcount is released by the into_raw call
         unsafe {
             (self.instance_pre_put_fn)(
-                hash.as_ptr(),
+                hash,
                 instance_pre_ptr_void,
                 self.external_cache,
             )
@@ -73,12 +74,16 @@ impl InstancePreCache {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn free_instance_pre_from_cache(
-    instance_pre: *mut c_void,
-) {
+pub unsafe extern "C" fn arc_instance_pre_drop_ref(instance_pre: *mut c_void) {
     let inst: *mut InstancePre<*mut c_void> =
         unsafe { core::mem::transmute(instance_pre) };
-    unsafe {
-        drop(Box::from_raw(inst));
-    }
+    let _instance_pre_arc = unsafe { Arc::from_raw(inst) };
+    // drop the ref
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn arc_instance_pre_clone_ref(instance_pre: *mut c_void) {
+    let inst: *mut InstancePre<*mut c_void> =
+        unsafe { core::mem::transmute(instance_pre) };
+    unsafe { Arc::increment_strong_count(inst) };
 }

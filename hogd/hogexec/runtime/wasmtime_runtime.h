@@ -4,11 +4,8 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <span>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include "account.hh"
@@ -16,88 +13,12 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/wasmtime_instance_cache.h"
 #include "hogd/rust/wasmtime/bindings.h"
-#include "types.hh"
 
 namespace hogd {
 
 struct Contract;
-
-// Wrapper around a void* that represents an InstancePre from Rust
-// The dtor calls free_instance_pre_from_cache to properly clean up
-class ExternalInstancePreType {
-public:
-  explicit ExternalInstancePreType(void *instance_pre_ptr)
-    : instance_pre_ptr_(instance_pre_ptr)
-  {}
-
-  ~ExternalInstancePreType()
-  {
-    if (instance_pre_ptr_ != nullptr) {
-      free_instance_pre_from_cache(instance_pre_ptr_);
-    }
-  }
-
-  // Non-copyable
-  ExternalInstancePreType(ExternalInstancePreType const &) = delete;
-  ExternalInstancePreType &operator=(ExternalInstancePreType const &) = delete;
-
-  // Movable
-  ExternalInstancePreType(ExternalInstancePreType &&other) noexcept
-    : instance_pre_ptr_(other.instance_pre_ptr_)
-  {
-    other.instance_pre_ptr_ = nullptr;
-  }
-
-  ExternalInstancePreType &operator=(ExternalInstancePreType &&other) noexcept
-  {
-    if (this != &other) {
-      if (instance_pre_ptr_ != nullptr) {
-        free_instance_pre_from_cache(instance_pre_ptr_);
-      }
-      instance_pre_ptr_ = other.instance_pre_ptr_;
-      other.instance_pre_ptr_ = nullptr;
-    }
-    return *this;
-  }
-
-  void *get() const { return instance_pre_ptr_; }
-
-private:
-  void *instance_pre_ptr_;
-};
-
-class WasmtimeInstancePreCache {
-public:
-  std::optional<void *> get(SHA256Hash const &hash)
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    auto it = instance_pre_cache_.find(hash);
-    if (it == instance_pre_cache_.end()) {
-      return std::nullopt;
-    }
-    return it->second.get();
-  }
-
-  void put(SHA256Hash const &hash, void *instance_pre_ptr)
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    // Only put if not already cached to avoid replacing entries that might
-    // still be in use
-    if (!instance_pre_cache_.contains(hash)) {
-      instance_pre_cache_.emplace(hash,
-                                  ExternalInstancePreType(instance_pre_ptr));
-    }
-    else {
-      // If already cached, free the duplicate
-      free_instance_pre_from_cache(instance_pre_ptr);
-    }
-  }
-
-private:
-  std::mutex mtx_;
-  std::unordered_map<SHA256Hash, ExternalInstancePreType> instance_pre_cache_;
-};
 
 class WasmtimeGlobalContext {
 public:
@@ -109,7 +30,7 @@ public:
 
 private:
   std::vector<void *> engines_;
-  std::vector<std::unique_ptr<WasmtimeInstancePreCache>> instance_pre_caches_;
+  std::vector<std::unique_ptr<WasmtimeInstanceCache>> instance_pre_caches_;
 };
 
 // Context shared between WasmtimeRuntime objects.

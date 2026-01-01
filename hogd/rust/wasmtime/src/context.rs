@@ -1,5 +1,6 @@
 use core::ffi::c_void;
 use core::slice;
+use std::sync::Arc;
 
 use crate::debug_log;
 use common::string_from_parts;
@@ -226,7 +227,7 @@ impl WasmtimeContext {
         &mut self,
         hash: &[u8; 32],
         user_context: *mut c_void,
-    ) -> Result<Option<InstancePre<*mut c_void>>, SystemErrorCode> {
+    ) -> Result<Option<Arc<InstancePre<*mut c_void>>>, SystemErrorCode> {
         if let Some(instance_pre) =
             self.global_context.instance_pre_cache.get(hash)
         {
@@ -254,17 +255,18 @@ impl WasmtimeContext {
             return Ok(None);
         }
 
-        let instance_pre = self
-            .linker
-            .instantiate_pre(&module)
-            .inspect_err(|_e| {
-                debug_log!(eprintln!("Error instantiating store: {_e}"));
-            })
-            .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
+        let instance_pre = Arc::new(
+            self.linker
+                .instantiate_pre(&module)
+                .inspect_err(|_e| {
+                    debug_log!(eprintln!("Error instantiating store: {_e}"));
+                })
+                .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?,
+        );
 
         self.global_context
             .instance_pre_cache
-            .put(hash, &instance_pre);
+            .put(hash, instance_pre.clone());
 
         return Ok(Some(instance_pre));
     }
