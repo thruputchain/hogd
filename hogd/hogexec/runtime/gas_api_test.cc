@@ -68,12 +68,12 @@ protected:
         .contract_type = ContractType::kWasmi,
     };
 
-    make_syscall_handler(contract);
-
     link_fn("test", "good_call",
             &consume_gas_call2); // called by "call2"
     link_fn("test", "external_call",
             &consume_gas_call); // called by "call1"
+
+    make_syscall_handler(contract);
 
     auto runtime_res =
         get_context()->make_new_runtime(deployed_contract_hash,
