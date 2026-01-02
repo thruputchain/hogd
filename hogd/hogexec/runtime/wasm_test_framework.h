@@ -42,18 +42,17 @@ enum class WasmEngine {
 // within the syscall handler.
 class WasmTestFramework {
 public:
-  // This handler is used to load contracts to the runtime context.
-  std::unique_ptr<SystemCallHandler> syscall_handler_;
-
   void make_syscall_handler(Contract const &contract)
   {
+    auto *context = get_context();
+    assert(context != nullptr);
     SignedTransaction signed_tx = SignedTransaction{};
     signed_tx.tx.contracts_to_deploy.push_back(contract);
     syscall_handler_ = std::make_unique<SystemCallHandler>(
         std::move(signed_tx), snapshot_cache_,
         PerTransactionDatabaseProxy(db_proxy_, 0, 0),
         PerTransactionEventServerProxy(event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *context_);
+        ProposalModeCtor{}, *context);
   }
 
   // Initialize the global context and runtime context for parameterized tests
@@ -66,6 +65,11 @@ public:
     case WasmEngine::kWasmtime:
       global_context_.emplace<WasmtimeGlobalContext>(wasmtime_engine_count);
     }
+  }
+
+  void set_context(std::unique_ptr<RuntimeContext> context)
+  {
+    context_ = std::move(context);
   }
 
   // Link a function to the global context
@@ -89,11 +93,14 @@ public:
       return context_.get();
     }
 
+    assert(!std::holds_alternative<std::monostate>(global_context_));
+
     if (std::holds_alternative<WasmiGlobalContext>(global_context_)) {
       context_ = std::make_unique<WasmiContext>(
           std::get<WasmiGlobalContext>(global_context_));
     }
     else {
+      assert(std::holds_alternative<WasmtimeGlobalContext>(global_context_));
       context_ = std::make_unique<WasmtimeContext>(
           std::get<WasmtimeGlobalContext>(global_context_));
     }
@@ -106,12 +113,20 @@ public:
     return engine == WasmEngine::kWasmi ? "Wasmi" : "Wasmtime";
   }
 
-protected:
+  SystemCallHandler *get_syscall_handler()
+  {
+    assert(syscall_handler_);
+    return syscall_handler_.get();
+  }
+
+private:
   std::variant<std::monostate, WasmiGlobalContext, WasmtimeGlobalContext>
       global_context_ = std::monostate{};
   std::unique_ptr<RuntimeContext> context_;
 
-private:
+  // This handler is used to load contracts to the runtime context.
+  std::unique_ptr<SystemCallHandler> syscall_handler_;
+
   // Boilerplate irrelevant for the test, just for creating the syscall handler.
   HogdbWrapper hogdb_wrapper_ = HogdbWrapper(StorageCostModelXdr{});
   TestEventAggregator event_server_;

@@ -116,7 +116,6 @@ protected:
         .contract_type = ContractType::kWasmi,
     };
 
-    make_syscall_handler(contract_);
     setup_wasm_context(GetParam());
     link_fn("test", "good_call", &good_call);
   }
@@ -127,8 +126,9 @@ protected:
 
 TEST_P(WasmiErrorHandlingTest, UnlinkedFn)
 {
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_TRUE(runtime.value() == nullptr);
 }
@@ -137,8 +137,9 @@ TEST_P(WasmiErrorHandlingTest, UnlinkedFn)
 TEST_P(WasmiErrorHandlingTest, RuntimeError)
 {
   link_fn("test", "external_call", &throw_runtime_error);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
@@ -152,8 +153,9 @@ TEST_P(WasmiErrorHandlingTest, RuntimeError)
 TEST_P(WasmiErrorHandlingTest, ExitHandling)
 {
   link_fn("test", "external_call", &exit_call);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -166,8 +168,9 @@ TEST_P(WasmiErrorHandlingTest, ExitHandling)
 TEST_P(WasmiErrorHandlingTest, HostError)
 {
   link_fn("test", "external_call", &throw_unrecoverable_host_error);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -180,8 +183,9 @@ TEST_P(WasmiErrorHandlingTest, HostError)
 TEST_P(WasmiErrorHandlingTest, AbortTransaction)
 {
   link_fn("test", "external_call", &throw_abort_transaction);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -194,8 +198,9 @@ TEST_P(WasmiErrorHandlingTest, AbortTransaction)
 TEST_P(WasmiErrorHandlingTest, ValidationError)
 {
   link_fn("test", "external_call", &throw_validation_error);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -209,8 +214,9 @@ TEST_P(WasmiErrorHandlingTest, ValidationError)
 TEST_P(WasmiErrorHandlingTest, OtherWeirdError)
 {
   link_fn("test", "external_call", &throw_bad_alloc);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -226,8 +232,9 @@ TEST_P(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -247,8 +254,9 @@ TEST_P(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -267,8 +275,9 @@ TEST_P(WasmiErrorHandlingTest, NonexistFn)
 TEST_P(WasmiErrorHandlingTest, FollowBadWithGood)
 {
   link_fn("test", "external_call", &throw_unrecoverable_host_error);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -287,8 +296,9 @@ TEST_P(WasmiErrorHandlingTest, FollowBadWithGood)
 TEST_P(WasmiErrorHandlingTest, CheckReturn)
 {
   link_fn("test", "external_call", &return_syscall);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -301,8 +311,9 @@ TEST_P(WasmiErrorHandlingTest, CheckReturn)
 TEST_P(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
   link_fn("test", "external_call", &throw_bad_alloc);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -321,8 +332,9 @@ TEST_P(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 TEST_P(WasmiErrorHandlingTest, Reentrance)
 {
   link_fn("test", "external_call", &reentrance);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -346,8 +358,9 @@ TEST_P(WasmiErrorHandlingTest, NullHandling)
       .contract_size = 0,
       .contract_type = ContractType::kWasmi,
   };
+  make_syscall_handler(null_contract);
   auto runtime = get_context()->make_new_runtime(null_deployed_contract_hash,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
@@ -362,8 +375,9 @@ TEST_P(WasmiErrorHandlingTest, NullLinkHandling)
   EXPECT_FALSE(link_fn("test", "", &good_call));
   EXPECT_TRUE(link_fn("foo", "good_call", &good_call));
 
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
@@ -372,8 +386,9 @@ TEST_P(WasmiErrorHandlingTest, NullLinkHandling)
 TEST_P(WasmiErrorHandlingTest, OutOfGas)
 {
   link_fn("test", "external_call", &consume_too_much_gas);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -392,8 +407,9 @@ TEST_P(WasmiErrorHandlingTest, OutOfGas)
 TEST_P(WasmiErrorHandlingTest, NoGas)
 {
   link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -407,8 +423,9 @@ TEST_P(WasmiErrorHandlingTest, NoGas)
 TEST_P(WasmiErrorHandlingTest, Spin)
 {
   link_fn("test", "external_call", &good_call);
+  make_syscall_handler(contract_);
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);

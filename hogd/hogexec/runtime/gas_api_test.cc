@@ -55,6 +55,7 @@ class GasApiTest : public ::testing::TestWithParam<WasmEngine>,
 protected:
   void SetUp() override
   {
+    setup_wasm_context(GetParam());
     Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
     contract.wasmi_contract() =
@@ -69,7 +70,6 @@ protected:
 
     make_syscall_handler(contract);
 
-    setup_wasm_context(GetParam());
     link_fn("test", "good_call",
             &consume_gas_call2); // called by "call2"
     link_fn("test", "external_call",
@@ -77,7 +77,7 @@ protected:
 
     auto runtime_res =
         get_context()->make_new_runtime(deployed_contract_hash,
-                                        syscall_handler_.get(), true);
+                                        get_syscall_handler(), true);
     ASSERT_TRUE(runtime_res.has_value());
     runtime_ = std::move(runtime_res.value());
 
