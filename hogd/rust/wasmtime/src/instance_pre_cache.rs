@@ -21,9 +21,9 @@ impl InstancePreCacheEntry {
     pub fn get(
         &self,
         engine_index: usize,
-    ) -> Option<Arc<InstancePre<*mut c_void>>> {
+    ) -> &Option<Arc<InstancePre<*mut c_void>>> {
         debug_assert!(engine_index < self.instance_pres.len());
-        unsafe { self.instance_pres.get_unchecked(engine_index).clone() }
+        unsafe { self.instance_pres.get_unchecked(engine_index) }
     }
 
     pub fn put(
@@ -32,7 +32,10 @@ impl InstancePreCacheEntry {
         instance_pre: Arc<InstancePre<*mut c_void>>,
     ) {
         debug_assert!(engine_index < self.instance_pres.len());
-        unsafe { *self.instance_pres.get_unchecked_mut(engine_index) = Some(instance_pre) };
+        unsafe {
+            *self.instance_pres.get_unchecked_mut(engine_index) =
+                Some(instance_pre)
+        };
     }
 }
 
@@ -54,11 +57,7 @@ impl InstancePreCache {
         hash: &SHA256Hash,
         engine_index: usize,
     ) -> Option<Arc<InstancePre<*mut c_void>>> {
-        if let Some(mut guard) = self.map.find(hash) {
-            guard.value().get(engine_index)
-        } else {
-            None
-        }
+        self.map.find(hash)?.value().get(engine_index).clone()
     }
 
     fn get_or_create_entry(
