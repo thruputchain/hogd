@@ -31,11 +31,6 @@ fn check_memory_limit(module: &Module) -> bool {
     false
 }
 
-fn check_no_start(module: &Module) -> bool {
-    let export = module.get_export("start");
-    export.is_none()
-}
-
 /// A Wasmtime runtime context that can be reused across multiple transactions.
 ///
 /// This context is **not thread-safe** and must be used by a single thread at a time.
@@ -112,12 +107,10 @@ impl WasmtimeContext {
             debug_log!(eprintln!("Module instantiation failed: Memory export verification failed"));
             return Ok(None);
         }
-        if !check_no_start(&module) {
-            debug_log!(eprintln!(
-                "Module instantiation failed: Has start function"
-            ));
-            return Ok(None);
-        }
+
+        // The wasmtime API doesn't expose a way to check if a module has a start function.
+        // Instead, if the module has a start function, it will fail to instantiate a new runtime
+        // as we supply no fuel during instantiation.
 
         let instance_pre =
             Arc::new(match self.linker().instantiate_pre(&module) {

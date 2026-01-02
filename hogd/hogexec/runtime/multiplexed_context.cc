@@ -1,13 +1,11 @@
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 
 #include <memory>
-#include <string_view>
 #include <unordered_map>
 #include <utility>
 
 #include "account.hh"
 #include "contract.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 
