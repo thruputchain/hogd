@@ -163,7 +163,7 @@ impl WasmtimeGlobalContext {
 
     pub fn new(
         engine_count: usize,
-        instance_pre_cache: Arc<InstancePreCache>,
+        instance_pre_cache: InstancePreCache,
     ) -> WasmtimeGlobalContext {
         // Create vector of engines
         let engines: Vec<Engine> =
@@ -523,7 +523,7 @@ pub unsafe extern "C" fn new_wasmtime_global_context(
     engine_count: usize,
 ) -> *mut c_void {
     debug_assert!(engine_count > 0);
-    let instance_pre_cache = Arc::new(InstancePreCache::new(engine_count));
+    let instance_pre_cache = InstancePreCache::new(engine_count);
     let global_context =
         Arc::new(WasmtimeGlobalContext::new(engine_count, instance_pre_cache));
     unsafe { core::mem::transmute(Box::into_raw(Box::new(global_context))) }
