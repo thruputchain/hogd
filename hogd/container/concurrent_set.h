@@ -171,12 +171,10 @@ private:
   // do nothing, otherwise, add a new level to the set.
   void try_resize()
   {
-    size_t capacity = capacity_.load(std::memory_order_acquire);
-    if (capacity == kCapacityResizeLock) {
-      while (capacity_.load(std::memory_order_acquire) == kCapacityResizeLock) {
-        cpu_relax();
-      }
-      return;
+    size_t capacity;
+    while ((capacity = capacity_.load(std::memory_order_acquire)) ==
+           kCapacityResizeLock) {
+      cpu_relax();
     }
 
     size_t inserts = inserts_.load(std::memory_order_relaxed);
@@ -188,11 +186,20 @@ private:
     size_t cap = capacity;
     while (cap != kCapacityResizeLock) {
       if (capacity_.compare_exchange_strong(cap, kCapacityResizeLock)) {
-        // we are the ones who are going to resize.
+        // we are the ones who are going to resize, but first check to make sure
+        // someone else didn't already acquire/release the resize lock to do the
+        // resize.
+        size_t inserts = inserts_.load(std::memory_order_relaxed);
+        if (inserts < cap * kResizeLoadFactor) {
+          // resize not needed, release and return.
+          capacity_.store(cap, std::memory_order_release);
+          return;
+        }
+
         size_t n_levels = levels_.size();
         size_t added_cap = entries_for_level(n_levels);
         levels_.emplace_back(std::make_unique<std::atomic<T>[]>(added_cap));
-        capacity_.store(capacity + added_cap, std::memory_order_release);
+        capacity_.store(cap + added_cap, std::memory_order_release);
         break;
       }
     }
