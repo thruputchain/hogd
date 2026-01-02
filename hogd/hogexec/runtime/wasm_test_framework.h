@@ -1,22 +1,37 @@
 #pragma once
 
+#include <cassert>
+#include <concepts>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <variant>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/wasmtime_runtime.h"
 #include "storage_cost.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "x23/sockio.h"
 
 namespace hogd {
+
+enum class WasmEngine {
+  kWasmi,
+  kWasmtime,
+};
 
 // Boilerplate for testing just the wasm runtime integrations.
 // Required because of how the runtime context lazily loads wasm contracts --
@@ -38,8 +53,63 @@ public:
         std::move(signed_tx), snapshot_cache_,
         PerTransactionDatabaseProxy(db_proxy_, 0, 0),
         PerTransactionEventServerProxy(event_server_proxy_, 0, 0),
-        ProposalModeCtor{}, *runtime_context_);
+        ProposalModeCtor{}, *context_);
   }
+
+  // Initialize the global context and runtime context for parameterized tests
+  void setup_wasm_context(WasmEngine engine, size_t wasmtime_engine_count = 1)
+  {
+    switch (engine) {
+    case WasmEngine::kWasmi:
+      global_context_.emplace<WasmiGlobalContext>();
+      break;
+    case WasmEngine::kWasmtime:
+      global_context_.emplace<WasmtimeGlobalContext>(wasmtime_engine_count);
+    }
+  }
+
+  // Link a function to the global context
+  template<std::same_as<uint64_t>... Args>
+  bool link_fn(std::string_view module_name, std::string_view fn_name,
+               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
+  {
+    assert(!context_); // don't link functions after a context has been created
+    if (std::holds_alternative<WasmiGlobalContext>(global_context_)) {
+      return std::get<WasmiGlobalContext>(global_context_)
+          .link_fn(module_name, fn_name, f);
+    }
+    return std::get<WasmtimeGlobalContext>(global_context_)
+        .link_fn(module_name, fn_name, f);
+  }
+
+  // Get the runtime context (for creating runtimes)
+  RuntimeContext *get_context()
+  {
+    if (context_) {
+      return context_.get();
+    }
+
+    if (std::holds_alternative<WasmiGlobalContext>(global_context_)) {
+      context_ = std::make_unique<WasmiContext>(
+          std::get<WasmiGlobalContext>(global_context_));
+    }
+    else {
+      context_ = std::make_unique<WasmtimeContext>(
+          std::get<WasmtimeGlobalContext>(global_context_));
+    }
+    return context_.get();
+  }
+
+  // Convert WasmEngine enum to string for test parameter names
+  static std::string engine_to_string(WasmEngine engine)
+  {
+    return engine == WasmEngine::kWasmi ? "Wasmi" : "Wasmtime";
+  }
+
+protected:
+  std::variant<std::monostate, WasmiGlobalContext, WasmtimeGlobalContext>
+      global_context_ = std::monostate{};
+  std::unique_ptr<RuntimeContext> context_;
 
 private:
   // Boilerplate irrelevant for the test, just for creating the syscall handler.
@@ -53,9 +123,6 @@ private:
   StorageSnapshotCache snapshot_cache_ = StorageSnapshotCache(0, db_proxy_);
   EventServerProxy event_server_proxy_ = EventServerProxy(
       x23::HostPort{"localhost", event_server_exec_rpc_.start_server(0)});
-
-  std::unique_ptr<RuntimeContext> runtime_context_ =
-      make_runtime_context(RuntimeEngine::kWasmi);
 };
 
 } // namespace hogd

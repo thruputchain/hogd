@@ -1,47 +1,17 @@
 use core::ffi::c_void;
 use core::slice;
-use std::cell::Cell;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::debug_log;
-use common::string_from_parts;
 
-use wasmtime::{
-    Caller, Config, Engine, InstanceAllocationStrategy, InstancePre, Linker,
-    Module, PoolingAllocationConfig,
-};
+use wasmtime::{Engine, InstancePre, Module};
 
-use crate::error::TrampolineError;
-use crate::instance_pre_cache::InstancePreCache;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
 pub use common::contract_loader::ContractGetResult;
 use common::SystemErrorCode;
-use common::TrampolineResult;
 
-pub struct LinkEntry {
-    module: String,
-    function: String,
-    nargs: u8,
-    fn_pointer: *mut c_void,
-}
-
-impl LinkEntry {
-    pub fn new(
-        module: String,
-        function: String,
-        nargs: u8,
-        fn_pointer: *mut c_void,
-    ) -> Self {
-        Self {
-            module,
-            function,
-            nargs,
-            fn_pointer,
-        }
-    }
-}
+use crate::global_context::WasmtimeGlobalContext;
 // assert that the memory is exported and starts at at most 1 page
 fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
@@ -66,182 +36,15 @@ fn check_no_start(module: &Module) -> bool {
     export.is_none()
 }
 
-pub struct WasmtimeGlobalContext {
-    engines: Vec<Engine>,
-    // We get slight contention (on the payments-10 benchmark, apparently around 1-2%, around 465/470K->460/455K or so)
-    // from contention on one InstancePreCache object, as compared to having one per engine.
-    // The savings is that we significantly reduce memory usage (as the number of contracts cached increases).
-    // I (geoff) made the choice to do one shared cache because
-    // (1) we already have some shared caches in hogexec (the snapshot cache), and while contention there is not insignificant,
-    // the performance impact is tolerable.
-    // (2) The performance change of having one shared cache is not extremely large on maximal contention workloads (with very few cache entries),
-    // and I am more concerned with how performance will degrade as the number of cache entries increases
-    // (and memory usage increases).
-    //
-    // But this change can be revisted if necessary.
-    instance_pre_cache: InstancePreCache,
-    engine_count: usize,
-    // TODO(geoff): we could stick the Linker here
-}
-
-impl WasmtimeGlobalContext {
-    /// Allocates an engine index using a static thread-local atomic pattern,
-    /// similar to the C++ implementation. Each thread gets a stable engine index
-    /// that is assigned on first access.
-    pub fn alloc_engine_index(&self) -> usize {
-        static ALLOCATOR: AtomicUsize = AtomicUsize::new(0);
-        thread_local! {
-            static THREAD_LOCAL_ALLOC: Cell<Option<usize>> = Cell::new(None);
-        }
-
-        THREAD_LOCAL_ALLOC.with(|cell| {
-            if let Some(idx) = cell.get() {
-                idx
-            } else {
-                let idx = ALLOCATOR.fetch_add(1, Ordering::Relaxed)
-                    % self.engine_count;
-                cell.set(Some(idx));
-                idx
-            }
-        })
-    }
-
-    fn new_engine() -> Engine {
-        let page_size: usize = 65536; // 64KB, i.e. 1 page
-        let num_slots: u32 = 1024;
-        let table_size: usize = 64;
-        let allocation_config: PoolingAllocationConfig =
-            PoolingAllocationConfig::default()
-                .max_unused_warm_slots(0)
-                .total_core_instances(num_slots)
-                .total_memories(num_slots)
-                .total_tables(num_slots)
-                .linear_memory_keep_resident(page_size * 2)
-                .max_memory_size(page_size * 2)
-                .table_keep_resident(table_size)
-                .table_elements(table_size)
-                //.memory_protection_keys(wasmtime::Enabled::No)
-                .clone();
-
-        let mut config = Config::default();
-        config
-            .consume_fuel(true)
-            .wasm_backtrace(false)
-            .strategy(wasmtime::Strategy::Winch)
-            // cranelift-only options
-            //.signals_based_traps(false)
-            //.table_lazy_init(true)
-            // done cranelift-only
-            .cranelift_pcc(false)
-            .native_unwind_info(false)
-            .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
-            .wasm_backtrace(false)
-            .debug_info(false)
-            .cranelift_opt_level(wasmtime::OptLevel::Speed)
-            .cranelift_nan_canonicalization(true) // deterministic nan
-            .relaxed_simd_deterministic(true)
-            .wasm_multi_memory(false)
-            .epoch_interruption(false)
-            .max_wasm_stack(16 * 1024)
-            // Configs set as per wasmtime documentation to eliminate vmm in steady state
-            // https://docs.rs/wasmtime/latest/wasmtime/struct.PoolingAllocationConfig.html
-            .memory_init_cow(false)
-            .memory_guard_size(0)
-            .memory_reservation(2 * page_size as u64)
-            .memory_reservation_for_growth(0)
-            .guard_before_linear_memory(false)
-            .memory_may_move(false)
-            .generate_address_map(false)
-            .allocation_strategy(InstanceAllocationStrategy::Pooling(
-                allocation_config,
-            ));
-
-        //config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
-
-        Engine::new(&config).unwrap()
-    }
-
-    pub fn new(
-        engine_count: usize,
-        instance_pre_cache: InstancePreCache,
-    ) -> WasmtimeGlobalContext {
-        // Create vector of engines
-        let engines: Vec<Engine> =
-            (0..engine_count).map(|_| Self::new_engine()).collect();
-        Self {
-            engines,
-            instance_pre_cache,
-            engine_count,
-        }
-    }
-
-    pub fn engine(&self, engine_index: usize) -> &Engine {
-        debug_assert!(engine_index < self.engine_count);
-        &self.engines[engine_index]
-    }
-
-    pub fn engine_count(&self) -> usize {
-        self.engine_count
-    }
-}
-
+/// A Wasmtime runtime context that can be reused across multiple transactions.
+///
+/// This context is **not thread-safe** and must be used by a single thread at a time.
+/// However, it can be reused across multiple sequential transactions within the same thread,
+/// which provides better performance than creating a new context for each transaction.
 pub struct WasmtimeContext {
     global_context: Arc<WasmtimeGlobalContext>,
-    linker: Linker<*mut c_void>,
     contract_get_fn: ContractGetFn,
     engine_index: usize,
-}
-
-// Tells rust that it is safe to send this c_void pointer
-// across lambda boundaries
-#[derive(Clone)]
-struct BorrowBypass {
-    fn_pointer: *mut c_void,
-}
-
-unsafe impl Send for BorrowBypass {}
-unsafe impl Sync for BorrowBypass {}
-
-fn wasmtime_handle_trampoline_error(
-    result: TrampolineResult,
-) -> Result<i32, wasmtime::Error> {
-    let error = result.panic.try_into();
-    if error.is_err() {
-        return Err(wasmtime::Error::new(TrampolineError {
-            error: common::HostFnErrorCode::kHostUnrecoverable,
-        }));
-    }
-    let error = error.unwrap();
-    match error {
-        common::HostFnErrorCode::kHostNoneOrRecoverable => Ok(result.result),
-        _ => Err(wasmtime::Error::new(TrampolineError { error })),
-    }
-}
-
-macro_rules! link_function_nargs {
-    ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
-        fn $name(
-            linker: &mut Linker<*mut c_void>,
-            fn_pointer: *mut c_void,
-            import_name: &str,
-            fn_name: &str,
-        ) -> Result<(), wasmtime::Error> {
-            let x = BorrowBypass { fn_pointer };
-            linker
-                .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
-                    let res = unsafe {
-                        common::$cfunc(
-                            x.clone().fn_pointer,
-                            *caller.data(),
-                            $($arg),*
-                        )
-                    };
-                    wasmtime_handle_trampoline_error(res)
-                })
-                .map_err(Into::into)
-                .map(|_| ())
-        }
-    };
 }
 
 impl WasmtimeContext {
@@ -252,7 +55,6 @@ impl WasmtimeContext {
         let engine_index = global_context.alloc_engine_index();
         Self {
             global_context: Arc::clone(global_context),
-            linker: Linker::new(global_context.engine(engine_index)),
             contract_get_fn: get_fn,
             engine_index,
         }
@@ -274,6 +76,10 @@ impl WasmtimeContext {
         self.global_context.engine(self.engine_index)
     }
 
+    fn linker(&self) -> &Linker<*mut c_void> {
+        self.global_context.linker(self.engine_index)
+    }
+
     pub fn get_instance_pre(
         &mut self,
         hash: &[u8; 32],
@@ -286,7 +92,7 @@ impl WasmtimeContext {
         // Check cache for this engine's InstancePre
         if let Some(instance_pre) = self
             .global_context
-            .instance_pre_cache
+            .instance_pre_cache()
             .get(hash, self.engine_index)
         {
             return Ok(Some(instance_pre));
@@ -314,7 +120,7 @@ impl WasmtimeContext {
         }
 
         let instance_pre =
-            Arc::new(match self.linker.instantiate_pre(&module) {
+            Arc::new(match self.linker().instantiate_pre(&module) {
                 Ok(instance_pre) => instance_pre,
                 Err(e) => {
                     debug_log!(eprintln!("Error instantiating store: {e}"));
@@ -332,7 +138,7 @@ impl WasmtimeContext {
                 }
             });
 
-        self.global_context.instance_pre_cache.put(
+        self.global_context.instance_pre_cache().put(
             hash,
             self.engine_index,
             instance_pre.clone(),
@@ -341,205 +147,11 @@ impl WasmtimeContext {
         return Ok(Some(instance_pre));
     }
 
-    pub fn link_function(&mut self, entry: LinkEntry) {
-        match entry.nargs {
-            0 => Self::link_function_0args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            1 => Self::link_function_1args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            2 => Self::link_function_2args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            3 => Self::link_function_3args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            4 => Self::link_function_4args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            5 => Self::link_function_5args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            6 => Self::link_function_6args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            7 => Self::link_function_7args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            8 => Self::link_function_8args(
-                &mut self.linker,
-                entry.fn_pointer,
-                &entry.module,
-                &entry.function,
-            ),
-            _ => panic!("Unsupported number of arguments: {}", entry.nargs),
-        }
-        .unwrap();
-    }
-
-    pub fn linker(&self) -> &Linker<*mut c_void> {
-        &self.linker
-    }
-
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
         let engine = self.engine();
         Module::validate(engine, contract_data).is_ok()
         // TODO(geoff): consider validating that contract memory exports are good and no start function
     }
-
-    link_function_nargs!(link_function_0args, c_call_0args);
-    link_function_nargs!(link_function_1args, c_call_1args, arg1);
-    link_function_nargs!(link_function_2args, c_call_2args, arg1, arg2);
-    link_function_nargs!(link_function_3args, c_call_3args, arg1, arg2, arg3);
-    link_function_nargs!(
-        link_function_4args,
-        c_call_4args,
-        arg1,
-        arg2,
-        arg3,
-        arg4
-    );
-    link_function_nargs!(
-        link_function_5args,
-        c_call_5args,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5
-    );
-    link_function_nargs!(
-        link_function_6args,
-        c_call_6args,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5,
-        arg6
-    );
-    link_function_nargs!(
-        link_function_7args,
-        c_call_7args,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5,
-        arg6,
-        arg7
-    );
-    link_function_nargs!(
-        link_function_8args,
-        c_call_8args,
-        arg1,
-        arg2,
-        arg3,
-        arg4,
-        arg5,
-        arg6,
-        arg7,
-        arg8
-    );
-}
-
-/// # Safety
-/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
-/// Context must have been created by new_wasmtime_context.
-#[no_mangle]
-pub unsafe extern "C" fn wasmtime_link_nargs(
-    context_void: *mut c_void,
-    module_name: *const u8,
-    module_name_len: u32,
-    method_name: *const u8,
-    method_name_len: u32,
-    function_pointer: *mut c_void,
-    nargs: u8,
-) -> bool // true if success
-{
-    let context: *mut WasmtimeContext =
-        unsafe { core::mem::transmute(context_void) };
-
-    debug_assert!(!context.is_null());
-    debug_assert!(!module_name.is_null());
-    debug_assert!(!method_name.is_null());
-
-    // assert module name & method_name nonzero
-    // WASMI (and apparently the wasm standard) will accept modules with no names,
-    let module = match string_from_parts(module_name, module_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
-
-    let method = match string_from_parts(method_name, method_name_len) {
-        Ok(x) => x,
-        _ => {
-            return false;
-        }
-    };
-
-    debug_assert!(!module.is_empty());
-    debug_assert!(!method.is_empty());
-
-    let c = unsafe { &mut *context };
-
-    c.link_function(LinkEntry::new(module, method, nargs, function_pointer));
-    true
-}
-
-/// # Safety
-/// Creates a global context that can be shared across threads.
-/// Global context is threadsafe.
-/// engine_count must be greater than 0.
-#[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context(
-    engine_count: usize,
-) -> *mut c_void {
-    debug_assert!(engine_count > 0);
-    let instance_pre_cache = InstancePreCache::new(engine_count);
-    let global_context =
-        Arc::new(WasmtimeGlobalContext::new(engine_count, instance_pre_cache));
-    unsafe { core::mem::transmute(Box::into_raw(Box::new(global_context))) }
-}
-
-/// # Safety
-/// Global context must not be a nullptr.
-/// Global context must have been created by new_wasmtime_global_context.
-#[no_mangle]
-pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
-    debug_assert!(!p.is_null());
-
-    let context: *mut Arc<WasmtimeGlobalContext> =
-        unsafe { core::mem::transmute(p) };
-
-    unsafe { drop(Box::from_raw(context)) };
 }
 
 // Rust FFI needs no_mangxle and extern "C"

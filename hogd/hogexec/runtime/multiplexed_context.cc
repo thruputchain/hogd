@@ -42,16 +42,4 @@ MultiplexedContext::verify_contract(Contract const &contract) const
   }
   return it->second.first->verify_contract(contract);
 }
-
-bool
-MultiplexedContext::link_fn_nargs(std::string_view module_name,
-                                  std::string_view fn_name, void *fn_ptr,
-                                  uint8_t nargs)
-{
-  auto it = contexts_.find(ContractType::kWasmi);
-  if (it == contexts_.end()) {
-    return false;
-  }
-  return it->second.first->link_fn_nargs(module_name, fn_name, fn_ptr, nargs);
-}
 } // namespace hogd

@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall_error.hh"
 
 namespace hogd {
@@ -114,7 +113,8 @@ arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
 
 } // namespace
 
-class InvokeArityTests : public ::testing::Test, public WasmTestFramework {
+class InvokeArityTests : public ::testing::TestWithParam<WasmEngine>,
+                         public WasmTestFramework {
 
 protected:
   void SetUp() override
@@ -131,19 +131,20 @@ protected:
 
     make_syscall_handler(contract);
 
-    WasmiContext context;
+    setup_wasm_context(GetParam());
+    link_fn("test", "arg0", &arity0);
+    link_fn("test", "arg1", &arity1);
+    link_fn("test", "arg2", &arity2);
+    link_fn("test", "arg3", &arity3);
+    link_fn("test", "arg4", &arity4);
+    link_fn("test", "arg5", &arity5);
+    link_fn("test", "arg6", &arity6);
+    link_fn("test", "arg7", &arity7);
+    link_fn("test", "arg8", &arity8);
 
-    context.link_fn("test", "arg0", &arity0);
-    context.link_fn("test", "arg1", &arity1);
-    context.link_fn("test", "arg2", &arity2);
-    context.link_fn("test", "arg3", &arity3);
-    context.link_fn("test", "arg4", &arity4);
-    context.link_fn("test", "arg5", &arity5);
-    context.link_fn("test", "arg6", &arity6);
-    context.link_fn("test", "arg7", &arity7);
-    context.link_fn("test", "arg8", &arity8);
-    auto runtime_res = context.make_new_runtime(deployed_contract_hash,
-                                                syscall_handler_.get(), true);
+    auto runtime_res =
+        get_context()->make_new_runtime(deployed_contract_hash,
+                                        syscall_handler_.get(), true);
     ASSERT_TRUE(runtime_res.has_value());
     runtime_ = std::move(runtime_res.value());
 
@@ -153,58 +154,66 @@ protected:
   std::unique_ptr<Runtime> runtime_;
 };
 
-TEST_F(InvokeArityTests, arity0)
+TEST_P(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity1)
+TEST_P(InvokeArityTests, arity1)
 {
   auto res = runtime_->invoke("calltest1", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity2)
+TEST_P(InvokeArityTests, arity2)
 {
   auto res = runtime_->invoke("calltest2", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity3)
+TEST_P(InvokeArityTests, arity3)
 {
   auto res = runtime_->invoke("calltest3", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity4)
+TEST_P(InvokeArityTests, arity4)
 {
   auto res = runtime_->invoke("calltest4", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity5)
+TEST_P(InvokeArityTests, arity5)
 {
   auto res = runtime_->invoke("calltest5", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity6)
+TEST_P(InvokeArityTests, arity6)
 {
   auto res = runtime_->invoke("calltest6", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity7)
+TEST_P(InvokeArityTests, arity7)
 {
   auto res = runtime_->invoke("calltest7", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity8)
+TEST_P(InvokeArityTests, arity8)
 {
   auto res = runtime_->invoke("calltest8", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
+
+INSTANTIATE_TEST_SUITE_P(WasmEngines, InvokeArityTests,
+                         ::testing::Values(WasmEngine::kWasmi,
+                                           WasmEngine::kWasmtime),
+                         [](const ::testing::TestParamInfo<WasmEngine> &info) {
+                           return WasmTestFramework::engine_to_string(
+                               info.param);
+                         });
 
 } // namespace hogd

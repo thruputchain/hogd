@@ -97,9 +97,53 @@ wasmi_contract_get_fn(void *host_call_context_ptr,
 
 } // namespace
 
-WasmiContext::WasmiContext()
-  : wasmi_context_ptr_(new_wasmi_context(&wasmi_contract_get_fn))
-{}
+WasmiGlobalContext::WasmiGlobalContext()
+{
+  global_context_ptr_ = new_wasmi_global_context();
+  CHECK(global_context_ptr_ != nullptr);
+}
+
+WasmiGlobalContext::~WasmiGlobalContext()
+{
+  if (global_context_ptr_ != nullptr) {
+    free_wasmi_global_context(global_context_ptr_);
+  }
+}
+
+WasmiGlobalContext &
+WasmiGlobalContext::operator=(WasmiGlobalContext &&other) noexcept
+{
+  if (this == &other) {
+    return *this;
+  }
+  if (global_context_ptr_ != nullptr) {
+    free_wasmi_global_context(global_context_ptr_);
+  }
+  global_context_ptr_ = other.global_context_ptr_;
+  other.global_context_ptr_ = nullptr;
+  return *this;
+}
+
+bool
+WasmiGlobalContext::link_fn_nargs(std::string_view module_name,
+                                  std::string_view fn_name, void *fn_ptr,
+                                  uint8_t nargs)
+{
+  assert(global_context_ptr_ != nullptr);
+  return wasmi_global_link_nargs(
+      global_context_ptr_,
+      reinterpret_cast<const uint8_t *>(module_name.data()), module_name.size(),
+      reinterpret_cast<const uint8_t *>(fn_name.data()), fn_name.size(), fn_ptr,
+      nargs);
+}
+
+WasmiContext::WasmiContext(WasmiGlobalContext &global_context)
+  : global_context_(global_context),
+    wasmi_context_ptr_(
+        new_wasmi_context(&wasmi_contract_get_fn, global_context_.get_inner()))
+{
+  CHECK(wasmi_context_ptr_ != nullptr);
+}
 
 WasmiContext::~WasmiContext()
 {
@@ -147,19 +191,6 @@ WasmiContext::verify_contract(Contract const &contract) const
                                reinterpret_cast<const uint8_t *>(
                                    contract.wasmi_contract().wasm.data()),
                                contract.wasmi_contract().wasm.size());
-}
-
-bool
-WasmiContext::link_fn_nargs(std::string_view module_name,
-                            std::string_view fn_name, void *fn_ptr,
-                            uint8_t nargs)
-{
-  assert(wasmi_context_ptr_ != nullptr);
-  return wasmi_link_nargs(wasmi_context_ptr_,
-                          reinterpret_cast<const uint8_t *>(module_name.data()),
-                          module_name.size(),
-                          reinterpret_cast<const uint8_t *>(fn_name.data()),
-                          fn_name.size(), fn_ptr, nargs);
 }
 
 std::span<std::byte>

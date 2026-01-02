@@ -39,8 +39,6 @@ public:
   }
 
 private:
-  bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
-                     void *fn_ptr, uint8_t nargs) override;
   std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts_;
 };
 

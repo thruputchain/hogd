@@ -1,7 +1,6 @@
 #pragma once
 
 #include <charconv>
-#include <concepts>
 #include <cstddef>
 #include <cstring>
 #include <format>
@@ -17,7 +16,6 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -100,9 +98,9 @@ engine_has_eager_link_guards(RuntimeEngine engine)
 // Most sandbox implementations have some amount of shared state (i.e., a list
 // of function pointers to link, or an environment allocator).
 //
-// We assume each RuntimeContext can be used by multiple Runtimes, but do not
-// assume that (re)using RuntimeContext across transactions is deterministic,
-// nor do we assume that a RuntimeContext is threadsafe.
+// We assume each RuntimeContext can be used by multiple Runtimes.
+// Each RuntimeContext can be used across multiple transactions,
+// but is not threadsafe.
 class RuntimeContext {
 public:
   RuntimeContext() = default;
@@ -125,17 +123,11 @@ public:
   // HostFnResult
   // function(HostCallContext* context, uint64_t arg0,...);
   //
-  // Context is the object contained in a WasmiRuntime. If the HostFnStatus is
-  // not an error, then the uint64 is returned to the wasm module. Otherwise,
-  // Wasmi unwinds the current invocation and returns a nonzero InvokeError.
-  template<std::same_as<uint64_t>... Args>
-  bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
+  // Validate link_fn parameters. Returns false if any parameter is invalid.
+  static bool validate_link_fn_params(std::string_view module_name,
+                                      std::string_view fn_name, void *fn_ptr)
   {
-    if (module_name.empty() || fn_name.empty() || (f == nullptr))
-      return false;
-    return link_fn_nargs(module_name, fn_name, reinterpret_cast<void *>(f),
-                         (kArgCount<Args>() + ... + 0));
+    return !module_name.empty() && !fn_name.empty() && (fn_ptr != nullptr);
   }
 
   // Perform any required validation checks on the contract.
@@ -146,13 +138,6 @@ public:
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
-
-  virtual bool link_fn_nargs(std::string_view module_name,
-                             std::string_view fn_name, void *fn_ptr,
-                             uint8_t nargs) = 0;
-
-private:
-  template<typename T> constexpr static auto kArgCount = [] { return 1; };
 };
 
 // create RuntimeContext with no imported functions
