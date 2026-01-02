@@ -754,6 +754,7 @@ make_async(source_location sloc = source_location::current())
 {
   CoroCB<R> cb;
   Async<R> async = [&cb](source_location) -> Async<R> {
+    // This is not an MVC because GetCoro never suspends.
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};

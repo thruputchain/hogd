@@ -6,7 +6,6 @@
 #include <memory>
 #include <span>
 #include <string_view>
-#include <vector>
 
 #include "account.hh"
 #include "hogd/base/types.h"
@@ -24,11 +23,10 @@ public:
   explicit WasmtimeGlobalContext(size_t engine_count);
   ~WasmtimeGlobalContext();
 
-  void *get_inner(size_t engine_index) const;
-  size_t alloc_engine_index();
+  void *get_inner() const { return global_context_ptr_; }
 
 private:
-  std::vector<void *> engines_;
+  void *global_context_ptr_ = nullptr;
 };
 
 // Context shared between WasmtimeRuntime objects.

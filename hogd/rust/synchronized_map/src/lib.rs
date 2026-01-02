@@ -22,6 +22,8 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Mutex;
 use std::thread;
 
+use siphasher::sip::SipHasher24;
+
 /// Default shard base order (log2 of shards per core)
 const DEFAULT_SHARD_BASE_ORDER: u32 = 9;
 
@@ -75,20 +77,16 @@ impl<'a, K, V, S> BucketGuard<'a, K, V, S> {
 /// Each bucket is protected by its own mutex, allowing concurrent access to
 /// different buckets. The number of buckets must be a power of 2 for efficient
 /// hash-based bucket selection.
-pub struct SynchronizedMap<
-    K,
-    V,
-    H = siphasher::sip::SipHasher24,
-    S = std::collections::hash_map::RandomState,
-> where
+pub struct SynchronizedMap<K, V, S = std::collections::hash_map::RandomState>
+where
     K: Hash + Eq,
-    H: Hasher + Default,
     S: BuildHasher + Default,
 {
-    /// Hash function state (for custom hashing)
-    hasher: H,
     /// Vector of mutexes, one per bucket
     locks: Vec<Mutex<HashMap<K, V, S>>>,
+
+    /// Siphash24 keys
+    siphash24_keys: [u64; 2],
 }
 
 impl<K, V> SynchronizedMap<K, V>
@@ -114,41 +112,42 @@ where
             locks.push(Mutex::new(HashMap::new()));
         }
 
+        // Initialize SipHash24 keys with random values for security
+        let mut siphash24_keys = [0u64; 2];
+        let mut key_bytes = [0u8; 16]; // 2 * u64 = 16 bytes
+        getrandom::fill(&mut key_bytes).unwrap();
+        // Convert bytes to u64 values (little-endian)
+        siphash24_keys[0] =
+            u64::from_le_bytes(key_bytes[0..8].try_into().unwrap());
+        siphash24_keys[1] =
+            u64::from_le_bytes(key_bytes[8..16].try_into().unwrap());
+
         Self {
-            hasher: siphasher::sip::SipHasher24::default(),
             locks,
+            siphash24_keys,
         }
     }
 }
 
-impl<K, V, H, S> SynchronizedMap<K, V, H, S>
+impl<K, V, S> SynchronizedMap<K, V, S>
 where
     K: Hash + Eq,
-    H: Hasher + Default + Clone,
     S: BuildHasher + Default,
 {
-    /// Create a new SynchronizedMap with custom hash function and shard count.
-    pub fn with_hasher_and_shard_count(shard_count: usize, hasher: H) -> Self {
-        assert!(
-            shard_count.is_power_of_two(),
-            "shard_count must be a power of 2"
-        );
-        assert!(shard_count > 0, "shard_count must be greater than 0");
-
-        let mut locks = Vec::with_capacity(shard_count);
-        for _ in 0..shard_count {
-            locks.push(Mutex::new(HashMap::with_hasher(S::default())));
-        }
-
-        Self { hasher, locks }
-    }
-
     /// Get the bucket index for a given key.
     #[inline]
     fn get_bucket_index(&self, key: &K) -> usize {
-        let mut hasher = self.hasher.clone();
+        let mut hasher = SipHasher24::new_with_keys(
+            self.siphash24_keys[0],
+            self.siphash24_keys[1],
+        );
         key.hash(&mut hasher);
         let hash = hasher.finish();
+        debug_assert!(
+            self.locks.len().is_power_of_two(),
+            "locks.len() must be a power of 2"
+        );
+
         (hash as usize) & (self.locks.len() - 1)
     }
 
