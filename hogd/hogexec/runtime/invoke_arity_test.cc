@@ -119,6 +119,7 @@ class InvokeArityTests : public ::testing::TestWithParam<WasmEngine>,
 protected:
   void SetUp() override
   {
+    setup_wasm_context(GetParam());
     Contract contract(ContractType::kWasmi);
     contract.wasmi_contract() =
         test::load_wasm_from_file("test_invoke_arity.wasm");
@@ -129,9 +130,6 @@ protected:
         .contract_type = ContractType::kWasmi,
     };
 
-    make_syscall_handler(contract);
-
-    setup_wasm_context(GetParam());
     link_fn("test", "arg0", &arity0);
     link_fn("test", "arg1", &arity1);
     link_fn("test", "arg2", &arity2);
@@ -141,10 +139,11 @@ protected:
     link_fn("test", "arg6", &arity6);
     link_fn("test", "arg7", &arity7);
     link_fn("test", "arg8", &arity8);
+    make_syscall_handler(contract);
 
     auto runtime_res =
         get_context()->make_new_runtime(deployed_contract_hash,
-                                        syscall_handler_.get(), true);
+                                        get_syscall_handler(), true);
     ASSERT_TRUE(runtime_res.has_value());
     runtime_ = std::move(runtime_res.value());
 

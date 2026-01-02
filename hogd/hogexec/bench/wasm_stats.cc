@@ -65,16 +65,14 @@ process_contract(std::string const &contract_name, std::string const &filename)
                                          static_cast<uint32_t>(contract_size),
                                      .contract_type = ContractType::kWasmi};
 
-  static WasmTestFramework framework;
-  framework.make_syscall_handler(contract);
-
-  auto runtime_context = make_hogexec_context();
+  WasmTestFramework framework;
+  framework.set_context(make_hogexec_context());
 
   // Create runtime
   auto runtime_result =
-      runtime_context->make_new_runtime(deployed_hash,
-                                        framework.syscall_handler_.get(),
-                                        false);
+      framework.get_context()->make_new_runtime(deployed_hash,
+                                                framework.get_syscall_handler(),
+                                                false);
 
   if (!runtime_result.has_value()) {
     std::println(stderr, "Failed to create runtime for {}", contract_name);

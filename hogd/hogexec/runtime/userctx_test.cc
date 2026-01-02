@@ -36,7 +36,6 @@ protected:
     Contract contract(ContractType::kWasmi);
     contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
 
-    make_syscall_handler(contract);
     deployed_contract_hash_ = DeployedContractHash{
         .hash = sha256(contract),
         .contract_size =
@@ -46,6 +45,7 @@ protected:
 
     setup_wasm_context(GetParam());
     link_fn("test", "redir_call", &foo);
+    make_syscall_handler(contract);
   }
 
   DeployedContractHash deployed_contract_hash_;
@@ -55,11 +55,11 @@ protected:
 TEST_P(UserCtxTest, CheckCtxCorrect)
 {
   auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
-                                                 syscall_handler_.get(), true);
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  ctx_check = syscall_handler_.get();
+  ctx_check = get_syscall_handler();
 
   auto res = runtime.value()->invoke("calltest", UINT64_MAX);
   EXPECT_TRUE(res.result_);
