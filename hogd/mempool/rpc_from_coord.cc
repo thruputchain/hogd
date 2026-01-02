@@ -73,8 +73,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), batch);
 
+  info("A");
   co_await scheduler_->add_txs(batch);
+  info("A");
   AuthErrorCodeBatch auth_ret = co_await auth_handle;
+  info("A");
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
@@ -84,14 +87,16 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       to_remove_indices.push_back(i);
     }
   }
+  info("{} txs were invalid", to_remove.size());
   // The txs are on the runqueue and need to be removed, so we set
   // [validated_block] to true.
-  auto remove_handle =
-      scheduler_->remove_from_scheduler(to_remove, /*validated_block=*/true);
+  co_await scheduler_->remove_from_scheduler(to_remove,
+                                             /*validated_block=*/true);
   remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
-  co_await remove_handle;
 
   co_await coord_client_->coordscheduler_notify_vetted(batch);
+  info("about to return from submit_unvetted, scheduler.size() = {}",
+       scheduler_->size());
   co_return;
 }
 
@@ -954,6 +959,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
+  info("auth_data_changed, key_changes.size() = {}", key_changes.size());
   static SignedTransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();

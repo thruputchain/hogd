@@ -231,6 +231,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
+    info("insert {} age {}", account, get_account_key(account).average_hog_age);
     ready_accounts_.insert(get_account_key(account));
   }
 }
@@ -671,7 +672,9 @@ x23::Async<void>
 Scheduler::remove_from_scheduler(
     x23::span<const SignedTransactionHash> tx_hashes, bool validated_block)
 {
+  info("remove_from_scheduler A");
   co_await default_coropoll().pool_.bg();
+  info("remove_from_scheduler A");
 
   static SynchronizedMap<ContractAddress, char> accounts;
   accounts.clear();
@@ -683,6 +686,7 @@ Scheduler::remove_from_scheduler(
       make_chunks(tx_hashes.size(), kNumThreads);
   std::array<x23::Awaitable<size_t>, kNumThreads> awaitables;
 
+  info("OK");
   for (size_t i = 0; i < chunks.size(); i++) {
     [](const ChunkRange &chunk, auto cb,
        x23::span<const SignedTransactionHash> tx_hashes,
@@ -738,15 +742,19 @@ Scheduler::remove_from_scheduler(
   // number of chunks. If we were to iterate through all of the awaitables,
   // we would deadlock waiting on awaitables for coroutines that do not have a
   // chunk.
+  info("ABOUT TO WAIT");
   for (size_t i = 0; i < chunks.size(); i++) {
     x23::Awaitable<size_t> &awaitable = awaitables[i];
     total_removed_from_runqueue += co_await awaitable;
   }
   double a = timer.elapsed();
 
+  info("NOW REMOVE");
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+      info("erase {} age {}", account,
+           get_account_key(account).average_hog_age);
       CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
     }
   });
