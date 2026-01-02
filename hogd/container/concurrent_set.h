@@ -105,10 +105,16 @@ public:
       // this should *almost* never happen. the one place we can run into this
       // is if lots of concurrent inserts start but don't complete and there
       // isn't sufficient space in the level they started in for them all to
-      // complete. If by some miracle this does happen, expand the table and
-      // try again. For any reasonable array sizes and load factors for resize
-      // trigger, this really shouldn't ever happen in practice.
-      try_resize();
+      // complete. If this does happen, first check to see if any levels have
+      // been added, and restart there. Otherwise, try to add a level.
+      if (level < levels_.size() - 1) {
+        level++;
+        level_capacity = entries_for_level(level);
+        goto outer;
+      }
+      else {
+        try_resize();
+      }
     }
   }
 
