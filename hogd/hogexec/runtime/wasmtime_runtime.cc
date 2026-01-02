@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/wasmtime_runtime.h"
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -8,7 +7,6 @@
 #include <span>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include "account.hh"
 #include "contract.hh"
@@ -87,45 +85,24 @@ wasmtime_contract_get_fn(void *host_call_context_ptr,
 
 WasmtimeGlobalContext::WasmtimeGlobalContext(size_t engine_count)
 {
-  engines_.resize(engine_count);
-  for (size_t i = 0; i < engine_count; ++i) {
-    engines_[i] = new_wasmtime_global_context();
-    CHECK(engines_[i] != nullptr);
-  }
+  // Create a single global context that manages all engines internally
+  global_context_ptr_ = new_wasmtime_global_context(engine_count);
+  CHECK(global_context_ptr_ != nullptr);
 }
 
 WasmtimeGlobalContext::~WasmtimeGlobalContext()
 {
-  for (auto &engine : engines_) {
-    if (engine != nullptr) {
-      free_wasmtime_global_context(engine);
-    }
+  if (global_context_ptr_ != nullptr) {
+    free_wasmtime_global_context(global_context_ptr_);
   }
 }
 
-void *
-WasmtimeGlobalContext::get_inner(size_t engine_index) const
-{
-  assert(engine_index < engines_.size());
-  return engines_[engine_index];
-}
-
-size_t
-WasmtimeGlobalContext::alloc_engine_index()
-{
-  static std::atomic<size_t> allocator = 0;
-  static thread_local size_t threadlocal_alloc =
-      allocator.fetch_add(1) % engines_.size();
-
-  return threadlocal_alloc;
-}
-
 WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
-  : engine_index_(global_context.alloc_engine_index())
 {
-  wasmtime_context_ptr_ =
-      new_wasmtime_context(&wasmtime_contract_get_fn,
-                           global_context.get_inner(engine_index_));
+  wasmtime_context_ptr_ = new_wasmtime_context(&wasmtime_contract_get_fn,
+                                               global_context.get_inner());
+  // engine_index is now allocated internally by Rust
+  engine_index_ = 0; // Not used anymore, but kept for compatibility
 }
 
 WasmtimeContext::~WasmtimeContext()

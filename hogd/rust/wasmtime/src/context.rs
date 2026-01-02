@@ -1,5 +1,7 @@
 use core::ffi::c_void;
 use core::slice;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::debug_log;
@@ -64,14 +66,35 @@ fn check_no_start(module: &Module) -> bool {
     export.is_none()
 }
 
-#[derive(Clone)]
 pub struct WasmtimeGlobalContext {
-    engine: Engine,
+    engines: Vec<Engine>,
     instance_pre_cache: Arc<InstancePreCache>,
+    engine_count: usize,
     // TODO(geoff): we could stick the Linker here
 }
 
 impl WasmtimeGlobalContext {
+    /// Allocates an engine index using a static thread-local atomic pattern,
+    /// similar to the C++ implementation. Each thread gets a stable engine index
+    /// that is assigned on first access.
+    pub fn alloc_engine_index(&self) -> usize {
+        static ALLOCATOR: AtomicUsize = AtomicUsize::new(0);
+        thread_local! {
+            static THREAD_LOCAL_ALLOC: Cell<Option<usize>> = Cell::new(None);
+        }
+
+        THREAD_LOCAL_ALLOC.with(|cell| {
+            if let Some(idx) = cell.get() {
+                idx
+            } else {
+                let idx = ALLOCATOR.fetch_add(1, Ordering::Relaxed)
+                    % self.engine_count;
+                cell.set(Some(idx));
+                idx
+            }
+        })
+    }
+
     fn new_engine() -> Engine {
         let page_size: usize = 65536; // 64KB, i.e. 1 page
         let num_slots: u32 = 1024;
@@ -128,19 +151,34 @@ impl WasmtimeGlobalContext {
     }
 
     pub fn new(
+        engine_count: usize,
         instance_pre_cache: Arc<InstancePreCache>,
     ) -> WasmtimeGlobalContext {
+        // Create vector of engines
+        let engines: Vec<Engine> =
+            (0..engine_count).map(|_| Self::new_engine()).collect();
         Self {
-            engine: Self::new_engine(),
+            engines,
             instance_pre_cache,
+            engine_count,
         }
+    }
+
+    pub fn engine(&self, engine_index: usize) -> &Engine {
+        debug_assert!(engine_index < self.engine_count);
+        &self.engines[engine_index]
+    }
+
+    pub fn engine_count(&self) -> usize {
+        self.engine_count
     }
 }
 
 pub struct WasmtimeContext {
-    global_context: WasmtimeGlobalContext,
+    global_context: Arc<WasmtimeGlobalContext>,
     linker: Linker<*mut c_void>,
     contract_get_fn: ContractGetFn,
+    engine_index: usize,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -197,13 +235,15 @@ macro_rules! link_function_nargs {
 
 impl WasmtimeContext {
     fn new(
-        global_context: &WasmtimeGlobalContext,
+        global_context: &Arc<WasmtimeGlobalContext>,
         get_fn: ContractGetFn,
     ) -> WasmtimeContext {
+        let engine_index = global_context.alloc_engine_index();
         Self {
-            global_context: global_context.clone(),
-            linker: Linker::new(&global_context.engine),
+            global_context: Arc::clone(global_context),
+            linker: Linker::new(global_context.engine(engine_index)),
             contract_get_fn: get_fn,
+            engine_index,
         }
     }
 
@@ -220,7 +260,7 @@ impl WasmtimeContext {
     }
 
     pub fn engine(&self) -> &Engine {
-        &self.global_context.engine
+        self.global_context.engine(self.engine_index)
     }
 
     pub fn get_instance_pre(
@@ -228,19 +268,26 @@ impl WasmtimeContext {
         hash: &[u8; 32],
         user_context: *mut c_void,
     ) -> Result<Option<Arc<InstancePre<*mut c_void>>>, SystemErrorCode> {
-        if let Some(instance_pre) =
-            self.global_context.instance_pre_cache.get(hash)
+        // Validate engine_index
+        if self.engine_index >= self.global_context.engine_count() {
+            return Err(SystemErrorCode::kSystemUnrecoverable);
+        }
+        // Check cache for this engine's InstancePre
+        if let Some(instance_pre) = self
+            .global_context
+            .instance_pre_cache
+            .get(hash, self.engine_index)
         {
             return Ok(Some(instance_pre));
         }
-        // otherwise compile the module and cache it
+        // otherwise compile the module and cache it for this engine
         let bytes = unsafe { self.fetch_contract(user_context, hash)? };
         if bytes.is_none() {
             return Ok(None);
         }
         let bytes = bytes.unwrap();
-        let linker = self.linker();
-        let module = Module::new(linker.engine(), bytes)
+        let engine = self.engine();
+        let module = Module::new(engine, bytes)
             .inspect_err(|_e| debug_log!(eprintln!("Module new error: {_e}")))
             .map_err(|_e| SystemErrorCode::kSystemUnrecoverable)?;
 
@@ -274,9 +321,11 @@ impl WasmtimeContext {
                 }
             });
 
-        self.global_context
-            .instance_pre_cache
-            .put(hash, instance_pre.clone());
+        self.global_context.instance_pre_cache.put(
+            hash,
+            self.engine_index,
+            instance_pre.clone(),
+        );
 
         return Ok(Some(instance_pre));
     }
@@ -347,8 +396,8 @@ impl WasmtimeContext {
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        let engine = &self.global_context.engine;
-        Module::validate(&engine, contract_data).is_ok()
+        let engine = self.engine();
+        Module::validate(engine, contract_data).is_ok()
         // TODO(geoff): consider validating that contract memory exports are good and no start function
     }
 
@@ -457,11 +506,16 @@ pub unsafe extern "C" fn wasmtime_link_nargs(
 /// # Safety
 /// Creates a global context that can be shared across threads.
 /// Global context is threadsafe.
+/// engine_count must be greater than 0.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
-    let instance_pre_cache = Arc::new(InstancePreCache::new());
-    let b = Box::new(WasmtimeGlobalContext::new(instance_pre_cache));
-    unsafe { core::mem::transmute(Box::into_raw(b)) }
+pub unsafe extern "C" fn new_wasmtime_global_context(
+    engine_count: usize,
+) -> *mut c_void {
+    debug_assert!(engine_count > 0);
+    let instance_pre_cache = Arc::new(InstancePreCache::new(engine_count));
+    let global_context =
+        Arc::new(WasmtimeGlobalContext::new(engine_count, instance_pre_cache));
+    unsafe { core::mem::transmute(Box::into_raw(Box::new(global_context))) }
 }
 
 /// # Safety
@@ -471,7 +525,7 @@ pub unsafe extern "C" fn new_wasmtime_global_context() -> *mut c_void {
 pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
     debug_assert!(!p.is_null());
 
-    let context: *mut WasmtimeGlobalContext =
+    let context: *mut Arc<WasmtimeGlobalContext> =
         unsafe { core::mem::transmute(p) };
 
     unsafe { drop(Box::from_raw(context)) };
@@ -482,6 +536,7 @@ pub unsafe extern "C" fn free_wasmtime_global_context(p: *mut c_void) {
 /// global_context must not be nullptr and must have been created by new_wasmtime_global_context.
 /// module_cache can be nullptr, in which case no module cache is used.
 /// module_cache must outlive WasmtimeContext.
+/// Engine index is allocated automatically using a thread-local atomic pattern.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmtime_context(
     get_fn: ContractGetFn,
@@ -489,8 +544,8 @@ pub unsafe extern "C" fn new_wasmtime_context(
 ) -> *mut c_void {
     debug_assert!(!global_context.is_null());
 
-    let global_context: &WasmtimeGlobalContext = unsafe {
-        &*core::mem::transmute::<*mut c_void, *mut WasmtimeGlobalContext>(
+    let global_context: &Arc<WasmtimeGlobalContext> = unsafe {
+        &*core::mem::transmute::<*mut c_void, *mut Arc<WasmtimeGlobalContext>>(
             global_context,
         )
     };
