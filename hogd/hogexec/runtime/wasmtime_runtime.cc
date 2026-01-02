@@ -97,12 +97,25 @@ WasmtimeGlobalContext::~WasmtimeGlobalContext()
   }
 }
 
+WasmtimeGlobalContext &
+WasmtimeGlobalContext::operator=(WasmtimeGlobalContext &&other) noexcept
+{
+  if (this == &other) {
+    return *this;
+  }
+  if (global_context_ptr_ != nullptr) {
+    free_wasmtime_global_context(global_context_ptr_);
+  }
+
+  global_context_ptr_ = other.global_context_ptr_;
+  other.global_context_ptr_ = nullptr;
+  return *this;
+}
+
 WasmtimeContext::WasmtimeContext(WasmtimeGlobalContext &global_context)
 {
   wasmtime_context_ptr_ = new_wasmtime_context(&wasmtime_contract_get_fn,
                                                global_context.get_inner());
-  // engine_index is now allocated internally by Rust
-  engine_index_ = 0; // Not used anymore, but kept for compatibility
 }
 
 WasmtimeContext::~WasmtimeContext()
@@ -161,18 +174,17 @@ WasmtimeContext::verify_contract(Contract const &contract) const
 }
 
 bool
-WasmtimeContext::link_fn_nargs(std::string_view module_name,
-                               std::string_view fn_name, void *fn_ptr,
-                               uint8_t nargs)
+WasmtimeGlobalContext::link_fn_nargs(std::string_view module_name,
+                                     std::string_view fn_name, void *fn_ptr,
+                                     uint8_t nargs)
 {
-  assert(wasmtime_context_ptr_ != nullptr);
-  return wasmtime_link_nargs(wasmtime_context_ptr_,
-                             reinterpret_cast<uint8_t const *>(
-                                 module_name.data()),
-                             static_cast<uint32_t>(module_name.size()),
-                             reinterpret_cast<uint8_t const *>(fn_name.data()),
-                             static_cast<uint32_t>(fn_name.size()), fn_ptr,
-                             nargs);
+  assert(global_context_ptr_ != nullptr);
+  return wasmtime_global_link_nargs(
+      global_context_ptr_,
+      reinterpret_cast<uint8_t const *>(module_name.data()),
+      static_cast<uint32_t>(module_name.size()),
+      reinterpret_cast<uint8_t const *>(fn_name.data()),
+      static_cast<uint32_t>(fn_name.size()), fn_ptr, nargs);
 }
 
 std::span<std::byte>

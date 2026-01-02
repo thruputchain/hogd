@@ -54,7 +54,18 @@ impl WasmtimeRuntime {
     ) -> Option<WasmtimeRuntime> {
         let instance_pre = context.get_instance_pre(hash, userctx).unwrap()?;
         let mut store = Store::new(context.engine(), userctx);
-        let instance = instance_pre.instantiate(&mut store).unwrap();
+        let instance = match instance_pre.instantiate(&mut store) {
+            Ok(instance) => instance,
+            Err(e) => {
+                if let Some(trap_code) = e.downcast_ref::<wasmtime::Trap>() {
+                    if *trap_code == wasmtime::Trap::OutOfFuel {
+                        return None;
+                    }
+                }
+                eprintln!("Error instantiating store: {e:?}");
+                panic!("Error instantiating store: {e:?}");
+            }
+        };
         Some(Self { store, instance })
     }
 

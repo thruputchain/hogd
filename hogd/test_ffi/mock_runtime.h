@@ -36,9 +36,6 @@ public:
       base_context_(std::move(base_context))
   {}
 
-  bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
-                     void *fn_ptr, uint8_t nargs) override;
-
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContractHash const &deployed_contract_hash,
                    SystemCallHandler *syscall_handler,

@@ -90,12 +90,6 @@ public:
   }
 
 private:
-  bool link_fn_nargs(std::string_view /*unused*/, std::string_view /*unused*/,
-                     void * /*unused*/, uint8_t /*unused*/) override
-  {
-    return true;
-  }
-
   const std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
 };
 

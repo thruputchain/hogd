@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall_error.hh"
 
 namespace hogd {
@@ -101,7 +100,7 @@ reentrance(HostCallContext * /*unused*/)
 
 } // namespace
 
-class WasmiErrorHandlingTest : public ::testing::Test,
+class WasmiErrorHandlingTest : public ::testing::TestWithParam<WasmEngine>,
                                public WasmTestFramework {
 protected:
   void SetUp() override
@@ -109,7 +108,6 @@ protected:
     contract_.contract_type(ContractType::kWasmi);
     contract_.wasmi_contract() =
         test::load_wasm_from_file("test_error_handling.wasm");
-    context_.link_fn("test", "good_call", &good_call);
 
     deployed_contract_hash_ = DeployedContractHash{
         .hash = sha256(contract_),
@@ -119,27 +117,28 @@ protected:
     };
 
     make_syscall_handler(contract_);
+    setup_wasm_context(GetParam());
+    link_fn("test", "good_call", &good_call);
   }
 
   Contract contract_;
-  WasmiContext context_;
   DeployedContractHash deployed_contract_hash_;
 };
 
-TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
+TEST_P(WasmiErrorHandlingTest, UnlinkedFn)
 {
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_TRUE(runtime.value() == nullptr);
 }
 
 // make sure we don't break if errors do get thrown
-TEST_F(WasmiErrorHandlingTest, RuntimeError)
+TEST_P(WasmiErrorHandlingTest, RuntimeError)
 {
-  context_.link_fn("test", "external_call", &throw_runtime_error);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_runtime_error);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
@@ -150,11 +149,11 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
             InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
-TEST_F(WasmiErrorHandlingTest, ExitHandling)
+TEST_P(WasmiErrorHandlingTest, ExitHandling)
 {
-  context_.link_fn("test", "external_call", &exit_call);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &exit_call);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -164,11 +163,11 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
   EXPECT_FALSE(res.is_root_success());
 }
 
-TEST_F(WasmiErrorHandlingTest, HostError)
+TEST_P(WasmiErrorHandlingTest, HostError)
 {
-  context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_unrecoverable_host_error);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -178,11 +177,11 @@ TEST_F(WasmiErrorHandlingTest, HostError)
             InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
-TEST_F(WasmiErrorHandlingTest, AbortTransaction)
+TEST_P(WasmiErrorHandlingTest, AbortTransaction)
 {
-  context_.link_fn("test", "external_call", &throw_abort_transaction);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_abort_transaction);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -192,11 +191,11 @@ TEST_F(WasmiErrorHandlingTest, AbortTransaction)
             InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
 }
 
-TEST_F(WasmiErrorHandlingTest, ValidationError)
+TEST_P(WasmiErrorHandlingTest, ValidationError)
 {
-  context_.link_fn("test", "external_call", &throw_validation_error);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_validation_error);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -207,11 +206,11 @@ TEST_F(WasmiErrorHandlingTest, ValidationError)
             InvokeError{InvokeErrorCode::kInvokeValidationFailure});
 }
 
-TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
+TEST_P(WasmiErrorHandlingTest, OtherWeirdError)
 {
-  context_.link_fn("test", "external_call", &throw_bad_alloc);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_bad_alloc);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -223,12 +222,12 @@ TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
             InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
-TEST_F(WasmiErrorHandlingTest, WasmError)
+TEST_P(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
-  context_.link_fn("test", "external_call", &good_call);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &good_call);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -244,12 +243,12 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
             InvokeError{InvokeErrorCode::kInvokeDeterministic});
 }
 
-TEST_F(WasmiErrorHandlingTest, NonexistFn)
+TEST_P(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
-  context_.link_fn("test", "external_call", &good_call);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &good_call);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -265,11 +264,11 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
             InvokeError{InvokeErrorCode::kInvokeDeterministic});
 }
 
-TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
+TEST_P(WasmiErrorHandlingTest, FollowBadWithGood)
 {
-  context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_unrecoverable_host_error);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -285,11 +284,11 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(WasmiErrorHandlingTest, CheckReturn)
+TEST_P(WasmiErrorHandlingTest, CheckReturn)
 {
-  context_.link_fn("test", "external_call", &return_syscall);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &return_syscall);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -299,11 +298,11 @@ TEST_F(WasmiErrorHandlingTest, CheckReturn)
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
+TEST_P(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
-  context_.link_fn("test", "external_call", &throw_bad_alloc);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &throw_bad_alloc);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -319,11 +318,11 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(WasmiErrorHandlingTest, Reentrance)
+TEST_P(WasmiErrorHandlingTest, Reentrance)
 {
-  context_.link_fn("test", "external_call", &reentrance);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &reentrance);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -338,7 +337,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
   EXPECT_TRUE(reentrance_hit);
 }
 
-TEST_F(WasmiErrorHandlingTest, NullHandling)
+TEST_P(WasmiErrorHandlingTest, NullHandling)
 {
   Contract null_contract(ContractType::kWasmi);
   make_syscall_handler(null_contract);
@@ -347,34 +346,34 @@ TEST_F(WasmiErrorHandlingTest, NullHandling)
       .contract_size = 0,
       .contract_type = ContractType::kWasmi,
   };
-  auto runtime = context_.make_new_runtime(null_deployed_contract_hash,
-                                           syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(null_deployed_contract_hash,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
 }
 
-TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
+TEST_P(WasmiErrorHandlingTest, NullLinkHandling)
 {
   // The WASM standard accepts empty strings, but we ban that out to keep the
   // ffi handling simpler (meaning we never have a reason to pass a null string
   // across FFI).
-  EXPECT_FALSE(context_.link_fn("", "good_call", &good_call));
-  EXPECT_FALSE(context_.link_fn("test", "", &good_call));
-  EXPECT_TRUE(context_.link_fn("foo", "good_call", &good_call));
+  EXPECT_FALSE(link_fn("", "good_call", &good_call));
+  EXPECT_FALSE(link_fn("test", "", &good_call));
+  EXPECT_TRUE(link_fn("foo", "good_call", &good_call));
 
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
 }
 
-TEST_F(WasmiErrorHandlingTest, OutOfGas)
+TEST_P(WasmiErrorHandlingTest, OutOfGas)
 {
-  context_.link_fn("test", "external_call", &consume_too_much_gas);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &consume_too_much_gas);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -390,11 +389,11 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
 
-TEST_F(WasmiErrorHandlingTest, NoGas)
+TEST_P(WasmiErrorHandlingTest, NoGas)
 {
-  context_.link_fn("test", "external_call", &good_call);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &good_call);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -405,11 +404,11 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
 
-TEST_F(WasmiErrorHandlingTest, Spin)
+TEST_P(WasmiErrorHandlingTest, Spin)
 {
-  context_.link_fn("test", "external_call", &good_call);
-  auto runtime = context_.make_new_runtime(deployed_contract_hash_,
-                                           syscall_handler_.get(), true);
+  link_fn("test", "external_call", &good_call);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 syscall_handler_.get(), true);
 
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
@@ -419,5 +418,13 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
+
+INSTANTIATE_TEST_SUITE_P(WasmEngines, WasmiErrorHandlingTest,
+                         ::testing::Values(WasmEngine::kWasmi,
+                                           WasmEngine::kWasmtime),
+                         [](const ::testing::TestParamInfo<WasmEngine> &info) {
+                           return WasmTestFramework::engine_to_string(
+                               info.param);
+                         });
 
 } // namespace hogd

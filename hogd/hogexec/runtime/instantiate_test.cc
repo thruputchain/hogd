@@ -6,18 +6,15 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/wasmtime_runtime.h"
-
 namespace hogd {
 
-class InstantiateTest : public ::testing::Test, public WasmTestFramework {
+class InstantiateTest : public ::testing::TestWithParam<WasmEngine>,
+                        public WasmTestFramework {
 protected:
-  WasmtimeGlobalContext wasmtime_global_context_ = WasmtimeGlobalContext(1);
-  WasmtimeContext wasmtime_context_ = WasmtimeContext(wasmtime_global_context_);
+  void SetUp() override { setup_wasm_context(GetParam()); }
 };
 
-TEST_F(InstantiateTest, MissingImportFail)
+TEST_P(InstantiateTest, MissingImportFail)
 {
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
@@ -28,14 +25,13 @@ TEST_F(InstantiateTest, MissingImportFail)
           static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
       .contract_type = ContractType::kWasmi,
   };
-  auto runtime =
-      wasmtime_context_.make_new_runtime(deployed_contract_hash,
-                                         syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
 
-TEST_F(InstantiateTest, InstantiateFail)
+TEST_P(InstantiateTest, InstantiateFail)
 {
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
@@ -47,14 +43,13 @@ TEST_F(InstantiateTest, InstantiateFail)
           static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
       .contract_type = ContractType::kWasmi,
   };
-  auto runtime =
-      wasmtime_context_.make_new_runtime(deployed_contract_hash,
-                                         syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
 
-TEST_F(InstantiateTest, InstantiateUnexportedMemory)
+TEST_P(InstantiateTest, InstantiateUnexportedMemory)
 {
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() =
@@ -66,15 +61,14 @@ TEST_F(InstantiateTest, InstantiateUnexportedMemory)
           static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
       .contract_type = ContractType::kWasmi,
   };
-  auto runtime =
-      wasmtime_context_.make_new_runtime(deployed_contract_hash,
-                                         syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
 
   EXPECT_FALSE(runtime.value());
 }
 
-TEST_F(InstantiateTest, InstantiateNoStart)
+TEST_P(InstantiateTest, InstantiateNoStart)
 {
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() = test::load_wasm_from_file("test_no_start.wasm");
@@ -85,11 +79,18 @@ TEST_F(InstantiateTest, InstantiateNoStart)
           static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
       .contract_type = ContractType::kWasmi,
   };
-  auto runtime =
-      wasmtime_context_.make_new_runtime(deployed_contract_hash,
-                                         syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash,
+                                                 syscall_handler_.get(), true);
   ASSERT_TRUE(runtime.has_value());
   EXPECT_FALSE(runtime.value());
 }
+
+INSTANTIATE_TEST_SUITE_P(WasmEngines, InstantiateTest,
+                         ::testing::Values(WasmEngine::kWasmi,
+                                           WasmEngine::kWasmtime),
+                         [](const ::testing::TestParamInfo<WasmEngine> &info) {
+                           return WasmTestFramework::engine_to_string(
+                               info.param);
+                         });
 
 } // namespace hogd

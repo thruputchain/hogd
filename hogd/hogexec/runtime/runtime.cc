@@ -15,31 +15,48 @@
 
 namespace hogd {
 
+// create RuntimeContext with no imported functions
 std::unique_ptr<RuntimeContext>
 make_runtime_context(RuntimeEngine engine)
 {
   switch (engine) {
   case RuntimeEngine::kWasmi:
   {
+    // For now, wasmtime is used even when engine is kWasmi
     static WasmtimeGlobalContext wasmtime_global_context =
         WasmtimeGlobalContext(8);
     return std::make_unique<WasmtimeContext>(wasmtime_global_context);
-    // return std::make_unique<WasmiContext>(&module_cache);
-    break;
   }
   default:
     return nullptr;
   }
 }
 
+namespace {
+WasmtimeGlobalContext
+make_wasmtime_hogexec_global_context()
+{
+  auto context = WasmtimeGlobalContext(8);
+  auto ok = context.link_fn("marmot", "syscall", &syscall_entry);
+  CHECK(ok);
+  return context;
+}
+} // namespace
+
 std::unique_ptr<RuntimeContext>
 make_hogexec_wasm_context(RuntimeEngine engine)
 {
-  std::unique_ptr<RuntimeContext> out = make_runtime_context(engine);
-  if (out) {
-    out->link_fn("marmot", "syscall", &syscall_entry);
+  switch (engine) {
+  case RuntimeEngine::kWasmi:
+  {
+    // For now, wasmtime is used even when engine is kWasmi
+    static WasmtimeGlobalContext wasmtime_global_context =
+        make_wasmtime_hogexec_global_context();
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
   }
-  return out;
+  default:
+    return nullptr;
+  }
 }
 
 InvokeResult
