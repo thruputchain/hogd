@@ -68,7 +68,18 @@ fn check_no_start(module: &Module) -> bool {
 
 pub struct WasmtimeGlobalContext {
     engines: Vec<Engine>,
-    instance_pre_cache: Arc<InstancePreCache>,
+    // We get slight contention (on the payments-10 benchmark, apparently around 1-2%, around 465/470K->460/455K or so)
+    // from contention on one InstancePreCache object, as compared to having one per engine.
+    // The savings is that we significantly reduce memory usage (as the number of contracts cached increases).
+    // I (geoff) made the choice to do one shared cache because
+    // (1) we already have some shared caches in hogexec (the snapshot cache), and while contention there is not insignificant,
+    // the performance impact is tolerable.
+    // (2) The performance change of having one shared cache is not extremely large on maximal contention workloads (with very few cache entries),
+    // and I am more concerned with how performance will degrade as the number of cache entries increases
+    // (and memory usage increases).
+    //
+    // But this change can be revisted if necessary.
+    instance_pre_cache: InstancePreCache,
     engine_count: usize,
     // TODO(geoff): we could stick the Linker here
 }
