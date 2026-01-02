@@ -22,10 +22,8 @@ impl InstancePreCacheEntry {
         &self,
         engine_index: usize,
     ) -> Option<Arc<InstancePre<*mut c_void>>> {
-        if engine_index >= self.instance_pres.len() {
-            return None;
-        }
-        self.instance_pres[engine_index].clone()
+        debug_assert!(engine_index < self.instance_pres.len());
+        unsafe { self.instance_pres.get_unchecked(engine_index).clone() }
     }
 
     pub fn put(
@@ -33,13 +31,8 @@ impl InstancePreCacheEntry {
         engine_index: usize,
         instance_pre: Arc<InstancePre<*mut c_void>>,
     ) {
-        if engine_index < self.instance_pres.len() {
-            self.instance_pres[engine_index] = Some(instance_pre);
-        }
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.instance_pres.iter().all(|x| x.is_some())
+        debug_assert!(engine_index < self.instance_pres.len());
+        unsafe { *self.instance_pres.get_unchecked_mut(engine_index) = Some(instance_pre) };
     }
 }
 
@@ -68,7 +61,7 @@ impl InstancePreCache {
         }
     }
 
-    pub fn get_or_create_entry(
+    fn get_or_create_entry(
         &self,
         hash: &SHA256Hash,
     ) -> synchronized_map::BucketGuard<'_, SHA256Hash, InstancePreCacheEntry>
