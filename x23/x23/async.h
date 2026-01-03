@@ -837,7 +837,7 @@ namespace detail {
 // coroutine_handle to jump to, we also return this handle.
 template<typename Promise>
 auto // either void or coroutine_handle<P>
-emulate_final_suspend(std::coroutine_handle<Promise> h) noexcept
+emulate_final_suspend(std::coroutine_handle<Promise> h)
 {
   auto a = get_awaiter(h.promise().final_suspend());
   using suspend_type = decltype(a.await_suspend(h));
