@@ -181,7 +181,7 @@ private:
     using enum accept_stat;
 
     MaybeAsync<Buf> operator()(BufViewEnd argbytes)
-    {
+    try {
       constexpr bool returns_void = std::is_void_v<return_type>;
       using dispatch_t = decltype(dispatch(argbytes));
       rpc_msg rmsg{.xid = xid_};
@@ -217,27 +217,28 @@ private:
 
         // Dispatch returned something awaitable and it's not ready,
         // so here we actually need to allocate a new coroutine frame.
-        return await_and_respond(*this, std::move(awaitable));
+        return [](ProcHandler self /* copy *this into coroutine */,
+                  auto awaitable) noexcept -> Async<Buf> {
+          try {
+            rpc_msg rmsg{.xid = self.xid_};
+            msg_set_reply_stat(&rmsg, SUCCESS);
+            if constexpr (returns_void) {
+              co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg);
+              co_return make_record(rmsg);
+            }
+            else {
+              serializes_like<return_type> auto res = co_await awaitable;
+              self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
+              co_return make_record(rmsg, res);
+            }
+          } catch (const std::exception &e) {
+            co_return self.error(e);
+          }
+        }(*this, std::move(awaitable));
       }
-    }
-
-    // Named coroutine function to avoid GCC issues with generic lambda coroutines
-    template<typename Awaitable>
-    static Async<Buf> await_and_respond(ProcHandler self, Awaitable awaitable)
-    {
-      constexpr bool returns_void = std::is_void_v<return_type>;
-      rpc_msg rmsg{.xid = self.xid_};
-      msg_set_reply_stat(&rmsg, SUCCESS);
-      if constexpr (returns_void) {
-        co_await awaitable;
-        self.d_.logger_.template log_server<ProcMeta>(rmsg);
-        co_return make_record(rmsg);
-      }
-      else {
-        serializes_like<return_type> auto res = co_await awaitable;
-        self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
-        co_return make_record(rmsg, res);
-      }
+    } catch (std::exception &e) {
+      return error(e);
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
@@ -324,12 +325,6 @@ protected:
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
   Detached reader(SLOC_DECL0);
-  // Named coroutine to avoid GCC issues with generic lambda coroutines
-  template<typename Awaitable>
-  Detached write_async_response(Awaitable awaitable)
-  {
-    cp_->dwrite(fd_, co_await awaitable);
-  }
   virtual void log_message(std::string msg) = 0;
 
 private:

@@ -127,20 +127,14 @@ RpcStreamImpl::reader(SLOC_ARG0)
       co_return;
     }
     rpc_msg msg;
-    // Avoid try-catch in coroutine body - use expected instead
-    auto deser_result = [&]() noexcept -> std::expected<size_t, std::string> {
-      try {
-        return deserialize_from(&msg, b);
-      } catch (XdrException &e) {
-        return std::unexpected{std::string(e.what())};
-      }
-    }();
-    if (!deser_result) {
-      debug("RpcStreamImpl deserialization: {}", deser_result.error());
+    size_t hdrbytes;
+    try {
+      hdrbytes = deserialize_from(&msg, b);
+    } catch (XdrException &e) {
+      debug("RpcStreamImpl deserialization: {}", e.what());
       fail();
       break;
     }
-    size_t hdrbytes = *deser_result;
     if (msg.body.mtype() == REPLY) {
       auto cs = cstate_.take();
       auto it = cs->xidmap_.find(msg.xid);
@@ -167,7 +161,9 @@ RpcStreamImpl::reader(SLOC_ARG0)
         if (awaiter.await_ready())
           cp_->dwrite(fd_, awaiter.await_resume());
         else
-          write_async_response(std::move(awaitable));
+          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+            self->cp_->dwrite(self->fd_, co_await awaitable);
+          }(*this, std::move(awaitable));
       }
       else
         send_msg(res);
