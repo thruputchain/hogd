@@ -134,10 +134,12 @@ ERC20ExperimentState::generate_experiment()
   initialization_txs.emplace_back(std::move(unfurl_txs));
   initialization_txs.emplace_back(std::move(mint_txs));
 
-  return LoadgenSuccessResult{
-      .genesis_configuration = builder.build(),
-      .initialization_txs = std::move(initialization_txs),
-  };
+  // Build result step by step to isolate potential GCC -O3 bug
+  auto genesis_config = builder.build();
+  LoadgenSuccessResult result;
+  result.genesis_configuration = std::move(genesis_config);
+  result.initialization_txs = std::move(initialization_txs);
+  return result;
 }
 
 LoadgenStatus<LoadgenExtension>
