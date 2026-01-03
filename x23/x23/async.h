@@ -282,7 +282,10 @@ public:
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
-  void unhandled_exception() { do_exception(std::current_exception()); }
+  void unhandled_exception() noexcept
+  {
+    do_exception(std::current_exception());
+  }
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
@@ -329,6 +332,7 @@ public:
         return;
     }
     x23assert(f & kException);
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Defer _c{[this] { std::destroy_at(&exception_); }};
     std::rethrow_exception(std::move(exception_));
   }
@@ -811,7 +815,7 @@ struct MapAwait {
   {
 #if X23_CORO_TRACE
     if constexpr (requires { a().await_suspend(h, sloc); })
-      a().await_suspend(h, sloc);
+      return a().await_suspend(h, sloc);
     else
 #endif // X23_CORO_TRACE
       return a().await_suspend(h);
@@ -863,7 +867,7 @@ emulate_final_suspend(std::coroutine_handle<Promise> h)
 template<typename T, typename E> struct ExpectAwait {
   std::expected<T, E> r_;
 
-  bool await_ready() { return r_.has_value(); }
+  bool await_ready() noexcept { return r_.has_value(); }
   template<typename P> auto await_suspend(std::coroutine_handle<P> h)
   {
     h.promise().return_value(std::unexpected(r_.error()));
