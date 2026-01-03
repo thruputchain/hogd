@@ -868,7 +868,7 @@ template<typename T, typename E> struct ExpectAwait {
   std::expected<T, E> r_;
 
   bool await_ready() noexcept { return r_.has_value(); }
-  template<typename P> auto await_suspend(std::coroutine_handle<P> h) noexcept
+  template<typename P> auto await_suspend(std::coroutine_handle<P> h)
   {
     h.promise().return_value(std::unexpected(r_.error()));
     return emulate_final_suspend(h);
