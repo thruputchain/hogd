@@ -19,7 +19,8 @@
 namespace hogd {
 
 namespace {
-constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 7);
+constexpr StorageCostModel kTestCostModel =
+    StorageCostModel(12000, 1, 1, 1, 7, 1234);
 
 Uniquifier
 u(BlockHeight const &height, ReplayNonce const &nonce)

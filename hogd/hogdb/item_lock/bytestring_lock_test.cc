@@ -17,7 +17,8 @@
 namespace hogd {
 
 namespace {
-constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 1);
+constexpr StorageCostModel kTestCostModel =
+    StorageCostModel(12000, 1, 1, 1, 1, 1234);
 
 OwningSpan<const std::byte>
 make_owning_span(std::vector<uint8_t> bytes)

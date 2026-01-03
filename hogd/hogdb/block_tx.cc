@@ -248,11 +248,10 @@ BlockTX::commit(WorkerPool &pool)
           return;
         }
 
-        LockContext ctx(&db_, block_height_,
-                        make_address_balance_item_key(v.first), &cost_model_);
-
-        HogDBStatus<void> tmp =
-            v.second.write_committed_change(ctx, get_trie());
+        HogDBStatus<void> tmp = v.second.write_committed_change(
+            LockContext(&db_, block_height_,
+                        make_address_balance_item_key(v.first), &cost_model_),
+            get_trie());
         if (!tmp) [[unlikely]] {
           std::scoped_lock guard(lock);
           ret = tmp;
@@ -261,7 +260,7 @@ BlockTX::commit(WorkerPool &pool)
         auto const *inner = v.second.get_inner<BalanceLock>();
         CHECK(inner != nullptr);
 
-        auto value = inner->build_result(ctx);
+        auto value = inner->get_delta();
 
         balance_deltas->push_back(
             Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});

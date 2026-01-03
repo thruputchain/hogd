@@ -14,7 +14,8 @@
 namespace hogd {
 
 namespace {
-constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 1);
+constexpr StorageCostModel kTestCostModel =
+    StorageCostModel(12000, 1, 1, 1, 1, 1234);
 
 // Helper to create a dummy LockContext for testing
 inline LockContext
@@ -224,25 +225,30 @@ TEST(BalanceLockTest, NewBalanceStorageCost)
   // cover the storage cost
   BalanceLock lock(std::nullopt);
 
+  constexpr static int128_t kBalanceStorageCost =
+      kTestCostModel.get_balance_cost();
+  ASSERT_GT(kBalanceStorageCost, 0);
+
   // Storage cost is 1234, so a delta less than that should fail
-  Balance too_small(1233);
+  Balance too_small(kBalanceStorageCost - 1);
   auto status =
       lock.try_atomic_change_lock(nullptr, &too_small, make_dummy_context());
   EXPECT_FALSE(status.has_value());
 
   // A delta equal to or greater than storage cost should succeed
-  Balance sufficient(1234);
+  Balance sufficient(kBalanceStorageCost);
   status =
       lock.try_atomic_change_lock(nullptr, &sufficient, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 
   EXPECT_EQ(lock.build_result(make_dummy_context()), 0);
 
-  // Even larger should work
+  // Adding additional is ok
   Balance larger(10000);
   status = lock.try_atomic_change_lock(nullptr, &larger, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 
+  // transfered kBalanceStorageCost + 10000 to the address, and only pay once
   EXPECT_EQ(lock.build_result(make_dummy_context()), 10000);
 }
 

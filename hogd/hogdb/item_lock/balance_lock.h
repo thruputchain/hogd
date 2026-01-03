@@ -80,6 +80,8 @@ public:
 
   int128_t build_result(LockContext const &ctx) const;
 
+  int128_t get_delta() const { return delta_bounds_.get_delta(); }
+
   // For testing only
   int128_t get_add_capacity() const { return delta_bounds_.get_add_capacity(); }
   int128_t get_sub_capacity() const { return delta_bounds_.get_sub_capacity(); }

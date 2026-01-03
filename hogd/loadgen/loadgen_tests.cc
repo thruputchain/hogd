@@ -31,9 +31,13 @@ TEST_P(LoadgenTests, EmptyGenesisConfiguration)
 
   auto bal = lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
       GenesisConfigurationLoader::kDeployContractAddress));
+  auto const *cost_model = get_default_cost_model();
   ASSERT_TRUE(bal.has_value());
+  // MockDB does not implement storage cost for balances,
+  // but in the mockdb test the cost for a balance is set as 0
   ASSERT_EQ(from_xdr(bal.value().nnint()),
-            GenesisConfigurationLoader::initial_hog_token_supply());
+            GenesisConfigurationLoader::initial_hog_token_supply() -
+                cost_model->get_balance_cost());
 }
 
 TEST_P(LoadgenTests, OneInitialConfig)

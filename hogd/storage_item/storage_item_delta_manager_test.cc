@@ -37,7 +37,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 2, 5, 100, 7);
+const StorageCostModel cost_model(12000, 2, 5, 100, 7, 0);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -1165,7 +1165,7 @@ TEST_P(DeltaManagerTest, BytestringCostUpgrade)
   InvalidStateFlag invalid_state_flag;
 
   // higher cost per byte and lower cost per item
-  StorageCostModel cost_model_2(10000, 3, 1, 1, 5);
+  StorageCostModel cost_model_2(10000, 3, 1, 1, 5, 0);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
@@ -1302,7 +1302,7 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
 
   // higher cost per item
 
-  StorageCostModel cost_model_2(14000, 2, 1, 1, 5);
+  StorageCostModel cost_model_2(14000, 2, 1, 1, 5, 0);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =

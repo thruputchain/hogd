@@ -74,7 +74,8 @@ make_test_pk_config(uint8_t value, Weight weight = 100)
       new PublicKeyConfig{.key = key, .max_weight = weight});
 }
 
-constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 1);
+constexpr StorageCostModel kTestCostModel =
+    StorageCostModel(12000, 1, 1, 1, 1, 1234);
 
 // Helper to create a dummy LockContext for testing
 inline LockContext

@@ -73,6 +73,7 @@ get_default_cost_model_xdr()
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .auth_per_key_cost = to_xdr(int128_t{1111}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+      .balance_cost = to_xdr(int128_t{1234}),
   };
 }
 
