@@ -218,7 +218,7 @@ private:
         // Dispatch returned something awaitable and it's not ready,
         // so here we actually need to allocate a new coroutine frame.
         return [](ProcHandler self /* copy *this into coroutine */,
-                  auto awaitable) noexcept -> Async<Buf> {
+                  auto awaitable) -> Async<Buf> {
           try {
             rpc_msg rmsg{.xid = self.xid_};
             msg_set_reply_stat(&rmsg, SUCCESS);

@@ -811,7 +811,7 @@ struct MapAwait {
   {
 #if X23_CORO_TRACE
     if constexpr (requires { a().await_suspend(h, sloc); })
-      a().await_suspend(h, sloc);
+      return a().await_suspend(h, sloc);
     else
 #endif // X23_CORO_TRACE
       return a().await_suspend(h);
@@ -863,8 +863,8 @@ emulate_final_suspend(std::coroutine_handle<Promise> h) noexcept
 template<typename T, typename E> struct ExpectAwait {
   std::expected<T, E> r_;
 
-  bool await_ready() { return r_.has_value(); }
-  template<typename P> auto await_suspend(std::coroutine_handle<P> h)
+  bool await_ready() noexcept { return r_.has_value(); }
+  template<typename P> auto await_suspend(std::coroutine_handle<P> h) noexcept
   {
     h.promise().return_value(std::unexpected(r_.error()));
     return emulate_final_suspend(h);
