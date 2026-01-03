@@ -217,6 +217,10 @@ private:
 
         // Dispatch returned something awaitable and it's not ready,
         // so here we actually need to allocate a new coroutine frame.
+        // Note: The try-catch here is necessary to convert exceptions
+        // from async handlers into RPC error responses. If this causes
+        // issues with GCC, consider wrapping awaitable in a helper that
+        // catches exceptions outside the coroutine machinery.
         return [](ProcHandler self /* copy *this into coroutine */,
                   auto awaitable) -> Async<Buf> {
           try {

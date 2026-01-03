@@ -127,14 +127,20 @@ RpcStreamImpl::reader(SLOC_ARG0)
       co_return;
     }
     rpc_msg msg;
-    size_t hdrbytes;
-    try {
-      hdrbytes = deserialize_from(&msg, b);
-    } catch (XdrException &e) {
-      debug("RpcStreamImpl deserialization: {}", e.what());
+    // Avoid try-catch in coroutine body - use expected instead
+    auto deser_result = [&]() noexcept -> std::expected<size_t, std::string> {
+      try {
+        return deserialize_from(&msg, b);
+      } catch (XdrException &e) {
+        return std::unexpected{std::string(e.what())};
+      }
+    }();
+    if (!deser_result) {
+      debug("RpcStreamImpl deserialization: {}", deser_result.error());
       fail();
       break;
     }
+    size_t hdrbytes = *deser_result;
     if (msg.body.mtype() == REPLY) {
       auto cs = cstate_.take();
       auto it = cs->xidmap_.find(msg.xid);

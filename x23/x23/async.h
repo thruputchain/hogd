@@ -330,7 +330,7 @@ public:
     }
     x23assert(f & kException);
     Defer _c{[this] { std::destroy_at(&exception_); }};
-    std::rethrow_exception(std::move(exception_));
+    std::rethrow_exception(exception_);
   }
 
   //
