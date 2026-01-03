@@ -2121,7 +2121,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto const *cost_model = get_default_cost_model();
   auto str_hello = make_bytestring("hello");
-  uint128_t write_cost = cost_model->get_bytestring_cost(str_hello.size());
+  int128_t write_cost = cost_model->get_bytestring_cost(str_hello.size());
   ASSERT_GT(write_cost, 0);
 
   // Sender contract
@@ -2134,9 +2134,11 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              auto native_token_client =
                  ContractTraitClient<itc_erc20::ERC20>(token_contract_addr);
 
+             uint128_t amount = write_cost;
+
              auto [r_transfer, g_transfer] =
                  native_token_client.invoke<"transfer">(handler, receiver_addr,
-                                                        to_xdr(write_cost));
+                                                        to_xdr(amount));
 
              if (!r_transfer.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -2207,6 +2209,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Grant initial tokens to sender
   setup_grant_storage_token(sender_addr, write_cost);
+  setup_grant_storage_token(receiver_addr, 0);
 
   // Invoke the sender contract
   auto handler = make_new_system_call_handler(
@@ -2258,8 +2261,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   if (GetParam() == TestDB::kHogDB) {
     auto hogs_transferred = get_hogs_transferred(1);
     ASSERT_EQ(hogs_transferred.size(), 2);
-    ASSERT_EQ(hogs_transferred[sender_addr], -write_cost);
-    ASSERT_EQ(hogs_transferred[receiver_addr], 0);
+    ASSERT_EQ(hogs_transferred.at(sender_addr), -write_cost);
+    ASSERT_EQ(hogs_transferred.at(receiver_addr), 0);
   }
 }
 

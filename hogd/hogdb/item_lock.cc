@@ -9,10 +9,12 @@
 #include <type_traits>
 #include <variant>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
@@ -23,7 +25,6 @@
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
 
 namespace hogd {
@@ -45,13 +46,12 @@ snapshot_cost_transform(int128_t local_cost, int128_t snapshot_cost,
 HogDBStatus<int128_t>
 ItemLock::try_atomic_change_lock(const ItemChange *before,
                                  const ItemChange *after,
-                                 const StorageCostModel *cost_model,
                                  const LockContext &ctx)
 {
   auto lock_state = lock_state_.load(std::memory_order_relaxed);
 
   if (lock_state == kFinalized) {
-    return handle_try_atomic_from_finalized(before, after, cost_model, ctx);
+    return handle_try_atomic_from_finalized(before, after, ctx);
   }
 
   if (lock_state == kFinalizedPermamentExclusiveLock) {
@@ -63,12 +63,18 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
 
   if (before == nullptr) {
     assert(after != nullptr);
-    return handle_uncommitted_try_new_lock(after, cost_model, ctx, lock);
+
+    if constexpr (is_debug_build()) {
+      if (ctx.key.is_address_balance()) {
+        CHECK(after->is_balance());
+      }
+    }
+    return handle_uncommitted_try_new_lock(after, ctx, lock);
   }
 
   if (after == nullptr) {
     assert(before != nullptr);
-    handle_release_uncommitted_lock(before, cost_model, ctx, lock);
+    handle_release_uncommitted_lock(before, ctx, lock);
     // this value should be ignored, so returning a value that is obviously
     // invalid
     return std::numeric_limits<int128_t>::max();
@@ -78,13 +84,11 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   assert(pending_refcount_ > 0);
   // No need to modify pending_refcount_ here -- we already have a reference and
   // don't need to release it, as both before and after are non-null.
-  return handle_try_atomic_from_pending(before, after, cost_model, ctx, lock);
+  return handle_try_atomic_from_pending(before, after, ctx, lock);
 }
 
 int128_t
-ItemLock::commit_change(const ItemChange &change,
-                        const StorageCostModel *cost_model,
-                        const LockContext &ctx)
+ItemLock::commit_change(const ItemChange &change, const LockContext &ctx)
 {
   bool did_finalize = false;
 
@@ -120,8 +124,7 @@ ItemLock::commit_change(const ItemChange &change,
               using change_type = typename lock_t::change_type;
               auto const *inner = change.get_inner<change_type>();
               assert(inner != nullptr);
-              auto r =
-                  lock.try_atomic_change_lock(nullptr, inner, cost_model, ctx);
+              auto r = lock.try_atomic_change_lock(nullptr, inner, ctx);
               CHECK(r.has_value());
             }
           },
@@ -158,7 +161,7 @@ ItemLock::commit_change(const ItemChange &change,
           auto const *inner = change.get_inner<typename lock_t::change_type>();
           assert(inner != nullptr);
           return lock.commit_change(did_finalize, snapshot_cost_, *inner,
-                                    cost_model);
+                                    ctx.cost_model);
         }
       },
       lock_contents_);
@@ -167,7 +170,6 @@ ItemLock::commit_change(const ItemChange &change,
 HogDBStatus<int128_t>
 ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
                                            const ItemChange *after,
-                                           const StorageCostModel *cost_model,
                                            const LockContext &ctx)
 {
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -202,8 +204,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
               return HogDBError{HogDBCode::kConflict};
             }
           }
-          return lock.try_atomic_change_lock(before_inner, after_inner,
-                                             cost_model, ctx);
+          return lock.try_atomic_change_lock(before_inner, after_inner, ctx);
         }
       },
       lock_contents_);
@@ -221,8 +222,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
 // is nullptr.
 HogDBStatus<int128_t>
 ItemLock::handle_try_atomic_from_pending(
-    const ItemChange *before, const ItemChange *after,
-    const StorageCostModel *cost_model, const LockContext &ctx,
+    const ItemChange *before, const ItemChange *after, const LockContext &ctx,
     std::unique_lock<x23::TestLock> const &ul)
 {
   assert(!std::holds_alternative<std::monostate>(lock_contents_));
@@ -240,7 +240,7 @@ ItemLock::handle_try_atomic_from_pending(
 
     if (after->is_exclusive()) {
       auto res = std::get<ExclusiveLock>(lock_contents_)
-                     .try_atomic_change_lock(before, after, cost_model, ctx);
+                     .try_atomic_change_lock(before, after, ctx);
       if (!res.has_value()) {
         return res;
       }
@@ -266,8 +266,7 @@ ItemLock::handle_try_atomic_from_pending(
             using change_type = typename lock_t::change_type;
             auto const *after_inner = after->get_inner<change_type>();
             assert(after_inner != nullptr);
-            auto res = lock.try_atomic_change_lock(nullptr, after_inner,
-                                                   cost_model, ctx);
+            auto res = lock.try_atomic_change_lock(nullptr, after_inner, ctx);
             assert(res.has_value());
             return res.value();
           }
@@ -301,7 +300,7 @@ ItemLock::handle_try_atomic_from_pending(
     set_exclusive_lock(ul);
 
     auto res = std::get<ExclusiveLock>(lock_contents_)
-                   .try_atomic_change_lock(before, after, cost_model, ctx);
+                   .try_atomic_change_lock(before, after, ctx);
     if (!res.has_value()) {
       return res;
     }
@@ -336,8 +335,7 @@ ItemLock::handle_try_atomic_from_pending(
             }
           }
 
-          return lock.try_atomic_change_lock(before_inner, after_inner,
-                                             cost_model, ctx);
+          return lock.try_atomic_change_lock(before_inner, after_inner, ctx);
         }
       },
       lock_contents_);
@@ -354,7 +352,6 @@ ItemLock::handle_try_atomic_from_pending(
 
 HogDBStatus<int128_t>
 ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
-                                          const StorageCostModel *cost_model,
                                           const LockContext &ctx,
                                           std::unique_lock<x23::TestLock> &ul)
 {
@@ -364,8 +361,7 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
     prepare_lock_contents(after, ul);
   }
 
-  auto res =
-      handle_try_atomic_from_pending(nullptr, after, cost_model, ctx, ul);
+  auto res = handle_try_atomic_from_pending(nullptr, after, ctx, ul);
 
   if (!res.has_value()) {
     // failed to acquire lock
@@ -381,8 +377,8 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
 
 void
 ItemLock::handle_release_uncommitted_lock(
-    const ItemChange *before, const StorageCostModel *cost_model,
-    const LockContext &ctx, std::unique_lock<x23::TestLock> const &ul)
+    const ItemChange *before, const LockContext &ctx,
+    std::unique_lock<x23::TestLock> const &ul)
 {
   assert(ul.owns_lock());
   assert(pending_refcount_ > 0);
@@ -393,8 +389,7 @@ ItemLock::handle_release_uncommitted_lock(
     return;
   }
 
-  auto res =
-      handle_try_atomic_from_pending(before, nullptr, cost_model, ctx, ul);
+  auto res = handle_try_atomic_from_pending(before, nullptr, ctx, ul);
   if (!res.has_value()) {
     panic("failed to release uncommitted lock");
   }
@@ -430,6 +425,12 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
     lock_contents_.emplace<NNInt128Lock>(
         after->get_raw_nnint128().value().base());
     // NOLINTEND(bugprone-unchecked-optional-access)
+    return;
+  }
+
+  if (after->is_balance()) {
+    CHECK(padding_type_ == kItemLockCacheDataBalance);
+    lock_contents_.emplace<BalanceLock>(balance_base_);
     return;
   }
 

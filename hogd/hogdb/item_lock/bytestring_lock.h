@@ -6,8 +6,6 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -26,10 +24,9 @@ public:
   // On success, returns a (deterministic) upper bound on the storage cost
   // required to commit the after value. Is a no-op on failure.
   // If after is nullptr, the storage cost output should be ignored.
-  HogDBStatus<int128_t>
-  try_atomic_change_lock(const Bytes *before, const Bytes *after,
-                         const StorageCostModel *cost_model,
-                         const LockContext &ctx);
+  HogDBStatus<int128_t> try_atomic_change_lock(const Bytes *before,
+                                               const Bytes *after,
+                                               const LockContext &ctx);
 
   int128_t get_storage_cost_of_committed_value(
       const StorageCostModel *cost_model) const noexcept

@@ -84,8 +84,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
 HogDBStatus<int128_t>
 ReplayCacheLock::try_atomic_change_lock(
     const PointerItem<ReplayCacheIt> *before,
-    const PointerItem<ReplayCacheIt> *after, const StorageCostModel *cost_model,
-    const LockContext &ctx)
+    const PointerItem<ReplayCacheIt> *after, const LockContext &ctx)
 {
   // No single transaction is allowed to add to the replay cache twice.
   if (before != nullptr && after != nullptr) {
@@ -146,7 +145,7 @@ ReplayCacheLock::try_atomic_change_lock(
     }
   }
 
-  return cost_model->get_replay_cache_cost(meta_->size + 1);
+  return ctx.cost_model->get_replay_cache_cost(meta_->size + 1);
 }
 
 int128_t

@@ -2,8 +2,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -17,9 +15,10 @@ public:
 
   DeletionLock() = default;
 
-  static HogDBStatus<int128_t> try_atomic_change_lock(
-      const Deletion * /*unused*/, const Deletion * /*unused*/,
-      const StorageCostModel * /*unused*/, const LockContext & /*ctx*/)
+  static HogDBStatus<int128_t>
+  try_atomic_change_lock(const Deletion * /*unused*/,
+                         const Deletion * /*unused*/,
+                         const LockContext & /*ctx*/)
   {
     return {0};
   }

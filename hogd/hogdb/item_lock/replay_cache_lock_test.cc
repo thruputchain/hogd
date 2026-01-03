@@ -19,7 +19,8 @@
 namespace hogd {
 
 namespace {
-constexpr StorageCostModel kTestCostModel = StorageCostModel(12000, 1, 1, 1, 7);
+constexpr StorageCostModel kTestCostModel =
+    StorageCostModel(12000, 1, 1, 1, 7, 1234);
 
 Uniquifier
 u(BlockHeight const &height, ReplayNonce const &nonce)
@@ -35,7 +36,7 @@ make_dummy_context(BlockHeight block_height = 0)
   static HogDBDAO *dummy_dao = nullptr;
   static Address dummy_addr = make_address(0);
   static ItemKey dummy_key = make_replay_cache_item_key(dummy_addr);
-  return LockContext(dummy_dao, block_height, dummy_key);
+  return LockContext(dummy_dao, block_height, dummy_key, &kTestCostModel);
 }
 
 } // namespace
@@ -111,18 +112,18 @@ TEST_F(ReplayCacheLockTest, DisallowDuplicateConsume)
   // Create first item: conflicts with a nonce in base_data_
   // base_data_ has u(height_ + 1, 100) = u(10, 100)
   PointerItem<ReplayCacheIt> item1(u(height_ + 1, 100));
-  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx);
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, ctx);
   ASSERT_FALSE(r1.has_value());
   EXPECT_EQ(r1.error(), HogDBError(HogDBCode::kConflict));
 
   // Create second item: doesn't conflict, should succeed
   PointerItem<ReplayCacheIt> item2(u(height_ + 1, 101));
-  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx);
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, ctx);
   ASSERT_TRUE(r2.has_value());
 
   // Try to add the same uniquifier again: conflicts with previous addition
   PointerItem<ReplayCacheIt> item3(u(height_ + 1, 101));
-  auto r3 = lock.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx);
+  auto r3 = lock.try_atomic_change_lock(nullptr, &item3, ctx);
   ASSERT_FALSE(r3.has_value());
   EXPECT_EQ(r3.error(), HogDBError(HogDBCode::kConflict));
 }
@@ -136,12 +137,12 @@ TEST_F(ReplayCacheLockTest, DisallowConsumeInThePast)
 
   // expiry == current height is okay, so this should be allowed.
   PointerItem<ReplayCacheIt> item(u(height_, 100));
-  auto r = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel, ctx);
+  auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
   ASSERT_TRUE(r.has_value());
 
   // expiry < current height is not okay, so this should fail.
   PointerItem<ReplayCacheIt> item2(u(height_ - 1, 100));
-  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx);
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, ctx);
   ASSERT_FALSE(r2.has_value());
   EXPECT_EQ(r2.error(), HogDBError(HogDBCode::kConflict));
 }
@@ -155,24 +156,21 @@ TEST_F(ReplayCacheLockTest, MergeConflict)
 
   // Tx1 adds 101
   PointerItem<ReplayCacheIt> item1(u(height_ + 1, 101));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
 
   // Tx2 adds 102 (distinct) -> OK
   PointerItem<ReplayCacheIt> item2(u(height_ + 1, 102));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
   // Tx3 adds 101 (same as Tx1) -> Conflict
   PointerItem<ReplayCacheIt> item3(u(height_ + 1, 101));
-  auto r3 = lock.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx);
+  auto r3 = lock.try_atomic_change_lock(nullptr, &item3, ctx);
   ASSERT_FALSE(r3.has_value());
   EXPECT_EQ(r3.error(), HogDBError(HogDBCode::kConflict));
 
   // Tx4 adds 101 but different height -> OK (New behavior: distinct uniquifier)
   PointerItem<ReplayCacheIt> item4(u(height_ + 2, 101));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item4, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item4, ctx).has_value());
 }
 
 TEST_F(ReplayCacheLockTest, UndoMerge)
@@ -184,54 +182,44 @@ TEST_F(ReplayCacheLockTest, UndoMerge)
 
   // 1. Acquire 101
   PointerItem<ReplayCacheIt> item1(u(height_ + 1, 101));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
 
   // 2. Try to acquire 101 again -> Conflict
   PointerItem<ReplayCacheIt> item2(u(height_ + 1, 101));
-  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx);
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, ctx);
   ASSERT_FALSE(r2.has_value());
   EXPECT_EQ(r2.error(), HogDBError(HogDBCode::kConflict));
 
   // 3. Release 101 (Undo Merge)
-  ASSERT_TRUE(lock.try_atomic_change_lock(&item1, nullptr, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(&item1, nullptr, ctx).has_value());
 
   // 4. Try to acquire 101 again -> Success
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
   // 5. Complex case: Acquire 103 and 104
   PointerItem<ReplayCacheIt> item3(u(height_ + 1, 103));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item3, ctx).has_value());
 
   PointerItem<ReplayCacheIt> item4(u(height_ + 1, 104));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item4, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item4, ctx).has_value());
 
   // 6. Verify conflicts
   PointerItem<ReplayCacheIt> item3_dup(u(height_ + 1, 103));
   ASSERT_FALSE(
-      lock.try_atomic_change_lock(nullptr, &item3_dup, &kTestCostModel, ctx)
-          .has_value());
+      lock.try_atomic_change_lock(nullptr, &item3_dup, ctx).has_value());
 
   PointerItem<ReplayCacheIt> item4_dup(u(height_ + 1, 104));
   ASSERT_FALSE(
-      lock.try_atomic_change_lock(nullptr, &item4_dup, &kTestCostModel, ctx)
-          .has_value());
+      lock.try_atomic_change_lock(nullptr, &item4_dup, ctx).has_value());
 
   // 7. Release 103
-  ASSERT_TRUE(lock.try_atomic_change_lock(&item3, nullptr, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(&item3, nullptr, ctx).has_value());
 
   // 8. Verify 103 success, 104 still conflict
   ASSERT_TRUE(
-      lock.try_atomic_change_lock(nullptr, &item3_dup, &kTestCostModel, ctx)
-          .has_value());
+      lock.try_atomic_change_lock(nullptr, &item3_dup, ctx).has_value());
   ASSERT_FALSE(
-      lock.try_atomic_change_lock(nullptr, &item4_dup, &kTestCostModel, ctx)
-          .has_value());
+      lock.try_atomic_change_lock(nullptr, &item4_dup, ctx).has_value());
 }
 
 TEST_F(ReplayCacheLockTest, Expiry)
@@ -244,21 +232,15 @@ TEST_F(ReplayCacheLockTest, Expiry)
 
     // u(height_, 101) -> expiry 9. Current height 9. Allowed (>=).
     PointerItem<ReplayCacheIt> item1(u(height_, 101));
-    ASSERT_TRUE(
-        lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
 
     // u(height_ + 1, 100) -> expiry 10. Base has u(10, 100). Conflict.
     PointerItem<ReplayCacheIt> item2(u(height_ + 1, 100));
-    ASSERT_FALSE(
-        lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
     // u(height_ + 1, 101) -> expiry 10. Allowed.
     PointerItem<ReplayCacheIt> item3(u(height_ + 1, 101));
-    ASSERT_TRUE(
-        lock.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item3, ctx).has_value());
   }
 
   height_++; // height is now 10
@@ -271,27 +253,19 @@ TEST_F(ReplayCacheLockTest, Expiry)
 
     // u(height_, 101) -> expiry 10. Current height 10. Allowed.
     PointerItem<ReplayCacheIt> item1(u(height_, 101));
-    ASSERT_TRUE(
-        lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
 
     // u(height_, 100) -> expiry 10. Base has u(10, 100). Conflict.
     PointerItem<ReplayCacheIt> item2(u(height_, 100));
-    ASSERT_FALSE(
-        lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
     // u(height_ + 1, 100) -> expiry 11. Allowed.
     PointerItem<ReplayCacheIt> item3(u(height_ + 1, 100));
-    ASSERT_TRUE(
-        lock.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item3, ctx).has_value());
 
     // u(height_ + 1, 101) -> expiry 11. Allowed.
     PointerItem<ReplayCacheIt> item4(u(height_ + 1, 101));
-    ASSERT_TRUE(
-        lock.try_atomic_change_lock(nullptr, &item4, &kTestCostModel, ctx)
-            .has_value());
+    ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item4, ctx).has_value());
 
     // Build result at height 10 - should have base nonce (100) plus addition
     // (101)
@@ -319,12 +293,10 @@ TEST_F(ReplayCacheLockTest, Build)
   auto ctx = make_dummy_context(height_);
 
   PointerItem<ReplayCacheIt> item1(u(height_, 102));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
 
   PointerItem<ReplayCacheIt> item2(u(height_, 101));
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-                  .has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
   // Build result for height 9 - should have additions (101, 102) sorted
   auto out = ReplayCacheLockTestHelper::build_result(lock, ctx, height_);
@@ -344,17 +316,11 @@ TEST_F(ReplayCacheLockTest, Build)
   ReplayCacheLock remade;
   ReplayCacheLockTestHelper::set_base(remade, height_, *out);
   ReplayCacheLockTestHelper::set_base(remade, height_ + 1, *out_h10);
-  ASSERT_FALSE(
-      remade.try_atomic_change_lock(nullptr, &item1, &kTestCostModel, ctx)
-          .has_value());
-  ASSERT_FALSE(
-      remade.try_atomic_change_lock(nullptr, &item2, &kTestCostModel, ctx)
-          .has_value());
+  ASSERT_FALSE(remade.try_atomic_change_lock(nullptr, &item1, ctx).has_value());
+  ASSERT_FALSE(remade.try_atomic_change_lock(nullptr, &item2, ctx).has_value());
 
   PointerItem<ReplayCacheIt> item3(u(height_ + 1, 100));
-  ASSERT_FALSE(
-      remade.try_atomic_change_lock(nullptr, &item3, &kTestCostModel, ctx)
-          .has_value());
+  ASSERT_FALSE(remade.try_atomic_change_lock(nullptr, &item3, ctx).has_value());
 }
 
 TEST_F(ReplayCacheLockTest, MergeCost)
@@ -366,7 +332,7 @@ TEST_F(ReplayCacheLockTest, MergeCost)
 
   { // merging non-conflicting entry results adds cost
     PointerItem<ReplayCacheIt> item(u(height_ + 1, 101));
-    auto r = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel, ctx);
+    auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
     ASSERT_TRUE(r);
     EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2), *r);
   }
@@ -374,7 +340,7 @@ TEST_F(ReplayCacheLockTest, MergeCost)
   { // merging one more non-conflicting entry in requires
     // one more entry worth of cost to be locked
     PointerItem<ReplayCacheIt> item(u(height_ + 1, 102));
-    auto r = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel, ctx);
+    auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
     ASSERT_TRUE(r);
     EXPECT_EQ(kTestCostModel.get_replay_cache_cost(2), *r);
   }

@@ -23,7 +23,7 @@ make_test_queue_entry(uint8_t value)
   return {value};
 }
 
-const StorageCostModel cost_model(12000, 1, 5, 100, 5);
+const StorageCostModel cost_model(12000, 1, 5, 100, 5, 0);
 
 } // namespace
 
