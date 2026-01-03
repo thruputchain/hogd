@@ -282,7 +282,7 @@ public:
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
-  void unhandled_exception() { do_exception(std::current_exception()); }
+  void unhandled_exception() noexcept { do_exception(std::current_exception()); }
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
@@ -833,7 +833,7 @@ namespace detail {
 // coroutine_handle to jump to, we also return this handle.
 template<typename Promise>
 auto // either void or coroutine_handle<P>
-emulate_final_suspend(std::coroutine_handle<Promise> h)
+emulate_final_suspend(std::coroutine_handle<Promise> h) noexcept
 {
   auto a = get_awaiter(h.promise().final_suspend());
   using suspend_type = decltype(a.await_suspend(h));
