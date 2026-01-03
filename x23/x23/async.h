@@ -282,7 +282,10 @@ public:
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
-  void unhandled_exception() noexcept { do_exception(std::current_exception()); }
+  void unhandled_exception() noexcept
+  {
+    do_exception(std::current_exception());
+  }
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
