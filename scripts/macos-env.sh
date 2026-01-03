@@ -1,0 +1,38 @@
+# macOS Development Environment for hogd
+# Source this file: source ./scripts/macos-env.sh
+
+# Get the directory where this script lives (works in both bash and zsh)
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    # Bash
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    # Zsh - use %x to get script path when sourced
+    SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+else
+    # Fallback - assume run from project root
+    SCRIPT_DIR="$(pwd)/scripts"
+fi
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Activate Python venv
+source "$PROJECT_ROOT/.venv/bin/activate"
+
+# Add Homebrew LLVM to PATH (clang-21)
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+
+# Add Homebrew bison to PATH (newer than macOS version)
+export PATH="/opt/homebrew/opt/bison/bin:$PATH"
+
+# Set compiler flags for LLVM
+export CC="/opt/homebrew/opt/llvm/bin/clang"
+export CXX="/opt/homebrew/opt/llvm/bin/clang++"
+export LDFLAGS="-L/opt/homebrew/opt/llvm/lib/c++ -L/opt/homebrew/opt/llvm/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
+
+# For cmake to find packages
+export CMAKE_PREFIX_PATH="/opt/homebrew/opt/llvm:/opt/homebrew/opt/openssl@3"
+
+echo "hogd development environment activated"
+echo "  Python: $(which python3)"
+echo "  Clang:  $(clang --version | head -1)"
+echo "  Rust:   $(rustc --version)"
