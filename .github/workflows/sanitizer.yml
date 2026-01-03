@@ -41,4 +41,5 @@ jobs:
                   --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                   --key=github_repo --value=${{ github.repository }} \
                   --key=git_commit --value=${{ github.sha }} \
+                  --timeout-sec=1800 \
                   ./scripts/schedules/sanitizer.toml
