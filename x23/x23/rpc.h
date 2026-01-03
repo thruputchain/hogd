@@ -140,7 +140,6 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  [[gnu::noinline]]
   MaybeAsync<Buf> serve(const rpc_msg &msg, BufViewEnd argdata) override
   {
     using enum msg_type;
@@ -181,7 +180,6 @@ private:
 
     using enum accept_stat;
 
-    [[gnu::noinline]]
     MaybeAsync<Buf> operator()(BufViewEnd argbytes)
     {
       constexpr bool returns_void = std::is_void_v<return_type>;
