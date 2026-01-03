@@ -167,9 +167,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
         if (awaiter.await_ready())
           cp_->dwrite(fd_, awaiter.await_resume());
         else
-          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
-            self->cp_->dwrite(self->fd_, co_await awaitable);
-          }(*this, std::move(awaitable));
+          write_async_response(std::move(awaitable));
       }
       else
         send_msg(res);
