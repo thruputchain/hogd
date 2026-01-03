@@ -33,6 +33,14 @@ echo 'run llvm tests'
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
+echo 'build clang asan release'
+./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
+
+echo 'run llvm asan tests release'
+export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
+ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
+
+# gcc release seems to be more likely broken than clang release?
 echo 'build gcc asan release'
 ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -x "-DENABLE_TEST_FFI=ON"  -x "-DBUILD_BENCHMARKS=OFF"
 

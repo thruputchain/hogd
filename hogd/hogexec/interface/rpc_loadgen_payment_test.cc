@@ -14,6 +14,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/interface/rpc_from_coord.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/mempool/shared.h"
@@ -26,6 +27,7 @@
 #include "sched_exec.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/refcnt.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
@@ -76,6 +78,9 @@ protected:
   DbSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
       db_client_;
   std::unique_ptr<loadgen_client_t> loadgen_client_;
+
+  x23::Defer<> force_syscallhandler_commit_ =
+      SystemCallHandler::force_commit_or_abort();
 
   ShardCard make_shard_card()
   {

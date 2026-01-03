@@ -250,17 +250,16 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
-    HogexecMetrics::mark_tx_failed(cumulative_invoke_result_,
-                                   get_block_execution_mode());
-    auto st = db_proxy_.abort_transaction();
-    if (!st.has_value()) {
-      return to_exec_result(st.error().code());
-    }
-
     if (cumulative_invoke_result_.result_.error().code() ==
         InvokeErrorCode::kInvokeUnrecoverable) {
       error("try_commit_transaction: received kInvokeUnrecoverable");
     }
+
+    auto res = abort_transaction();
+    if (!res.has_value()) {
+      return to_exec_result(res.error().code());
+    }
+
     return to_exec_result(cumulative_invoke_result_.result_.error().code());
   }
   assert(last_frame_.has_value());
