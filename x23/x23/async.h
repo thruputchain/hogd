@@ -329,8 +329,9 @@ public:
         return;
     }
     x23assert(f & kException);
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Defer _c{[this] { std::destroy_at(&exception_); }};
-    std::rethrow_exception(exception_);
+    std::rethrow_exception(std::move(exception_));
   }
 
   //
