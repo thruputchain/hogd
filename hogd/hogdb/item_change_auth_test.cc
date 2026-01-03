@@ -32,12 +32,12 @@ make_pk_config(Weight w)
 
 // Helper to create a dummy LockContext for testing
 inline LockContext
-make_dummy_context()
+make_dummy_context(const StorageCostModel &cost_model)
 {
   // These are never dereferenced in most lock implementations
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
-  return LockContext(dummy_dao, 0, dummy_key);
+  return LockContext(dummy_dao, 0, dummy_key, &cost_model);
 }
 
 } // namespace
@@ -123,12 +123,12 @@ TEST_F(ItemChangeAuthTest, Narrow)
   ItemLock lock(0);
   ItemChange change = ItemChange(std::move(auth_data_item));
 
-  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_,
-                                       make_dummy_context());
+  auto r = lock.try_atomic_change_lock(nullptr, &change,
+                                       make_dummy_context(cost_model_));
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  EXPECT_EQ(lock.commit_change(change, &cost_model_, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(change, make_dummy_context(cost_model_)),
             cost_model_.get_auth_data_cost(3));
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
@@ -157,12 +157,12 @@ TEST_F(ItemChangeAuthTest, NarrowUncommitted)
   ItemChange change = ItemChange(std::move(narrowed));
 
   ItemLock lock(0);
-  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_,
-                                       make_dummy_context());
+  auto r = lock.try_atomic_change_lock(nullptr, &change,
+                                       make_dummy_context(cost_model_));
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  EXPECT_EQ(lock.commit_change(change, &cost_model_, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(change, make_dummy_context(cost_model_)),
             cost_model_.get_auth_data_cost(3));
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
@@ -222,12 +222,12 @@ TEST_F(ItemChangeAuthTest, CommitAndBuild)
 
   ItemLock lock(0);
   ItemChange change = ItemChange(std::move(auth_data_item));
-  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_,
-                                       make_dummy_context());
+  auto r = lock.try_atomic_change_lock(nullptr, &change,
+                                       make_dummy_context(cost_model_));
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  EXPECT_EQ(lock.commit_change(change, &cost_model_, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(change, make_dummy_context(cost_model_)),
             cost_model_.get_auth_data_cost(3));
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();
@@ -246,12 +246,12 @@ TEST_F(ItemChangeAuthTest, DeleteKey)
 
   ItemLock lock(0);
   ItemChange change = ItemChange(std::move(auth_data_item));
-  auto r = lock.try_atomic_change_lock(nullptr, &change, &cost_model_,
-                                       make_dummy_context());
+  auto r = lock.try_atomic_change_lock(nullptr, &change,
+                                       make_dummy_context(cost_model_));
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r.value(), cost_model_.get_auth_data_cost(3));
 
-  EXPECT_EQ(lock.commit_change(change, &cost_model_, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(change, make_dummy_context(cost_model_)),
             cost_model_.get_auth_data_cost(2));
 
   auto const *inner = lock.get_inner<PointerLock<AuthLock>>();

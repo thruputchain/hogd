@@ -4,8 +4,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -21,12 +19,11 @@ public:
     : std::unique_ptr<T>(std::make_unique<T>(std::forward<Args>(args)...))
   {}
 
-  HogDBStatus<int128_t>
-  try_atomic_change_lock(const change_type *before, const change_type *after,
-                         const StorageCostModel *cost_model,
-                         const LockContext &ctx)
+  HogDBStatus<int128_t> try_atomic_change_lock(const change_type *before,
+                                               const change_type *after,
+                                               const LockContext &ctx)
   {
-    return this->get()->try_atomic_change_lock(before, after, cost_model, ctx);
+    return this->get()->try_atomic_change_lock(before, after, ctx);
   }
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const change_type &after,

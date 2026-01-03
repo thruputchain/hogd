@@ -23,8 +23,7 @@ namespace hogd {
 HogDBStatus<int128_t>
 NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
                                           const DeployedContractData *after,
-                                          const StorageCostModel *cost_model,
-                                          const LockContext & /*ctx*/)
+                                          const LockContext &ctx)
 {
   assert(before == nullptr ||
          before->deployed_contract_hash() == deployed_contract_hash_);
@@ -34,7 +33,7 @@ NewDeploymentLock::try_atomic_change_lock(const DeployedContractData *before,
     return HogDBError{HogDBCode::kConflict};
   }
 
-  return cost_model->get_contract_size_cost(
+  return ctx.cost_model->get_contract_size_cost(
       deployed_contract_hash_.contract_size);
 }
 

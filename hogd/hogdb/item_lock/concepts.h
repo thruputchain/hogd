@@ -17,22 +17,28 @@ namespace hogd {
 // e.g. ReplayCacheLock uses this is access the block height to determine if
 // a uniquifier is expired and to lazily load chunks of replay caches.
 struct LockContext {
+  LockContext(HogDBDAO *dao, BlockHeight block_height, const ItemKey &key,
+              const StorageCostModel *cost_model)
+    : dao(dao), block_height(block_height), key(key), cost_model(cost_model)
+  {}
+
   HogDBDAO *dao;
   BlockHeight block_height;
   const ItemKey &key;
+  const StorageCostModel *cost_model;
 };
 
 template<typename Lock>
 concept item_lock_unsized =
     requires { typename Lock::change_type; } &&
     requires(Lock lock, const Lock::change_type *before,
-             const Lock::change_type *after, const StorageCostModel *cost_model,
-             const LockContext &ctx, bool finalize, int128_t snapshot_cost) {
+             const Lock::change_type *after, const LockContext &ctx,
+             bool finalize, int128_t snapshot_cost) {
       {
-        lock.try_atomic_change_lock(before, after, cost_model, ctx)
+        lock.try_atomic_change_lock(before, after, ctx)
       } -> std::same_as<HogDBStatus<int128_t>>;
       {
-        lock.commit_change(finalize, snapshot_cost, *after, cost_model)
+        lock.commit_change(finalize, snapshot_cost, *after, ctx.cost_model)
       } -> std::same_as<int128_t>;
     } &&
     requires(Lock const &lock, const LockContext &ctx, MerkleTriePrefix &trie) {

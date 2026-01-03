@@ -11,6 +11,7 @@
 #include "hogd/hogdb/item_lock/auth_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/x23.h"
 
@@ -73,7 +74,7 @@ make_dummy_context()
   // These are never dereferenced in most lock implementations
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
-  return LockContext(dummy_dao, 0, dummy_key);
+  return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
 }
 
 } // namespace
@@ -85,14 +86,13 @@ TEST(AuthLockTest, BasicAcquireAndRelease)
 
   // Acquire lock on key 0
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  auto status = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(1));
 
   // Release lock
-  status = lock.try_atomic_change_lock(&item1, nullptr, &kTestCostModel,
-                                       make_dummy_context());
+  status = lock.try_atomic_change_lock(&item1, nullptr, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 }
 
@@ -105,14 +105,13 @@ TEST(AuthLockTest, MultipleKeysSameTransaction)
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)},
                                      {1, make_test_pk_config(2)},
                                      {2, make_test_pk_config(3)}});
-  auto status = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(3));
 
   // Release all locks
-  status = lock.try_atomic_change_lock(&item1, nullptr, &kTestCostModel,
-                                       make_dummy_context());
+  status = lock.try_atomic_change_lock(&item1, nullptr, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 }
 
@@ -123,23 +122,23 @@ TEST(AuthLockTest, DISABLED_ConcurrentNonConflicting)
 
   // Tx1 acquires lock on key 0
   auto tx1_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 acquires lock on key 1 (different key, no conflict)
   auto tx2_item = make_auth_item(base, {{1, make_test_pk_config(2)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Both can release
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx2_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx1_item, nullptr, make_dummy_context())
+          .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx2_item, nullptr, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_ConcurrentSameKeySameValue)
@@ -151,23 +150,23 @@ TEST(AuthLockTest, DISABLED_ConcurrentSameKeySameValue)
 
   // Tx1 acquires lock on key 0
   auto tx1_item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 tries to acquire lock on same key with same value (should succeed)
   auto tx2_item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Both release
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx2_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx1_item, nullptr, make_dummy_context())
+          .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx2_item, nullptr, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_ConcurrentSameKeyDifferentValue)
@@ -177,25 +176,25 @@ TEST(AuthLockTest, DISABLED_ConcurrentSameKeyDifferentValue)
 
   // Tx1 acquires lock on key 0
   auto tx1_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 tries to acquire lock on same key with different value (should fail)
   auto tx2_item = make_auth_item(base, {{0, make_test_pk_config(2)}});
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Tx1 releases
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx1_item, nullptr, make_dummy_context())
+          .has_value());
 
   // Now Tx2 can acquire
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
@@ -207,24 +206,22 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBasic)
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
   item1.narrow(item1_narrow);
-  auto status = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   EXPECT_TRUE(status.has_value());
 
   // Another tx cannot acquire any lock on key 0
   auto item2 = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context())
+          .has_value());
 
   // Release exclusive lock
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, nullptr, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, nullptr, make_dummy_context())
                   .has_value());
 
   // Now the other tx can acquire
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context())
                   .has_value());
 }
 
@@ -235,27 +232,27 @@ TEST(AuthLockTest, DISABLED_ExclusiveLockBlocksOthers)
 
   // Tx1 acquires non-exclusive lock
   auto tx1_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 tries to acquire exclusive lock (should fail - someone else holds lock)
   auto tx2_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
   auto tx2_item_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
   tx2_item.narrow(tx2_item_narrow);
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Tx1 releases
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx1_item, nullptr, make_dummy_context())
+          .has_value());
 
   // Now Tx2 can acquire exclusive lock
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
@@ -267,20 +264,17 @@ TEST(AuthLockTest, DISABLED_UpgradeToExclusive)
 
   // Acquire non-exclusive lock
   auto item1 = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
   // Upgrade to exclusive (should succeed since we're the only one)
   auto item2 = make_auth_item(base, {{0, make_test_pk_config(2)}});
   item2.narrow(item1);
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
   // Release
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item2, nullptr, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item2, nullptr, make_dummy_context())
                   .has_value());
 }
 
@@ -293,21 +287,20 @@ TEST(AuthLockTest, DISABLED_CannotUpgradeToExclusiveWhenOthersHold)
 
   // Tx1 acquires non-exclusive lock
   auto tx1_item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 acquires non-exclusive lock
   auto tx2_item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Tx1 tries to upgrade to exclusive (should fail - Tx2 holds lock)
   auto tx1_exclusive = make_auth_item(base, {{0, make_test_pk_config(2)}});
   tx1_exclusive.narrow(tx1_item);
   EXPECT_FALSE(lock.try_atomic_change_lock(&tx1_item, &tx1_exclusive,
-                                           &kTestCostModel,
                                            make_dummy_context())
                    .has_value());
 }
@@ -323,21 +316,19 @@ TEST(AuthLockTest, DISABLED_DowngradeFromExclusive)
   auto item1 = make_auth_item(base, {{0, pk}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
   item1.narrow(item1_narrow);
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
   // Downgrade to non-exclusive
   auto item2 = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
   // Now another tx can acquire non-exclusive lock
   auto tx2_item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, CommitSingleKey)
@@ -350,8 +341,7 @@ TEST(AuthLockTest, CommitSingleKey)
 
   // Acquire lock
   int128_t snapshot_cost = 0;
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, make_dummy_context())
                   .has_value());
 
   // Commit (did_finalize = true)
@@ -371,8 +361,7 @@ TEST(AuthLockTest, CommitMultipleKeys)
 
   // Acquire locks
   int128_t snapshot_cost = 0;
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, make_dummy_context())
                   .has_value());
 
   // Commit
@@ -391,8 +380,7 @@ TEST(AuthLockTest, CommitWithBaseKeys)
   auto item = make_auth_item(base, {{2, make_test_pk_config(3)}});
 
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, make_dummy_context())
                   .has_value());
 
   // Commit - should go from 2 keys to 3 keys
@@ -413,8 +401,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
   auto item1 = make_auth_item(base, {{0, pk}});
   auto item1_narrow = make_auth_item(base, {{0, make_test_pk_config(2)}});
   item1.narrow(item1_narrow);
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
   // Commit (clears exclusive flag)
@@ -422,8 +409,7 @@ TEST(AuthLockTest, DISABLED_ExclusiveFlagClearedOnCommit)
 
   // Now another tx can acquire a lock (exclusive flag was cleared)
   auto item2 = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context())
                   .has_value());
 }
 
@@ -436,8 +422,8 @@ TEST(AuthLockTest, StorageCostWithDeletedKey)
   auto item = make_auth_item(base, {{1, nullptr}});
 
   // Reserve should still account for all possible keys
-  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   // Base has 3 keys, we're not adding any (nullptr doesn't count)
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(3));
@@ -459,23 +445,23 @@ TEST(AuthLockTest, DISABLED_PartialCommit)
 
   // Tx1 modifies key 0
   auto tx1_item = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 modifies key 1
   auto tx2_item = make_auth_item(base, {{1, make_test_pk_config(2)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Commit only tx1
   lock.commit_change(true, 0, tx1_item, &kTestCostModel);
 
   // Tx2 still holds its lock
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx2_item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(&tx2_item, nullptr, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_MultipleKeysPartialOverlap)
@@ -487,22 +473,22 @@ TEST(AuthLockTest, DISABLED_MultipleKeysPartialOverlap)
 
   // Tx1 modifies keys 0, 1
   auto tx1_item = make_auth_item(base, {{0, pk}, {1, make_test_pk_config(2)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1_item, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &tx1_item, make_dummy_context())
+          .has_value());
 
   // Tx2 tries to modify keys 1, 2 (conflicts on key 1)
   auto tx2_item = make_auth_item(base, {{1, make_test_pk_config(3)},
                                         {2, make_test_pk_config(4)}});
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &tx2_item, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &tx2_item, make_dummy_context())
+          .has_value());
 
   // Tx2 can modify just key 2 (no conflict)
   auto tx2_item_no_conflict =
       make_auth_item(base, {{2, make_test_pk_config(4)}});
   EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2_item_no_conflict,
-                                          &kTestCostModel, make_dummy_context())
+                                          make_dummy_context())
                   .has_value());
 }
 
@@ -515,18 +501,15 @@ TEST(AuthLockTest, DISABLED_KeepLockNoChange)
 
   // Acquire lock
   auto item = make_auth_item(base, {{0, pk}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item, make_dummy_context())
                   .has_value());
 
   // "Upgrade" from item to same item (no change)
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item, &item, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item, &item, make_dummy_context())
                   .has_value());
 
   // Release
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item, nullptr, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item, nullptr, make_dummy_context())
                   .has_value());
 }
 
@@ -542,11 +525,9 @@ TEST(AuthLockTest, DISABLED_ConcurrentExclusiveLocks)
   auto item2_narrow = make_auth_item(base, {{1, make_test_pk_config(1)}});
   item2.narrow(item2_narrow);
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context())
                   .has_value());
 
   EXPECT_EQ(lock.commit_change(true, 0, item1, &kTestCostModel),
@@ -566,8 +547,7 @@ TEST(AuthLockTest, AcquireCosts1)
       make_auth_item(base,
                      {{0, make_test_pk_config(1)}, {1, nullptr}, {4, nullptr}});
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(3));
 
@@ -593,14 +573,12 @@ TEST(AuthLockTest, DISABLED_AcquireCosts2)
   auto item2 =
       make_auth_item(base, {{0, nullptr}, {2, make_test_pk_config(3)}});
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   // pay for new key on 1, doesn't get refund for deleting 0
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &item2, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   // pay for new key on 2, doesn't get refund for deleting 0
   EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
@@ -621,23 +599,21 @@ TEST(AuthLockTest, DISABLED_SwapKeys)
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
   // conflicts with item1 on key 0
   auto other_tx = make_auth_item(base, {{0, make_test_pk_config(5)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &other_tx, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &other_tx, make_dummy_context())
+          .has_value());
 
   // Tx changes to release key 0 and acquire key 1 instead
   auto item2 = make_auth_item(base, {{1, make_test_pk_config(2)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
   // Now another tx can acquire key 0 (was released)
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &other_tx, make_dummy_context())
+          .has_value());
 }
 
 TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
@@ -652,34 +628,28 @@ TEST(AuthLockTest, DISABLED_ThreeConcurrentTransactionsSameKey)
   auto tx2 = make_auth_item(base, {{0, pk}});
   auto tx3 = make_auth_item(base, {{0, pk}});
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx1, make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx2, make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx3, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &tx3, make_dummy_context())
                   .has_value());
 
   // None can upgrade to exclusive
   auto tx1_excl = make_auth_item(base, {{0, make_test_pk_config(2)}});
   tx1_excl.narrow(tx1);
-  EXPECT_FALSE(lock.try_atomic_change_lock(&tx1, &tx1_excl, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(&tx1, &tx1_excl, make_dummy_context())
+          .has_value());
 
   // Release tx2 and tx3
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx2, nullptr, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&tx2, nullptr, make_dummy_context())
                   .has_value());
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx3, nullptr, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&tx3, nullptr, make_dummy_context())
                   .has_value());
 
   // Now tx3 can upgrade to exclusive
-  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1, &tx1_excl, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&tx1, &tx1_excl, make_dummy_context())
                   .has_value());
 }
 
@@ -697,8 +667,8 @@ TEST(AuthLockTest, SetNonceConfig)
 
   // Acquire lock
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
-  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(2));
 
@@ -739,8 +709,8 @@ TEST(AuthLockTest, SetGasPermissionConfigs)
 
   // Acquire lock
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(3);
-  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(3));
 
@@ -773,8 +743,7 @@ TEST(AuthLockTest, NonceConfigRollback)
   item1.get()->set_new_nonce(nonce1);
 
   int128_t snapshot_cost = kTestCostModel.get_auth_data_cost(2);
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
   // Second change: change nonce config (this is the "middle" state we'll
@@ -785,8 +754,7 @@ TEST(AuthLockTest, NonceConfigRollback)
   nonce2.required_weight = Weight{2};
   item2.get()->set_new_nonce(nonce2);
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
   // Third change: change nonce config again
@@ -796,13 +764,11 @@ TEST(AuthLockTest, NonceConfigRollback)
   nonce3.required_weight = Weight{3};
   item3.get()->set_new_nonce(nonce3);
 
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item2, &item3, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item2, &item3, make_dummy_context())
                   .has_value());
 
   // Rollback: transition from item3 back to item2
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item3, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item3, &item2, make_dummy_context())
                   .has_value());
 
   // Commit the rollback (item2)
@@ -827,8 +793,8 @@ TEST(AuthLockTest, AllKeysUsed)
   }
 
   auto item = make_auth_item(base, all_keys);
-  auto status = lock.try_atomic_change_lock(nullptr, &item, &kTestCostModel,
-                                            make_dummy_context());
+  auto status =
+      lock.try_atomic_change_lock(nullptr, &item, make_dummy_context());
   EXPECT_TRUE(status.has_value());
   EXPECT_EQ(status.value(), kTestCostModel.get_auth_data_cost(kMaxSigners));
 
@@ -846,32 +812,29 @@ TEST(AuthLockTest, DISABLED_PartialRelease)
   auto item1 = make_auth_item(base, {{0, make_test_pk_config(1)},
                                      {1, make_test_pk_config(2)},
                                      {2, make_test_pk_config(3)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &item1, make_dummy_context())
                   .has_value());
 
   // Tx releases keys 0 and 2, keeps key 1
   auto item2 = make_auth_item(base, {{1, make_test_pk_config(2)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, &kTestCostModel,
-                                          make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(&item1, &item2, make_dummy_context())
                   .has_value());
 
   // Another tx can now acquire key 0
   auto other_tx1 = make_auth_item(base, {{0, make_test_pk_config(1)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx1, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &other_tx1, make_dummy_context())
+          .has_value());
 
   // And key 2
   auto other_tx2 = make_auth_item(base, {{2, make_test_pk_config(3)}});
-  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &other_tx2, &kTestCostModel,
-                                          make_dummy_context())
-                  .has_value());
+  EXPECT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &other_tx2, make_dummy_context())
+          .has_value());
 
   // But not key 1 with different value
   auto conflicting_tx = make_auth_item(base, {{1, make_test_pk_config(99)}});
   EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &conflicting_tx,
-                                           &kTestCostModel,
                                            make_dummy_context())
                    .has_value());
 }

@@ -4,7 +4,7 @@
 #include <optional>
 #include <unordered_map>
 
-#include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 

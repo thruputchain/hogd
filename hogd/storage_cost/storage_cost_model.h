@@ -54,6 +54,8 @@ struct StorageCostModel {
     return kBaseItemCost + (num_keys * kAuthPerKeyCost);
   }
 
+  constexpr int128_t get_balance_cost() const { return kBalanceCost; }
+
   const int128_t kBaseItemCost;
   const int32_t kBytestringCostPerByte;
   const int128_t kBaseContractDeploymentCost;
@@ -66,6 +68,8 @@ struct StorageCostModel {
   const int128_t kRCQCostPerBlock = 0;
 
   const int128_t kReplayCacheCostPerEntry = 0;
+
+  const int128_t kBalanceCost = 1234;
 
   StorageCostModelXdr to_xdr() const;
 };

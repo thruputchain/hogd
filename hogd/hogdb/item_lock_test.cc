@@ -83,7 +83,7 @@ make_dummy_context()
   // These are never dereferenced in most lock implementations
   static HogDBDAO *dummy_dao = nullptr;
   static ItemKey dummy_key = make_item_key(make_address(0), 0);
-  return LockContext(dummy_dao, 0, dummy_key);
+  return LockContext(dummy_dao, 0, dummy_key, &kTestCostModel);
 }
 
 } // namespace
@@ -97,24 +97,21 @@ TEST(ItemLockTest, BasicUsage)
   // conflicting type
   auto conflicting = make_nnint_change(50, 30);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.kBaseItemCost);
 
-  auto r3 = lock.try_atomic_change_lock(nullptr, &conflicting, &kTestCostModel,
-                                        make_dummy_context());
+  auto r3 =
+      lock.try_atomic_change_lock(nullptr, &conflicting, make_dummy_context());
   EXPECT_FALSE(r3.has_value());
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, CommitChangeWithSnapshotCost)
@@ -124,29 +121,24 @@ TEST(ItemLockTest, CommitChangeWithSnapshotCost)
   auto second = make_nnint_change(100, 20);
   auto third = make_nnint_change(100, 30);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   EXPECT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost - 10000);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   EXPECT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.kBaseItemCost - 10000);
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()),
             kTestCostModel.kBaseItemCost - 10000);
 
   // storage cost should be deterministic
-  auto r4 = lock.try_atomic_change_lock(nullptr, &third, &kTestCostModel,
-                                        make_dummy_context());
+  auto r4 = lock.try_atomic_change_lock(nullptr, &third, make_dummy_context());
   EXPECT_TRUE(r4.has_value());
   EXPECT_EQ(r4.value(), kTestCostModel.kBaseItemCost - 10000);
 
-  EXPECT_EQ(lock.commit_change(third, &kTestCostModel, make_dummy_context()),
-            0);
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(third, make_dummy_context()), 0);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, CommitChangeWithSnapshotCostReleaseNonPermamnentExclusive)
@@ -157,29 +149,23 @@ TEST(ItemLockTest, CommitChangeWithSnapshotCostReleaseNonPermamnentExclusive)
   auto second = make_nnint_change(100, 20);
   auto third = make_nnint_change(100, 30);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), 0);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
-            -1000);
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()), -1000);
 
   // storage cost should be deterministic
-  auto r4 = lock.try_atomic_change_lock(nullptr, &third, &kTestCostModel,
-                                        make_dummy_context());
+  auto r4 = lock.try_atomic_change_lock(nullptr, &third, make_dummy_context());
   ASSERT_TRUE(r4.has_value());
   EXPECT_EQ(r4.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(third, &kTestCostModel, make_dummy_context()),
-            0);
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(third, make_dummy_context()), 0);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, NNIntChangeBase)
@@ -190,40 +176,33 @@ TEST(ItemLockTest, NNIntChangeBase)
 
   auto second_compat = make_nnint_change(200, 30);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_FALSE(r2.has_value());
 
-  r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                   make_dummy_context());
+  r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_FALSE(r2.has_value());
   second.narrow(first);
   ASSERT_TRUE(second.is_exclusive());
-  r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                   make_dummy_context());
+  r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.kBaseItemCost);
 
-  EXPECT_FALSE(lock.try_atomic_change_lock(nullptr, &second_compat,
-                                           &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second_compat, make_dummy_context())
+          .has_value());
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
 
   auto r3 = lock.try_atomic_change_lock(nullptr, &second_compat,
-                                        &kTestCostModel, make_dummy_context());
+                                        make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), kTestCostModel.kBaseItemCost);
-  EXPECT_EQ(lock.commit_change(second_compat, &kTestCostModel,
-                               make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(second_compat, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, NNIntChangeExclusiveAfterCommit)
@@ -233,37 +212,34 @@ TEST(ItemLockTest, NNIntChangeExclusiveAfterCommit)
   auto first2 = make_nnint_change(100, 20);
   auto second = make_nnint_change(200, 20);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
 
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
 
   // Now we can acquire a shared lock but not an exclusive lock
 
-  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &first2, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &first2, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.kBaseItemCost);
 
-  EXPECT_FALSE(lock.try_atomic_change_lock(&first2, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(&first2, &second, make_dummy_context())
+          .has_value());
 
   ItemChange first2_copy = first2;
   first2.narrow(second);
 
   ASSERT_TRUE(first2.is_exclusive());
-  EXPECT_FALSE(lock.try_atomic_change_lock(&first2_copy, &first2,
-                                           &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  EXPECT_FALSE(
+      lock.try_atomic_change_lock(&first2_copy, &first2, make_dummy_context())
+          .has_value());
 }
 
 TEST(ItemLockTest, ChangeItemType)
@@ -272,26 +248,24 @@ TEST(ItemLockTest, ChangeItemType)
   auto first = make_nnint_change(100, 10);
   auto second = make_bytestring_change({1, 2, 3});
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
 
-  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
 
   second.narrow(first);
   ASSERT_TRUE(second.is_exclusive());
-  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
-  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                        make_dummy_context());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.get_bytestring_cost(3));
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()),
             kTestCostModel.get_bytestring_cost(3));
 }
 
@@ -302,46 +276,40 @@ TEST(ItemLockTest, SeveralBytestringAcquires)
   auto second = make_bytestring_change({4, 5, 6, 7, 8});          // 5 bytes
   auto third = make_bytestring_change({7, 8, 9, 10, 11, 12, 13}); // 7 bytes
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_bytestring_cost(3));
 
   second.narrow(first);
   ASSERT_TRUE(second.is_exclusive());
-  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.get_bytestring_cost(5));
 
   third.narrow(second);
-  auto r3 = lock.try_atomic_change_lock(&second, &third, &kTestCostModel,
-                                        make_dummy_context());
+  auto r3 = lock.try_atomic_change_lock(&second, &third, make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), kTestCostModel.get_bytestring_cost(7));
 
-  EXPECT_EQ(lock.commit_change(third, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(third, make_dummy_context()),
             kTestCostModel.get_bytestring_cost(7));
 
   // same as third
   auto post_commit = make_bytestring_change({7, 8, 9, 10, 11, 12, 13});
-  auto r4 = lock.try_atomic_change_lock(nullptr, &post_commit, &kTestCostModel,
-                                        make_dummy_context());
+  auto r4 =
+      lock.try_atomic_change_lock(nullptr, &post_commit, make_dummy_context());
   ASSERT_TRUE(r4.has_value());
   EXPECT_EQ(r4.value(), kTestCostModel.get_bytestring_cost(7));
-  EXPECT_EQ(lock.commit_change(post_commit, &kTestCostModel,
-                               make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(post_commit, make_dummy_context()), 0);
 
   // can't acaquire exclusive lock now
   auto post_commit_exclusive = post_commit;
   post_commit_exclusive.narrow(first);
   ASSERT_TRUE(post_commit_exclusive.is_exclusive());
-  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &post_commit,
-                                          &kTestCostModel, make_dummy_context())
-                  .has_value());
+  ASSERT_TRUE(
+      lock.try_atomic_change_lock(nullptr, &post_commit, make_dummy_context())
+          .has_value());
   ASSERT_FALSE(lock.try_atomic_change_lock(&post_commit, &post_commit_exclusive,
-                                           &kTestCostModel,
                                            make_dummy_context())
                    .has_value());
 }
@@ -352,13 +320,11 @@ TEST(ItemLockTest, PermamentExclusiveInitial)
   auto first = make_nnint_change(100, 10);
   first.set_permanent_exclusive();
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), -1000);
 
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            -1000);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), -1000);
 }
 
 TEST(ItemLockTest, PermamentExclusiveDowngrade)
@@ -369,18 +335,15 @@ TEST(ItemLockTest, PermamentExclusiveDowngrade)
   auto second = make_nnint_change(200, 20);
   second.narrow(first);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), -1000);
 
-  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
-            -1000);
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()), -1000);
 }
 
 TEST(ItemLockTest, PermamentExclusiveUpgradeDowngrade)
@@ -392,23 +355,19 @@ TEST(ItemLockTest, PermamentExclusiveUpgradeDowngrade)
   auto third = second;
   second.set_permanent_exclusive();
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), 0);
 
-  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), -1000);
 
-  auto r3 = lock.try_atomic_change_lock(&second, &third, &kTestCostModel,
-                                        make_dummy_context());
+  auto r3 = lock.try_atomic_change_lock(&second, &third, make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(third, &kTestCostModel, make_dummy_context()),
-            -1000);
+  EXPECT_EQ(lock.commit_change(third, make_dummy_context()), -1000);
 }
 
 TEST(ItemLockTest, PermamentExclusiveKeepsLock)
@@ -418,23 +377,21 @@ TEST(ItemLockTest, PermamentExclusiveKeepsLock)
   first.set_permanent_exclusive();
   auto second = make_nnint_change(100, 20);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), -1000);
 
-  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
 
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            -1000);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), -1000);
 
   // second should not conflict with first, except that first is permanent
   // exclusive
-  ASSERT_FALSE(lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
+          .has_value());
 }
 
 TEST(ItemLockTest, DeletionChange)
@@ -444,25 +401,20 @@ TEST(ItemLockTest, DeletionChange)
   auto second = make_deletion_change();
   auto third = make_deletion_change();
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), 0);
 
-  r1 = lock.try_atomic_change_lock(&first, &third, &kTestCostModel,
-                                   make_dummy_context());
+  r1 = lock.try_atomic_change_lock(&first, &third, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), 0);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
-            0);
-  EXPECT_EQ(lock.commit_change(third, &kTestCostModel, make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()), 0);
+  EXPECT_EQ(lock.commit_change(third, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, DeletionChangeReleaseCost)
@@ -471,20 +423,16 @@ TEST(ItemLockTest, DeletionChangeReleaseCost)
   auto first = make_deletion_change();
   auto second = make_deletion_change();
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), 0);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), 0);
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
-            -100);
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()), -100);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, DeletionChangePermamentExclusiveRelease)
@@ -494,17 +442,14 @@ TEST(ItemLockTest, DeletionChangePermamentExclusiveRelease)
   first.set_permanent_exclusive();
   auto second = make_deletion_change();
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), -100);
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_FALSE(r2.has_value());
 
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
-            -100);
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()), -100);
 }
 
 TEST(ItemLockTest, BaseDataConflict)
@@ -517,20 +462,18 @@ TEST(ItemLockTest, BaseDataConflict)
   auto second =
       ItemChange(make_auth_data_change({{1, make_test_pk_config(2)}}));
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(1));
 
-  auto r2 = lock.try_atomic_change_lock(nullptr, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(nullptr, &second, make_dummy_context());
   ASSERT_FALSE(r2.has_value());
 
-  ASSERT_FALSE(lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                           make_dummy_context())
-                   .has_value());
+  ASSERT_FALSE(
+      lock.try_atomic_change_lock(&first, &second, make_dummy_context())
+          .has_value());
 
-  EXPECT_EQ(lock.commit_change(first, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(first, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(1));
 }
 
@@ -542,13 +485,12 @@ TEST(ItemLockTest, AuthAddKey)
   first.set_new_pk(1, make_test_pk_config(2));
   ItemChange first_change(std::move(first));
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
 
-  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(first_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2));
 }
 
@@ -559,13 +501,12 @@ TEST(ItemLockTest, ChangeKey)
   first.set_new_pk(0, make_test_pk_config(2));
   ItemChange first_change(std::move(first));
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(1));
 
-  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(first_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(1));
 }
 
@@ -581,30 +522,25 @@ TEST(ItemLockTest, DISABLED_AuthAddKeyMultiple)
   ItemChange third_change = first_change;
   // NOLINTEND(performance-unnecessary-copy-initialization)
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
 
   auto r2 = lock.try_atomic_change_lock(nullptr, &second_change,
-                                        &kTestCostModel, make_dummy_context());
+                                        make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
 
-  auto r3 = lock.try_atomic_change_lock(nullptr, &third_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r3 =
+      lock.try_atomic_change_lock(nullptr, &third_change, make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), kTestCostModel.get_auth_data_cost(2));
 
-  EXPECT_EQ(lock.commit_change(second_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2));
-  EXPECT_EQ(lock.commit_change(third_change, &kTestCostModel,
-                               make_dummy_context()),
-            0);
-  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel,
-                               make_dummy_context()),
-            0);
+  EXPECT_EQ(lock.commit_change(third_change, make_dummy_context()), 0);
+  EXPECT_EQ(lock.commit_change(first_change, make_dummy_context()), 0);
 }
 
 TEST(ItemLockTest, DISABLED_MoveKeys)
@@ -629,30 +565,27 @@ TEST(ItemLockTest, DISABLED_MoveKeys)
   ItemChange second_change(std::move(second));
   ItemChange third_change(std::move(third));
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 =
+      lock.try_atomic_change_lock(nullptr, &first_change, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.get_auth_data_cost(2));
 
   auto r2 = lock.try_atomic_change_lock(nullptr, &second_change,
-                                        &kTestCostModel, make_dummy_context());
+                                        make_dummy_context());
   ASSERT_TRUE(r2.has_value());
   EXPECT_EQ(r2.value(), kTestCostModel.get_auth_data_cost(2));
 
-  auto r3 = lock.try_atomic_change_lock(nullptr, &third_change, &kTestCostModel,
-                                        make_dummy_context());
+  auto r3 =
+      lock.try_atomic_change_lock(nullptr, &third_change, make_dummy_context());
   ASSERT_TRUE(r3.has_value());
   EXPECT_EQ(r3.value(), kTestCostModel.get_auth_data_cost(2));
 
-  EXPECT_EQ(lock.commit_change(second_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(1));
-  EXPECT_EQ(lock.commit_change(third_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(third_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(2) -
                 kTestCostModel.get_auth_data_cost(1));
-  EXPECT_EQ(lock.commit_change(first_change, &kTestCostModel,
-                               make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(first_change, make_dummy_context()),
             kTestCostModel.get_auth_data_cost(3) -
                 kTestCostModel.get_auth_data_cost(2));
 }
@@ -666,16 +599,14 @@ TEST(ItemLockTest, FinalizeExclusive)
   auto second = make_nnint_change(200, 20);
   second.narrow(first);
 
-  auto r1 = lock.try_atomic_change_lock(nullptr, &first, &kTestCostModel,
-                                        make_dummy_context());
+  auto r1 = lock.try_atomic_change_lock(nullptr, &first, make_dummy_context());
   ASSERT_TRUE(r1.has_value());
   EXPECT_EQ(r1.value(), kTestCostModel.kBaseItemCost);
 
-  auto r2 = lock.try_atomic_change_lock(&first, &second, &kTestCostModel,
-                                        make_dummy_context());
+  auto r2 = lock.try_atomic_change_lock(&first, &second, make_dummy_context());
   ASSERT_TRUE(r2.has_value());
 
-  EXPECT_EQ(lock.commit_change(second, &kTestCostModel, make_dummy_context()),
+  EXPECT_EQ(lock.commit_change(second, make_dummy_context()),
             kTestCostModel.kBaseItemCost);
 
   auto const *inner = lock.get_inner<NNInt128Lock>();

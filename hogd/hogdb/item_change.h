@@ -177,6 +177,57 @@ static_assert(hogd::is_item<hogd::NNInt128>);
 
 namespace hogd {
 
+// NNInt128 type, specialized for balance changes.
+struct Balance {
+public:
+  Balance(int128_t balance_change) : delta_(balance_change)
+  {
+    if (delta_ < 0) {
+      sub_ = delta_;
+    }
+    else {
+      add_ = delta_;
+    }
+  }
+
+  bool narrow(Balance const &other);
+
+  int128_t delta() const { return delta_; }
+  int128_t plus() const { return add_; }
+  int128_t minus() const { return sub_; }
+
+  bool operator==(const Balance &other) const = default;
+
+private:
+  void assert_is_valid() const
+  {
+    assert(add_ >= 0);
+    assert(sub_ <= 0);
+    assert(add_ >= delta_);
+    assert(sub_ <= delta_);
+  }
+
+  int128_t delta_;
+  int128_t add_ = 0;
+  int128_t sub_ = 0;
+};
+
+} // namespace hogd
+
+template<> struct std::formatter<hogd::Balance> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+
+  static auto format(const hogd::Balance &bal, auto &ctx)
+  {
+    return format_to(ctx.out(), "Balance{{delta={}, plus={}, minus={}}}",
+                     bal.delta(), bal.plus(), bal.minus());
+  }
+};
+
+static_assert(hogd::is_item<hogd::Balance>);
+
+namespace hogd {
+
 // Bytes is an item type that manages an opaque variable-length arrays of
 // bytes. It commutes with other Bytes's if the array is equal.
 struct Bytes {
@@ -418,6 +469,7 @@ public:
   ItemChange(ReplayCacheIt &&replay_cache)
     : type_(PointerItem<ReplayCacheIt>(std::move(replay_cache)))
   {}
+  ItemChange(Balance &&balance) : type_(std::move(balance)) {}
   ~ItemChange() = default;
 
   // getters
@@ -427,6 +479,7 @@ public:
   std::optional<ReplayCacheIt> to_replay_cache() const;
   std::optional<NewContractData> to_new_contract() const;
   std::optional<DeployedContractData> to_new_deployment() const;
+  std::optional<Balance> to_balance() const;
   bool is_bytes() const { return std::holds_alternative<Bytes>(type_); }
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_nnint128() const { return std::holds_alternative<NNInt128>(type_); }
@@ -457,6 +510,8 @@ public:
     return std::holds_alternative<PointerItem<ReplayCacheIt>>(type_);
   }
 
+  bool is_balance() const { return std::holds_alternative<Balance>(type_); }
+
   template<typename T> auto const *get_inner() const
   {
     return std::get_if<T>(&type_);
@@ -468,8 +523,8 @@ public:
   auto get_type() const { return type_.index(); }
 
 private:
-  std::variant<std::monostate, NNInt128, Bytes, Deletion, DeployedContractData,
-               NewContractData, PointerItem<AuthDataItem>,
+  std::variant<std::monostate, NNInt128, Balance, Bytes, Deletion,
+               DeployedContractData, NewContractData, PointerItem<AuthDataItem>,
                PointerItem<ReplayCacheIt>>
       type_;
   bool exclusive_{false};
@@ -541,6 +596,15 @@ ItemChange::to_new_deployment() const
   return std::nullopt;
 }
 
+inline std::optional<Balance>
+ItemChange::to_balance() const
+{
+  if (const auto *tmp = std::get_if<Balance>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+/*
 inline HogDBStatus<ItemChange>
 make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
 {
@@ -553,7 +617,7 @@ make_balance_change(HogDBDAO &db, const Address &addr, int128_t delta)
   }
   auto out = ItemChange(NNInt128(*balance, delta));
   return HogDBStatus<ItemChange>(std::in_place_t{}, std::move(out));
-}
+} */
 
 } // namespace hogd
 
