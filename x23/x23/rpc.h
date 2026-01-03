@@ -180,8 +180,8 @@ private:
 
     using enum accept_stat;
 
-    MaybeAsync<Buf> operator()(BufViewEnd argbytes)
-    try {
+    MaybeAsync<Buf> operator()(BufViewEnd argbytes) noexcept
+    {
       constexpr bool returns_void = std::is_void_v<return_type>;
       using dispatch_t = decltype(dispatch(argbytes));
       rpc_msg rmsg{.xid = xid_};
@@ -217,32 +217,22 @@ private:
 
         // Dispatch returned something awaitable and it's not ready,
         // so here we actually need to allocate a new coroutine frame.
-        // Note: The try-catch here is necessary to convert exceptions
-        // from async handlers into RPC error responses. If this causes
-        // issues with GCC, consider wrapping awaitable in a helper that
-        // catches exceptions outside the coroutine machinery.
         return [](ProcHandler self /* copy *this into coroutine */,
                   auto awaitable) -> Async<Buf> {
-          try {
-            rpc_msg rmsg{.xid = self.xid_};
-            msg_set_reply_stat(&rmsg, SUCCESS);
-            if constexpr (returns_void) {
-              co_await awaitable;
-              self.d_.logger_.template log_server<ProcMeta>(rmsg);
-              co_return make_record(rmsg);
-            }
-            else {
-              serializes_like<return_type> auto res = co_await awaitable;
-              self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
-              co_return make_record(rmsg, res);
-            }
-          } catch (const std::exception &e) {
-            co_return self.error(e);
+          rpc_msg rmsg{.xid = self.xid_};
+          msg_set_reply_stat(&rmsg, SUCCESS);
+          if constexpr (returns_void) {
+            co_await awaitable;
+            self.d_.logger_.template log_server<ProcMeta>(rmsg);
+            co_return make_record(rmsg);
+          }
+          else {
+            serializes_like<return_type> auto res = co_await awaitable;
+            self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
+            co_return make_record(rmsg, res);
           }
         }(*this, std::move(awaitable));
       }
-    } catch (std::exception &e) {
-      return error(e);
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
