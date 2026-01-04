@@ -1,17 +1,7 @@
 # macOS Development Environment for hogd
 # Source this file: source ./scripts/macos-env.sh
 
-# Get the directory where this script lives (works in both bash and zsh)
-if [ -n "${BASH_SOURCE[0]:-}" ]; then
-    # Bash
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-elif [ -n "${ZSH_VERSION:-}" ]; then
-    # Zsh - use %x to get script path when sourced
-    SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
-else
-    # Fallback - assume run from project root
-    SCRIPT_DIR="$(pwd)/scripts"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Activate Python venv
@@ -49,3 +39,6 @@ if [ -n "$TOOLCHAIN_VERSION" ]; then
         echo "          WARNING: toolchain $TOOLCHAIN_VERSION not installed"
     fi
 fi
+echo ""
+echo "Note: ./scripts/build.sh automatically activates this environment."
+echo "      If running 'make' directly, source this file first."
