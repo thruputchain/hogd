@@ -1,0 +1,409 @@
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+
+#include "built_contracts/itc_erc20.h"
+#include "exec_result.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hogexec/precompiles/precompile_native_token.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "precompiles.hh"
+#include "rpc_types.hh"
+#include "syscall_error.hh"
+#include "transaction.hh"
+#include "types.hh"
+
+namespace hogd {
+
+class BalanceCostTrackingTest : public ::testing::Test,
+                                public NativeContractTestFramework {
+public:
+  BalanceCostTrackingTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB)
+  {}
+
+protected:
+  void SetUp() override
+  {
+    // Set up the preset native token contract
+    auto token_contract = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(token_contract);
+    write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                     token_contract);
+  }
+};
+
+// Transfer a large number of units of native token to an address that doesn't
+// exist. This should succeed, but then after the block closes the value should
+// be discounted the balance cost.
+TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
+{
+
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  // Create sender and receiver addresses
+  constexpr static ContractAddress kSenderAddr = make_contract_address(100);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(101);
+
+  // Grant initial tokens to sender (large amount)
+  constexpr int128_t kInitialBalance = 1'000'000;
+  constexpr int128_t kTransferAmount = 500'000;
+  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+
+  // Create a contract that will transfer tokens
+  auto sender_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime &) -> InvokeStatus<void> {
+             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+                 handler, kReceiverAddr,
+                 to_xdr(static_cast<uint128_t>(kTransferAmount)));
+
+             if (!r_transfer.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (!r_transfer.value().has_value() ||
+                 !r_transfer.value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 1;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto test_runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  // Invoke the transfer
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *test_runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+
+  // Advance block to commit the transaction
+  advance_block();
+
+  // Check receiver's balance - should be transfer amount minus balance cost
+  auto receiver_balance_addrkey =
+      make_free_native_token_balance_addrkey(kReceiverAddr);
+  auto receiver_balance_opt =
+      lookup_storage_item_from_db(receiver_balance_addrkey);
+  ASSERT_TRUE(receiver_balance_opt.has_value());
+  int128_t receiver_balance = from_xdr(receiver_balance_opt.value().nnint());
+  EXPECT_EQ(receiver_balance, kTransferAmount - balance_cost);
+}
+
+// Two transactions in one block that transfer to the same new address. The
+// cost of the balance item should only be paid once.
+TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
+{
+
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  // Create sender and receiver addresses
+  constexpr static ContractAddress kSenderAddr = make_contract_address(200);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(201);
+
+  // Grant initial tokens to sender
+  constexpr int128_t kInitialBalance = 1'000'000;
+  constexpr int128_t kFirstTransferAmount = 300'000;
+  constexpr int128_t kSecondTransferAmount = 200'000;
+  setup_grant_storage_token(kSenderAddr, kInitialBalance);
+
+  // Create a contract that will transfer tokens
+  auto sender_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime &) -> InvokeStatus<void> {
+             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+                 handler, kReceiverAddr,
+                 to_xdr(static_cast<uint128_t>(kFirstTransferAmount)));
+
+             if (!r_transfer.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (!r_transfer.value().has_value() ||
+                 !r_transfer.value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime &) -> InvokeStatus<void> {
+             auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress);
+
+             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+                 handler, kReceiverAddr,
+                 to_xdr(static_cast<uint128_t>(kSecondTransferAmount)));
+
+             if (!r_transfer.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (!r_transfer.value().has_value() ||
+                 !r_transfer.value().value().is_ok()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 1;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto test_runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  // First transaction: transfer to receiver (new address)
+  auto handler1 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *test_runtime_context);
+
+  auto res1 = handler1.root_invoke();
+  ASSERT_TRUE(res1.is_root_success());
+
+  auto commit_res1 = handler1.try_commit_transaction();
+  ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler1.emit_events()());
+
+  // Second transaction in the same block: transfer to same receiver
+  auto handler2 = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(1),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *test_runtime_context);
+
+  auto res2 = handler2.root_invoke();
+  ASSERT_TRUE(res2.is_root_success());
+
+  auto commit_res2 = handler2.try_commit_transaction();
+  ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler2.emit_events()());
+
+  // Advance block to commit both transactions
+  advance_block();
+
+  // Check receiver's balance - should be sum of both transfers minus balance
+  // cost only once
+  auto receiver_balance_addrkey =
+      make_free_native_token_balance_addrkey(kReceiverAddr);
+  auto receiver_balance_opt =
+      lookup_storage_item_from_db(receiver_balance_addrkey);
+  ASSERT_TRUE(receiver_balance_opt.has_value());
+  int128_t receiver_balance = from_xdr(receiver_balance_opt.value().nnint());
+  int128_t expected_balance =
+      kFirstTransferAmount + kSecondTransferAmount - balance_cost;
+  EXPECT_EQ(receiver_balance, expected_balance);
+}
+
+// Test try_invoke with balance cost tracking. In one transaction:
+// 1. Try to transfer with insufficient tokens to cover the cost (in try_invoke
+//    frame) - should fail
+// 2. Call transfer with the same arguments, not in try_invoke frame - should
+//    succeed
+// 3. Call transfer again with the remainder to make a new balance, in
+// try_invoke
+//    frame - should succeed
+// In the end, we only transfer the cost for a balance (so the observed balance
+// should be 0)
+TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
+{
+  auto const *cost_model = get_default_cost_model();
+  int128_t balance_cost = cost_model->get_balance_cost();
+  ASSERT_GT(balance_cost, 0);
+
+  // Create sender and receiver addresses
+  constexpr static ContractAddress kSenderAddr = make_contract_address(50);
+  constexpr static ContractAddress kReceiverAddr = make_contract_address(51);
+
+  // Grant initial tokens to sender (exactly balance_cost)
+  setup_grant_storage_token(kSenderAddr, balance_cost);
+
+  // Amounts: we'll transfer (balance_cost - 1) first, then 1
+  int128_t kFirstTransferAmount = balance_cost - 1;
+  ASSERT_GT(kFirstTransferAmount, 0);
+  int128_t kSecondTransferAmount = 1;
+
+  // Create a contract that orchestrates the transfers
+  auto sender_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [kFirstTransferAmount, kSecondTransferAmount](
+               SystemCallHandler &handler,
+               NativeRuntime &runtime) -> InvokeStatus<void> {
+             auto native_token_addr =
+                 GenesisConfigurationLoader::kPresetNativeTokenAddress;
+             using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+             // 1. Try to transfer (balance_cost - 1) in try_invoke frame -
+             // should fail because insufficient to cover balance cost
+             auto calldata1 = erc20_meta::make_calldata<"transfer">(
+                 kReceiverAddr,
+                 to_xdr(static_cast<uint128_t>(kFirstTransferAmount)));
+             auto [r1, _g1] = handler.invoke(
+                 native_token_addr,
+                 sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                 runtime.get_available_gas(), calldata1,
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Should fail in try_invoke (insufficient funds for balance cost)
+             if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // 2. Call transfer with same arguments, NOT in try_invoke frame -
+             // should succeed (creates the balance)
+             auto [r2, _g2] = handler.invoke(
+                 native_token_addr,
+                 sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                 runtime.get_available_gas(), calldata1,
+                 std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // 3. Call transfer again with remainder (1), in try_invoke frame -
+             // should succeed
+             auto calldata2 = erc20_meta::make_calldata<"transfer">(
+                 kReceiverAddr,
+                 to_xdr(static_cast<uint128_t>(kSecondTransferAmount)));
+             auto [r3, _g3] = handler.invoke(
+                 native_token_addr,
+                 sdk_method_id(erc20_meta::entrypoint<"transfer">()),
+                 runtime.get_available_gas(), calldata2,
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r3.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kSenderNativeId = 1;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto test_runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  write_contract(sender_contract_xdr);
+  write_deployment(kSenderAddr, sender_contract_xdr);
+
+  // Invoke the contract
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSenderAddr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      *test_runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events()());
+
+  // Advance block to commit the transaction
+  advance_block();
+
+  // Check receiver's balance - should be 0 (we transferred exactly balance_cost
+  // total, which gets deducted)
+  auto receiver_balance_addrkey =
+      make_free_native_token_balance_addrkey(kReceiverAddr);
+  auto receiver_balance_opt =
+      lookup_storage_item_from_db(receiver_balance_addrkey);
+  ASSERT_TRUE(receiver_balance_opt.has_value());
+  int128_t receiver_balance = from_xdr(receiver_balance_opt.value().nnint());
+  EXPECT_EQ(receiver_balance, 0);
+}
+
+} // namespace hogd
