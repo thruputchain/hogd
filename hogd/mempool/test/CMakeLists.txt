@@ -47,6 +47,28 @@ target_link_libraries(mempool_test
 
 gtest_discover_tests(mempool_test)
 
+# Scheduler stress tests - separated for longer-running tests.
+# Run with: ./build/hogd/mempool/test/scheduler_stress_test
+# For large scale tests: --gtest_also_run_disabled_tests
+add_executable(
+  scheduler_stress_test
+  scheduler_stress_test.cc
+  $<TARGET_OBJECTS:mempool_test_infra>
+)
+
+target_link_libraries(scheduler_stress_test
+  hogd
+  mempool
+  exec_interface
+  runtime
+  runtime_test_util
+  contract_loader
+  GTest::gtest
+)
+
+# Note: Not using gtest_discover_tests to avoid slowing down regular ctest runs.
+# These tests can be run manually or via a separate CI job.
+
 if(BUILD_BENCHMARKS)
   add_executable(
     mempool_bench
