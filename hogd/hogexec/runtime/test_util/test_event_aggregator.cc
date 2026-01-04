@@ -66,12 +66,15 @@ std::optional<TxEventLog>
 TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
 {
   std::lock_guard<std::mutex> lock(mtx_);
+  std::println("Getting events for block {} and tx {}", block_id, tx_id);
   auto it = events_.find(block_id);
   if (it == events_.end()) {
+    std::println("Block {} not found", block_id);
     return std::nullopt;
   }
 
   if (!it->second.contains(tx_id)) {
+    std::println("Tx {} not found", tx_id);
     return std::nullopt;
   }
   return it->second.at(tx_id);
