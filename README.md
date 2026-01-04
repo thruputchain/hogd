@@ -2,6 +2,42 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 
 # Installation Instructions
 
+## macOS Quick Start
+
+For macOS users, an automated setup script is available that installs all dependencies:
+
+1. Install [Homebrew](https://brew.sh/) if you haven't already.
+
+2. Run the macOS setup script:
+   ~~~~ .sh
+   ./scripts/macos-setup.sh
+   ~~~~
+
+3. Follow the normal build instructions below (starting from step 5).
+
+The setup script installs all required dependencies including LLVM, CMake, Python packages, Rust toolchains, and development tools.
+
+**Note:** An SSH agent must be running to fetch private submodules. Configure your SSH keys with GitHub before running the build.
+
+## Docker
+
+For development and testing in a containerized environment, use the Docker-based CI setup:
+
+~~~~ .sh
+# Build the Docker image
+./docker/local-ci.sh build
+
+# Run C++ CI checks (format, build, test)
+./docker/local-ci.sh cpp
+
+# Interactive shell for debugging
+./docker/local-ci.sh shell
+~~~~
+
+See `docker/README.md` for detailed usage, including SSH agent setup for private submodules, tidy checks, and more.
+
+## Manual Installation (All Platforms)
+
 1. Install the `wat2wasm` utility from the [WebAssembly Binary
    Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
    managers let you do this by installing a package called `wabt`.
