@@ -5,7 +5,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 # On macOS, check if development environment is set up
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # Check if Python venv is activated by checking for pyyaml
-  if ! python3 -c "import yaml" &> /dev/null; then
+  if ! python3 -c "import yaml" &>/dev/null; then
     # Try to auto-source the macos-env.sh if it exists
     MACOS_ENV_SCRIPT="$(dirname "$SCRIPT_DIR")/scripts/macos-env.sh"
     if [ -f "$MACOS_ENV_SCRIPT" ]; then
@@ -13,7 +13,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
       source "$MACOS_ENV_SCRIPT"
 
       # Verify it worked
-      if ! python3 -c "import yaml" &> /dev/null; then
+      if ! python3 -c "import yaml" &>/dev/null; then
         echo ""
         echo "ERROR: Failed to activate development environment"
         echo "Please run: source ./scripts/macos-env.sh"

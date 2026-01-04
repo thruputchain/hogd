@@ -32,12 +32,12 @@ echo "  Rust:   $(rustc --version) (default)"
 # Show the project toolchain version to verify rustup is working
 TOOLCHAIN_VERSION=$(grep 'channel' "$PROJECT_ROOT/hogd/rust/rust-toolchain.toml" 2>/dev/null | cut -d'"' -f2)
 if [ -n "$TOOLCHAIN_VERSION" ]; then
-    TOOLCHAIN_RUSTC=$(rustc +"$TOOLCHAIN_VERSION" --version 2>/dev/null)
-    if [ -n "$TOOLCHAIN_RUSTC" ]; then
-        echo "          $TOOLCHAIN_RUSTC (project toolchain)"
-    else
-        echo "          WARNING: toolchain $TOOLCHAIN_VERSION not installed"
-    fi
+  TOOLCHAIN_RUSTC=$(rustc +"$TOOLCHAIN_VERSION" --version 2>/dev/null)
+  if [ -n "$TOOLCHAIN_RUSTC" ]; then
+    echo "          $TOOLCHAIN_RUSTC (project toolchain)"
+  else
+    echo "          WARNING: toolchain $TOOLCHAIN_VERSION not installed"
+  fi
 fi
 echo ""
 echo "Note: ./scripts/build.sh automatically activates this environment."
