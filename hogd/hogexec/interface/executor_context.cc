@@ -10,6 +10,7 @@
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -188,13 +189,18 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
   pending_event_calls_.fetch_sub(1, std::memory_order_relaxed);
 }
 
-std::optional<SystemErrorCode>
+x23::Async<std::optional<SystemErrorCode>>
 ExecutorContext::await_event_return()
 {
+  int wait_count = 0;
   while (pending_event_calls_.load(std::memory_order_relaxed) > 0) {
     cpu_relax();
+    wait_count++;
+    if ((wait_count & 0xFF) == 0U) [[unlikely]] {
+      co_await default_threadpool().bg();
+    }
   }
-  return event_error_;
+  co_return event_error_;
 }
 
 } // namespace hogd

@@ -102,7 +102,7 @@ ExecutorStateManager::open_validation(BlockID new_validation_id)
   return open_block(new_validation_id, ExecutionMode::kValidating);
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
@@ -113,14 +113,14 @@ ExecutorStateManager::remove_block(BlockID block_id)
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
-      return ExecResult::ExecResultSystemError;
+      co_return ExecResult::ExecResultSystemError;
     }
     it->second.open_block_count--;
     if (it->second.open_block_count == 0) {
       if (it->second.context.initiate_shutdown()) {
         do_gc = true;
       }
-      auto event_error = it->second.context.get().await_event_return();
+      auto event_error = co_await it->second.context.get().await_event_return();
       if (event_error.has_value()) [[unlikely]] {
         switch (event_error.value()) {
         case SystemErrorCode::kSystemAbortTransaction:
@@ -149,7 +149,7 @@ ExecutorStateManager::remove_block(BlockID block_id)
     worker_pool_.print_stats();
     gc_executor_context(block_id);
   }
-  return result;
+  co_return result;
 }
 
 void

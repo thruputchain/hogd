@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "exec_sched.hh"
+#include "exec_result.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -41,7 +42,7 @@ public:
   ExecResult open_proposal(BlockID new_proposal_id);
   ExecResult open_validation(BlockID new_validation_id);
   // Decreases the reference count of the executor context.
-  ExecResult remove_block(BlockID block_id);
+  x23::Async<ExecResult> remove_block(BlockID block_id);
 
   // All references to the executor context must be released before calling
   // this.
