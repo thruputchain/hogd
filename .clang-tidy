@@ -51,3 +51,7 @@ CheckOptions:
   - { key: readability-implicit-bool-conversion.AllowPointerConditions,  value: 1  }
   - { key: readability-function-cognitive-complexity.IgnoreMacros,  value: 1   }
   - { key: modernize-use-scoped-lock.WarnOnSingleLocks,          value: false }
+  # Allow variables of the form _name, for e.g. x23::Defer usage
+  - { key: readability-identifier-naming.LocalVariableIgnoredRegexp,        value: "^_[a-zA-Z]+$"  }
+  # promise_type required for coroutines
+  - { key: readability-identifier-naming.StructIgnoredRegexp,        value: "^promise_type$"  }

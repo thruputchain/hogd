@@ -61,6 +61,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
@@ -86,7 +87,7 @@ struct SRpcService {
 
 class SRpcFd : public RefCount {
 public:
-  static inline bool ignore_sigpipe = true;
+  static inline bool ignore_sigpipe_ = true;
 
   // Note the BufView argument to CallCB is only the arguments, not
   // the rpc_msg, which has already been decoded.  (This is an
@@ -103,10 +104,11 @@ public:
   SRpcFd(const SRpcFd &) = delete;
 
   template<typename... Args>
-  void fail(std::format_string<Args...> fmt, Args &&...args)
+  void fail(std::format_string<Args...> fmt, Args &&...args) noexcept
   {
     Str msg = uformat("SRpcFd(fd {}): ", fd_.get()) +
               uvformat(fmt.get(), std::make_format_args(args...));
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
     debug.err("{}", msg);
     stop();
   }
@@ -277,7 +279,8 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
                decltype(*declval<Server>())>::rpc_service,
            typename... ExtraArgs>
   requires implements_srpc<Server, VersMeta, ExtraArgs...>
-  SRpcStream &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
+  SRpcStream &server(Server srvr, VersMeta /*unused*/ = {},
+                     ExtraArgs &&...extra_args)
   {
     auto dispatch = new SRpcDispatcher<VersMeta, Server, Logger,
                                        std::decay_t<ExtraArgs>...>(
@@ -296,7 +299,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
@@ -399,7 +402,7 @@ struct SRpcMulticlient : RefCount, PerCpuSet<RefPtr<SRpcStream<Logger>>, true> {
 
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }

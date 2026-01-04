@@ -11,6 +11,7 @@
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/corotrace.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/event.h>
 #include <x23/refcnt.h>
@@ -76,9 +77,10 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
       co_return res.error();
     else
       len = *res;
-    done = len & 0x80000000;
+    done = ((len & 0x80000000) != 0U);
     len &= 0x7fffffff;
     if (bp->size() + len > max_message_size) {
+      // NOLINTNEXTLINE(readability-static-accessed-through-instance)
       debug.err(
           "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
           get_fd(), bp->size() + len, max_message_size);
@@ -89,6 +91,7 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
       co_return res.error();
     }
     else if (*res != len) {
+      // NOLINTNEXTLINE(readability-static-accessed-through-instance)
       debug.err("RpcStreamImpl: read(fd {}, n {}) returned {} bytes", get_fd(),
                 len, *res);
       co_return Errno{ENOMSG};
@@ -119,7 +122,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
-  if constexpr (kMinBuf)
+  if constexpr (kMinBuf != 0U)
     b.reserve(kMinBuf);
   while (!ss_.stop_requested()) {
     if (Errno err = co_await read_record(&b)) {
@@ -149,7 +152,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
       //
       // cp_->pool_.make_callback(cb, std::move(b));
       cb(std::move(b));
-      if constexpr (kMinBuf)
+      if constexpr (kMinBuf != 0U)
         b.reserve(kMinBuf);
     }
     else if (msg.body.mtype() == CALL) {

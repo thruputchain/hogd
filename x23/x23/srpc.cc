@@ -1,12 +1,28 @@
 
+#include <x23/srpc.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
 #include <print>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <thread>
+#include <utility>
 
-#include <signal.h>
-
-#include "x23/serialize.h"
-#include "x23/sockio.h"
-#include "x23/srpc.h"
-#include "x23/vec.h"
+#include <x23/cleanup.h>
+#include <x23/cpumap.h>
+#include <x23/debug.h>
+#include <x23/fileio.h>
+#include <x23/refcnt.h>
+#include <x23/rpc_msg.hh>
+#include <x23/serialize.h>
+#include <x23/sockio.h>
+#include <x23/uiobuf.h>
+#include <x23/utility.h>
+#include <x23/vec.h>
 
 namespace x23 {
 
@@ -64,8 +80,8 @@ SRpcFd::go(const CpuSet *cpus)
   // If this fails, you have neither clients nor servers.
   x23assert(refcount() || !srvmap_.empty());
 
-  if (ignore_sigpipe) {
-    ignore_sigpipe = false;
+  if (ignore_sigpipe_) {
+    ignore_sigpipe_ = false;
     signal(SIGPIPE, SIG_IGN);
   }
 

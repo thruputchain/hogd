@@ -5,6 +5,7 @@
 #include <atomic>
 #include <mutex>
 
+#include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/refcnt.h>
 #include <x23/threadpool.h>
