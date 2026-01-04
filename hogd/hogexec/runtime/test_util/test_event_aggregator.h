@@ -10,6 +10,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
 
 namespace hogd {

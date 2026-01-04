@@ -47,11 +47,9 @@ TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
                                 TxEventLog const &event_log)
 {
   std::unique_lock<std::mutex> lock(mtx_);
-  std::println("Emitting event for block {} and tx {}", block_id, tx_id);
   // Block if should_block_ is true
   emit_cv_.wait(lock, [this] { return !should_block_; });
 
-  std::println("Post wait: Emitting event for block {} and tx {}", block_id, tx_id);
   if (!is_block_open(block_id)) {
     error("Block {} is not open", block_id);
     return RPCError::kRPCBadBlockID;
@@ -70,15 +68,14 @@ std::optional<TxEventLog>
 TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
 {
   std::lock_guard<std::mutex> lock(mtx_);
-  std::println("Getting events for block {} and tx {}", block_id, tx_id);
   auto it = events_.find(block_id);
   if (it == events_.end()) {
-    std::println("Block {} not found", block_id);
+    error("Block {} not found", block_id);
     return std::nullopt;
   }
 
   if (!it->second.contains(tx_id)) {
-    std::println("Tx {} not found", tx_id);
+    error("Tx {} not found in block {}", tx_id, block_id);
     return std::nullopt;
   }
   return it->second.at(tx_id);

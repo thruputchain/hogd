@@ -102,12 +102,12 @@ protected:
 
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
-    info("Opening block {}", block_id);
     auto open_res = client_.executorsched_open_proposal_block(block_id);
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
-    auto db_res = db_client_.dbsched_create_snapshot(parent_block_id, block_id,
-                                                     BlockExecutionMode::kBlockExecutionModeProposal);
+    auto db_res = db_client_.dbsched_create_snapshot(
+        parent_block_id, block_id,
+        BlockExecutionMode::kBlockExecutionModeProposal);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
     auto event_open_res = event_client_.eventsched_open_block(block_id);
@@ -116,7 +116,6 @@ protected:
 
   void close_block(BlockID block_id)
   {
-    info("Closing block {}", block_id);
     auto client_finish_res = client_.executorsched_finish_block(block_id);
     ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
 
@@ -171,7 +170,6 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
-    info("Start initialization block {}", current_block_id);
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
@@ -182,7 +180,6 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     }
 
     // Finish the initialization block
-    info("Finish initialization block {}", current_block_id);
     close_block(current_block_id);
     current_block_id++;
   }
@@ -220,7 +217,8 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
     auto events = event_wrapper_.get_events(test_block_id, tx_id);
     ASSERT_TRUE(events.has_value()) << "Events should be present";
-    ASSERT_GT(events->events.size(), 0) << "Events should have at least one event";
+    ASSERT_GT(events->events.size(), 0)
+        << "Events should have at least one event";
   }
 }
 
@@ -263,7 +261,6 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
-    info("Start initialization block {}", current_block_id);
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
@@ -274,7 +271,6 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
     }
 
     // Finish the initialization block
-    info("Finish initialization block {}", current_block_id);
     close_block(current_block_id);
     current_block_id++;
   }
