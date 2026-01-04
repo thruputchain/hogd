@@ -59,6 +59,9 @@ public:
     loadgen_client_ = std::make_unique<loadgen_client_t>(
         create_client<LoadgenInterfaceV1>(loadgen_host_port, false,
                                           LoadgenRpc::kRpcMaxMessageSize)());
+
+    event_client_ = make_srpc_multiclient<EventSched1>(
+        x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
   }
 
 protected:
@@ -78,6 +81,9 @@ protected:
       db_client_;
   std::unique_ptr<loadgen_client_t> loadgen_client_;
 
+  EventSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
+      event_client_;
+
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();
 
@@ -93,6 +99,34 @@ protected:
             std::format("localhost:{}", db_wrapper_.coord_port()).c_str()};
   }
   EventCard make_event_card() { return event_wrapper_.make_event_card(); }
+
+  void open_block(BlockID block_id, BlockID parent_block_id)
+  {
+    auto open_res = client_.executorsched_open_proposal_block(block_id);
+    ASSERT_EQ(open_res, ExecResult::ExecResultOK);
+
+    auto db_res = db_client_.dbsched_create_snapshot(parent_block_id, block_id,
+                                                     BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+    auto event_open_res = event_client_.eventsched_open_block(block_id);
+    ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+  }
+
+  void close_block(BlockID block_id)
+  {
+    auto client_finish_res = client_.executorsched_finish_block(block_id);
+    ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
+
+    auto event_close_res = event_client_.eventsched_close_block(block_id);
+    ASSERT_EQ(event_close_res, RPCError::kRPCNone);
+
+    auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
+    ASSERT_EQ(db_close_res, DbSchedResult::DbSchedResultOK);
+
+    auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id);
+    ASSERT_EQ(db_commit_res, DbSchedResult::DbSchedResultOK);
+  }
 };
 
 //
@@ -127,8 +161,6 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Run initialization transactions
   const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
-  auto event_client = make_srpc_multiclient<EventSched1>(
-      x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
 
   // Count total initialization transactions to calculate work transaction IDs
   size_t num_init_txs = 0;
@@ -137,19 +169,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
-    // Open the proposal block for this initialization block
-    auto open_res = client_.executorsched_open_proposal_block(current_block_id);
-    ASSERT_EQ(open_res, ExecResult::ExecResultOK);
-
-    // Open corresponding db block
-    db_res = db_client_.dbsched_create_snapshot(
-        current_block_id - 1, current_block_id,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
-
-    // Open the event block
-    auto event_open_res = event_client.eventsched_open_block(current_block_id);
-    ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+    open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
     for (const auto &tx : init_block) {
@@ -159,23 +179,12 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     }
 
     // Finish the initialization block
-    client_.executorsched_finish_block(current_block_id);
+    close_block(current_block_id);
     current_block_id++;
   }
 
   // Now open the test block for work transactions
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
-  ASSERT_EQ(open_res, ExecResult::ExecResultOK);
-
-  // Open corresponding db block
-  db_res = db_client_.dbsched_create_snapshot(
-      current_block_id - 1, test_block_id,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
-
-  // Open the event block
-  auto event_open_res = event_client.eventsched_open_block(test_block_id);
-  ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+  open_block(test_block_id, current_block_id - 1);
 
   // Get some payment transactions from loadgen
   constexpr size_t kNumTxs = 5;
@@ -196,7 +205,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   }
 
   // Finish the block
-  client_.executorsched_finish_block(test_block_id);
+  close_block(test_block_id);
   // Now all the events should be emitted
 
   // Calculate transaction IDs: executor_id=1, so tx_id = base + (1 << 48)
@@ -253,19 +262,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
-    // Open the proposal block for this initialization block
-    auto open_res = client_.executorsched_open_proposal_block(current_block_id);
-    ASSERT_EQ(open_res, ExecResult::ExecResultOK);
-
-    // Open corresponding db block
-    db_res = db_client_.dbsched_create_snapshot(
-        current_block_id - 1, current_block_id,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
-
-    // Open the event block
-    auto event_open_res = event_client.eventsched_open_block(current_block_id);
-    ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+    open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
     for (const auto &tx : init_block) {
@@ -275,23 +272,12 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
     }
 
     // Finish the initialization block
-    client_.executorsched_finish_block(current_block_id);
+    close_block(current_block_id);
     current_block_id++;
   }
 
   // Now open the test block for work transactions
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
-  ASSERT_EQ(open_res, ExecResult::ExecResultOK);
-
-  // Open corresponding db block
-  db_res = db_client_.dbsched_create_snapshot(
-      current_block_id - 1, test_block_id,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
-
-  // Open the event block
-  auto event_open_res = event_client.eventsched_open_block(test_block_id);
-  ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+  open_block(test_block_id, current_block_id - 1);
 
   // Block event emission before proposing transactions
   event_wrapper_.block_emit_events();
@@ -329,7 +315,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   event_wrapper_.unblock_emit_events();
 
   // Finish the block
-  client_.executorsched_finish_block(test_block_id);
+  close_block(test_block_id);
 
   // Check that events were emitted using the calculated transaction IDs
   bool found_events = false;
