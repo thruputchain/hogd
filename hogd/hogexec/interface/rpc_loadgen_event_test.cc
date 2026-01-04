@@ -122,7 +122,7 @@ protected:
     ASSERT_EQ(event_close_res, RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
-    ASSERT_EQ(db_close_res, DbSchedResult::DbSchedResultOK);
+    ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
     auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id);
     ASSERT_EQ(db_commit_res, DbSchedResult::DbSchedResultOK);
