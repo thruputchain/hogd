@@ -134,6 +134,11 @@ done
 
 echo "Rust toolchains configured."
 
+# Fetch cargo dependencies (requires rust-src to be installed first)
+echo ""
+echo "Fetching cargo dependencies..."
+"$SCRIPT_DIR/fetch.sh"
+
 # Generate the environment activation script
 ENV_SCRIPT="$SCRIPT_DIR/macos-env.sh"
 cat >"$ENV_SCRIPT" <<'EOF'
