@@ -300,11 +300,11 @@ public:
   //
   // Functions for use on the caller/awaiter/"future" side
   //
-
   bool await_ready() noexcept
   {
-    return flags_.load(std::memory_order_acquire) & kReturning;
+    return (flags_.load(std::memory_order_acquire) & kReturning) != 0U;
   }
+
   bool await_suspend(auto h SLOC_DECL) noexcept
   {
 #if X23_CORO_TRACE
@@ -332,7 +332,6 @@ public:
         return;
     }
     x23assert(f & kException);
-    // NOLINTNEXTLINE(readability-identifier-naming)
     Defer _c{[this] { std::destroy_at(&exception_); }};
     std::rethrow_exception(std::move(exception_));
   }
@@ -770,6 +769,7 @@ make_async(source_location sloc = source_location::current())
 // A function that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
   struct promise_type : PromiseBase {
     template<typename... Args> requires has_location<Args...>
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
@@ -784,6 +784,7 @@ struct Detached {
     }
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
+  // NOLINTEND(readability-convert-member-functions-to-static)
 
   Detached(Detached &&) noexcept = delete;
 

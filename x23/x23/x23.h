@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -14,6 +17,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <variant>
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -50,7 +54,7 @@ index_string()
   if constexpr (I <= 9)
     return index_string_val<I + '0', C...>;
   else
-    return index_string<I / 10, I % 10 + '0', C...>();
+    return index_string<I / 10, (I % 10) + '0', C...>();
 }
 
 // An array of const char * with {"0", "1", ... "N"} to use as field

@@ -58,6 +58,7 @@ struct FixedStr {
 };
 
 template<FixedStr EnvVar> struct DebugFd {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   static inline std::string env_val;
 
   static int fd() noexcept
@@ -113,13 +114,14 @@ private:
 };
 
 struct NullDebugFd {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   static inline const std::string env_val{};
 
   static constexpr int fd() noexcept { return -1; }
   constexpr operator bool() const { return false; }
   static void vfmt(std::string_view fmt, std::format_args args) {}
-  static void fmt(auto &&...) {}
-  static void operator()(auto &&...) {}
+  static void fmt(auto &&.../*unused*/) {}
+  static void operator()(auto &&.../*unused*/) {}
   static void verr(std::string_view fmt, std::format_args args)
   {
     std::string msg = vformat_logline("", fmt, args);
@@ -147,6 +149,7 @@ inline DebugFd<"X23SERVER_TRACE"> debug;
 //       auto _rusage = dump_rusage(1);
 //       // ...
 //    }
+// NOLINTNEXTLINE(readability-static-accessed-through-instance)
 Defer<> dump_rusage(int fd = debug.fd());
 
 // Append argument to string, quoting if necessary
@@ -181,6 +184,7 @@ namespace detail {
                            std::source_location sloc) noexcept;
 } // namespace detail
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 template<typename... Args> struct panic {
   panic(std::format_string<Args...> fmt, const Args &...args,
         std::source_location sloc = std::source_location::current()) noexcept

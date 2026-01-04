@@ -80,17 +80,18 @@
 
 #pragma once
 
-#include "x23/cpumap.h"
 #include <atomic>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
 #include <expected>
 #include <map>
 #include <print>
 #include <stop_token>
 #include <string>
+#include <sys/socket.h>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -99,6 +100,8 @@
 #include <x23/cleanup.h>
 #include <x23/corosync.h>
 #include <x23/corotrace.h>
+#include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/event.h>
 #include <x23/fileio.h>
@@ -108,6 +111,7 @@
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
+#include <x23/threadpool.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
@@ -182,6 +186,7 @@ private:
 
     MaybeAsync<Buf> operator()(BufViewEnd argbytes)
     try {
+      // NOLINTNEXTLINE(readability-identifier-naming)
       constexpr bool returns_void = std::is_void_v<return_type>;
       using dispatch_t = decltype(dispatch(argbytes));
       rpc_msg rmsg{.xid = xid_};
@@ -377,7 +382,7 @@ struct RpcStream : public detail::RpcStreamImpl {
 
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
     go();
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
@@ -388,7 +393,8 @@ struct RpcStream : public detail::RpcStreamImpl {
                decltype(*declval<Server>())>::rpc_service,
            typename... ExtraArgs>
   requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-  RpcStream *server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
+  RpcStream *server(Server srvr, VersMeta /*unused*/ = {},
+                    ExtraArgs &&...extra_args)
   {
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
@@ -506,7 +512,7 @@ struct RpcMulticlient : RefCount,
 
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
