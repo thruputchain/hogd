@@ -47,14 +47,18 @@ TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
                                 TxEventLog const &event_log)
 {
   std::unique_lock<std::mutex> lock(mtx_);
+  std::println("Emitting event for block {} and tx {}", block_id, tx_id);
   // Block if should_block_ is true
   emit_cv_.wait(lock, [this] { return !should_block_; });
 
+  std::println("Post wait: Emitting event for block {} and tx {}", block_id, tx_id);
   if (!is_block_open(block_id)) {
+    error("Block {} is not open", block_id);
     return RPCError::kRPCBadBlockID;
   }
 
   if (events_[block_id].contains(tx_id)) {
+    error("Unrecoverable: Tx {} already exists for block {}", tx_id, block_id);
     return RPCError::kRPCUnrecoverable;
   }
 
