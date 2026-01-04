@@ -142,6 +142,19 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
 
   if (exec_res == ExecResult::ExecResultOK) {
     pending_event_calls_.fetch_add(1, std::memory_order_relaxed);
+    // The release of the PerThreaadARC for this happens after the above
+    // fetch_add; hence, when finish_block() is called, the above change is
+    // visible.
+    //
+    // Furthermore, it is not possible that the acquire_reference() for this
+    // transaction could succeed if the PerThreadARC is in shutdown mode. (If
+    // someone sends a bunch of propose_transaction() calls and then immediately
+    // calls finish_block() without waiting for those, and uses different tcp
+    // connections so the calls aren't ordered, then some of those propose calls
+    // might still fail by failing to acquire a reference).
+    //
+    // Hence, when we go to await_event_return(), we know that this event call
+    // will be awaited before this ExecutorContext is destroyed.
     syscall_handler.emit_events()(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);

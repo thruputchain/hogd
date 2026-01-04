@@ -46,7 +46,10 @@ RPCError
 TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
                                 TxEventLog const &event_log)
 {
-  std::lock_guard<std::mutex> lock(mtx_);
+  std::unique_lock<std::mutex> lock(mtx_);
+  // Block if should_block_ is true
+  emit_cv_.wait(lock, [this] { return !should_block_; });
+
   if (!is_block_open(block_id)) {
     return RPCError::kRPCBadBlockID;
   }

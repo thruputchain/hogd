@@ -1,0 +1,372 @@
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <format>
+#include <memory>
+#include <thread>
+#include <utility>
+
+#include "db_sched.hh"
+#include "event_rpc.hh"
+#include "exec_result.hh"
+#include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/os.h"
+#include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/interface/rpc_from_coord.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/hogdb_wrapper.h"
+#include "hogd/init.h"
+#include "hogd/loadgen/loadgen_server.h"
+#include "hogd/mempool/shared.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
+#include "loadgen.hh"
+#include "rpc_types.hh"
+#include "sched_db.hh"
+#include "sched_event.hh"
+#include "sched_exec.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/cleanup.h"
+#include "x23/refcnt.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+class RpcLoadgenEventTest : public ::testing::Test {
+public:
+  void SetUp() override
+  {
+    // Start loadgen RPC server on a random port
+    loadgen_port_ = loadgen_server_.start_server(0);
+
+    // Start executor RPC server on a random port
+    executor_port_ = rpc_server_.start_server(0);
+
+    // Create executor RPC client connected to the server
+    client_ = make_srpc_multiclient<ExecutorSched1>(
+        x23::HostPort{"localhost", executor_port_}, false);
+
+    db_client_ = make_srpc_multiclient<DbSched1>(
+        x23::HostPort{"localhost", db_wrapper_.coord_port()}, false);
+
+    // Create loadgen client
+    x23::HostPort loadgen_host_port{"localhost", loadgen_port_};
+    loadgen_client_ = std::make_unique<loadgen_client_t>(
+        create_client<LoadgenInterfaceV1>(loadgen_host_port, false,
+                                          LoadgenRpc::kRpcMaxMessageSize)());
+  }
+
+protected:
+  HogdbWrapper db_wrapper_ =
+      HogdbWrapper(StorageCostModel(get_default_cost_model_xdr()));
+  EventServerWrapper event_wrapper_;
+
+  RpcServer<LoadgenRpc> loadgen_server_{default_coropoll()};
+  uint16_t loadgen_port_ = 0;
+
+  RpcServer<ExecutorMempoolRpc> rpc_server_{default_coropoll()};
+  uint16_t executor_port_ = 0;
+
+  ExecutorSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
+      client_;
+  DbSched1::client<x23::RefPtr<x23::SRpcMulticlient<x23::RpcLogger>>>
+      db_client_;
+  std::unique_ptr<loadgen_client_t> loadgen_client_;
+
+  x23::Defer<> force_syscallhandler_commit_ =
+      SystemCallHandler::force_commit_or_abort();
+
+  ShardCard make_shard_card()
+  {
+    return ShardCard{
+        .protocol = hogd::version::kHogdProtocol(),
+        .upid = {},
+        .block_height = 0,
+        .address_for_exec =
+            std::format("localhost:{}", db_wrapper_.exec_port()).c_str(),
+        .address_for_sched =
+            std::format("localhost:{}", db_wrapper_.coord_port()).c_str()};
+  }
+  EventCard make_event_card() { return event_wrapper_.make_event_card(); }
+};
+
+//
+// Test that loadgen ERC20 payment transactions emit events.
+//
+TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
+{
+  BlockID test_block_id = 100;
+
+  // Generate an experiment with ERC20 payments
+  constexpr uint32_t kNumAccounts = 10;
+  ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
+  config.erc20_payments().num_accounts = kNumAccounts;
+
+  LoadgenResult result = loadgen_client_->generate_experiment(config)();
+  ASSERT_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  LoadgenContextID context_id = result.success().context_id;
+
+  // Load the genesis configuration from loadgen to the database
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
+      result.success().genesis_configuration);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  // Initialize the executor with a shard pointing to our mock database server
+  IntroExecResult exec_result{
+      .exec_id = 1,
+      .shards = x23::Vec<ShardCard>{make_shard_card()},
+      .event = make_event_card(),
+  };
+  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+
+  // Run initialization transactions
+  const auto &init_blocks = result.success().initialization_txs;
+  BlockID current_block_id = 1;
+  auto event_client = make_srpc_multiclient<EventSched1>(
+      x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
+
+  // Count total initialization transactions to calculate work transaction IDs
+  size_t num_init_txs = 0;
+  for (const InitializationBlock &init_block : init_blocks) {
+    num_init_txs += init_block.size();
+  }
+
+  for (const InitializationBlock &init_block : init_blocks) {
+    // Open the proposal block for this initialization block
+    auto open_res = client_.executorsched_open_proposal_block(current_block_id);
+    ASSERT_EQ(open_res, ExecResult::ExecResultOK);
+
+    // Open corresponding db block
+    db_res = db_client_.dbsched_create_snapshot(
+        current_block_id - 1, current_block_id,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+    // Open the event block
+    auto event_open_res = event_client.eventsched_open_block(current_block_id);
+    ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+
+    // Propose all transactions in this initialization block
+    for (const auto &tx : init_block) {
+      auto propose_res =
+          client_.executorsched_propose_transaction(current_block_id, tx);
+      ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
+    }
+
+    // Finish the initialization block
+    client_.executorsched_finish_block(current_block_id);
+    current_block_id++;
+  }
+
+  // Now open the test block for work transactions
+  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  ASSERT_EQ(open_res, ExecResult::ExecResultOK);
+
+  // Open corresponding db block
+  db_res = db_client_.dbsched_create_snapshot(
+      current_block_id - 1, test_block_id,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  // Open the event block
+  auto event_open_res = event_client.eventsched_open_block(test_block_id);
+  ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+
+  // Get some payment transactions from loadgen
+  constexpr size_t kNumTxs = 5;
+  LoadgenExtensionResult ext_result =
+      loadgen_client_->extend_experiment(context_id, kNumTxs, 1'000'000'000)();
+  ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+
+  const SignedTransactionBatch &txs = ext_result.success().work_txs;
+  ASSERT_EQ(txs.size(), kNumTxs);
+
+  // Propose each transaction
+  for (const auto &tx : txs) {
+    auto propose_res =
+        client_.executorsched_propose_transaction(test_block_id, tx);
+    // Transactions might succeed or fail depending on account balances, etc.
+    // But they should not return SystemError if everything is set up correctly
+    ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
+  }
+
+  // Finish the block
+  client_.executorsched_finish_block(test_block_id);
+  // Now all the events should be emitted
+
+  // Calculate transaction IDs: executor_id=1, so tx_id = base + (1 << 48)
+  // Work transactions start after all initialization transactions
+  constexpr uint64_t kExecutorId = 1;
+  constexpr uint64_t kExecutorIdShift = kExecutorId << 48;
+  bool found_events = false;
+  for (size_t i = 0; i < txs.size(); ++i) {
+    TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
+    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+    if (events.has_value() && events->events.size() > 0) {
+      found_events = true;
+      // Verify the event structure is correct (should have at least one event)
+      ASSERT_GT(events->events.size(), 0);
+      break;
+    }
+  }
+  // At least one transaction should have emitted events, proving the experiment
+  // is set up correctly and events are being emitted
+  ASSERT_TRUE(found_events) << "No events were emitted for any transaction";
+}
+
+//
+// Test that event emission can be delayed and then unblocked.
+//
+TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
+{
+  BlockID test_block_id = 200;
+
+  // Generate an experiment with ERC20 payments
+  constexpr uint32_t kNumAccounts = 10;
+  ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
+  config.erc20_payments().num_accounts = kNumAccounts;
+
+  LoadgenResult result = loadgen_client_->generate_experiment(config)();
+  ASSERT_EQ(result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  LoadgenContextID context_id = result.success().context_id;
+
+  // Load the genesis configuration from loadgen to the database
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
+      result.success().genesis_configuration);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  // Initialize the executor
+  IntroExecResult exec_result{
+      .exec_id = 1,
+      .shards = x23::Vec<ShardCard>{make_shard_card()},
+      .event = make_event_card(),
+  };
+  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+
+  // Run initialization transactions
+  const auto &init_blocks = result.success().initialization_txs;
+  BlockID current_block_id = 1;
+  auto event_client = make_srpc_multiclient<EventSched1>(
+      x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
+
+  // Count total initialization transactions to calculate work transaction IDs
+  size_t num_init_txs = 0;
+  for (const InitializationBlock &init_block : init_blocks) {
+    num_init_txs += init_block.size();
+  }
+
+  for (const InitializationBlock &init_block : init_blocks) {
+    // Open the proposal block for this initialization block
+    auto open_res = client_.executorsched_open_proposal_block(current_block_id);
+    ASSERT_EQ(open_res, ExecResult::ExecResultOK);
+
+    // Open corresponding db block
+    db_res = db_client_.dbsched_create_snapshot(
+        current_block_id - 1, current_block_id,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+    // Open the event block
+    auto event_open_res = event_client.eventsched_open_block(current_block_id);
+    ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+
+    // Propose all transactions in this initialization block
+    for (const auto &tx : init_block) {
+      auto propose_res =
+          client_.executorsched_propose_transaction(current_block_id, tx);
+      ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
+    }
+
+    // Finish the initialization block
+    client_.executorsched_finish_block(current_block_id);
+    current_block_id++;
+  }
+
+  // Now open the test block for work transactions
+  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  ASSERT_EQ(open_res, ExecResult::ExecResultOK);
+
+  // Open corresponding db block
+  db_res = db_client_.dbsched_create_snapshot(
+      current_block_id - 1, test_block_id,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  // Open the event block
+  auto event_open_res = event_client.eventsched_open_block(test_block_id);
+  ASSERT_EQ(event_open_res, RPCError::kRPCNone);
+
+  // Block event emission before proposing transactions
+  event_wrapper_.block_emit_events();
+
+  // Calculate transaction IDs: executor_id=1, so tx_id = base + (1 << 48)
+  // Work transactions start after all initialization transactions
+  constexpr uint64_t kExecutorId = 1;
+  constexpr uint64_t kExecutorIdShift = kExecutorId << 48;
+
+  // Get payment transactions from loadgen
+  constexpr size_t kNumTxs = 3;
+  LoadgenExtensionResult ext_result =
+      loadgen_client_->extend_experiment(context_id, kNumTxs, 1'000'000'000)();
+  ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+
+  const SignedTransactionBatch &txs = ext_result.success().work_txs;
+  ASSERT_EQ(txs.size(), kNumTxs);
+
+  // Propose transactions while events are blocked
+  for (const auto &tx : txs) {
+    auto propose_res =
+        client_.executorsched_propose_transaction(test_block_id, tx);
+    ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
+  }
+
+  // Wait a bit - events should be blocked
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Verify events haven't been emitted yet (they're blocked)
+  for (size_t i = 0; i < txs.size(); ++i) {
+    TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
+    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+    // Events should not be present yet since emission is blocked
+    // (Note: this is a timing-dependent check, but should work in most cases)
+    ASSERT_FALSE(events.has_value()) << "Events should be blocked";
+  }
+  for (size_t i = 0; i < txs.size(); ++i) {
+    TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
+    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+    // Events should not be present yet since emission is blocked
+    ASSERT_FALSE(events.has_value()) << "Events should be blocked";
+  }
+
+  // Unblock event emission
+  event_wrapper_.unblock_emit_events();
+
+  // Finish the block
+  client_.executorsched_finish_block(test_block_id);
+
+  // Check that events were emitted using the calculated transaction IDs
+  bool found_events = false;
+  for (size_t i = 0; i < txs.size(); ++i) {
+    auto tx_id =
+        static_cast<TransactionID>(num_init_txs + i + kExecutorIdShift);
+    auto events = event_wrapper_.get_events(test_block_id, tx_id);
+    if (events.has_value() && events->events.size() > 0) {
+      found_events = true;
+      // Verify the event structure is correct
+      ASSERT_GT(events->events.size(), 0);
+      break;
+    }
+  }
+  // At least one transaction should have emitted events after unblocking
+  ASSERT_TRUE(found_events) << "No events were emitted after unblocking";
+}
+
+} // namespace hogd

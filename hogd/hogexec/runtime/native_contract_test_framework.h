@@ -215,6 +215,10 @@ public:
     return event_server_.get_events(block_id, tx_id);
   }
 
+  // Blocking control for testing delays
+  void block_emit_events() { event_server_.block_emit_events(); }
+  void unblock_emit_events() { event_server_.unblock_emit_events(); }
+
 private:
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =

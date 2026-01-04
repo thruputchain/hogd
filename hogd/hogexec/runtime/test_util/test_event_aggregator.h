@@ -1,5 +1,6 @@
 #pragma once
 
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -33,8 +34,22 @@ public:
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
+  // Blocking control: block emit_event calls until unblock_emit_events is
+  // called
+  void block_emit_events() { should_block_ = true; }
+
+  // Unblock emit_event calls (wakes up all waiting calls)
+  void unblock_emit_events()
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    should_block_ = false;
+    emit_cv_.notify_all();
+  }
+
 private:
   std::mutex mtx_;
+  std::condition_variable emit_cv_;
+  bool should_block_ = false;
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
 

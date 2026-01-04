@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -145,8 +146,6 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
   }
   if (do_gc) {
-    // Print DispatchPool stats before GC
-    worker_pool_.print_stats();
     gc_executor_context(block_id);
   }
   co_return result;
