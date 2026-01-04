@@ -16,8 +16,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
-
 #include <variant>
+
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -228,7 +228,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
       [[unlikely]] throw XdrLengthError("Attempt to resize Ptr to more than 1");
     }
   }
-  static void reserve(size_t) {}
+  static void reserve(size_t /*unused*/) {}
   auto begin(this auto &&self) noexcept { return self.get(); }
   auto end(this auto &&self) noexcept { return self.begin() + self.size(); }
   value_type &back(this auto &&self) { return *self.get(); }
@@ -594,11 +594,6 @@ xdr_cmp(const T &a, const T &b)
 // This function is used to suppresses a compiler warning about a
 // switch statement on a bool in generated code.  You shouldn't need
 // to use it in hand-written code.
-inline std::uint32_t
-unbool(bool b)
-{
-  return b;
-}
 template<typename T>
 requires (!std::same_as<T, bool> && (std::integral<T> || std::is_enum_v<T>))
 inline T
@@ -614,7 +609,7 @@ enum EmptyEnum {};
 // Used to check version concepts
 struct VacuousSendCall {
   template<typename ProcMeta>
-  typename ProcMeta::return_type send_call(auto &&...)
+  typename ProcMeta::return_type send_call(auto &&... /*unused*/)
   {
     throw;
   }
