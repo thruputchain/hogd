@@ -280,11 +280,11 @@ template<typename T> struct xdr_meta<Ptr<T>> {
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {
   using super = std::formatter<std::string>;
-  static inline const std::unordered_map<E, std::string> valmap{
+  static inline const std::unordered_map<E, std::string> valmap_{
       x23::xdr_meta<E>::tags.begin(), x23::xdr_meta<E>::tags.end()};
   auto format(E e, auto &ctx) const
   {
-    if (auto it = valmap.find(e); it != valmap.end())
+    if (auto it = valmap_.find(e); it != valmap_.end())
       return super::format(it->second, ctx);
     return super::format(std::format("{}#{}", x23::xdr_meta<E>::type_name,
                                      std::underlying_type_t<E>(e)),
@@ -594,10 +594,15 @@ xdr_cmp(const T &a, const T &b)
 // This function is used to suppresses a compiler warning about a
 // switch statement on a bool in generated code.  You shouldn't need
 // to use it in hand-written code.
+inline std::uint32_t
+unbool(bool b) noexcept
+{
+  return std::uint32_t{b};
+}
 template<typename T>
 requires (!std::same_as<T, bool> && (std::integral<T> || std::is_enum_v<T>))
 inline T
-unbool(T b)
+unbool(T b) noexcept
 {
   return b;
 }
@@ -609,7 +614,7 @@ enum EmptyEnum {};
 // Used to check version concepts
 struct VacuousSendCall {
   template<typename ProcMeta>
-  typename ProcMeta::return_type send_call(auto &&... /*unused*/)
+  typename ProcMeta::return_type send_call(auto &&.../*unused*/)
   {
     throw;
   }
