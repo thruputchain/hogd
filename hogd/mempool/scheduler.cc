@@ -541,130 +541,356 @@ Scheduler::cycle_accounts_during_schedule_helper(
   }
 }
 
-void
+x23::Async<void>
 Scheduler::schedule(size_t num_txs,
                     x23::XdrVec<SignedTransactionHash> &tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
-  size_t num_scheduled = 0;
-  static std::unordered_set<ContractAddress> removed_accounts;
-  static std::unordered_set<ContractAddress> accounts_excluded_from_block;
-  removed_accounts.clear();
-  accounts_excluded_from_block.clear();
+  // Early exit if nothing to schedule.
+  if (!num_txs || ready_accounts_.empty()) {
+    co_return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Parallel scheduling implementation.
+  //
+  // This addresses the original TODO from jhumphri: "This is a good place to
+  // parallelize. Each thread can handle its own chunk of accounts from
+  // [ready_accounts_]."
+  //
+  // Algorithm:
+  // 1. Outer loop: continue until we've scheduled num_txs or no more accounts
+  // 2. Snapshot ready_accounts_ to a vector (preserves priority order)
+  // 3. Partition accounts into chunks for parallel processing
+  // 4. Each thread processes its chunk, using CAS on an atomic counter to
+  //    avoid over-scheduling beyond num_txs
+  // 5. Merge results in chunk order (preserves HOG age priority ordering)
+  // 6. Cycle removed accounts and re-add to ready_accounts_ if they have txs
+  // 7. If we haven't reached num_txs and ready_accounts_ is non-empty, repeat
+  //
+  // The outer loop is necessary because accounts may need cycling (moving gas
+  // from AlreadyScheduled/Received groups to ToSchedule) before their txs can
+  // be scheduled. Each iteration processes all ready accounts and cycles those
+  // that ran out of gas.
+  // ---------------------------------------------------------------------------
+
+  // TODO(jhumphri): Consider tuning this value based on benchmarks. The
+  // optimal thread count may depend on account count and system load.
+  constexpr size_t kNumThreads = 128;
+
+  // Maximum outer loop iterations to prevent unbounded spinning. This can
+  // happen if concurrent add_txs() calls keep adding accounts while we're
+  // scheduling. 10 iterations should be more than enough for normal cycling.
+  constexpr size_t kMaxOuterIterations = 10;
+
+  // Per-thread results. Each thread accumulates its scheduled txs and tracks
+  // which accounts were removed (ran out of txs or gas) or excluded
+  // (insufficient total gas).
+  struct ScheduledTx {
+    SignedTransactionHash hash;
+    SignedTransaction tx;
+  };
+  struct ThreadResult {
+    std::vector<ScheduledTx> scheduled;
+    std::unordered_set<ContractAddress> removed_accounts;
+    std::unordered_set<ContractAddress> excluded_accounts;
+  };
 
   const TxKey lower_bound = {.expiry_block_height = current_block_,
                              .tx_hash = {}};
-  auto account_it = ready_accounts_.begin();
-  while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-    if (account_it == ready_accounts_.end()) {
-      ready_accounts_.clear();
-      cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
-      removed_accounts.clear();
-      account_it = ready_accounts_.begin();
-      if (ready_accounts_.empty()) {
-        // If there are still no ready accounts, then break.
-        break;
+
+  // Track excluded accounts across all iterations - once excluded, stay
+  // excluded for the remainder of this block.
+  std::unordered_set<ContractAddress> all_excluded_accounts;
+
+  // Atomic counter for global scheduling limit, persists across iterations.
+  std::atomic<size_t> global_scheduled{0};
+
+  // Outer loop iteration counter.
+  size_t iterations = 0;
+
+  // Outer loop: continue scheduling until we've reached num_txs or there are
+  // no more accounts with txs that can be scheduled, or we hit the iteration
+  // limit (to prevent unbounded spinning from concurrent add_txs()).
+  while (global_scheduled.load(std::memory_order_relaxed) < num_txs &&
+         !ready_accounts_.empty() &&
+         size_.load(std::memory_order_relaxed) > 0 &&
+         iterations < kMaxOuterIterations) {
+    iterations++;
+
+    // Step 1: Snapshot ready_accounts_ to a vector (preserves priority order).
+    std::vector<AccountKey> accounts_vec(ready_accounts_.begin(),
+                                         ready_accounts_.end());
+
+    // Step 2: Partition into chunks for parallel processing.
+    const auto chunks = make_chunks(accounts_vec.size(), kNumThreads);
+
+    std::vector<ThreadResult> results(chunks.size());
+
+    // Step 3: Parallel dispatch - each thread processes its chunk of accounts.
+    std::vector<x23::Awaitable<void>> awaitables(chunks.size());
+    for (size_t i = 0; i < chunks.size(); i++) {
+      [](const ChunkRange &chunk, auto cb,
+         const std::vector<AccountKey> &accounts_vec,
+         std::atomic<size_t> &global_scheduled, size_t num_txs,
+         const TxKey &lower_bound, ThreadResult &result,
+         Scheduler &scheduler) -> x23::Detached {
+        co_await default_coropoll().pool_.bg();
+
+        for (size_t acct_idx = chunk.start; acct_idx < chunk.end; acct_idx++) {
+          // Early exit check with relaxed ordering. This is intentionally weak
+          // - we may see a stale count and process one extra account, but the
+          // acquire load below (before CAS) ensures correctness when actually
+          // scheduling. This pattern avoids expensive acquire loads on every
+          // iteration.
+          if (global_scheduled.load(std::memory_order_relaxed) >= num_txs) {
+            break;
+          }
+
+          const AccountKey &account_key = accounts_vec[acct_idx];
+          const ContractAddress &account = account_key.account;
+
+          auto [hog_ages, hog_ages_lock] =
+              scheduler.get_cached_hog_age(account);
+          auto [txs_to_schedule, txs_lock] = scheduler.account_to_tx_[account];
+          uint128_t hogs_spent_by_account = 0;
+          bool account_removed = false;
+
+          while (scheduler.size_.load(std::memory_order_relaxed) > 0) {
+            // Acquire load before CAS to ensure we see all writes from threads
+            // that previously incremented the counter. This synchronizes-with
+            // the acq_rel CAS below, establishing a happens-before
+            // relationship.
+            size_t current_count =
+                global_scheduled.load(std::memory_order_acquire);
+            if (current_count >= num_txs) {
+              break;
+            }
+
+            auto it = txs_to_schedule.lower_bound(lower_bound);
+
+            // This removes expired txs.
+            if (it != txs_to_schedule.begin()) {
+              for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
+                   it_remove++) {
+                const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
+                CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+              }
+              size_t to_remove = std::distance(txs_to_schedule.begin(), it);
+              CHECK_LE(to_remove,
+                       scheduler.size_.load(std::memory_order_relaxed));
+              // size_ uses relaxed ordering because it's only an approximate
+              // count for loop guards. The true source of truth is the
+              // SynchronizedMaps (txs_, account_to_tx_), which use mutex locks.
+              scheduler.size_.fetch_sub(to_remove, std::memory_order_relaxed);
+              it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
+            }
+
+            if (it == txs_to_schedule.end()) {
+              // No more txs for this account.
+              result.removed_accounts.insert(account);
+              account_removed = true;
+              break;
+            }
+
+            const SignedTransactionHash &tx_hash = it->first.tx_hash;
+            SignedTransaction &tx = it->second->tx;
+            const uint128_t hogs_available =
+                from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
+
+            if (tx.tx.invocation.gas_limit <= hogs_available) {
+              // Try to claim a slot using CAS to avoid over-scheduling.
+              // This ensures we never exceed num_txs even with parallel
+              // threads.
+              //
+              // Memory ordering rationale:
+              // - acq_rel on success: Ensures (1) we see all writes from
+              // threads
+              //   that incremented before us (acquire), and (2) our writes are
+              //   visible to threads that increment after us (release).
+              // - relaxed on failure: The next iteration will re-load with
+              //   acquire semantics via the acquire load above. The weak CAS
+              //   updates current_count automatically on failure.
+              while (!global_scheduled.compare_exchange_weak(
+                  current_count, current_count + 1, std::memory_order_acq_rel,
+                  std::memory_order_relaxed)) {
+                if (current_count >= num_txs) {
+                  // Limit reached during contention, stop scheduling.
+                  goto done_with_account;
+                }
+              }
+
+              // Successfully claimed a slot, proceed with scheduling.
+              hog_ages->num_hogs[kHogAgeGroupToSchedule] =
+                  to_xdr(hogs_available - tx.tx.invocation.gas_limit);
+              hogs_spent_by_account += tx.tx.invocation.gas_limit;
+
+              result.scheduled.push_back({.hash = tx_hash, .tx = tx});
+
+              // We are deleting [it] here, so do not access [tx_hash] or [tx]
+              // beyond this point!
+              it = txs_to_schedule.erase(it);
+              scheduler.size_.fetch_sub(1, std::memory_order_relaxed);
+            }
+            else {
+              // Not enough gas in ToSchedule group.
+              const uint128_t all_hogs_available =
+                  hogs_spent_by_account +
+                  from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]) +
+                  from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
+                  from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
+
+              if (tx.tx.invocation.gas_limit > all_hogs_available) {
+                // This account does not have enough hogs across all three of
+                // its groups to schedule the tx, so we discard the tx.
+                // We want to discourage accounts from submitting txs that
+                // cannot be executed, so exclude the account from being
+                // scheduled for the remainder of the block. Note that if any
+                // txs for the account are already included in the block, those
+                // txs will still be executed.
+                //
+                // TODO(jhumphri): Do we want to penalize the account more
+                // severely?
+                it = txs_to_schedule.erase(it);
+                scheduler.size_.fetch_sub(1, std::memory_order_relaxed);
+                // It is possible that the account is already in
+                // [excluded_accounts], so we do not CHECK that the insert was
+                // successful. This happens when [add_txs()] is called in
+                // parallel with [schedule()]. [add_txs()] can enqueue another
+                // tx for [account], and then if [schedule()] cycles the
+                // accounts via [cycle_accounts_during_schedule_helper()], we
+                // end up adding [account] back into [ready_accounts_].
+                result.excluded_accounts.insert(account);
+              }
+              else {
+                // The account has enough hogs in total to run this tx, but the
+                // account is going to have to be cycled once or twice. For
+                // now, we just skip over this account and revisit it once it
+                // has been cycled.
+              }
+
+              result.removed_accounts.insert(account);
+              account_removed = true;
+              break;
+            }
+          }
+
+        done_with_account:
+          if (hogs_spent_by_account) {
+            // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group
+            // for this account.
+            move_hogs_to_already_scheduled_group(*hog_ages,
+                                                 hogs_spent_by_account,
+                                                 scheduler.current_block_);
+          }
+
+          // If we hit the global limit and didn't exhaust this account, mark
+          // it as removed so it gets re-added to ready_accounts_ later.
+          if (!account_removed &&
+              global_scheduled.load(std::memory_order_relaxed) >= num_txs) {
+            result.removed_accounts.insert(account);
+          }
+        }
+
+        cb();
+        co_return;
+      }(chunks[i], x23::CoroCB(awaitables[i]), accounts_vec, global_scheduled,
+                               num_txs, lower_bound, results[i], *this);
+    }
+
+    // Step 4: Await all threads.
+    for (size_t i = 0; i < chunks.size(); i++) {
+      co_await awaitables[i];
+    }
+
+    // Step 5: Merge results in chunk order (preserves priority ordering).
+    // This ensures that accounts with older HOG ages have their txs appear
+    // first in the output, maintaining the fairness invariant.
+    for (const auto &result : results) {
+      for (const auto &stx : result.scheduled) {
+        tx_hashes.push_back(stx.hash);
+        txs.push_back(stx.tx);
       }
     }
 
-    // TODO(jhumphri): This is a good place to parallelize. Each thread can
-    // handle its own chunk of accounts from [ready_accounts_].
-    const AccountKey account_key = *account_it;
-    const ContractAddress account = account_key.account;
-    auto [hog_ages, hog_ages_lock] = get_cached_hog_age(account);
-    auto [txs_to_schedule, txs_lock] = account_to_tx_[account];
-    uint128_t hogs_spent_by_account = 0;
-    while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
-      auto it = txs_to_schedule.lower_bound(lower_bound);
-      if (it != txs_to_schedule.begin()) {
-        // This removes expired txs.
-        for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
-             it_remove++) {
-          const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
-        }
-        size_t to_remove = std::distance(txs_to_schedule.begin(), it);
-        CHECK_LE(to_remove, size_.load(std::memory_order_relaxed));
-        size_ -= to_remove;
-        it = txs_to_schedule.erase(txs_to_schedule.begin(), it);
-      }
-      if (it == txs_to_schedule.end()) {
-        account_it++;
-        CHECK(removed_accounts.insert(account).second);
-        break;
-      }
-      const SignedTransactionHash &tx_hash = it->first.tx_hash;
-      SignedTransaction &tx = it->second->tx;
-      const uint128_t hogs_available =
-          from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
-      if (tx.tx.invocation.gas_limit <= hogs_available) {
-        hog_ages->num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(hogs_available - tx.tx.invocation.gas_limit);
-        hogs_spent_by_account += tx.tx.invocation.gas_limit;
-
-        tx_hashes.push_back(tx_hash);
-        txs.push_back(tx);
-
-        // We are deleting [it] here, so do not access [tx_hash] or [tx]
-        // beyond this point!
-        it = txs_to_schedule.erase(it);
-        num_scheduled++;
-        size_.fetch_sub(1, std::memory_order_relaxed);
-      }
-      else {
-        const uint128_t all_hogs_available =
-            hogs_spent_by_account +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
-        if (tx.tx.invocation.gas_limit > all_hogs_available) {
-          // This account does not have enough hogs across all three of its
-          // groups to schedule the tx, so we discard the tx.
-          // We want to discourage accounts from submitting txs that cannot be
-          // executed, so exclude the account from being scheduled for the
-          // remainder of the block. Note that if any txs for the account are
-          // already included in the block, those txs will still be executed.
-          //
-          // TODO(jhumphri): Do we want to penalize the account more severely?
-          it = txs_to_schedule.erase(it);
-          size_.fetch_sub(1, std::memory_order_relaxed);
-          // It is possible that the account is already in
-          // [accounts_excluded_from_block], so we do not CHECK that the insert
-          // was successful. This happens when [add_txs()] above is called in
-          // parallel with [schedule()]. [add_txs()] can enqueue another tx for
-          // [account], and then if [schedule()] cycles the accounts above via
-          // [cycle_accounts_during_schedule_helper()], we end up adding
-          // [account] back into [ready_accounts_].
-          accounts_excluded_from_block.insert(account);
-        }
-        else {
-          // The account has enough hogs in total to run this tx, but the
-          // account is going to have to be cycled once or twice. For now, we
-          // just skip over this account and revisit it once it has been
-          // cycled.
-        }
-        account_it++;
-        CHECK(removed_accounts.insert(account).second);
-        break;
+    // Step 6: Collect removed and excluded accounts from all threads.
+    // Also track which accounts were actually processed (touched by a thread).
+    std::unordered_set<ContractAddress> removed_accounts;
+    std::unordered_set<ContractAddress> processed_accounts;
+    for (const auto &result : results) {
+      removed_accounts.insert(result.removed_accounts.begin(),
+                              result.removed_accounts.end());
+      all_excluded_accounts.insert(result.excluded_accounts.begin(),
+                                   result.excluded_accounts.end());
+      // An account was processed if it appears in removed_accounts or
+      // excluded_accounts, or if a tx was scheduled from it.
+      processed_accounts.insert(result.removed_accounts.begin(),
+                                result.removed_accounts.end());
+      processed_accounts.insert(result.excluded_accounts.begin(),
+                                result.excluded_accounts.end());
+    }
+    // Also mark accounts as processed if their txs were scheduled.
+    for (const auto &result : results) {
+      for (const auto &stx : result.scheduled) {
+        processed_accounts.insert(stx.tx.tx.invocation.invoked_address);
       }
     }
-    if (hogs_spent_by_account) {
-      // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
-      // this account.
-      move_hogs_to_already_scheduled_group(*hog_ages, hogs_spent_by_account,
-                                           current_block_);
+
+    // Step 7: Update ready_accounts_.
+    // Add [removed_accounts] back to [ready_accounts_] for each account that
+    // is still ready. We clear and rebuild because account keys may have
+    // changed (gas deductions change the effective priority).
+    //
+    // IMPORTANT: We must also re-add accounts that were NOT processed at all
+    // because the global limit was reached before their thread started. These
+    // accounts still have txs but weren't touched.
+    ready_accounts_.clear();
+
+    // First, re-add accounts that were never processed (due to global limit).
+    // These accounts need to maintain their position in ready_accounts_.
+    for (const auto &account_key : accounts_vec) {
+      const ContractAddress &account = account_key.account;
+      if (!processed_accounts.contains(account) &&
+          !all_excluded_accounts.contains(account)) {
+        // This account was never touched, re-add with its original key.
+        if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+          ready_accounts_.insert(account_key);
+        }
+      }
     }
+
+    // Cycle removed accounts (those that ran out of gas or hit the limit) and
+    // re-add if they still have txs. Skip excluded accounts.
+    for (const ContractAddress &account : removed_accounts) {
+      if (all_excluded_accounts.contains(account)) {
+        continue;
+      }
+      cycle_accounts_during_schedule_helper({account}, lower_bound);
+    }
+
+    // If we haven't reached num_txs but ready_accounts_ is empty after
+    // cycling, the loop will exit on the next iteration check.
   }
-  // Add [removed_accounts] back to [ready_accounts_] for each account that is
-  // still ready.
-  ready_accounts_.erase(ready_accounts_.begin(), account_it);
-  cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
-  for (const ContractAddress &account : accounts_excluded_from_block) {
+  // Log a warning if we hit the iteration limit without scheduling all
+  // requested txs. This can happen if concurrent add_txs() keeps adding
+  // accounts, causing repeated cycling.
+  if (iterations >= kMaxOuterIterations &&
+      global_scheduled.load(std::memory_order_relaxed) < num_txs) {
+    warn("schedule(): hit iteration limit ({}) before scheduling all {} txs "
+         "(scheduled {})",
+         kMaxOuterIterations, num_txs,
+         global_scheduled.load(std::memory_order_relaxed));
+  }
+
+  // Re-add excluded accounts if they still have txs (for future blocks).
+  for (const ContractAddress &account : all_excluded_accounts) {
     if (account_is_ready(account, /*remove_expired_txs=*/false)) {
-      CHECK(ready_accounts_.insert(get_account_key(account)).second);
+      ready_accounts_.insert(get_account_key(account));
     }
   }
+
+  co_return;
 }
 
 x23::Async<void>

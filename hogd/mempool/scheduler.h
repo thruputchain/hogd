@@ -48,8 +48,9 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
-                x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<void> schedule(size_t num_txs,
+                            x23::XdrVec<SignedTransactionHash> &tx_hashes,
+                            x23::XdrVec<SignedTransaction> &txs);
 
   // Finds the txs specified in [hashes] and removes them from the runqueue.
   // This is used when validating a block as the txs have supposedly been

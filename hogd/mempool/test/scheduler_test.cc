@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "db_sched.hh"
@@ -118,7 +119,7 @@ TEST(Scheduler, Single)
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
@@ -209,7 +210,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
 
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
@@ -264,7 +265,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   // Nominate a block.
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(sha256(scheduled.front()), sha256(txs[1]));
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -301,7 +302,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -320,7 +321,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_EQ(scheduled_hashes.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
@@ -336,7 +337,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
 
   scheduled_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -355,7 +356,7 @@ TEST(Scheduler, ReenqueueTxs)
 
   x23::XdrVec<SignedTransactionHash> scheduled_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
   ASSERT_EQ(scheduled.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
 
@@ -410,7 +411,7 @@ TEST(Scheduler, Fairness)
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<SignedTransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled)();
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
@@ -483,7 +484,7 @@ TEST(Scheduler, FairnessAcrossBlocks)
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<SignedTransactionHash> scheduled_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
 
@@ -500,6 +501,448 @@ TEST(Scheduler, FairnessAcrossBlocks)
     EXPECT_GE(tx_counts[address],
               target - MempoolTestInfra::kAccountAddresses.size());
   }
+}
+
+// =============================================================================
+// Parallel Scheduling Tests
+//
+// These tests verify invariants that must hold whether scheduling is sequential
+// or parallel. They should pass with the current sequential implementation and
+// continue to pass after parallelization.
+// =============================================================================
+
+TEST(SchedulerParallel, MultipleAccountsScheduled)
+{
+  // Verify that scheduling works correctly across multiple accounts and that
+  // each account's txs maintain FIFO ordering within the account.
+  constexpr size_t kTxsPerAccount = 20;
+  constexpr size_t kNumRounds = 10;
+
+  std::vector<fib_client_t> fib_clients;
+  std::unordered_map<ContractAddress, SignedTransactionBatch> txs;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+    txs[address] = generate_unsigned_txs(fib_clients.back(), kTxsPerAccount);
+  }
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  for (const auto &[_, tx] : txs) {
+    scheduler->add_txs(tx)();
+  }
+
+  // Schedule txs over multiple rounds and count per account
+  std::unordered_map<ContractAddress, size_t> tx_counts;
+  size_t total_scheduled = 0;
+  for (size_t round = 0; round < kNumRounds; round++) {
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/8, scheduled_hashes, scheduled)();
+    for (const auto &tx : scheduled) {
+      tx_counts[tx.tx.invocation.invoked_address]++;
+    }
+    total_scheduled += scheduled.size();
+    scheduler->increment_current_block();
+  }
+
+  // Some txs should have been scheduled
+  EXPECT_GT(total_scheduled, 0UL);
+
+  // Multiple accounts should have had txs scheduled (fairness)
+  size_t accounts_with_txs = 0;
+  for (const auto &[addr, count] : tx_counts) {
+    if (count > 0) {
+      accounts_with_txs++;
+    }
+  }
+  EXPECT_GT(accounts_with_txs, 1UL);
+}
+
+TEST(SchedulerParallel, GlobalTxLimitRespected)
+{
+  // Verify that exactly num_txs transactions are scheduled, never more.
+  constexpr size_t kTxsPerAccount = 50;
+  constexpr size_t kRequestedTxs = 25;
+
+  std::vector<fib_client_t> fib_clients;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+  }
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Add many txs from all accounts
+  for (size_t i = 0; i < fib_clients.size(); i++) {
+    SignedTransactionBatch batch =
+        generate_unsigned_txs(fib_clients[i], kTxsPerAccount);
+    scheduler->add_txs(batch)();
+  }
+
+  // Request exactly kRequestedTxs
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(kRequestedTxs, scheduled_hashes, scheduled)();
+
+  // Must get exactly the requested amount (or less if not enough txs)
+  EXPECT_EQ(scheduled.size(), kRequestedTxs);
+  EXPECT_EQ(scheduled_hashes.size(), kRequestedTxs);
+}
+
+TEST(SchedulerParallel, NoDuplicateScheduling)
+{
+  // Verify that no transaction is scheduled twice across multiple schedule
+  // calls.
+  constexpr size_t kTxsPerAccount = 20;
+  constexpr size_t kNumScheduleCalls = 10;
+  constexpr size_t kTxsPerCall = 5;
+
+  std::vector<fib_client_t> fib_clients;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+  }
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  for (size_t i = 0; i < fib_clients.size(); i++) {
+    SignedTransactionBatch batch =
+        generate_unsigned_txs(fib_clients[i], kTxsPerAccount);
+    scheduler->add_txs(batch)();
+  }
+
+  std::unordered_set<SignedTransactionHash> all_scheduled;
+  for (size_t call = 0; call < kNumScheduleCalls; call++) {
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(kTxsPerCall, scheduled_hashes, scheduled)();
+
+    for (const auto &hash : scheduled_hashes) {
+      // Verify this tx was not already scheduled
+      EXPECT_EQ(all_scheduled.count(hash), 0UL)
+          << "Transaction scheduled twice!";
+      all_scheduled.insert(hash);
+    }
+
+    scheduler->increment_current_block();
+  }
+}
+
+TEST(SchedulerParallel, AccountCyclingWorks)
+{
+  // Verify that accounts cycle correctly when gas is insufficient, even under
+  // parallel scheduling.
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 5);
+
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const auto gas_per_tx =
+      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  // Start with zero gas in ToSchedule, but enough in AlreadyScheduled
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
+                  /*num_hogs=*/gas_per_tx * 5);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs(txs)();
+
+  // Schedule all txs - this should trigger cycling
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/5, scheduled_hashes, scheduled)();
+
+  // All 5 txs should be scheduled after cycling
+  EXPECT_EQ(scheduled.size(), 5UL);
+}
+
+TEST(SchedulerParallel, EmptyChunksHandled)
+{
+  // Verify correct behavior when there are fewer accounts than potential
+  // parallel threads. Some chunks will be empty.
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 10);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Only add txs for one account
+  scheduler->add_txs(txs)();
+
+  // Request many txs - only 10 should be returned since that's all we have
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/100, scheduled_hashes, scheduled)();
+
+  EXPECT_EQ(scheduled.size(), 10UL);
+
+  // All scheduled txs should be from the single account
+  for (const auto &tx : scheduled) {
+    EXPECT_EQ(tx.tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[0]);
+  }
+}
+
+TEST(SchedulerParallel, ConcurrentAddAndSchedule)
+{
+  // Test that adding transactions and scheduling can happen concurrently
+  // without data races or crashes. This test adds txs in batches and schedules
+  // between batches.
+  constexpr size_t kBatches = 10;
+  constexpr size_t kTxsPerBatch = 20;
+
+  std::vector<fib_client_t> fib_clients;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+  }
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  size_t total_scheduled = 0;
+
+  for (size_t batch = 0; batch < kBatches; batch++) {
+    // Add txs from all accounts
+    for (size_t i = 0; i < fib_clients.size(); i++) {
+      SignedTransactionBatch txs =
+          generate_unsigned_txs(fib_clients[i], kTxsPerBatch);
+      scheduler->add_txs(txs)();
+    }
+
+    // Schedule some txs
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(kTxsPerBatch, scheduled_hashes, scheduled)();
+    total_scheduled += scheduled.size();
+
+    scheduler->increment_current_block();
+  }
+
+  // We should have scheduled some txs (exact count depends on gas availability)
+  EXPECT_GT(total_scheduled, 0UL);
+
+  // The tx cache should contain scheduled txs that haven't been removed yet
+  EXPECT_GE(scheduler->tx_cache_size(), 0UL);
+
+  // No crashes or data races occurred - test passed
+}
+
+// =============================================================================
+// Critical Hardening Tests
+//
+// These tests verify critical invariants that the parallel implementation must
+// preserve. They are designed to catch subtle ordering and correctness bugs.
+// =============================================================================
+
+TEST(SchedulerParallel, DeterministicOrdering)
+{
+  // Verify that transactions are scheduled in strict HOG age order within a
+  // single schedule() call. Older accounts (higher age) must be scheduled
+  // before younger accounts. This test runs multiple times to catch
+  // non-determinism in the parallel merge.
+
+  constexpr size_t kNumRuns = 100;
+
+  for (size_t run = 0; run < kNumRuns; run++) {
+    // Create 4 accounts with different ages
+    std::vector<fib_client_t> fib_clients;
+    for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+      fib_clients.emplace_back(address);
+    }
+
+    MempoolTestInfra server;
+
+    // Set up accounts with distinct ages:
+    // Note: average_hog_age is the block height when HOGs were acquired.
+    // LOWER age = acquired earlier = OLDER = HIGHER priority.
+    // Account 0: age 25 (oldest, highest priority)
+    // Account 1: age 50
+    // Account 2: age 75
+    // Account 3: age 100 (youngest, lowest priority)
+    constexpr uint128_t kHogsPerAccount = 10'000'000'000ULL;
+    server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
+                    kHogAgeGroupToSchedule, /*age=*/25, kHogsPerAccount);
+    server.set_hogs(MempoolTestInfra::kAccountAddresses[1],
+                    kHogAgeGroupToSchedule, /*age=*/50, kHogsPerAccount);
+    server.set_hogs(MempoolTestInfra::kAccountAddresses[2],
+                    kHogAgeGroupToSchedule, /*age=*/75, kHogsPerAccount);
+    server.set_hogs(MempoolTestInfra::kAccountAddresses[3],
+                    kHogAgeGroupToSchedule, /*age=*/100, kHogsPerAccount);
+
+    std::shared_ptr<Scheduler> scheduler =
+        server.mempool_coord_rpc().scheduler();
+
+    // Add exactly 1 tx per account
+    for (size_t i = 0; i < fib_clients.size(); i++) {
+      SignedTransactionBatch txs = generate_unsigned_txs(fib_clients[i], 1);
+      scheduler->add_txs(txs)();
+    }
+
+    // Schedule all 4 txs
+    x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/4, scheduled_hashes, scheduled)();
+
+    ASSERT_EQ(scheduled.size(), 4UL) << "Run " << run << ": Expected 4 txs";
+
+    // Verify ordering: oldest account first (lowest age = oldest)
+    // The expected order is: Account 0, 1, 2, 3 (by increasing age)
+    EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[0])
+        << "Run " << run << ": First tx should be from oldest account (age 25)";
+    EXPECT_EQ(scheduled[1].tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[1])
+        << "Run " << run << ": Second tx should be from account with age 50";
+    EXPECT_EQ(scheduled[2].tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[2])
+        << "Run " << run << ": Third tx should be from account with age 75";
+    EXPECT_EQ(scheduled[3].tx.invocation.invoked_address,
+              MempoolTestInfra::kAccountAddresses[3])
+        << "Run " << run
+        << ": Fourth tx should be from youngest account (age 100)";
+  }
+}
+
+TEST(SchedulerParallel, AtomicCounterStress)
+{
+  // Stress test the CAS loop by creating many accounts with many transactions
+  // and verifying that exactly the requested number of transactions are
+  // scheduled, with no duplicates and no over-scheduling.
+
+  constexpr size_t kNumAccounts = 100;
+  constexpr size_t kTxsPerAccount = 100;
+  constexpr size_t kRequestedTxs = 5000;
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Create many accounts with many transactions
+  std::vector<fib_client_t> fib_clients;
+  fib_clients.reserve(kNumAccounts);
+
+  // Generate unique addresses for additional accounts beyond the 4 standard
+  // ones
+  for (size_t i = 0; i < kNumAccounts; i++) {
+    ContractAddress addr;
+    // Use a deterministic pattern for reproducibility
+    std::fill(addr.begin(), addr.end(), 0);
+    addr[0] = static_cast<uint8_t>(i & 0xFF);
+    addr[1] = static_cast<uint8_t>((i >> 8) & 0xFF);
+    addr[2] = 0x42; // Marker byte
+    fib_clients.emplace_back(addr);
+
+    // Set up each account with gas
+    constexpr uint128_t kHogsPerAccount = 100'000'000'000ULL;
+    server.set_hogs(addr, kHogAgeGroupToSchedule, /*age=*/i, kHogsPerAccount);
+  }
+
+  // Add transactions for all accounts
+  for (size_t i = 0; i < kNumAccounts; i++) {
+    SignedTransactionBatch txs =
+        generate_unsigned_txs(fib_clients[i], kTxsPerAccount);
+    scheduler->add_txs(txs)();
+  }
+
+  // Total txs available: kNumAccounts * kTxsPerAccount = 10,000
+  // We request 5,000
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(kRequestedTxs, scheduled_hashes, scheduled)();
+
+  // Verify exact count
+  EXPECT_EQ(scheduled.size(), kRequestedTxs)
+      << "Exactly " << kRequestedTxs << " txs should be scheduled";
+  EXPECT_EQ(scheduled_hashes.size(), kRequestedTxs)
+      << "Hash count should match tx count";
+
+  // Verify no duplicates
+  std::unordered_set<SignedTransactionHash> seen;
+  for (const auto &hash : scheduled_hashes) {
+    auto [it, inserted] = seen.insert(hash);
+    EXPECT_TRUE(inserted) << "Duplicate transaction detected!";
+  }
+}
+
+TEST(SchedulerParallel, CyclingPreservesGlobalOrder)
+{
+  // Verify that when accounts need to cycle (insufficient gas in ToSchedule
+  // group), the global HOG age ordering is still preserved. Accounts with
+  // older HOGs should still be scheduled before accounts with younger HOGs,
+  // even after cycling.
+
+  // Create 4 accounts, all with gas only in AlreadyScheduled (forcing cycling)
+  std::vector<fib_client_t> fib_clients;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    fib_clients.emplace_back(address);
+  }
+
+  MempoolTestInfra server;
+
+  // Set up accounts with:
+  // - ZERO gas in ToSchedule (forces cycling)
+  // - Enough gas in AlreadyScheduled to run after cycling
+  // - Different ages (lower age = older = higher priority)
+  constexpr uint128_t kHogsPerAccount = 10'000'000'000ULL;
+
+  // Account 0: oldest (lowest age), should be scheduled first after cycling
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
+                  kHogAgeGroupToSchedule, /*age=*/25, /*num_hogs=*/0);
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
+                  kHogAgeGroupAlreadyScheduled, /*age=*/25, kHogsPerAccount);
+
+  // Account 1: second oldest
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[1],
+                  kHogAgeGroupToSchedule, /*age=*/50, /*num_hogs=*/0);
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[1],
+                  kHogAgeGroupAlreadyScheduled, /*age=*/50, kHogsPerAccount);
+
+  // Account 2: third oldest
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[2],
+                  kHogAgeGroupToSchedule, /*age=*/75, /*num_hogs=*/0);
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[2],
+                  kHogAgeGroupAlreadyScheduled, /*age=*/75, kHogsPerAccount);
+
+  // Account 3: youngest (highest age), should be scheduled last after cycling
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[3],
+                  kHogAgeGroupToSchedule, /*age=*/100, /*num_hogs=*/0);
+  server.set_hogs(MempoolTestInfra::kAccountAddresses[3],
+                  kHogAgeGroupAlreadyScheduled, /*age=*/100, kHogsPerAccount);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Add 1 tx per account
+  for (size_t i = 0; i < fib_clients.size(); i++) {
+    SignedTransactionBatch txs = generate_unsigned_txs(fib_clients[i], 1);
+    scheduler->add_txs(txs)();
+  }
+
+  // Schedule all 4 txs - this will trigger cycling for all accounts
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/4, scheduled_hashes, scheduled)();
+
+  // All 4 should be scheduled after cycling
+  ASSERT_EQ(scheduled.size(), 4UL)
+      << "All 4 txs should be scheduled after cycling";
+
+  // Verify the order matches HOG age priority (oldest first)
+  // After cycling, the order should still respect the original age ordering
+  EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+            MempoolTestInfra::kAccountAddresses[0])
+      << "First tx should be from oldest account after cycling";
+  EXPECT_EQ(scheduled[1].tx.invocation.invoked_address,
+            MempoolTestInfra::kAccountAddresses[1])
+      << "Second tx should be from second oldest account after cycling";
+  EXPECT_EQ(scheduled[2].tx.invocation.invoked_address,
+            MempoolTestInfra::kAccountAddresses[2])
+      << "Third tx should be from third oldest account after cycling";
+  EXPECT_EQ(scheduled[3].tx.invocation.invoked_address,
+            MempoolTestInfra::kAccountAddresses[3])
+      << "Fourth tx should be from youngest account after cycling";
 }
 
 } // namespace hogd

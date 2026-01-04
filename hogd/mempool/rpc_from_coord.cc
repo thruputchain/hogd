@@ -390,8 +390,8 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
     if (i > 0) {
       // The first call to [schedule()] is done in [schedulercoord_nominate()]
       // since we want to overlap it with the block initialization RPCs.
-      scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
-                           cache.tx_hashes, cache.txs);
+      co_await scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
+                                    cache.tx_hashes, cache.txs);
     }
     size_t num_scheduled_this_iteration = cache.txs.size() - num_scheduled;
     if (!num_scheduled_this_iteration) {
@@ -583,10 +583,10 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     // call with the block initialization work.
     x23::CoroGuard cg;
     co_await cg(scheduler_->global_lock_);
-    scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
-                         nominated_block_cache_.tx_hashes,
-                         nominated_block_cache_.txs);
-    info("schedule() gaves us {} txs", nominated_block_cache_.tx_hashes.size());
+    co_await scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
+                                  nominated_block_cache_.tx_hashes,
+                                  nominated_block_cache_.txs);
+    info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
   }
 
   if (!co_await initialize_block_handle) {
