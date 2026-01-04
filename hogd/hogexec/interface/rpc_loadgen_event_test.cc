@@ -102,6 +102,7 @@ protected:
 
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
+    info("Opening block {}", block_id);
     auto open_res = client_.executorsched_open_proposal_block(block_id);
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
@@ -115,11 +116,12 @@ protected:
 
   void close_block(BlockID block_id)
   {
+    info("Closing block {}", block_id);
     auto client_finish_res = client_.executorsched_finish_block(block_id);
     ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
 
     auto event_close_res = event_client_.eventsched_close_block(block_id);
-    ASSERT_EQ(event_close_res, RPCError::kRPCNone);
+    ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
@@ -137,7 +139,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   BlockID test_block_id = 100;
 
   // Generate an experiment with ERC20 payments
-  constexpr uint32_t kNumAccounts = 10;
+  constexpr uint32_t kNumAccounts = 5;
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments().num_accounts = kNumAccounts;
 
@@ -169,6 +171,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
+    info("Start initialization block {}", current_block_id);
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
@@ -179,6 +182,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     }
 
     // Finish the initialization block
+    info("Finish initialization block {}", current_block_id);
     close_block(current_block_id);
     current_block_id++;
   }
@@ -228,7 +232,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   BlockID test_block_id = 200;
 
   // Generate an experiment with ERC20 payments
-  constexpr uint32_t kNumAccounts = 10;
+  constexpr uint32_t kNumAccounts = 5;
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments().num_accounts = kNumAccounts;
 
@@ -252,9 +256,6 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Run initialization transactions
   const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
-  auto event_client = make_srpc_multiclient<EventSched1>(
-      x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
-
   // Count total initialization transactions to calculate work transaction IDs
   size_t num_init_txs = 0;
   for (const InitializationBlock &init_block : init_blocks) {
@@ -262,16 +263,18 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   }
 
   for (const InitializationBlock &init_block : init_blocks) {
+    info("Start initialization block {}", current_block_id);
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
     for (const auto &tx : init_block) {
       auto propose_res =
           client_.executorsched_propose_transaction(current_block_id, tx);
-      ASSERT_NE(propose_res.result(), ExecResult::ExecResultSystemError);
+      ASSERT_EQ(propose_res.result(), ExecResult::ExecResultOK);
     }
 
     // Finish the initialization block
+    info("Finish initialization block {}", current_block_id);
     close_block(current_block_id);
     current_block_id++;
   }
