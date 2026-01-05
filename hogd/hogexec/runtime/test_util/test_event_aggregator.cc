@@ -45,7 +45,7 @@ TestEventAggregator::close_block(BlockID block_id)
 
 x23::Async<RPCError>
 TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
-                                TxEventLog const &event_log)
+                                TxEventLog event_log)
 {
   co_await should_block_futex_.wait(true);
 

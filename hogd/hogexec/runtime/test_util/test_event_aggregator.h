@@ -32,7 +32,7 @@ public:
   RPCError open_block(BlockID block_id);
   EventBlockResult close_block(BlockID block_id);
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
-                                  TxEventLog const &event_log);
+                                  TxEventLog event_log);
 
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
