@@ -223,14 +223,14 @@ private:
       panic("ConcurrentSet::contains/erase called with reserved value");
     }
 
-    size_t level = 0;
-    size_t level_capacity = entries_for_level(level);
-    assert((level_capacity & (level_capacity - 1)) == 0);
-
     size_t hash = Traits::hash(value);
 
+    size_t level = -1;
     while (true) {
     outer:
+      size_t level_capacity = entries_for_level(++level);
+      assert((level_capacity & (level_capacity - 1)) == 0);
+
       for (size_t i = 0; i < level_capacity; i++) {
         size_t index = (hash + i) & (level_capacity - 1);
         auto &l = levels_[level];
@@ -239,10 +239,19 @@ private:
         if (v == value) {
           bool r = true;
           if (erase) {
+            if (v == Traits::kTombstone) {
+              return false;
+            }
+            // This is subtle. Note here the only overwrites allowed on an entry
+            // are for ones that are non-empty and non-tombstone. Hence, if we
+            // see CAS failure, it must be because another thread erased the
+            // entry, so there is no need to retry.
             r = l[index].compare_exchange_strong(v, Traits::kTombstone,
                                                  std::memory_order_release,
                                                  std::memory_order_relaxed);
-            erases_.fetch_add(1, std::memory_order_relaxed);
+            if (r) {
+              erases_.fetch_add(1, std::memory_order_relaxed);
+            }
           }
           return r;
         }
@@ -251,14 +260,18 @@ private:
         }
 
         if (level < levels_.size() - 1) {
-          level++;
-          level_capacity = entries_for_level(level);
-          // jump to outer while
           goto outer;
         }
 
         return false;
       }
+
+      // in case a level was added since we started looking for a value in the
+      // current level, restart the search in the new level.
+      if (level < levels_.size() - 1) {
+        goto outer;
+      }
+
       return false;
     }
 
