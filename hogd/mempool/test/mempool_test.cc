@@ -33,6 +33,8 @@ TEST(Mempool, SubmitUnvetted)
   MempoolTestInfra server;
 
   AccountAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth_data.last_written_height = 0;
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -55,7 +57,21 @@ TEST(Mempool, SubmitUnvetted)
   };
   tx.auth_claims.push_back(make_sign_claim(0));
 
+  auto make_signature = [&](SecretKey sk, Transaction const &tx, uint8_t id) {
+    DecoratedSignature signature;
+    signature.public_key_id = id;
+    signature.signature = Signature(CryptographicScheme::Ed25519);
+    signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
+    return signature;
+  };
+  DecoratedSignatureList decorated_signatures;
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  decorated_signatures.list.push_back(make_signature(sk, tx, 0));
+  txs[0].signatures.push_back(decorated_signatures);
+
   server.mempool_coord_rpc().schedulercoord_submit_unvetted({txs[0]})();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 TEST(Mempool, SubmitVetted)
@@ -464,17 +480,20 @@ TEST(Mempool, AuthChanged)
        .auth_data = x23::Ptr<AccountAuthData>(auth_data)}};
   server.register_auth_data_updates(
       /*height=*/0, key_changes)();
-  Transaction tx = txs[0].tx;
+
   auto make_sign_claim = [&](uint32_t idx) {
     AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
     claim.invoked_address_signature_id() = idx;
     return claim;
   };
-
   for (SignedTransaction &stx : txs) {
     stx.tx.auth_claims.push_back(make_sign_claim(0));
   }
+
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+
+  info("OK HERE!!! scheduler size is {}",
+       server.mempool_coord_rpc().scheduler()->size());
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 2;

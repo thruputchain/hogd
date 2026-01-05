@@ -44,6 +44,18 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
   return txs;
 }
 
+inline Ed25519SecretKey
+create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
+{
+  const auto [public_key, private_key] = ed25519_keygen();
+  x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
+  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
+  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
+  pk_config->key.ed25519() = public_key;
+  pk_config->max_weight = weight;
+  return private_key;
+}
+
 inline AccountAuthData
 get_default_account()
 {
@@ -60,18 +72,6 @@ get_default_account()
   return AccountAuthData{.public_keys = public_keys,
                          .gas_permissions = {},
                          .nonce_config = kNonceConfig};
-}
-
-inline Ed25519SecretKey
-create_key_pair(AccountAuthData &auth_data, size_t idx, Weight weight)
-{
-  const auto [public_key, private_key] = ed25519_keygen();
-  x23::Ptr<PublicKeyConfig> &pk_config = auth_data.public_keys[idx];
-  pk_config = x23::Ptr<PublicKeyConfig>(new PublicKeyConfig());
-  pk_config->key = PublicKey(CryptographicScheme::Ed25519);
-  pk_config->key.ed25519() = public_key;
-  pk_config->max_weight = weight;
-  return private_key;
 }
 
 inline void

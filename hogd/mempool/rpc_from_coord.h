@@ -230,7 +230,8 @@ private:
 
     // TODO(jhumphri): Ask the db for the current block ID and fill in
     // [current_block_id_] with it in the scheduler.
-    scheduler_ = std::make_shared<Scheduler>(db_sched_client_);
+    scheduler_ =
+        std::make_shared<Scheduler>(/*current_block=*/1, db_sched_client_);
     co_await db_rpc_->register_scheduler(scheduler_);
 
     x23::XdrVec<ShardCard> cards;
