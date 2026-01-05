@@ -15,7 +15,6 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <sys/endian.h> // IWYU pragma: keep
 #include <sys/fcntl.h>
 #include <sys/socket.h>
 #include <utility>
