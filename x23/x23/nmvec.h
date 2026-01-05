@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <iterator>
 #include <ranges>
 #include <semaphore>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>

@@ -49,7 +49,7 @@ find_exe(std::filesystem::path prog)
 #ifdef __APPLE__
 
 // mac-specific utilities for getting path to the current program
-std::string
+static std::string
 get_executable_path()
 {
   uint32_t size = 0;

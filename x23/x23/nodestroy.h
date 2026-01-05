@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <concepts>
 #include <initializer_list>
 #include <type_traits>
 
