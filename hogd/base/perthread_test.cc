@@ -79,4 +79,16 @@ TEST(PerThreadTest, Counters)
   EXPECT_EQ(cnt.get(), kThreads + 2);
 }
 
+TEST(PerThreadTest, CounterResize)
+{
+  PerThreadCounter<int> cnt;
+  cnt.inc(1);
+
+  PerThreadCounter<int> cnt2;
+  cnt2.inc(1);
+
+  EXPECT_EQ(cnt.get(), 1);
+  EXPECT_EQ(cnt2.get(), 1);
+}
+
 } // namespace hogd
