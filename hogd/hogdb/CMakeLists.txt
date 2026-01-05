@@ -6,6 +6,7 @@ add_library(hogdb_objects OBJECT
   block_tx.cc
   block_id_manager.cc
   item_lock/auth_lock.cc
+  item_lock/balance_lock.cc
   item_lock/bytestring_lock.cc
   item_lock/deletion_lock.cc
   item_lock/exclusive_lock.cc
@@ -74,6 +75,7 @@ add_executable(
   item_change_exclusive_test.cc
   item_lock_test.cc
   item_lock/auth_lock_test.cc
+  item_lock/balance_lock_test.cc
   item_lock/bytestring_lock_test.cc
   item_lock/nnint128_lock_test.cc
   item_lock/replay_cache_lock_test.cc

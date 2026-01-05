@@ -10,7 +10,6 @@
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -18,7 +17,6 @@ namespace hogd {
 HogDBStatus<int128_t>
 NewContractLock::try_atomic_change_lock(const NewContractData *before,
                                         const NewContractData *after,
-                                        const StorageCostModel * /*unused*/,
                                         const LockContext & /*ctx*/)
 {
   assert(before == nullptr || before->new_contract() == contract_);

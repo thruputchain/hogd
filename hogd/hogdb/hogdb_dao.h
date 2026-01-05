@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // xdr types
@@ -146,10 +147,59 @@ enum {
 // ItemLockCacheData is the data we use to cache type-specific info,
 // like the nnint base value, so we don't have to load that on each
 // request_nnint128.
-using ItemLockCacheData = std::array<uint8_t, 23>;
-enum {
-  kItemLockCacheDataTypeNone = 0,
-  kItemLockCacheDataNNInt128BaseValue = 1,
+
+class ItemLockCacheData {
+public:
+  static ItemLockCacheData from_balance(std::optional<int128_t> balance)
+  {
+    return ItemLockCacheData(CachedBalance{balance});
+  }
+
+  static ItemLockCacheData from_nnint128_base(int128_t base_value)
+  {
+    return ItemLockCacheData(CachedNNInt128Base{base_value});
+  }
+
+  static ItemLockCacheData from_none() { return ItemLockCacheData(); }
+
+  bool is_cached_balance() const
+  {
+    return std::holds_alternative<CachedBalance>(data_);
+  }
+
+  bool is_cached_nnint128_base() const
+  {
+    return std::holds_alternative<CachedNNInt128Base>(data_);
+  }
+
+  bool is_none() const { return std::holds_alternative<std::monostate>(data_); }
+
+  std::optional<int128_t> get_cached_balance() const
+  {
+    assert(std::holds_alternative<CachedBalance>(data_));
+    return std::get<CachedBalance>(data_).balance;
+  }
+
+  int128_t get_cached_nnint128_base() const
+  {
+    assert(std::holds_alternative<CachedNNInt128Base>(data_));
+    return std::get<CachedNNInt128Base>(data_).base_value;
+  }
+
+private:
+  struct CachedBalance {
+    std::optional<int128_t> balance;
+  };
+
+  struct CachedNNInt128Base {
+    int128_t base_value;
+  };
+
+  ItemLockCacheData() : data_(std::monostate{}) {}
+  ItemLockCacheData(CachedBalance balance) : data_(balance) {}
+  ItemLockCacheData(CachedNNInt128Base nnint128_base) : data_(nnint128_base) {}
+
+  std::variant<std::monostate, CachedBalance, CachedNNInt128Base> data_;
 };
 
 // create a key for a replay cache data item that holds nonces for with a

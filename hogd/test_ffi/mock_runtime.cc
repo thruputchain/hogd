@@ -75,17 +75,4 @@ MockRuntimeContext::make_new_runtime(
                                          syscall_handler, do_contract_verify);
 }
 
-bool
-MockRuntimeContext::link_fn_nargs(std::string_view module_name,
-                                  std::string_view fn_name, void *fn_ptr,
-                                  uint8_t nargs)
-{
-
-  // if linking anything other than syscall_handler, note that
-  // MockRuntimeContext handles syscalls via a different mechanism.  Regular
-  // WASM Linking not supported
-
-  return base_context_->link_fn_nargs(module_name, fn_name, fn_ptr, nargs);
-}
-
 } // namespace hogd

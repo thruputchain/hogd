@@ -63,8 +63,7 @@ AuthLock::count_active_keys() const
 HogDBStatus<int128_t>
 AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
                                  const PointerItem<AuthDataItem> *after,
-                                 const StorageCostModel *cost_model,
-                                 const LockContext & /*ctx*/)
+                                 const LockContext &ctx)
 {
 
   std::unique_lock<x23::TestLock> ul(lock_);
@@ -102,7 +101,7 @@ AuthLock::try_atomic_change_lock(const PointerItem<AuthDataItem> *before,
   }
 
   // TODO(geoff): cost for gas configs
-  return cost_model->get_auth_data_cost(keys);
+  return ctx.cost_model->get_auth_data_cost(keys);
 }
 
 int128_t

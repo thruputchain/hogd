@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <optional>
 #include <set>
 
@@ -11,6 +12,8 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
 #include "x23/testlock.h"
 
 namespace hogd {
@@ -22,7 +25,6 @@ public:
   HogDBStatus<int128_t>
   try_atomic_change_lock(const PointerItem<ReplayCacheIt> *before,
                          const PointerItem<ReplayCacheIt> *after,
-                         const StorageCostModel *cost_model,
                          const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const PointerItem<ReplayCacheIt> &after,

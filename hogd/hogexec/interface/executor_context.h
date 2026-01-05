@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -64,7 +65,7 @@ public:
   }
 
   // Block until all event calls have returned.
-  std::optional<SystemErrorCode> await_event_return();
+  x23::Async<std::optional<SystemErrorCode>> await_event_return();
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);

@@ -46,6 +46,17 @@ NNInt128::narrow(const NNInt128 &nnint)
 }
 
 bool
+Balance::narrow(const Balance &other)
+{
+  assert_is_valid();
+  other.assert_is_valid();
+  add_ = std::max(add_, other.add_);
+  sub_ = std::min(sub_, other.sub_);
+  assert_is_valid();
+  return true;
+}
+
+bool
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
   CHECK(base_auth_data() == auth_data_item.base_auth_data());

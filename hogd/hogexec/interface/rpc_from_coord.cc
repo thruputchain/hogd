@@ -124,13 +124,13 @@ ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
   return executor_states_->open_validation(id);
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
 {
   if (!initialize_check()) [[unlikely]] {
-    return ExecResult::ExecResultSystemError;
+    co_return ExecResult::ExecResultSystemError;
   }
-  return executor_states_->remove_block(id);
+  co_return co_await executor_states_->remove_block(id);
 }
 
 TransactionID

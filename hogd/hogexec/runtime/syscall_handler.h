@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -79,6 +80,10 @@ public:
       if (!transaction_committed_or_aborted_) {
         warn("SystemCallHandler destroyed without committing or aborting "
              "transaction");
+        if (debug_force_commit_abort_) {
+          panic("SystemCallHandler destroyed at invalid state: {}",
+                transaction_committed_or_aborted_);
+        }
       }
       if (last_frame_.has_value() &&
           !last_frame_.value().extract_events().empty() &&
@@ -235,6 +240,12 @@ public:
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
 
+  static auto force_commit_or_abort()
+  {
+    debug_force_commit_abort_ = true;
+    return x23::Defer([]() { debug_force_commit_abort_ = false; });
+  }
+
 private:
   RuntimeContext &runtime_context_;
   const SignedTransaction signed_tx_;
@@ -259,6 +270,8 @@ private:
   bool transaction_committed_or_aborted_{false};
 
   StorageSnapshotCache &snapshot_cache_;
+
+  inline static bool debug_force_commit_abort_{false};
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid.

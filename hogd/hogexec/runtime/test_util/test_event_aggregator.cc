@@ -8,6 +8,7 @@
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -42,21 +43,25 @@ TestEventAggregator::close_block(BlockID block_id)
   return result;
 }
 
-RPCError
+x23::Async<RPCError>
 TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
-                                TxEventLog const &event_log)
+                                TxEventLog event_log)
 {
-  std::lock_guard<std::mutex> lock(mtx_);
+  co_await should_block_futex_.wait(true);
+
+  std::lock_guard lock(mtx_);
   if (!is_block_open(block_id)) {
-    return RPCError::kRPCBadBlockID;
+    error("Block {} is not open", block_id);
+    co_return RPCError::kRPCBadBlockID;
   }
 
   if (events_[block_id].contains(tx_id)) {
-    return RPCError::kRPCUnrecoverable;
+    error("Unrecoverable: Tx {} already exists for block {}", tx_id, block_id);
+    co_return RPCError::kRPCUnrecoverable;
   }
 
   events_[block_id][tx_id] = event_log;
-  return RPCError::kRPCNone;
+  co_return RPCError::kRPCNone;
 }
 
 std::optional<TxEventLog>
@@ -65,10 +70,12 @@ TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
   std::lock_guard<std::mutex> lock(mtx_);
   auto it = events_.find(block_id);
   if (it == events_.end()) {
+    error("Block {} not found", block_id);
     return std::nullopt;
   }
 
   if (!it->second.contains(tx_id)) {
+    error("Tx {} not found in block {}", tx_id, block_id);
     return std::nullopt;
   }
   return it->second.at(tx_id);

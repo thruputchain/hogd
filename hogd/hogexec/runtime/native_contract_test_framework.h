@@ -73,6 +73,7 @@ get_default_cost_model_xdr()
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .auth_per_key_cost = to_xdr(int128_t{1111}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+      .balance_cost = to_xdr(int128_t{1234}),
   };
 }
 
@@ -213,6 +214,10 @@ public:
   {
     return event_server_.get_events(block_id, tx_id);
   }
+
+  // Blocking control for testing delays
+  void block_emit_events() { event_server_.block_emit_events(); }
+  void unblock_emit_events() { event_server_.unblock_emit_events(); }
 
 private:
   TestEventAggregator event_server_;

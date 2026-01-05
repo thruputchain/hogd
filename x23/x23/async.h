@@ -282,7 +282,10 @@ public:
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
-  void unhandled_exception() { do_exception(std::current_exception()); }
+  void unhandled_exception() noexcept
+  {
+    do_exception(std::current_exception());
+  }
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
@@ -297,11 +300,11 @@ public:
   //
   // Functions for use on the caller/awaiter/"future" side
   //
-
   bool await_ready() noexcept
   {
-    return flags_.load(std::memory_order_acquire) & kReturning;
+    return (flags_.load(std::memory_order_acquire) & kReturning) != 0U;
   }
+
   bool await_suspend(auto h SLOC_DECL) noexcept
   {
 #if X23_CORO_TRACE
@@ -754,6 +757,7 @@ make_async(source_location sloc = source_location::current())
 {
   CoroCB<R> cb;
   Async<R> async = [&cb](source_location) -> Async<R> {
+    // This is not an MVC because GetCoro never suspends.
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};
@@ -765,6 +769,7 @@ make_async(source_location sloc = source_location::current())
 // A function that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
   struct promise_type : PromiseBase {
     template<typename... Args> requires has_location<Args...>
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
@@ -779,6 +784,7 @@ struct Detached {
     }
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
+  // NOLINTEND(readability-convert-member-functions-to-static)
 
   Detached(Detached &&) noexcept = delete;
 
@@ -810,7 +816,7 @@ struct MapAwait {
   {
 #if X23_CORO_TRACE
     if constexpr (requires { a().await_suspend(h, sloc); })
-      a().await_suspend(h, sloc);
+      return a().await_suspend(h, sloc);
     else
 #endif // X23_CORO_TRACE
       return a().await_suspend(h);
@@ -862,7 +868,7 @@ emulate_final_suspend(std::coroutine_handle<Promise> h)
 template<typename T, typename E> struct ExpectAwait {
   std::expected<T, E> r_;
 
-  bool await_ready() { return r_.has_value(); }
+  bool await_ready() noexcept { return r_.has_value(); }
   template<typename P> auto await_suspend(std::coroutine_handle<P> h)
   {
     h.promise().return_value(std::unexpected(r_.error()));

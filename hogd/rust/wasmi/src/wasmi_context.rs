@@ -6,6 +6,7 @@ use core::ffi::c_void;
 use core::slice;
 
 use crate::module_cache::{ModuleCache, ModuleCacheEntry};
+use crate::wasmi_debug_log;
 use crate::wasmi_error::TrampolineError;
 use crate::SHA256Hash;
 pub use common::contract_loader::ContractGetFn;
@@ -78,8 +79,28 @@ impl LinkEntry {
     }
 }
 
+pub struct WasmiGlobalContext {
+    entries: Vec<LinkEntry>,
+}
+
+impl WasmiGlobalContext {
+    pub fn new() -> WasmiGlobalContext {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn add_entry(&mut self, entry: LinkEntry) {
+        self.entries.push(entry);
+    }
+
+    pub fn entries(&self) -> &Vec<LinkEntry> {
+        &self.entries
+    }
+}
+
 pub struct WasmiContext {
-    pub entries: Vec<LinkEntry>,
+    global_context: std::sync::Arc<WasmiGlobalContext>,
     pub module_cache: Option<ModuleCache>,
     contract_get_fn: ContractGetFn,
 }
@@ -137,9 +158,12 @@ macro_rules! link_function_nargs {
 }
 
 impl WasmiContext {
-    fn new(get_fn: ContractGetFn) -> WasmiContext {
+    fn new(
+        global_context: std::sync::Arc<WasmiGlobalContext>,
+        get_fn: ContractGetFn,
+    ) -> WasmiContext {
         Self {
-            entries: Vec::new(),
+            global_context: global_context,
             // Performance is somewhat sensitive to module cache size.
             // We need to change the caching strategy anyways once we go to winch.
             module_cache: Some(ModuleCache::new(10)),
@@ -183,10 +207,6 @@ impl WasmiContext {
         }
     }
 
-    pub fn add_entry(&mut self, entry: LinkEntry) {
-        self.entries.push(entry);
-    }
-
     fn new_engine() -> Engine {
         Engine::new(
             Config::default()
@@ -211,7 +231,8 @@ impl WasmiContext {
         let engine = Self::new_engine();
         let mut linker = Linker::new(&engine);
 
-        for entry in &self.entries {
+        let entries = self.global_context.entries();
+        for entry in entries {
             match entry.nargs {
                 0 => Self::link_function_0args(
                     &mut linker,
@@ -379,20 +400,130 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     debug_assert!(!module.is_empty());
     debug_assert!(!method.is_empty());
 
-    let c = unsafe { &mut *context };
+    // Forward to global context FFI function
+    let c = unsafe { &*context };
+    // Get the Arc pointer - we need to get the inner pointer from the Arc
+    let global_context_ptr: *mut c_void = unsafe {
+        core::mem::transmute::<
+            &std::sync::Arc<WasmiGlobalContext>,
+            *const std::sync::Arc<WasmiGlobalContext>,
+        >(&c.global_context) as *mut c_void
+    };
+    wasmi_global_link_nargs(
+        global_context_ptr,
+        module_name,
+        module_name_len,
+        method_name,
+        method_name_len,
+        function_pointer,
+        nargs,
+    )
+}
 
-    c.add_entry(LinkEntry::new(module, method, nargs, function_pointer));
-    true
+/// # Safety
+/// Global context must not be a nullptr.
+/// Global context must have been created by new_wasmi_global_context.
+#[no_mangle]
+pub unsafe extern "C" fn wasmi_global_link_nargs(
+    global_context_void: *mut c_void,
+    module_name: *const u8,
+    module_name_len: u32,
+    method_name: *const u8,
+    method_name_len: u32,
+    function_pointer: *mut c_void,
+    nargs: u8,
+) -> bool // true if success
+{
+    let global_context: &mut std::sync::Arc<WasmiGlobalContext> = unsafe {
+        &mut *core::mem::transmute::<
+            *mut c_void,
+            *mut std::sync::Arc<WasmiGlobalContext>,
+        >(global_context_void)
+    };
+
+    debug_assert!(!global_context_void.is_null());
+    debug_assert!(!module_name.is_null());
+    debug_assert!(!method_name.is_null());
+
+    let module = match string_from_parts(module_name, module_name_len) {
+        Ok(x) => x,
+        _ => {
+            return false;
+        }
+    };
+
+    let method = match string_from_parts(method_name, method_name_len) {
+        Ok(x) => x,
+        _ => {
+            return false;
+        }
+    };
+
+    debug_assert!(!module.is_empty());
+    debug_assert!(!method.is_empty());
+
+    // Get mutable reference from Arc - this only works if there's exactly one reference
+    // Linking should happen before contexts are created
+    if let Some(global_context_mut) = std::sync::Arc::get_mut(global_context) {
+        global_context_mut.add_entry(LinkEntry::new(
+            module,
+            method,
+            nargs,
+            function_pointer,
+        ));
+        true
+    } else {
+        // Multiple references exist - this shouldn't happen if linking is done before contexts
+        wasmi_debug_log!(eprintln!(
+            "Multiple references exist to global context"
+        ));
+        false
+    }
+}
+
+/// # Safety
+/// Creates a global context that can be shared across threads.
+/// Global context is threadsafe.
+#[no_mangle]
+pub unsafe extern "C" fn new_wasmi_global_context() -> *mut c_void {
+    let global_context = std::sync::Arc::new(WasmiGlobalContext::new());
+
+    let b = Box::into_raw(Box::new(global_context));
+    unsafe { core::mem::transmute(b) }
+}
+
+/// # Safety
+/// Global context must not be a nullptr.
+/// Global context must have been created by new_wasmi_global_context.
+#[no_mangle]
+pub unsafe extern "C" fn free_wasmi_global_context(p: *mut c_void) {
+    debug_assert!(!p.is_null());
+
+    let global_context: *mut std::sync::Arc<WasmiGlobalContext> =
+        unsafe { core::mem::transmute(p) };
+
+    unsafe { drop(Box::from_raw(global_context)) };
 }
 
 // Rust FFI needs no_mangle and extern "C"
 /// # Safety
 /// get_fn must not be a nullptr.
+/// global_context must not be a nullptr and must have been created by new_wasmi_global_context.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
     get_fn: ContractGetFn,
+    global_context: *mut c_void,
 ) -> *mut c_void {
-    let b = Box::new(WasmiContext::new(get_fn));
+    debug_assert!(!global_context.is_null());
+
+    let global_context: &std::sync::Arc<WasmiGlobalContext> = unsafe {
+        &*core::mem::transmute::<
+            *mut c_void,
+            *mut std::sync::Arc<WasmiGlobalContext>,
+        >(global_context)
+    };
+
+    let b = Box::new(WasmiContext::new(global_context.clone(), get_fn));
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 

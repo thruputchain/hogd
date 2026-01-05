@@ -60,11 +60,21 @@
 
 #include <atomic>
 #include <cassert>
-#include <queue>
+#include <concepts>
+#include <coroutine>
+#include <mutex>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include <x23/async.h>
+#include <x23/cleanup.h>
 #include <x23/corotrace.h>
+#include <x23/debug.h>
+#include <x23/mvar.h>
 #include <x23/threadpool.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
@@ -201,6 +211,7 @@ private:
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   bool await_ready() noexcept { return false; }
   template<typename Promise>
   auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
@@ -209,6 +220,7 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     p.return_void(); // Coroutine must return void
     return finish_suspend(moriturus);
   }
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void await_resume() noexcept { std::unreachable(); }
 
 protected:

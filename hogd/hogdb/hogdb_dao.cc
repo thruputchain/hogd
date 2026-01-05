@@ -313,20 +313,11 @@ HogDBStatus<void>
 HogDBDAO::write_address_balance(const Address &addr, int128_t val)
 {
   auto key = make_address_key(addr, Prefix::kBalance);
-  std::optional<HogDBStatus<DBItem>> before_item;
-  if (!invariants_.empty()) {
-    before_item = db_.get(std::as_bytes(std::span(key)));
-  }
-
+  auto before_item = get_before_item(key);
   auto ret = db_.put(std::as_bytes(std::span(key)), kNNInt128,
                      byte_view(cpu_to_le(val)));
 
-  if (!invariants_.empty()) {
-    auto after_item = db_.get(std::as_bytes(std::span(key)));
-    for (auto &invariant : invariants_) {
-      invariant->log_item_change(key, *before_item, after_item);
-    }
-  }
+  update_invariants_post(key, before_item);
   return ret;
 }
 
@@ -457,19 +448,16 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
   case ItemKeyType::kItemKeyTypeFreeNativeTokenBalance:
     assert(key.is_address_balance());
     {
-      // this is not charged
+      // this is not charged via the regular storage cost mechanism
       auto r = read_address_balance(key.get_address());
       if (!r && r.error() != HogDBCode::kNotFound) {
         return r.error();
       }
-      ItemLockCacheData cache_data{kItemLockCacheDataNNInt128BaseValue};
       if (!r) {
         assert(r.error() == HogDBCode::kNotFound);
-        memset(cache_data.data() + 1, 0, cache_data.size() - 1);
-        return std::make_pair(0, cache_data);
+        return std::make_pair(0, ItemLockCacheData::from_balance(std::nullopt));
       }
-      std::memcpy(cache_data.data() + 1, &r.value(), sizeof(int128_t));
-      return std::make_pair(0, cache_data);
+      return std::make_pair(0, ItemLockCacheData::from_balance(r.value()));
     }
 
   case ItemKeyType::kItemKeyTypeAccountAuthData:
@@ -490,7 +478,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         }
       }
       return std::make_pair(cost_model->get_auth_data_cost(active_keys),
-                            ItemLockCacheData{kItemLockCacheDataTypeNone});
+                            ItemLockCacheData::from_none());
     }
   case ItemKeyType::kItemKeyTypeReplayCache:
     assert(key.is_replay_cache());
@@ -504,7 +492,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
         return HogDBError(HogDBCode::kNotFound);
       }
       return std::make_pair(cost_model->get_replay_cache_cost(r->size),
-                            ItemLockCacheData{kItemLockCacheDataTypeNone});
+                            ItemLockCacheData::from_none());
     }
   case ItemKeyType::kItemKeyTypeAddressMetadata:
     assert(key.is_address_metadata());
@@ -525,7 +513,7 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       }
       return std::make_pair(cost_model->get_contract_size_cost(
                                 deployed_contract_hash.contract_size),
-                            ItemLockCacheData{kItemLockCacheDataTypeNone});
+                            ItemLockCacheData::from_none());
     }
   case ItemKeyType::kItemKeyTypeContractData:
   {
@@ -543,15 +531,13 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       std::memcpy(&base_value, item.value().value.data(), sizeof(int128_t));
       int128_t out = le_to_cpu(base_value);
 
-      ItemLockCacheData cache_data;
-      cache_data[0] = kItemLockCacheDataNNInt128BaseValue;
-      std::memcpy(cache_data.data() + 1, &out, sizeof(int128_t));
-      return std::make_pair(cost_model->get_nnint_cost(), cache_data);
+      return std::make_pair(cost_model->get_nnint_cost(),
+                            ItemLockCacheData::from_nnint128_base(out));
     }
     case kBytes:
       return std::make_pair(cost_model->get_bytestring_cost(
                                 item.value().value.size()),
-                            ItemLockCacheData{kItemLockCacheDataTypeNone});
+                            ItemLockCacheData::from_none());
     default:
       error("unknown item type loaded from db: key={} type={}", key,
             item.value().type);

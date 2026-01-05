@@ -70,6 +70,7 @@ target_link_libraries(
 
 add_library(runtime_test_objects OBJECT
   authclaim_test.cc
+  balance_cost_tracking_test.cc
   contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc

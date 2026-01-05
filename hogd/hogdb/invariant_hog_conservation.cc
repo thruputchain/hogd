@@ -77,9 +77,15 @@ HogConservationInvariant::handle_balance_change(
                                               std::span(&balance, 1))));
     return le_to_cpu(balance);
   };
+
   auto before_balance = get_balance(before);
   auto after_balance = get_balance(after);
-  update_total_supply(after_balance - before_balance);
+
+  int128_t before_cost =
+      before.has_value() ? cost_model_.get_balance_cost() : 0;
+  int128_t after_cost = after.has_value() ? cost_model_.get_balance_cost() : 0;
+  update_total_supply(after_balance - before_balance + after_cost -
+                      before_cost);
 }
 
 void

@@ -84,7 +84,8 @@ TEST(RecoveryTests, RecoveryVaryingItems)
     ASSERT_TRUE(itx->request_nnint128(
                        make_address_balance_item_key(ContractAddress{0}),
                        ctx.get_cost_model().get_nnint_cost() +
-                           ctx.get_cost_model().get_bytestring_cost(6),
+                           ctx.get_cost_model().get_bytestring_cost(6) +
+                           ctx.get_cost_model().get_balance_cost(),
                        std::to_underlying(StorageItemRPCFlags::kStorageNone))
                     .has_value());
     ASSERT_TRUE(itx->request_nnint128(

@@ -5,6 +5,7 @@
 #include <memory>
 #include <utility>
 
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -80,7 +81,7 @@ public:
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all
   // transactions on this block have been committed or aborted.
-  ExecResult executorsched_finish_block(BlockID id);
+  x23::Async<ExecResult> executorsched_finish_block(BlockID id);
 
   // It is an error to shut down the executor while there are transactions
   // that are still running.

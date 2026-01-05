@@ -10,6 +10,7 @@
 // xdr types
 #include "account.hh"
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/auth_change_subscription_manager.h"
@@ -198,9 +199,32 @@ TEST_F(HogDBTest, ItemLockCacheData)
       db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
   ASSERT_TRUE(rsize);
   EXPECT_EQ(cost_model_.get_nnint_cost(), rsize->first);
-  int128_t base;
-  std::memcpy(&base, rsize->second.data() + 1, sizeof(int128_t));
-  EXPECT_EQ(0xABCD'EF01'2345'6789, base);
+
+  ASSERT_TRUE(rsize->second.is_cached_nnint128_base());
+  EXPECT_EQ(0xABCD'EF01'2345'6789, rsize->second.get_cached_nnint128_base());
+}
+
+TEST_F(HogDBTest, ItemLockCacheDataBalance)
+{
+  ItemKey ikey = make_address_balance_item_key(make_address(kAddress));
+  EXPECT_TRUE(db_.write_address_balance(ikey.get_address(), 100000));
+  auto rbalance =
+      db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
+  ASSERT_TRUE(rbalance);
+  EXPECT_EQ(0, rbalance->first);
+  ASSERT_TRUE(rbalance->second.is_cached_balance());
+  EXPECT_EQ(100000, rbalance->second.get_cached_balance().value());
+}
+
+TEST_F(HogDBTest, ItemLockCacheDataNoBalance)
+{
+  ItemKey ikey = make_address_balance_item_key(make_address(kAddress));
+  HogDBStatus<std::pair<int128_t, ItemLockCacheData>> rbalance =
+      db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
+  ASSERT_TRUE(rbalance);
+  EXPECT_EQ(0, rbalance->first);
+  ASSERT_TRUE(rbalance->second.is_cached_balance());
+  EXPECT_FALSE(rbalance->second.get_cached_balance().has_value());
 }
 
 TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
@@ -240,7 +264,9 @@ TEST_F(HogDBTest, HogAgeWrittenOnDeployment)
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3,
       DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
-  int128_t cost = cost_model_.get_contract_size_cost(10);
+  int128_t cost =
+      cost_model_.get_contract_size_cost(10) + cost_model_.get_balance_cost();
+  CHECK(cost < 100000); // for the test, given the above constant
   ASSERT_TRUE(invoke_tx.request_nnint128(
       make_address_balance_item_key(addr3), -cost,
       std::to_underlying(StorageItemRPCFlags::kStorageNone)));
@@ -277,10 +303,10 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ItemLock lock(0);
 
   {
-    LockContext ctx(&db_, height, rckey);
-    auto r = lock.try_atomic_change_lock(nullptr, &c1, &cost_model_, ctx);
+    LockContext ctx(&db_, height, rckey, &cost_model_);
+    auto r = lock.try_atomic_change_lock(nullptr, &c1, ctx);
     ASSERT_TRUE(r);
-    auto commit_cost = lock.commit_change(c1, &cost_model_, ctx);
+    auto commit_cost = lock.commit_change(c1, ctx);
     EXPECT_EQ(cost_model_.kBaseItemCost + cost_model_.kReplayCacheCostPerEntry,
               commit_cost);
     ASSERT_TRUE(lock.write_committed_change(ctx, trie_));
@@ -313,19 +339,19 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ItemLock lock2(snapshot_result->first);
 
   {
-    LockContext ctx(&db_, height, rckey);
+    LockContext ctx(&db_, height, rckey, &cost_model_);
 
     // height is now 10, 101 expired, and it shouldn't be possible to readd it
     ItemChange c2(ReplayCacheIt(Uniquifier(height, 101)));
-    auto r = lock2.try_atomic_change_lock(nullptr, &c2, &cost_model_, ctx);
+    auto r = lock2.try_atomic_change_lock(nullptr, &c2, ctx);
     ASSERT_FALSE(r);
 
     ItemChange c3(ReplayCacheIt(Uniquifier(height + 1, 102)));
-    auto r2 = lock2.try_atomic_change_lock(nullptr, &c3, &cost_model_, ctx);
+    auto r2 = lock2.try_atomic_change_lock(nullptr, &c3, ctx);
     ASSERT_TRUE(r2);
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, r2.value());
 
-    auto commit_cost = lock2.commit_change(c3, &cost_model_, ctx);
+    auto commit_cost = lock2.commit_change(c3, ctx);
     EXPECT_EQ(cost_model_.kReplayCacheCostPerEntry, commit_cost);
     ASSERT_TRUE(lock2.write_committed_change(ctx, trie_));
   }
@@ -355,6 +381,128 @@ TEST_F(HogDBTest, ItemChangeReplayCache)
   ASSERT_TRUE(final_data_h11);
   ASSERT_EQ(1, final_data_h11->nonces.size());
   EXPECT_EQ(102, final_data_h11->nonces[0]);
+}
+
+TEST_F(HogDBTest, BalanceTransferReducesByCost)
+{
+  Address sender_addr = make_address(kAddress);
+  Address recipient_addr = make_address(kAddress + 1);
+
+  // Set initial balance for sender
+  constexpr int128_t kInitialBalance = 100000;
+  ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
+
+  db_.load_trie(trie_);
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                 background_commit_worker_, height);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  // Transfer balance to a new address
+  constexpr int128_t kTransferAmount = 50000;
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(sender_addr), -kTransferAmount,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+  ASSERT_TRUE(invoke_tx.request_nnint128(
+      make_address_balance_item_key(recipient_addr), kTransferAmount,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+
+  ASSERT_TRUE(invoke_tx.sync_balance_locks());
+  invoke_tx.commit();
+  invoke_tx.release_blocktx_reference();
+
+  ASSERT_TRUE(block_tx.get().commit());
+
+  // Read back the sender's balance
+  auto sender_balance = db_.read_address_balance(sender_addr);
+  ASSERT_TRUE(sender_balance);
+
+  // The balance should be reduced by the transfer amount
+  // (cost for this elt is implicit in the fact that the balance exists in the
+  // db snapshot that was loaded at the start of the test)
+  int128_t expected_sender_balance = kInitialBalance - kTransferAmount;
+  EXPECT_EQ(expected_sender_balance, *sender_balance);
+
+  // Verify recipient received the transfer amount
+  auto recipient_balance = db_.read_address_balance(recipient_addr);
+  ASSERT_TRUE(recipient_balance);
+  EXPECT_EQ(kTransferAmount - cost_model_.get_balance_cost(),
+            *recipient_balance);
+}
+
+TEST_F(HogDBTest, TwoTransfersToSameAddressCostOnce)
+{
+  Address sender_addr = make_address(kAddress);
+  Address recipient_addr = make_address(kAddress + 1);
+
+  // Set initial balance for sender
+  constexpr int128_t kInitialBalance = 200000;
+  constexpr static int128_t kFirstTransferAmount = 50000;
+  constexpr static int128_t kSecondTransferAmount = 30000;
+
+  ASSERT_TRUE(db_.write_address_balance(sender_addr, kInitialBalance));
+
+  db_.load_trie(trie_);
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(db_, trie_, cost_model_,
+                                 background_commit_worker_, height);
+
+  {
+    // First InvokeTX: transfer to recipient (new address, cost applies)
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx1(block_tx);
+
+    ASSERT_TRUE(invoke_tx1.request_nnint128(
+        make_address_balance_item_key(sender_addr), -kFirstTransferAmount,
+        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+    ASSERT_TRUE(invoke_tx1.request_nnint128(
+        make_address_balance_item_key(recipient_addr), kFirstTransferAmount,
+        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+
+    ASSERT_TRUE(invoke_tx1.sync_balance_locks());
+    invoke_tx1.commit();
+    invoke_tx1.release_blocktx_reference();
+  }
+
+  {
+    // Second InvokeTX: transfer to same recipient (existing address, no cost)
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX invoke_tx2(block_tx);
+
+    ASSERT_TRUE(invoke_tx2.request_nnint128(
+        make_address_balance_item_key(sender_addr), -kSecondTransferAmount,
+        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+    ASSERT_TRUE(invoke_tx2.request_nnint128(
+        make_address_balance_item_key(recipient_addr), kSecondTransferAmount,
+        std::to_underlying(StorageItemRPCFlags::kStorageNone)));
+
+    ASSERT_TRUE(invoke_tx2.sync_balance_locks());
+    invoke_tx2.commit();
+    invoke_tx2.release_blocktx_reference();
+  }
+
+  // Commit the block transaction
+  ASSERT_TRUE(block_tx.get().commit());
+
+  // Verify sender's balance
+  auto sender_balance = db_.read_address_balance(sender_addr);
+  ASSERT_TRUE(sender_balance);
+  int128_t expected_sender_balance =
+      kInitialBalance - kFirstTransferAmount - kSecondTransferAmount;
+  EXPECT_EQ(expected_sender_balance, *sender_balance);
+
+  // Verify recipient's final balance: sum of both transfers minus cost only
+  // once
+  auto recipient_balance = db_.read_address_balance(recipient_addr);
+  ASSERT_TRUE(recipient_balance);
+  int128_t expected_recipient_balance = kFirstTransferAmount +
+                                        kSecondTransferAmount -
+                                        cost_model_.get_balance_cost();
+  EXPECT_EQ(expected_recipient_balance, *recipient_balance);
 }
 
 } // namespace hogd

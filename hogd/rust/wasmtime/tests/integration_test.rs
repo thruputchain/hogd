@@ -180,7 +180,7 @@ fn load_wasm_file(filename: &str) -> &'static [u8] {
 fn test_create_context() {
     // Test that we can create and destroy a wasmtime context
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         assert!(
             !global_context.is_null(),
             "Global context should be created"
@@ -196,7 +196,7 @@ fn test_create_context() {
 #[test]
 fn test_verify_valid_wasm() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context =
             new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
         assert!(!context.is_null());
@@ -258,7 +258,7 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
 #[test]
 fn test_create_runtime() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         println!("global_context created");
         let context = new_wasmtime_context(
             test_get_simple_add_contract_get_fn,
@@ -289,7 +289,7 @@ fn test_create_runtime() {
 #[test]
 fn test_get_memory() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_simple_add_contract_get_fn,
             global_context,
@@ -325,7 +325,7 @@ fn test_get_memory() {
 #[test]
 fn test_invoke_function() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
             global_context,
@@ -361,7 +361,7 @@ fn test_invoke_function() {
 #[test]
 fn test_gas_metering() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
             global_context,
@@ -403,7 +403,7 @@ fn test_missing_wasm_file() {
 #[test]
 fn test_verify_invalid_wasm() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context =
             new_wasmtime_context(no_get_mock_contract_get_fn, global_context);
 
@@ -427,7 +427,7 @@ fn test_verify_invalid_wasm() {
 #[test]
 fn test_multiple_runtimes() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
             global_context,
@@ -468,7 +468,7 @@ fn test_fibonacci_computation() {
     // Test that we can invoke the fibonacci function and verify results
     // This tests the WAT->WASM conversion from test_fibonacci.wat
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
             global_context,
@@ -510,7 +510,7 @@ fn test_fibonacci_computation() {
 #[test]
 fn test_fibonacci_computation_overflow() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_fibonacci_contract_get_fn,
             global_context,
@@ -570,7 +570,7 @@ unsafe extern "C" fn test_get_simple_add_and_fibonacci_contract_get_fn(
 #[test]
 fn test_module_cache() {
     unsafe {
-        let global_context = new_wasmtime_global_context();
+        let global_context = new_wasmtime_global_context(8);
         let context = new_wasmtime_context(
             test_get_simple_add_and_fibonacci_contract_get_fn,
             global_context,

@@ -5,8 +5,6 @@
 #include "account.hh"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/hogdb/hog_types.h"
-#include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/status.h"
@@ -22,9 +20,10 @@ public:
     : deployed_contract_hash_(std::move(deployed_contract_hash))
   {}
 
-  HogDBStatus<int128_t> try_atomic_change_lock(
-      const DeployedContractData *before, const DeployedContractData *after,
-      const StorageCostModel *cost_model, const LockContext &ctx);
+  HogDBStatus<int128_t>
+  try_atomic_change_lock(const DeployedContractData *before,
+                         const DeployedContractData *after,
+                         const LockContext &ctx);
   int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                          const DeployedContractData & /*unused*/,
                          const StorageCostModel *cost_model) const;

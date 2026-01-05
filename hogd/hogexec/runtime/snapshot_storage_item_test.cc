@@ -56,7 +56,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
       {make_test_queue_entry(6)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 100, 5);
+  StorageCostModel cost_model(12000, 1, 5, 100, 5, 1234);
   server_->impl()->setup_create_item(AddressAndKey{},
                                      StorageItemWrapper(std::move(queue),
                                                         &cost_model));
