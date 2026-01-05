@@ -65,8 +65,7 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
 
 x23::Async<void>
 MempoolCoordinatorRpc::verify_transactions(
-    const SignedTransactionBatch &batch,
-    x23::Vec<SignedTransactionHash> &to_remove,
+    SignedTransactionBatch &batch, x23::Vec<SignedTransactionHash> &to_remove,
     x23::Vec<size_t> &to_remove_indices)
 {
   co_await default_coropoll().pool_.bg();

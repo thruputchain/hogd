@@ -34,7 +34,7 @@ public:
   {}
 
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, SignedTransactionBatch txs);
+  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
 
@@ -122,7 +122,8 @@ public:
   authmempool_verify_transactions(BlockHeight height,
                                   SignedTransactionBatch txs)
   {
-    return auth_server_.verify_transactions(height, std::move(txs));
+    x23::span<SignedTransaction> txs_span(txs.begin(), txs.end());
+    return auth_server_.verify_transactions(height, txs_span);
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,

@@ -289,7 +289,7 @@ private:
   x23::Async<void> commit_block(const PendingBlock &cache);
 
   x23::Async<void>
-  verify_transactions(const SignedTransactionBatch &batch,
+  verify_transactions(SignedTransactionBatch &batch,
                       x23::Vec<SignedTransactionHash> &to_remove,
                       x23::Vec<size_t> &to_remove_indices);
 
