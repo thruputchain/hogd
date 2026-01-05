@@ -50,23 +50,11 @@ TEST(Mempool, SubmitUnvetted)
   server.register_auth_data_updates(
       /*height=*/0, key_changes)();
   Transaction &tx = txs[0].tx;
-  auto make_sign_claim = [&](uint32_t idx) {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = idx;
-    return claim;
-  };
   tx.auth_claims.push_back(make_sign_claim(0));
 
-  auto make_signature = [&](SecretKey sk, Transaction const &tx, uint8_t id) {
-    DecoratedSignature signature;
-    signature.public_key_id = id;
-    signature.signature = Signature(CryptographicScheme::Ed25519);
-    signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
-    return signature;
-  };
-  DecoratedSignatureList decorated_signatures;
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
+  DecoratedSignatureList decorated_signatures;
   decorated_signatures.list.push_back(make_signature(sk, tx, 0));
   txs[0].signatures.push_back(decorated_signatures);
 
@@ -446,7 +434,13 @@ TEST(Mempool, GenerateBlockId)
   EXPECT_NE(first, second);
 }
 
-// [kMaxBlockSize] is 10,000, which causes this test to time out. We should
+namespace {
+
+constexpr size_t kNumSubmitChunks = 10;
+
+} // namespace
+
+// [kMaxBlockSize] is 1,000,000, which causes this test to time out. We should
 // re-enable this test once we add performance improvements.
 // NOLINTNEXTLINE
 TEST(Mempool, AuthChanged)
@@ -457,7 +451,7 @@ TEST(Mempool, AuthChanged)
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   SignedTransactionBatch txs =
       generate_unsigned_txs(fib_client,
-                            /*MempoolCoordinatorRpc::kMaxBlockSize +*/ 1);
+                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -466,6 +460,8 @@ TEST(Mempool, AuthChanged)
                       MempoolCoordinatorRpc::kMaxBlockSize * 2);
 
   AccountAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
   auth_data.last_written_height = 0;
   auth_data.nonce_config.required_weight = 1;
   set_nonce_key(auth_data, /*idx=*/0);
@@ -481,16 +477,24 @@ TEST(Mempool, AuthChanged)
   server.register_auth_data_updates(
       /*height=*/0, key_changes)();
 
-  auto make_sign_claim = [&](uint32_t idx) {
-    AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-    claim.invoked_address_signature_id() = idx;
-    return claim;
-  };
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
   for (SignedTransaction &stx : txs) {
     stx.tx.auth_claims.push_back(make_sign_claim(0));
-  }
 
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+    DecoratedSignatureList decorated_signatures;
+    decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
+    stx.signatures.push_back(decorated_signatures);
+  }
+  // We break the tx vector into chunks to avoid exceeding the max RPC size.
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), kNumSubmitChunks);
+  for (size_t i = 0; i < kNumSubmitChunks; i++) {
+    const ChunkRange &chunk = chunks[i];
+    SignedTransactionBatch to_submit(txs.begin() + chunk.start,
+                                     txs.begin() + chunk.end);
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(to_submit)();
+  }
 
   info("OK HERE!!! scheduler size is {}",
        server.mempool_coord_rpc().scheduler()->size());
@@ -500,19 +504,25 @@ TEST(Mempool, AuthChanged)
   server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+  auto res_nominate =
+      server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
   Nomination nomination =
       server.coord_sched_rpc().get_nomination()().nomination;
   EXPECT_EQ(nomination.transaction_hashes.size(),
             MempoolCoordinatorRpc::kMaxBlockSize);
+  auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
+      res_nominate.block_id())();
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 
   // Now check that the last tx is still nominated.
   db_tip = {.height = nomination.block_height,
             .hash = nomination.block_hash,
-            .id = res.block_id()};
-  res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+            .id = res_nominate.block_id()};
+  res_nominate = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
   nomination = server.coord_sched_rpc().get_nomination()().nomination;
   EXPECT_EQ(nomination.transaction_hashes.size(), 1);
 }
@@ -550,11 +560,6 @@ TEST(Mempool, AuthInvalidated)
 
   SignedTransactionBatch signed_txs;
   for (const SignedTransaction &stx : txs) {
-    auto make_sign_claim = [&](uint32_t idx) {
-      AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
-      claim.invoked_address_signature_id() = idx;
-      return claim;
-    };
     Transaction tx = stx.tx;
     tx.auth_claims.push_back(make_sign_claim(0));
     signed_txs.push_back(

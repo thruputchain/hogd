@@ -73,11 +73,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), batch);
 
-  info("A");
   co_await scheduler_->add_txs(batch);
-  info("A");
   AuthErrorCodeBatch auth_ret = co_await auth_handle;
-  info("A");
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {

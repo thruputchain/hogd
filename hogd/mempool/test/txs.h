@@ -74,6 +74,24 @@ get_default_account()
                          .nonce_config = kNonceConfig};
 }
 
+inline AuthClaim
+make_sign_claim(uint32_t idx)
+{
+  AuthClaim claim(AuthClaimType::kInvokedAddressSignature);
+  claim.invoked_address_signature_id() = idx;
+  return claim;
+}
+
+inline DecoratedSignature
+make_signature(const SecretKey &sk, const Transaction &tx, uint8_t id)
+{
+  DecoratedSignature signature;
+  signature.public_key_id = id;
+  signature.signature = Signature(CryptographicScheme::Ed25519);
+  signature.signature.ed25519() = ed25519_sign(sk.ed25519(), sha256(tx));
+  return signature;
+}
+
 inline void
 set_nonce_key(AccountAuthData &auth_data, size_t idx)
 {
