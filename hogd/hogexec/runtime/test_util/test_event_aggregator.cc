@@ -8,6 +8,7 @@
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -42,26 +43,25 @@ TestEventAggregator::close_block(BlockID block_id)
   return result;
 }
 
-RPCError
+x23::Async<RPCError>
 TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
-                                TxEventLog const &event_log)
+                                TxEventLog event_log)
 {
-  std::unique_lock<std::mutex> lock(mtx_);
-  // Block if should_block_ is true
-  emit_cv_.wait(lock, [this] { return !should_block_; });
+  co_await should_block_futex_.wait(true);
 
+  std::lock_guard lock(mtx_);
   if (!is_block_open(block_id)) {
     error("Block {} is not open", block_id);
-    return RPCError::kRPCBadBlockID;
+    co_return RPCError::kRPCBadBlockID;
   }
 
   if (events_[block_id].contains(tx_id)) {
     error("Unrecoverable: Tx {} already exists for block {}", tx_id, block_id);
-    return RPCError::kRPCUnrecoverable;
+    co_return RPCError::kRPCUnrecoverable;
   }
 
   events_[block_id][tx_id] = event_log;
-  return RPCError::kRPCNone;
+  co_return RPCError::kRPCNone;
 }
 
 std::optional<TxEventLog>
