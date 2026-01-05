@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -17,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/err.h>
 #include <x23/nodestroy.h>
@@ -199,8 +202,10 @@ get_allowed_cpus()
 class CpuSet {
 public:
   static constexpr unsigned kNCPUs = 1;
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
   bool valid() const noexcept { return true; }
   Errno set_affinity() const { return 0; }
+  // NOLINTEND(readability-convert-member-functions-to-static)
 };
 
 #endif // !HAVE_SCHED_SETAFFINITY
@@ -259,8 +264,10 @@ private:
 #endif // HAVE_SCHED_SETAFFINITY
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 struct populate_t {};
 constexpr populate_t populate;
+// NOLINTEND(readability-identifier-naming)
 
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
 // ValidOnly is false, then it will only construct a T for CpuSets on

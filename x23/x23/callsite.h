@@ -50,7 +50,7 @@ get_callsite(std::string_view ignore_file,
 #else // !HAVE_STD_STACKTRACE
 
 inline std::string
-get_callsite(std::string_view ignore_file,
+get_callsite(std::string_view /*ignore_file*/,
              source_location sloc = source_location::current())
 {
   return to_string(sloc);

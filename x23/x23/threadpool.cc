@@ -4,11 +4,11 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <coroutine>
+#include <csignal>
 #include <format>
 #include <functional>
 #include <memory>
-
-#include <signal.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -285,7 +285,7 @@ ThreadPool::Worker::getq() noexcept
 }
 
 std::coroutine_handle<>
-ThreadPool::Worker::qpop(QPtr &ptr)
+ThreadPool::Worker::qpop(QPtr &ptr) const
 {
   x23assert(!ptr->q.empty());
 
@@ -349,7 +349,7 @@ ThreadPool::Worker::work()
 bool
 in_thread_pool()
 {
-  return ThreadPool::get_thread_pool();
+  return ThreadPool::get_thread_pool() != nullptr;
 }
 
 } // namespace x23
