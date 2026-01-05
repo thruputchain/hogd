@@ -288,6 +288,11 @@ private:
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
+  x23::Async<void>
+  verify_transactions(const SignedTransactionBatch &batch,
+                      x23::Vec<SignedTransactionHash> &to_remove,
+                      x23::Vec<size_t> &to_remove_indices);
+
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,
                                   size_t executor_idx);

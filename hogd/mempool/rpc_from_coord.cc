@@ -63,27 +63,52 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
 
 } // namespace
 
-// TODO(jhumphri): When should we remove txs from [vetted_txs_]?
+x23::Async<void>
+MempoolCoordinatorRpc::verify_transactions(
+    const SignedTransactionBatch &batch,
+    x23::Vec<SignedTransactionHash> &to_remove,
+    x23::Vec<size_t> &to_remove_indices)
+{
+  co_await default_coropoll().pool_.bg();
+
+  constexpr size_t kNumThreads = 108;
+  const std::vector<ChunkRange> chunks = make_chunks(batch.size(), kNumThreads);
+  x23::Vec<x23::Async<AuthErrorCodeBatch>> auth_rets;
+  auth_rets.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    x23::span<SignedTransaction> to_check(batch.begin() + chunk.start,
+                                          batch.begin() + chunk.end);
+    // TODO(jhumphri): What if [current_block] is incremented before we add
+    // the txs to the scheduler? In that case, the auth_changed callback
+    // would not see these txs, so we could end up adding unauthorized txs
+    // to the scheduler. Maybe this race is okay if the executor detects
+    // that the txs are now unauthorized?
+    auth_rets.push_back(auth_->verify_transactions(
+        /*height=*/scheduler_->current_block(), to_check));
+  }
+  for (x23::Async<AuthErrorCodeBatch> &a : auth_rets) {
+    AuthErrorCodeBatch auth_ret = co_await a;
+    for (size_t i = 0; i < auth_ret.size(); i++) {
+      const AuthErrorCode &code = auth_ret[i];
+      if (code != AuthErrorCode::kAuthSuccess) {
+        to_remove.push_back(sha256(batch[i]));
+        to_remove_indices.push_back(i);
+      }
+    }
+  }
+}
 
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     SignedTransactionBatch batch)
 {
   info("submit_unvetted, {} txs", batch.size());
-  auto auth_handle = auth_->verify_transactions(
-      /*height=*/scheduler_->current_block(), batch);
-
-  co_await scheduler_->add_txs(batch);
-  AuthErrorCodeBatch auth_ret = co_await auth_handle;
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
-  for (size_t i = 0; i < auth_ret.size(); i++) {
-    const AuthErrorCode &code = auth_ret[i];
-    if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(sha256(batch[i]));
-      to_remove_indices.push_back(i);
-    }
-  }
+  auto auth_handle = verify_transactions(batch, to_remove, to_remove_indices);
+
+  co_await scheduler_->add_txs(batch);
+  co_await auth_handle;
   info("{} txs were invalid", to_remove.size());
   // The txs are on the runqueue and need to be removed, so we set
   // [validated_block] to true.
