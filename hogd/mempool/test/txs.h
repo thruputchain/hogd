@@ -38,7 +38,9 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
             .uniquifier = {.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = i},
-            .contracts_to_deploy = {}}};
+            .contracts_to_deploy = {},
+            .auth_claims = {},
+            .gas_claims = {}}};
     txs.push_back(tx);
   }
   return txs;

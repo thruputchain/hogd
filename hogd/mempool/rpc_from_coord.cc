@@ -103,6 +103,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     SignedTransactionBatch batch)
 {
+  ElapsedTimer timer;
   info("submit_unvetted, {} txs", batch.size());
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
@@ -111,15 +112,18 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await scheduler_->add_txs(batch);
   co_await auth_handle;
   info("{} txs were invalid", to_remove.size());
-  // The txs are on the runqueue and need to be removed, so we set
-  // [validated_block] to true.
-  co_await scheduler_->remove_from_scheduler(to_remove,
-                                             /*validated_block=*/true);
-  remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+  if (!to_remove.empty()) {
+    // The txs are on the runqueue and need to be removed, so we set
+    // [validated_block] to true.
+    co_await scheduler_->remove_from_scheduler(to_remove,
+                                               /*validated_block=*/true);
+    remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+  }
 
   co_await coord_client_->coordscheduler_notify_vetted(batch);
-  info("about to return from submit_unvetted, scheduler.size() = {}",
-       scheduler_->size());
+  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
+       "= {}",
+       scheduler_->size(), timer.elapsed());
   co_return;
 }
 
@@ -639,6 +643,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // memory allocation/free overhead.
   nominated_block_cache_.txs.clear();
   nominated_block_cache_.tx_hashes.clear();
+  nominated_block_cache_.txs.reserve(kMaxBlockSize);
+  nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
@@ -656,9 +662,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
     scheduler_->schedule(kMaxBlockSize / kNumSchedulerIterations,
                          nominated_block_cache_.tx_hashes,
                          nominated_block_cache_.txs);
-    info("schedule() gaves us {} txs", nominated_block_cache_.tx_hashes.size());
+    info("schedule() gave us {} txs", nominated_block_cache_.tx_hashes.size());
   }
-
   if (!co_await initialize_block_handle) {
     // Add the txs from the first call to [schedule()] above back to the
     // scheduler.

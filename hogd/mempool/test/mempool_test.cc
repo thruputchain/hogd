@@ -436,7 +436,7 @@ TEST(Mempool, GenerateBlockId)
 
 namespace {
 
-constexpr size_t kNumSubmitChunks = 10;
+constexpr size_t kNumSubmitChunks = 20;
 
 } // namespace
 
