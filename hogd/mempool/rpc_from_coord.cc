@@ -85,14 +85,16 @@ MempoolCoordinatorRpc::verify_transactions(
     auth_rets.push_back(auth_->verify_transactions(
         /*height=*/scheduler_->current_block(), to_check));
   }
+  size_t absolute_idx = 0;
   for (x23::Async<AuthErrorCodeBatch> &a : auth_rets) {
     AuthErrorCodeBatch auth_ret = co_await a;
     for (size_t i = 0; i < auth_ret.size(); i++) {
       const AuthErrorCode &code = auth_ret[i];
       if (code != AuthErrorCode::kAuthSuccess) {
         to_remove.push_back(sha256(batch[i]));
-        to_remove_indices.push_back(i);
+        to_remove_indices.push_back(absolute_idx);
       }
+      absolute_idx++;
     }
   }
 }
