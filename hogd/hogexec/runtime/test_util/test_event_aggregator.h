@@ -6,12 +6,14 @@
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -40,10 +42,10 @@ public:
   void block_emit_events() { should_block_futex_.store(true); }
 
   // Unblock emit_event calls (wakes up all waiting calls)
-  void unblock_emit_events()
+  void unblock_emit_events(x23::ThreadPool *pool = &default_threadpool())
   {
     should_block_futex_.store(false);
-    should_block_futex_.broadcast();
+    should_block_futex_.broadcast(pool);
   }
 
 private:
