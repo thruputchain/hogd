@@ -1,6 +1,5 @@
 #pragma once
 
-#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -12,6 +11,7 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -29,28 +29,26 @@ public:
 
   RPCError open_block(BlockID block_id);
   EventBlockResult close_block(BlockID block_id);
-  RPCError emit_event(BlockID block_id, TransactionID tx_id,
-                      TxEventLog const &event_log);
+  x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
+                                  TxEventLog const &event_log);
 
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
   // Blocking control: block emit_event calls until unblock_emit_events is
   // called
-  void block_emit_events() { should_block_ = true; }
+  void block_emit_events() { should_block_futex_.store(true); }
 
   // Unblock emit_event calls (wakes up all waiting calls)
   void unblock_emit_events()
   {
-    std::lock_guard<std::mutex> lock(mtx_);
-    should_block_ = false;
-    emit_cv_.notify_all();
+    should_block_futex_.store(false);
+    should_block_futex_.broadcast();
   }
 
 private:
   std::mutex mtx_;
-  std::condition_variable emit_cv_;
-  bool should_block_ = false;
+  x23::CoroFutex<bool> should_block_futex_{false};
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
 
@@ -73,8 +71,9 @@ struct TestEventAggregatorExecRpc {
 
   static void eventexecutor_null() {}
 
-  RPCError eventexecutor_emit_event(BlockID block_id, TransactionID tx_id,
-                                    TxEventLog const &event_log)
+  x23::Async<RPCError> eventexecutor_emit_event(BlockID block_id,
+                                                TransactionID tx_id,
+                                                TxEventLog const &event_log)
   {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
