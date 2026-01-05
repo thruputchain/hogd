@@ -1,3 +1,4 @@
+#include <barrier>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -207,14 +208,26 @@ TEST(ConcurrentSet, ParallelInsert)
   ConcurrentSet<uint64_t> s;
   std::vector<std::jthread> threads;
   threads.reserve(kNThreads);
+  std::barrier barrier(kNThreads);
   for (size_t i = 0; i < kNThreads; ++i) {
-    threads.emplace_back([i, &s]() {
+    threads.emplace_back([i, &s, &barrier]() {
+      barrier.arrive_and_wait();
       for (size_t j = 1; j <= kKeysPerThread; ++j)
         s.try_insert((i * kKeysPerThread) + j);
     });
   }
 
   threads.clear();
+
+  std::set<__uint128_t> expected_keys{};
+  for (size_t i = 0; i < kNThreads; ++i)
+    for (size_t j = 1; j <= kKeysPerThread; ++j)
+      expected_keys.insert((i * kKeysPerThread) + j);
+
+  std::set<__uint128_t> found_keys{};
+  for (auto e : s)
+    found_keys.insert(e);
+  ASSERT_EQ(expected_keys, found_keys);
 
   for (size_t i = 0; i < kNThreads; ++i) {
     threads.emplace_back([i, &s]() {
@@ -232,8 +245,10 @@ TEST(ConcurrentSet, ParallelInsertAndErase)
   ConcurrentSet<uint64_t> s;
   std::vector<std::jthread> threads;
   threads.reserve(kNThreads);
+  std::barrier barrier(kNThreads);
   for (size_t i = 0; i < kNThreads; ++i) {
-    threads.emplace_back([i, &s]() {
+    threads.emplace_back([i, &s, &barrier]() {
+      barrier.arrive_and_wait();
       for (size_t j = 1; j <= kKeysPerThread; ++j)
         s.try_insert((i * kKeysPerThread) + j);
     });
