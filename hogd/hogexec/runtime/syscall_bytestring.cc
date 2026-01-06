@@ -9,6 +9,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "storage_delta_flags.hh"
 #include "syscall_error.hh"
 #include "types.hh"
 
@@ -60,9 +61,11 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
-                            std::span<const std::byte> input_bytestring)
+                            std::span<const std::byte> input_bytestring,
+                            StorageItemRPCFlagSet input_flags)
 {
-  auto status = syscall_handler.set_bytestring(input_key, input_bytestring);
+  auto status =
+      syscall_handler.set_bytestring(input_key, input_bytestring, input_flags);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
