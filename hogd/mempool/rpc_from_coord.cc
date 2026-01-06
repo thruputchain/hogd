@@ -400,6 +400,13 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
     x23::span<bool> ret_span(cache.statuses.begin() + num_scheduled,
                              cache.statuses.begin() + cache.tx_hashes.size());
+    // [schedule()] appends transactions to the end of [txs]. Normally,
+    // [txs_span] could therefore become invalidated because the backing store
+    // of [txs] could be resized on an append. However, we reserve the backing
+    // store of [txs] up front with
+    // [nominated_block_cache_.txs.reserve(kMaxBlockSize)] in
+    // [schedulercoord_nominate()], so we do not need to worry about the span
+    // becoming invalidated.
     x23::span<SignedTransaction> txs_span(cache.txs.begin() + num_scheduled,
                                           cache.txs.end());
     num_scheduled = cache.tx_hashes.size();
@@ -569,6 +576,8 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // memory allocation/free overhead.
   nominated_block_cache_.txs.clear();
   nominated_block_cache_.tx_hashes.clear();
+  nominated_block_cache_.txs.reserve(kMaxBlockSize);
+  nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
