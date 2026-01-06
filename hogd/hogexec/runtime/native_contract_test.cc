@@ -1,8 +1,8 @@
+#include <gtest/gtest.h>
+
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <gtest/gtest.h>
-
 #include <limits>
 #include <memory>
 #include <optional>
@@ -10,6 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "account.hh"
 #include "contract.hh"
@@ -31,6 +32,7 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/test_event_aggregator.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -314,9 +316,11 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        auto r =
-            handler.set_bytestring(kBadKey, std::as_bytes(std::span(bstring)));
-        if (!r.has_value() || !r.value().has_value()) {
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            handler, kBadKey, std::as_bytes(std::span(bstring)),
+            std::to_underlying(StorageItemRPCFlags::kStorageNone));
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
@@ -331,6 +335,20 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         }
         if (std::memcmp(r2.value().value().data(), bstring.data(),
                         bstring.size()) != 0) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
+        std::vector<uint8_t> bstring(100);
+        RuntimeMemoryLength written_len = 0;
+        auto [res, _gas] = syscall_BytestringGet_inner(handler, kBadKey,
+                                                       std::as_writable_bytes(
+                                                           std::span(bstring)),
+                                                       written_len);
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};
@@ -374,6 +392,22 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
+
+  SystemCallHandler handler2 = make_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(1),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+  EXPECT_ANY_THROW(handler2.root_invoke());
 }
 
 TEST_F(NativeContractTest, LazyLoadingNNInt)
@@ -399,16 +433,17 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           }
 
           // add ops shouldn't query db
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
-                                                              nullptr, 100);
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kBadKey, nullptr, 100,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
 
-          auto [r2, _gas2] =
-              syscall_NonnegativeIntSetAdd_inner(handler, kBadKey, nullptr,
-                                                 -200);
+          auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kBadKey, nullptr, -200,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -428,8 +463,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
           int128_t set_value = 100;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(handler, kBadKey,
-                                                              &set_value, 200);
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kBadKey, &set_value, 200,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};

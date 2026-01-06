@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -79,13 +80,13 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
             key](SystemCallHandler &handler,
                  NativeRuntime &) -> InvokeStatus<void> {
              // Write state that should be reverted
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(str_hello)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(str_hello)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "ManualRevertBasicFunctionality: Failed to set "
+                                "bytestring in method 0";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -161,13 +162,13 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
             parent_key](SystemCallHandler &handler,
                         NativeRuntime &runtime) -> InvokeStatus<void> {
              // Parent writes its own state
-             auto res =
-                 handler.set_bytestring(parent_key,
-                                        std::as_bytes(std::span(parent_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, parent_key, std::as_bytes(std::span(parent_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
+                                "set bytestring in parent method (method 0)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -207,13 +208,13 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
             child_key](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
              // Child writes state that should be reverted
-             auto res =
-                 handler.set_bytestring(child_key,
-                                        std::as_bytes(std::span(child_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, child_key, std::as_bytes(std::span(child_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "NestedManualRevertWithReturnData: Failed to "
+                                "set bytestring in child method (method 1)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -291,13 +292,13 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
              [test_data, return_data,
               key](SystemCallHandler &handler,
                    NativeRuntime &) -> InvokeStatus<void> {
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
+                                  "bytestring in method 0 (manual revert)";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -312,15 +313,13 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
             {1,
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 ADD_FAILURE() << "set_bytestring failed";
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
-                 ADD_FAILURE() << "set_bytestring failed";
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ManualRevertVsNormalFailure: Failed to set "
+                                  "bytestring in method 1 (normal failure)";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -415,13 +414,14 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
              // Do expensive work before reverting
              for (int i = 0; i < 10; ++i) {
                auto temp_key = make_storage_key("temp_" + std::to_string(i));
-               auto res =
-                   handler.set_bytestring(temp_key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, temp_key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "GasConsumptionWithManualRevert: Failed to "
+                                  "set bytestring in method 0, iteration "
+                               << i;
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -511,12 +511,13 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
            [data1, return1](SystemCallHandler &handler,
                             NativeRuntime &runtime) -> InvokeStatus<void> {
              auto key = make_storage_key("level1");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span(data1)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(data1)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
+                                "bytestring in level 1 (method 1)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -544,12 +545,13 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
            [data2, return2](SystemCallHandler &handler,
                             NativeRuntime &runtime) -> InvokeStatus<void> {
              auto key = make_storage_key("level2");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span(data2)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(data2)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
+                                "bytestring in level 2 (method 2)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -577,12 +579,13 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
            [data3, return3](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
              auto key = make_storage_key("level3");
-             auto res =
-                 handler.set_bytestring(key, std::as_bytes(std::span(data3)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(data3)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
+                                "bytestring in level 3 (method 3)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -658,13 +661,13 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
                // Write state that should be reverted on error
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                                  "bytestring in method 0";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -680,13 +683,13 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
                // Write state that should be reverted on error
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                                  "bytestring in method 1";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -704,13 +707,13 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
                // Write state that should be reverted on error
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                                  "bytestring in method 2";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -727,13 +730,13 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
                // Write state that should NOT be reverted (no error)
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(test_data)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(test_data)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                                  "bytestring in method 3";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 

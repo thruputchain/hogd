@@ -26,6 +26,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -82,7 +83,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
                // Write a bytestring to the storage key
                Bytestring bytestring = make_bytestring("hello");
                auto [write_status, _g2] = syscall_BytestringSet_inner(
-                   handler, key, std::as_bytes(std::span(bytestring)));
+                   handler, key, std::as_bytes(std::span(bytestring)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write bytestring: " << write_status.error();
@@ -237,9 +239,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
                // Write a nonnegative integer to the storage key
                int128_t set_value = 42;
-               auto [write_status, _g2] =
-                   syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
-                                                      0);
+               auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
+                   handler, key, &set_value, 0,
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
                if (!write_status.has_value()) {
                  ADD_FAILURE()
                      << "Failed to write nnint: " << write_status.error();

@@ -22,6 +22,7 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -54,7 +55,9 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         0,
         [](SystemCallHandler &handler, int64_t set_amount,
            int64_t add_amount) -> InvokeStatus<void> {
-          auto r = handler.set_nnint(kKey, set_amount, add_amount);
+          auto r = handler.set_nnint(kKey, set_amount, add_amount,
+                                     std::to_underlying(
+                                         StorageItemRPCFlags::kStorageNone));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
@@ -63,7 +66,9 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](SystemCallHandler &handler) -> InvokeStatus<void> {
-          auto r = handler.set_nnint(kKey, 35, 0);
+          auto r = handler.set_nnint(kKey, 35, 0,
+                                     std::to_underlying(
+                                         StorageItemRPCFlags::kStorageNone));
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }

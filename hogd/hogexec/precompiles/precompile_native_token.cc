@@ -6,6 +6,7 @@
 #include <memory>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/itc_erc20.hh"
@@ -23,6 +24,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "standard_asset_events.hh"
+#include "storage_delta_flags.hh"
 #include "types.hh"
 #include "x23/format.h"
 
@@ -56,7 +58,9 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
   }
   int128_t new_add = add + amount;
   assert(set.has_value());
-  auto r2 = handler.set_nnint(allow_key, set, new_add);
+  auto r2 =
+      handler.set_nnint(allow_key, set, new_add,
+                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
   if (!r2.has_value()) {
     return r2.error();
   }
