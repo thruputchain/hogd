@@ -158,8 +158,11 @@ private:
     LockerState *prev_;
 
     AwaitAcquire(CoroLock &lk, LockerState *ls) : lk_(lk), next_(ls) {}
-    bool await_ready() noexcept { return !(prev_ = lk_.last_.exchange(next_)); }
-    void await_suspend(CoroHandle h SLOC_DECL) noexcept
+    bool await_ready() noexcept
+    {
+      return (prev_ = lk_.last_.exchange(next_)) == nullptr;
+    }
+    void await_suspend(CoroHandle h SLOC_DECL) const noexcept
     {
 #if X23_CORO_TRACE
       if (PromiseBase *base = h.base())
@@ -186,7 +189,7 @@ public:
                                                            T t);
 
   // True while lock is held
-  bool busy() const { return last_.load(std::memory_order_acquire); }
+  bool busy() const { return last_.load(std::memory_order_acquire) != nullptr; }
 
 private:
   // If last_ is NULL, the lock is free.  If last_ points to a
@@ -462,7 +465,7 @@ public:
   {
     std::unique_lock ul(lk_);
     if (Downer *head = next_) {
-      if (!(next_ = head->next_))
+      if (!(next_ = head->next_)) // NOLINT(bugprone-assignment-in-if-condition)
         last_ = &next_;
       ul.unlock();
       head->h_();

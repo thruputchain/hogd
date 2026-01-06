@@ -86,7 +86,8 @@ CoroPoll::CoroPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{})
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }
 
-CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread) : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread /*unused*/)
+  : CoroPollImpl(pool)
 {
   if (ignore_sigpipe) {
     ignore_sigpipe = false;
