@@ -110,7 +110,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto auth_handle = verify_transactions(batch, to_remove, to_remove_indices);
 
   co_await scheduler_->add_txs(batch);
+  ElapsedTimer timer2;
   co_await auth_handle;
+  double auth_handle_duration = timer2.elapsed();
   info("{} txs were invalid", to_remove.size());
   if (!to_remove.empty()) {
     // The txs are on the runqueue and need to be removed, so we set
@@ -122,8 +124,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   co_await coord_client_->coordscheduler_notify_vetted(batch);
   info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}",
-       scheduler_->size(), timer.elapsed());
+       "= {}, auth_handle_duration = {}",
+       scheduler_->size(), timer.elapsed(), auth_handle_duration);
   co_return;
 }
 
