@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
 
 cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
