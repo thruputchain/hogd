@@ -158,7 +158,10 @@ private:
     LockerState *prev_;
 
     AwaitAcquire(CoroLock &lk, LockerState *ls) : lk_(lk), next_(ls) {}
-    bool await_ready() noexcept { return (prev_ = lk_.last_.exchange(next_)) == nullptr; }
+    bool await_ready() noexcept
+    {
+      return (prev_ = lk_.last_.exchange(next_)) == nullptr;
+    }
     void await_suspend(CoroHandle h SLOC_DECL) const noexcept
     {
 #if X23_CORO_TRACE

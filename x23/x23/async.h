@@ -543,7 +543,8 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL) // NOLINT(misc-unused-parameters)
+  void operator()(detail::is_callback_of<R> auto cb
+                      SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);

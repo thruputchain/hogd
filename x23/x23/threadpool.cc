@@ -10,9 +10,12 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <sys/signal.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
+#include "x23/cleanup.h"
 #include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
@@ -195,7 +198,7 @@ void
 ThreadPool::debug_dump()
 {
   std::string msg = show();
-  int fd = debug.fd();
+  int fd = debug.fd(); // NOLINT(readability-static-accessed-through-instance)
   if (fd < 0)
     fd = 2;
   ::write(fd, msg.data(), msg.size());
