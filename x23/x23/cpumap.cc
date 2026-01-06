@@ -1,14 +1,22 @@
-
-#include <algorithm>
-#include <array>
-#include <cctype>
-#include <thread>
-#include <unordered_map>
-
 #include "x23/cpumap.h"
-#include "x23/debug.h"
+
+#include <algorithm> // IWYU pragma: keep
+#include <array>
+#include <bit>
+#include <cctype>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <tuple>
+#include <unordered_map> // IWYU pragma: keep
+#include <utility>
+
+#include "x23/config.h"
+#include "x23/debug.h" // IWYU pragma: keep
 #include "x23/fileio.h"
 #include "x23/nodestroy.h"
+#include "x23/vec.h"
 
 namespace x23 {
 
@@ -126,6 +134,7 @@ CpuMap::compute_cpusets()
 unsigned
 nproc()
 {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   constexpr std::array<int, 256> hex_nibble_popcount = []() consteval {
     std::array<int, 256> counts{};
     for (unsigned c = '0'; c <= '9'; ++c)
@@ -218,7 +227,7 @@ try {
 
 #else  // !HAVE_SCHED_GETCPU
 CpuMap
-make_cpu_map(std::string_view path)
+make_cpu_map(std::string_view /*path*/)
 {
   return CpuMap{Vec{0}};
 }

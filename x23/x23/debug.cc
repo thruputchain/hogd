@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -9,15 +10,18 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <sys/fcntl.h>
+#include <sys/signal.h>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 #include <fcntl.h>
-#include <signal.h>
-#include <stdlib.h>
+#include <csignal>
 #include <sys/resource.h>
 #include <unistd.h>
 
+#include "x23/cleanup.h"
 #include "x23/config.h"
 #include "x23/debug.h"
 #include "x23/fileio.h"
@@ -216,7 +220,7 @@ dump_rusage(int fd)
 {
   if (fd < 0)
     return {};
-  using namespace std::chrono;
+  using std::chrono::steady_clock;
   struct rusage usage;
   if (getrusage(RUSAGE_SELF, &usage)) {
     perror("getrusage");

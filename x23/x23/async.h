@@ -367,7 +367,7 @@ public:
 private:
   // Caller's handle after it decides to suspend itself (if the result
   // is not already ready).
-  std::coroutine_handle<> caller_{};
+  std::coroutine_handle<> caller_;
 
   // result_ has been constructed:
   static constexpr unsigned kResult = 1U << 0;
@@ -543,7 +543,7 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL)
+  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
@@ -561,7 +561,7 @@ template<typename R> struct [[nodiscard]] Async {
 
   // Return the Async value synchronously, pausing the current thread
   // until the result is ready.
-  R operator()(SLOC_DECL0)
+  R operator()(SLOC_DECL0) // NOLINT(misc-unused-parameters)
   {
     extern bool in_thread_pool();
     x23assert(!in_thread_pool());
@@ -590,12 +590,14 @@ namespace detail {
 
 // The is_awaiter concept is implemented as a template type to allow
 // it to be partially specialized.
+// NOLINTBEGIN(readability-identifier-naming)
 template<typename A>
     struct is_awaiter_impl : std::conditional_t < requires(A a) {
   {a.await_ready()}->std::same_as<bool>;
   a.await_suspend(std::noop_coroutine());
   a.await_resume();
 }, std::true_type, std::false_type>{};
+// NOLINTEND(readability-identifier-naming)
 
 // A concept that's 99% likely to determine whether a type is an
 // awaiter.  The exception is awaiters that can be awaited only in
