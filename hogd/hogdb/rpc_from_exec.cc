@@ -324,4 +324,20 @@ HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
   return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
 }
 
+ExpectedDBTip
+HogDBExecutorRpc::get_db_tip(BlockID block_id)
+{
+  HogDBStatus<DbTip> tip = ctx_.get_tip();
+  if (!tip) {
+    return ExpectedDBTip(to_rpc_error(tip.error()));
+  }
+  // block_id is id of current block, not the parent id (tip->id)
+  assert(tip->id != block_id);
+
+  ExpectedDBTip out;
+  out.error(RPCError::kRPCNone);
+  out.db_tip() = *tip;
+  return out;
+}
+
 } // namespace hogd

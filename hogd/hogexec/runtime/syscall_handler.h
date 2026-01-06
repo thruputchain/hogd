@@ -233,6 +233,11 @@ public:
   SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
       x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
 
+  // == Block statistics syscalls ==
+  // These are based on reading the db tip.
+  SystemStatus<BlockHeight> get_block_height() const;
+  SystemStatus<SHA256Hash> get_parent_block_hash() const;
+
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist

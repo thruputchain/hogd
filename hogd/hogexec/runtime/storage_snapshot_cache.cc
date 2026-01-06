@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <format>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -125,6 +126,34 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   auto [obj, ul] = snapshot_item_cache_.find(addrkey);
   assert(obj);
   return obj;
+}
+
+SystemStatus<const DbTip *>
+StorageSnapshotCache::try_get_db_tip()
+{
+  auto *tip = db_tip_.load();
+  if (tip != nullptr) {
+    return tip;
+  }
+
+  auto db_res = db_proxy_.get_db_tip(block_id_);
+  if (!db_res) {
+    return db_res.error();
+  }
+
+  std::unique_ptr<DbTip> tip_unique = std::make_unique<DbTip>(db_res.value());
+  if (db_tip_.compare_exchange_strong(tip, tip_unique.get())) {
+    return tip_unique.release();
+  }
+  assert(tip != nullptr);
+  return tip;
+}
+
+void
+StorageSnapshotCache::release_db_tip()
+{
+  auto *tip = db_tip_.exchange(nullptr);
+  delete tip;
 }
 
 } // namespace hogd

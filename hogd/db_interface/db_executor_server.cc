@@ -202,4 +202,16 @@ DbExecutorRpc::get_concurrent_retrocausal_queue_entry(
   return out;
 }
 
+ExpectedDBTip
+DbExecutorRpc::get_db_tip(BlockID block_id)
+{
+  auto block_data = block_manager_->get_block_data(block_id);
+  if (!block_data) {
+    return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
+
+  // TODO(geoff): implement this, or get rid of the mock db
+  return ExpectedDBTip(RPCError::kRPCUnimplemented);
+}
+
 } // namespace hogd

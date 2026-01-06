@@ -54,7 +54,6 @@ CheckOptions:
   # Allow variables of the form _name, for e.g. x23::Defer usage
   - { key: readability-identifier-naming.LocalVariableIgnoredRegexp,     value: "^_[a-zA-Z]+$"  }
   - { key: readability-identifier-naming.ConstexprVariableIgnoredRegexp, value: "^_[a-zA-Z]+$"  }
-  - { key: readability-identifier-naming.ConstantIgnoredRegexp,  value: "^_[a-zA-Z]+$" }
   # promise_type required for coroutines
   - { key: readability-identifier-naming.StructIgnoredRegexp,        value: "^promise_type$"  }
   # Silence false positives on x23assert macro
