@@ -3,9 +3,11 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <new>
 #include <ranges>
 #include <stdexcept>

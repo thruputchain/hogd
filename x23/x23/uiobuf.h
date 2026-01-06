@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
