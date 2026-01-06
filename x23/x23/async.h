@@ -289,7 +289,7 @@ public:
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
-    auto await_suspend(std::coroutine_handle<>) const noexcept
+    auto await_suspend(std::coroutine_handle<> /*unused*/) const noexcept
     {
       return caller_;
     }
@@ -315,11 +315,10 @@ public:
 #endif // X23_CORO_TRACE
     caller_ = h;
     unsigned oldflags = flags_.fetch_or(kAwaiting, std::memory_order_acq_rel);
-    if (oldflags & kReturning)
-      return false;
+
     // Once we set kAwaiting, the callee may resume us and destroy the
     // Awaitable at any time, so we must no longer touch *this.
-    return true;
+    return !(oldflags & kReturning);
   }
   auto await_resume()
   {

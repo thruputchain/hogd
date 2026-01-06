@@ -55,3 +55,5 @@ CheckOptions:
   - { key: readability-identifier-naming.LocalVariableIgnoredRegexp,        value: "^_[a-zA-Z]+$"  }
   # promise_type required for coroutines
   - { key: readability-identifier-naming.StructIgnoredRegexp,        value: "^promise_type$"  }
+  # Silence false positives on x23assert macro
+  - { key: readability-simplify-boolean-expr.IgnoreMacros,       value: true }

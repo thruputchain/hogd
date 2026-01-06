@@ -125,7 +125,7 @@ private:
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
   // Does NOT set the type as ExclusiveLock.
-  void prepare_lock_contents(const ItemChange *after,
+  void prepare_lock_contents(const ItemChange *after, const LockContext &ctx,
                              std::unique_lock<x23::TestLock> const &ul);
   void reset_lock_contents(std::unique_lock<x23::TestLock> const &ul);
 

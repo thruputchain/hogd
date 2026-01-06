@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <expected>
 #include <functional>
@@ -16,6 +17,7 @@
 #include <netinet/tcp.h>
 #include <sys/fcntl.h>
 #include <sys/socket.h>
+#include <utility>
 
 #include "x23/cleanup.h"
 #include "x23/debug.h"
@@ -45,6 +47,28 @@ set_nodelay(BorrowedFd fd, bool on)
     Errno{}.raise("TCP_NODELAY");
 }
 
+// Refactor env2int calls to avoid a tsan false positive
+namespace {
+
+int
+env2int(const char *var)
+{
+  char *s = getenv(var);
+  if (!s || !*s)
+    return -1;
+  return atoi(s);
+};
+
+__attribute__((no_sanitize("thread"))) std::pair<int, int>
+get_send_recv_buf_sizes()
+{
+  static const int sndsize = env2int("X23_SNDBUF"),
+                   rcvsize = env2int("X23_RCVBUF");
+  return {sndsize, rcvsize};
+}
+
+} // namespace
+
 void
 set_nonblock(BorrowedFd fd, bool on)
 {
@@ -62,17 +86,11 @@ set_nonblock(BorrowedFd fd, bool on)
 #ifndef NDEBUG
   if (ignore_debug_env)
     return;
-  auto env2int = [](const char *var) {
-    char *s = getenv(var);
-    if (!s || !*s)
-      return -1;
-    return atoi(s);
-  };
-  // For an async-IO torture test set the X23_SNDBUF and X23_RCVBUF
-  // variables to something small.
-  static const int sndsize = env2int("X23_SNDBUF"),
-                   rcvsize = env2int("X23_RCVBUF");
+
   if (on) {
+    // For an async-IO torture test set the X23_SNDBUF and X23_RCVBUF
+    // variables to something small.
+    auto [sndsize, rcvsize] = get_send_recv_buf_sizes();
     if (sndsize > 0)
       setsockopt(fd.get(), SOL_SOCKET, SO_SNDBUF, &sndsize, sizeof(sndsize));
     if (rcvsize > 0)

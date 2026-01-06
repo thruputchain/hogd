@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <utility>
+#include <vector>
 
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -60,8 +62,9 @@ public:
                            .nonce_count = static_cast<unsigned int>(s)});
       }
     }
-    lock.meta_ =
-        ReplayCacheMetadata{.size = total, .heights = std::move(heights)};
+    lock.meta_cell_.emplace(
+        ReplayCacheMetadata{.size = total, .heights = std::move(heights)});
+    lock.meta_.store(&lock.meta_cell_.value());
   }
 
   // Set empty base data for a range of heights to avoid DAO calls
@@ -74,16 +77,28 @@ public:
       }
     }
     // Initialize metadata if not already set
-    if (!lock.meta_.has_value()) {
-      lock.meta_.emplace(ReplayCacheMetadata{.size = 0, .heights = {}});
+    if (lock.meta_.load() == nullptr) {
+      lock.meta_cell_.emplace(ReplayCacheMetadata{.size = 0, .heights = {}});
+      lock.meta_.store(&lock.meta_cell_.value());
     }
+  }
+
+  static Uniquifier u_from_uint128(__uint128_t v)
+  {
+    return Uniquifier(v >> 64, v & 0xFFFFFFFFFFFFFFFF);
   }
 
   static HogDBStatus<ReplayCacheData> build_result(const ReplayCacheLock &lock,
                                                    const LockContext &ctx,
                                                    BlockHeight height)
   {
-    return lock.build_result(ctx, height);
+    std::vector<Uniquifier> all_additions;
+    all_additions.reserve(lock.conflicts_.size());
+    for (const auto &value : lock.conflicts_) {
+      all_additions.push_back(u_from_uint128(value));
+    }
+    std::ranges::sort(all_additions);
+    return lock.build_result(ctx, height, all_additions);
   }
 };
 

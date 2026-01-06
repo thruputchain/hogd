@@ -146,7 +146,7 @@ private:
     {
       return Cmp{}(a.t_, b.t_);
     }
-    friend void swap(Element &a, Element &b)
+    friend void swap(Element &a, Element &b) noexcept
     {
       using std::swap;
       swap(a.t_, b.t_);
@@ -163,7 +163,7 @@ private:
 
   static constexpr size_t kDegree = Degree;
   static constexpr size_t parent(size_t i) { return (i - 1) / kDegree; }
-  static constexpr size_t first_child(size_t i) { return kDegree * i + 1; }
+  static constexpr size_t first_child(size_t i) { return (kDegree * i) + 1; }
 
   // One more than the index of the last child of node i
   size_t end_child(size_t i)

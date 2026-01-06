@@ -130,6 +130,7 @@ WasmtimeContext::make_new_runtime(
     DeployedContractHash const &deployed_contract_hash,
     SystemCallHandler *syscall_handler, bool do_contract_verify)
 {
+  assert(syscall_handler != nullptr);
   auto host_call_context = make_new_host_call_context(syscall_handler);
 
   NewWasmtimeRuntimeResult new_runtime_result =

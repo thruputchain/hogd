@@ -111,6 +111,7 @@
 #include <limits>
 #include <memory>
 #include <stop_token>
+#include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -118,7 +119,9 @@
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/corotrace.h>
 #include <x23/cpumap.h>
+#include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/signal.h>
@@ -423,7 +426,7 @@ private:
 
     void lock_affinity_queue(QPtr &ptr) noexcept;
     QPtr getq() noexcept;
-    std::coroutine_handle<> qpop(QPtr &ptr);
+    std::coroutine_handle<> qpop(QPtr &ptr) const;
   };
 
   struct alignas(hardware_destructive_interference_size) ThreadState {
@@ -454,7 +457,7 @@ private:
   static uint64_t rnd_skip(uint64_t &seed, uint64_t max, uint64_t skip)
   {
     uint64_t r = rnd(seed) % (max - 1);
-    r += (r >= skip);
+    r += uint64_t{r >= skip};
     return r;
   }
 

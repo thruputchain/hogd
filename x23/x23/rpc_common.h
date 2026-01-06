@@ -7,6 +7,7 @@
 #include <cassert>
 #include <chrono>
 #include <compare>
+#include <concepts>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -300,8 +301,9 @@ struct RpcCsvLogger {
 
   static double timestamp()
   {
-    using namespace std::chrono;
-    return duration<double>(system_clock::now().time_since_epoch()).count();
+    return std::chrono::duration<double>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
   }
 
   template<typename Meta>
@@ -348,8 +350,12 @@ struct RpcCsvLogger {
 
 struct RpcNoLogger {
   RpcNoLogger() noexcept = default;
-  RpcNoLogger(const std::string &, int = RpcLogger::default_logfd) noexcept {}
-  RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
+  RpcNoLogger(const std::string & /*unused*/,
+              int /*unused*/ = RpcLogger::default_logfd) noexcept
+  {}
+  RpcNoLogger(int /*unused*/,
+              int /*unused*/ = RpcLogger::default_logfd) noexcept
+  {}
   static constexpr bool active() { return false; }
   template<typename = void>
   void log_client(const rpc_msg &msg, const auto &...pl)

@@ -61,12 +61,9 @@ template<FixedStr EnvVar> struct DebugFd {
   // NOLINTNEXTLINE(readability-identifier-naming)
   static inline std::string env_val;
 
-  static int fd() noexcept
+  __attribute__((no_sanitize("thread"))) static int fd() noexcept
   {
-    static int the_fd = [] {
-      env_val = get_debug_env(EnvVar);
-      return make_debug_fd(env_val);
-    }();
+    static int the_fd = make_fd();
     return the_fd;
   }
 
@@ -110,6 +107,12 @@ private:
   {
     std::string msg = vformat_logline("", fmt, args);
     write(fd(), msg.data(), msg.size());
+  }
+
+  static int make_fd() noexcept
+  {
+    env_val = get_debug_env(EnvVar);
+    return make_debug_fd(env_val);
   }
 };
 
