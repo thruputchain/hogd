@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/event_server_proxy.h"
@@ -115,7 +116,7 @@ public:
 
   SystemCallHandler *get_syscall_handler()
   {
-    assert(syscall_handler_);
+    CHECK(syscall_handler_.get() != nullptr);
     return syscall_handler_.get();
   }
 

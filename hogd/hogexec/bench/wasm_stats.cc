@@ -8,6 +8,7 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -67,6 +68,8 @@ process_contract(std::string const &contract_name, std::string const &filename)
 
   WasmTestFramework framework;
   framework.set_context(make_hogexec_context());
+  framework.make_syscall_handler(contract);
+  CHECK(framework.get_syscall_handler() != nullptr);
 
   // Create runtime
   auto runtime_result =
