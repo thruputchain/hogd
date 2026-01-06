@@ -187,7 +187,8 @@ public:
   get_bytestring(StorageKeyContractData const &storage_key);
   SystemStatus<SyscallStatus<void>>
   set_bytestring(StorageKeyContractData const &storage_key,
-                 std::span<const std::byte> input_bytestring);
+                 std::span<const std::byte> input_bytestring,
+                 StorageItemRPCFlagSet input_flags);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
@@ -199,7 +200,8 @@ public:
 
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, int128_t add_value);
+            std::optional<int128_t> set_value, int128_t add_value,
+            StorageItemRPCFlagSet input_flags);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>

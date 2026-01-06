@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -77,13 +78,13 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
             contract_b_addr](SystemCallHandler &handler,
                              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Contract A writes its own state
-             auto res = handler.set_bytestring(contract_a_key,
-                                               std::as_bytes(
-                                                   std::span(contract_a_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_a_key,
+                 std::as_bytes(std::span(contract_a_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -126,13 +127,13 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
             contract_b_key](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
              // Contract B writes state that should be reverted
-             auto res = handler.set_bytestring(contract_b_key,
-                                               std::as_bytes(
-                                                   std::span(contract_b_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_b_key,
+                 std::as_bytes(std::span(contract_b_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -228,13 +229,13 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
             contract_b_addr](SystemCallHandler &handler,
                              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Contract A writes its own state
-             auto res = handler.set_bytestring(contract_a_key,
-                                               std::as_bytes(
-                                                   std::span(contract_a_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_a_key,
+                 std::as_bytes(std::span(contract_a_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -278,13 +279,13 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
             contract_c_addr](SystemCallHandler &handler,
                              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Contract B writes state that should be reverted
-             auto res = handler.set_bytestring(contract_b_key,
-                                               std::as_bytes(
-                                                   std::span(contract_b_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_b_key,
+                 std::as_bytes(std::span(contract_b_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -333,13 +334,13 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
             contract_c_key](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
              // Contract C writes state that should be reverted
-             auto res = handler.set_bytestring(contract_c_key,
-                                               std::as_bytes(
-                                                   std::span(contract_c_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_c_key,
+                 std::as_bytes(std::span(contract_c_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -435,13 +436,13 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
             contract_b_addr](SystemCallHandler &handler,
                              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Contract A writes its own state
-             auto res = handler.set_bytestring(contract_a_key,
-                                               std::as_bytes(
-                                                   std::span(contract_a_data)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, contract_a_key,
+                 std::as_bytes(std::span(contract_a_data)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "Failed to set bytestring";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

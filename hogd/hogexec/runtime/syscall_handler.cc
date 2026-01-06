@@ -719,8 +719,16 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
-                                  std::span<const std::byte> input_bytestring)
+                                  std::span<const std::byte> input_bytestring,
+                                  StorageItemRPCFlagSet input_flags)
 {
+  assert(!is_read_only());
+
+  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+          input_flags)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
@@ -732,7 +740,7 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                 input_bytestring.size());
   }
 
-  return item_view->set(BytestringItem(std::move(new_string)));
+  return item_view->set(BytestringItem(std::move(new_string)), input_flags);
 }
 
 SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
@@ -803,8 +811,16 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
-                             int128_t add_value)
+                             int128_t add_value,
+                             StorageItemRPCFlagSet input_flags)
 {
+  assert(!is_read_only());
+
+  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(
+          input_flags)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
@@ -812,8 +828,9 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  return item_view->set(
-      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+  return item_view->set(NNIntItem{.base_value_ = set_value,
+                                  .add_value_ = add_value},
+                        input_flags);
 }
 
 SystemStatus<SyscallStatus<void>>
