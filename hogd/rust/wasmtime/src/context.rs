@@ -56,7 +56,7 @@ impl WasmtimeContext {
     }
 
     /// # Safety
-    /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
+    /// user_context must be a valid pointer to a HostCallContext
     pub unsafe fn fetch_contract<'a>(
         &self,
         user_context: *mut c_void,
