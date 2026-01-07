@@ -997,6 +997,11 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
   info("auth_data_changed, key_changes.size() = {}", key_changes.size());
+  for (const KeyChange &key_change : key_changes) {
+    info("auth_data_changed key_change: address {}, nonce required weight {}",
+         key_change.address,
+         key_change.auth_data->nonce_config.required_weight);
+  }
   static SignedTransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
@@ -1019,7 +1024,6 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
-      // TODO(jhumphri): The scheduler already has the hashes.
       to_remove.push_back(tx_hashes[i]);
     }
   }

@@ -452,6 +452,8 @@ TEST(Mempool, AuthChanged)
   SignedTransactionBatch txs =
       generate_unsigned_txs(fib_client,
                             MempoolCoordinatorRpc::kMaxBlockSize + 1);
+  SignedTransaction auth_tx =
+      generate_change_nonce_config(fib_client, /*required_weight=*/10);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -486,6 +488,17 @@ TEST(Mempool, AuthChanged)
     decorated_signatures.list.push_back(make_signature(sk, stx.tx, 0));
     stx.signatures.push_back(decorated_signatures);
   }
+  {
+    // Handle [auth_tx].
+    auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
+
+    DecoratedSignatureList decorated_signatures;
+    decorated_signatures.list.push_back(make_signature(sk, auth_tx.tx, 0));
+    auth_tx.signatures.push_back(decorated_signatures);
+
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted({auth_tx})();
+  }
+
   // We break the tx vector into chunks to avoid exceeding the max RPC size.
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), kNumSubmitChunks);

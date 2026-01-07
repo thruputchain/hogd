@@ -7,7 +7,6 @@
 
 #include "account.hh"
 #include "built_contracts/fibonacci.h"
-#include "built_contracts/simple_wallet_authclaim.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -20,8 +19,6 @@
 namespace hogd {
 
 using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
-using simple_wallet_authclaim_client_t =
-    ContractTraitClient<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
 // TODO(jhumphri): why is this not just returning a Vec<Transaction>?
 inline SignedTransactionBatch
@@ -50,12 +47,11 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
 }
 
 inline SignedTransaction
-generate_change_nonce_config(simple_wallet_authclaim_client_t &client,
-                             uint32_t required_weight)
+generate_change_nonce_config(fib_client_t &fib_client, uint32_t required_weight)
 {
   constexpr char kProgramName[] = "change_nonce_config";
   return {.tx = Transaction{
-              .invocation = client.make_invocation<kProgramName>(
+              .invocation = fib_client.make_invocation<kProgramName>(
                   // TODO(jhumphri): How to get this number automatically?
                   /*gas_amount=*/5'000'000'000, required_weight),
               .uniquifier = {.block_expiry_height =
