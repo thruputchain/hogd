@@ -32,27 +32,50 @@ namespace hogd {
 namespace {
 
 struct VoidMarker {};
+struct NotFoundIsUnrecoverableError {};
+
+constexpr auto
+return_type(auto &&f, auto &&err)
+{
+  if constexpr (requires { f(std::move(get<1>(err))); }) {
+    return f(std::move(get<1>(err)));
+  }
+  else if constexpr (std::same_as<decltype(f()), void>) {
+    return;
+  }
+  else {
+    return f();
+  }
+}
+
+template<typename T>
+concept is_expected_type = requires { typename T::value_type; } &&
+                           requires { typename T::error_type; };
+
+template<typename T>
+constexpr auto
+get_inner_return_type()
+{
+  if constexpr (is_expected_type<T>) {
+    return typename T::value_type{};
+  }
+  else if constexpr (std::same_as<T, void>) {
+    return;
+  }
+  else {
+    return T{};
+  }
+}
 
 template<auto NullValue>
 constexpr auto
 to_system_error_code(auto err, auto &&f)
 {
   constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
-  auto type_lambda = [&] {
-    if constexpr (kHasReturnType) {
-      return f(std::move(get<1>(err)));
-    }
-    else if constexpr (std::same_as<decltype(f()), void>) {
-      return;
-    }
-    else {
-      return f();
-    }
-  };
+  using return_type = decltype(return_type(f, err));
+  using inner_return_type = decltype(get_inner_return_type<return_type>());
 
-  using ret_t = decltype(type_lambda());
-
-  return [&] -> SystemStatus<ret_t> {
+  return [&] -> SystemStatus<inner_return_type> {
     RPCError err_code;
     if constexpr (kHasReturnType) {
       err_code = err.error();
@@ -64,26 +87,35 @@ to_system_error_code(auto err, auto &&f)
     switch (err_code) {
     case RPCError::kRPCNone:
       if constexpr (kHasReturnType) {
-        return f(std::move(get<1>(err)));
+        return SystemStatus<inner_return_type>{f(std::move(get<1>(err)))};
       }
       else {
         static_assert(std::is_same_v<decltype(err), RPCError>);
         if constexpr (std::same_as<decltype(f()), void>) {
-          return {};
+          return SystemStatus<void>{};
         }
         else {
-          return SystemStatus<ret_t>{f()};
+          return f();
         }
       }
     case RPCError::kRPCStorageWriteFailed:
     case RPCError::kRPCNotFound:
       // can't directly combine these branches; f() isn't a valid expression in
-      // the first case NOLINTBEGIN(bugprone-branch-clone)
-      if constexpr (kHasReturnType) {
-        return NullValue;
+      // the first case
+      //
+      // NOLINTBEGIN(bugprone-branch-clone)
+      if constexpr (std::same_as<decltype(NullValue),
+                                 NotFoundIsUnrecoverableError>) {
+        error("Unrecoverable: Received RPCNotFound or RPCStorageWriteFailed on "
+              "unexpected rpc: {}",
+              err_code);
+        return SystemError{SystemErrorCode::kSystemUnrecoverable};
+      }
+      else if constexpr (kHasReturnType) {
+        return SystemStatus<return_type>{NullValue};
       }
       else if constexpr (!std::same_as<decltype(f()), void>) {
-        return NullValue;
+        return SystemStatus<return_type>{NullValue};
       }
       // NOLINTEND(bugprone-branch-clone)
       else {
@@ -152,9 +184,10 @@ SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = client_.get_snapshot_item(block_id, addrkey);
-  return to_system_error_code<std::nullopt>(res, [](StorageItem &&x) {
-    return std::make_optional<StorageItem>(std::move(x));
-  });
+  return to_system_error_code<std::nullopt>(
+      res, [](StorageItem &&x) -> std::optional<StorageItem> {
+        return std::make_optional<StorageItem>(std::move(x));
+      });
 }
 
 SystemStatus<std::optional<const Contract>>
@@ -233,6 +266,22 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
 {
   auto res = client_.pop_subtransactions(block_id, tx_id, count);
   return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+SystemStatus<DbTip>
+DatabaseProxy::get_db_tip(BlockID block_id)
+{
+  auto res = client_.get_db_tip(block_id);
+  return to_system_error_code<NotFoundIsUnrecoverableError{}>(
+      res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
+        if (x.id == block_id) {
+          error("Unrecoverable: Received DbTip with block id equal to current "
+                "block id: {} (should be parent ID)",
+                x.id);
+          return SystemError{SystemErrorCode::kSystemUnrecoverable};
+        }
+        return x;
+      });
 }
 
 } // namespace hogd

@@ -1,28 +1,15 @@
 #pragma once
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <print>
-#include <span>
-#include <stdexcept>
-#include <stop_token>
-#include <string_view>
 #include <sys/socket.h>
-#include <thread>
 #include <type_traits>
-#include <utility>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/span.h"
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/block_state.h"
@@ -77,6 +64,8 @@ public:
   {
     // TODO(jhumphri): Implement.
   }
+
+  ExpectedDBTip get_db_tip(BlockID block_id);
 
 private:
   static bool try_reserve_delta(BlockState *block_state, TransactionID tx,

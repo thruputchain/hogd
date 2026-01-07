@@ -7,6 +7,7 @@
 #include <concepts>
 #include <expected>
 #include <limits>
+#include <string>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -65,7 +66,7 @@ template<typename Enum, std::derived_from<std::error_category> Category>
 requires std::is_scoped_enum_v<Enum>
 class EnumError : public ErrorBase {
 public:
-  explicit EnumError(Enum code) : code_(code) {}
+  constexpr explicit EnumError(Enum code) : code_(code) {}
 
   // code returns the enum error code.
   Enum code() const { return code_; }

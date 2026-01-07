@@ -1160,4 +1160,26 @@ SystemCallHandler::sha256_finalize(uint32_t input_index)
   return r;
 }
 
+// == Block statistics syscalls ==
+
+SystemStatus<BlockHeight>
+SystemCallHandler::get_block_height() const
+{
+  auto tip = snapshot_cache_.try_get_db_tip();
+  if (!tip.has_value()) {
+    return tip.error();
+  }
+  return tip.value()->height;
+}
+
+SystemStatus<SHA256Hash>
+SystemCallHandler::get_parent_block_hash() const
+{
+  auto tip = snapshot_cache_.try_get_db_tip();
+  if (!tip.has_value()) {
+    return tip.error();
+  }
+  return tip.value()->hash;
+}
+
 } // namespace hogd

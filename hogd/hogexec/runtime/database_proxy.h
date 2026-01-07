@@ -83,6 +83,8 @@ public:
   SystemStatus<void> pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                          uint32_t count);
 
+  SystemStatus<DbTip> get_db_tip(BlockID block_id);
+
 private:
   using base_client_t = x23::SRpcMulticlient<x23::RpcLogger>::ClientRef;
   using client_t = DatabaseToExecutorInterfaceV1::client<base_client_t>;
