@@ -110,6 +110,7 @@ add_library(runtime_test_objects OBJECT
   runtime_test.cc
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
+  sha2_in_contract_test.cc
   shutdown_test.cc
   snapshot_storage_item_test.cc
   syscall_auth_config_test.cc

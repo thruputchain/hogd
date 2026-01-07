@@ -56,12 +56,13 @@ impl WasmtimeContext {
     }
 
     /// # Safety
-    /// user_context must be a valid pointer to a HostCallContext (or a nullptr).
+    /// user_context must be a valid pointer to a HostCallContext
     pub unsafe fn fetch_contract<'a>(
         &self,
         user_context: *mut c_void,
         hash: &'a SHA256Hash,
     ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
+        debug_assert!(!user_context.is_null());
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
         get_res.to_data()
