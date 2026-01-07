@@ -296,6 +296,7 @@ SystemCallHandler::try_commit_transaction()
   bool result = r.value();
   // check if any of the 2pc database operations failed
   if (!result) {
+    two_phase_commit_failed_ = true;
 
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {

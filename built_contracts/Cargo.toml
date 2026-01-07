@@ -15,6 +15,7 @@ members = [
     "integration_test_contracts/simple_wallet_authclaim",
     "integration_test_contracts/authclaim_test",
     "integration_test_contracts/hash_bug",
+    "integration_test_contracts/htlc",
 ]
 resolver = "2"
 

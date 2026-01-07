@@ -1,6 +1,12 @@
 #include <gtest/gtest.h>
 
+#include "x23/async.h"
+#include "x23/cpumap.h"
+#include "x23/event.h"
+#include "x23/refcnt.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 #include "xdrtest.hh"
 
 namespace x23 {
@@ -19,16 +25,24 @@ TEST(RpcMulticlient, Constructor)
   TestServer impl;
   ThreadPool pool(2);
   CoroPoll cp(pool);
-  auto [port, fd] = tcp_rpc_server(cp, 0, [&impl](auto c) {
+  DestroyInhibit di;
+
+  auto [port, fd] = tcp_rpc_server(cp, 0, [&impl, _d = RefPtr(di)](auto c) {
     c->server(&impl, blank_rpc_v1{});
   });
 
-  auto client = RpcMulticlient<RpcLogger>::make(
-      cp, *HostPort{"localhost", port}.to_addr(true), *llc_map);
+  HostPort hp{"localhost", port};
+  auto sockaddr = hp.to_addr(true);
+  ASSERT_TRUE(sockaddr.has_value());
+  auto sockaddr_storage = sockaddr.value();
+
+  auto client = RpcMulticlient<RpcLogger>::make(cp, sockaddr_storage, *llc_map);
 
   auto result = client->template client<blank_rpc_v1>().echo(Data{1, 2, 3})();
   auto expect = Data{1, 2, 3};
   EXPECT_TRUE(result == expect);
+  cp.poison(fd);
+  di.destroy_wait();
 }
 
 } // namespace x23
