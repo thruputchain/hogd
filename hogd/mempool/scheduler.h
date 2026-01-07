@@ -72,8 +72,8 @@ public:
                            SignedTransactionBatch &txs)
   {
     auto [address_txs, lock] = account_to_tx_[address];
-    tx_hashes.reserve(txs.size());
-    txs.reserve(txs.size());
+    tx_hashes.reserve(address_txs.size());
+    txs.reserve(address_txs.size());
     for (const auto &[tx_key, tx_value] : address_txs) {
       tx_hashes.push_back(tx_key.tx_hash);
       txs.push_back(tx_value->tx);
