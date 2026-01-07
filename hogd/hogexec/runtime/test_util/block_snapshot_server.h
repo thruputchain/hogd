@@ -14,6 +14,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -60,6 +61,23 @@ public:
 
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
+
+  ExpectedDBTip get_db_tip(BlockID block)
+  {
+    if (block != block_id_) {
+      return ExpectedDBTip(RPCError::kRPCBadBlockID);
+    }
+
+    // fake dbtip
+    ExpectedDBTip out;
+    out.error(RPCError::kRPCNone);
+    out.db_tip() = DbTip{
+        .height = static_cast<BlockHeight>(block_id_),
+        .hash = sha256(block_id_),
+        .id = block_id_,
+    };
+    return out;
+  }
 
   // Only used within test setup
   void setup_create_contract(Contract const &contract);

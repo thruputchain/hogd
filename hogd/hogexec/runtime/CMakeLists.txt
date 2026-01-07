@@ -32,6 +32,7 @@ add_library(runtime_objects OBJECT
   storage_snapshot_cache.cc
   snapshot_storage_item.cc
   syscall_auth.cc
+  syscall_block_data.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
@@ -112,6 +113,7 @@ add_library(runtime_test_objects OBJECT
   shutdown_test.cc
   snapshot_storage_item_test.cc
   syscall_auth_config_test.cc
+  syscall_block_data_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   try_invoke_test.cc

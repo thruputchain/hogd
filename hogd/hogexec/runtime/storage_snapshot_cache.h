@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -50,6 +51,8 @@ public:
   SystemStatus<SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
+  SystemStatus<const DbTip *> try_get_db_tip();
+
   ~StorageSnapshotCache();
 
   void reset()
@@ -58,11 +61,18 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
+    release_db_tip();
   }
 
-  void set_block_id(BlockID block_id) { block_id_ = block_id; }
+  void set_block_id(BlockID block_id)
+  {
+    block_id_ = block_id;
+    release_db_tip();
+  }
 
 private:
+  void release_db_tip();
+
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
   SynchronizedMap<SHA256Hash, std::optional<const Contract>> contract_cache_;
@@ -74,6 +84,8 @@ private:
 
   BlockID block_id_;
   DatabaseProxy &db_proxy_;
+
+  std::atomic<DbTip *> db_tip_ = nullptr;
 };
 
 } // namespace hogd

@@ -47,6 +47,8 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
+  ExpectedDBTip get_db_tip(BlockID block);
+
   void shut_down()
   {
     // TODO(jhumphri): Implement.

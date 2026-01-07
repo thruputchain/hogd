@@ -59,7 +59,7 @@ public:
 };
 
 struct SyscallError : public EnumError<SyscallErrorCode, SyscallErrorCategory> {
-  explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
+  constexpr explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
 };
 
 // Enable comparisons between SyscallErrorCode and std::error_code.
@@ -78,7 +78,7 @@ public:
 };
 
 struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
-  explicit SystemError(SystemErrorCode err) : EnumError(err) {}
+  constexpr explicit SystemError(SystemErrorCode err) : EnumError(err) {}
 
   static SystemError from_raw_error_code(int32_t raw_error_code)
   {
