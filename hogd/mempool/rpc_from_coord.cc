@@ -996,12 +996,6 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
-  info("auth_data_changed, key_changes.size() = {}", key_changes.size());
-  for (const KeyChange &key_change : key_changes) {
-    info("auth_data_changed key_change: address {}, nonce required weight {}",
-         key_change.address,
-         key_change.auth_data->nonce_config.required_weight);
-  }
   static SignedTransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
