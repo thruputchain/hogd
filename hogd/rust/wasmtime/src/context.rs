@@ -62,6 +62,7 @@ impl WasmtimeContext {
         user_context: *mut c_void,
         hash: &'a SHA256Hash,
     ) -> Result<Option<&'a [u8]>, SystemErrorCode> {
+        debug_assert!(!user_context.is_null());
         let get_res =
             unsafe { (self.contract_get_fn)(user_context, hash.as_ptr()) };
         get_res.to_data()
@@ -85,13 +86,13 @@ impl WasmtimeContext {
             return Err(SystemErrorCode::kSystemUnrecoverable);
         }
         // Check cache for this engine's InstancePre
-        if let Some(instance_pre) = self
+        /*if let Some(instance_pre) = self
             .global_context
             .instance_pre_cache()
             .get(hash, self.engine_index)
         {
             return Ok(Some(instance_pre));
-        }
+        } */
         // otherwise compile the module and cache it for this engine
         let bytes = unsafe { self.fetch_contract(user_context, hash)? };
         if bytes.is_none() {
@@ -131,11 +132,11 @@ impl WasmtimeContext {
                 }
             });
 
-        self.global_context.instance_pre_cache().put(
+        /*  self.global_context.instance_pre_cache().put(
             hash,
             self.engine_index,
             instance_pre.clone(),
-        );
+        ); */
 
         return Ok(Some(instance_pre));
     }

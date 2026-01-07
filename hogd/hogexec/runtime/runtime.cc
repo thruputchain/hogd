@@ -41,6 +41,17 @@ make_wasmtime_hogexec_global_context()
   CHECK(ok);
   return context;
 }
+
+[[maybe_unused]]
+WasmiGlobalContext
+make_wasmi_hogexec_global_context()
+{
+  auto context = WasmiGlobalContext();
+  auto ok = context.link_fn("marmot", "syscall", &syscall_entry);
+  CHECK(ok);
+  return context;
+}
+
 } // namespace
 
 std::unique_ptr<RuntimeContext>

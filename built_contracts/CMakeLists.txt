@@ -306,7 +306,9 @@ add_wasm_builds(
   simple_wallet_authclaim
   initial_token_claim 
   itc_erc20 
-  authclaim_test)
+  authclaim_test
+  hash_bug
+)
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
 add_spec_and_types_generation(
