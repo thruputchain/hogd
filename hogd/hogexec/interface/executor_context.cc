@@ -129,6 +129,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &tx,
   switch (exec_res) {
   case ExecResult::ExecResultOK:
   case ExecResult::ExecResultTxDeterministicError:
+  case ExecResult::ExecResultTxRootFrameReverted:
     out.proposal_data() = syscall_handler.get_proposal_data();
     break;
   case ExecResult::ExecResultTxNonDeterministicError:

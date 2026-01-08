@@ -184,6 +184,7 @@ MempoolCoordinatorRpc::propose_batch(
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
     case ExecResult::ExecResultOK:
+    case ExecResult::ExecResultTxRootFrameReverted:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
       ret_chunk[i] = true;
