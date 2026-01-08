@@ -101,6 +101,172 @@ protected:
   Ed25519PublicKey wallet_public_key_;
   Ed25519SecretKey wallet_secret_key_;
 
+  uint64_t nonce_ = 0;
+
+  // Helper to mint tokens to the wallet
+  void mint_tokens_to_wallet(uint128_t amount)
+  {
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+    Calldata mint_calldata = x23::serialize(
+        kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
+        GasAmount{UINT64_MAX},
+        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
+                                          to_xdr(amount)));
+    Ed25519Signature mint_sig = ed25519_sign(wallet_secret_key_, mint_calldata);
+
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = wallet_client_.make_invocation<"do_action">(
+                        UINT64_MAX, mint_sig, mint_calldata),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    EXPECT_TRUE(handler.emit_events()());
+    advance_block();
+  }
+
+  // Helper to transfer tokens from wallet to HTLC contract
+  void transfer_tokens_to_htlc(uint128_t amount)
+  {
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+
+    Calldata transfer_calldata = x23::serialize(
+        kERC20ContractAddress, erc20_meta::entrypoint<"transfer">(),
+        GasAmount{UINT64_MAX},
+        erc20_meta::make_calldata<"transfer">(kHTLCContractAddress,
+                                              to_xdr(amount)));
+    Ed25519Signature transfer_sig =
+        ed25519_sign(wallet_secret_key_, transfer_calldata);
+
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = wallet_client_.make_invocation<"do_action">(
+                        UINT64_MAX, transfer_sig, transfer_calldata),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    EXPECT_TRUE(handler.emit_events()());
+    advance_block();
+  }
+
+  // Helper to create an HTLC via wallet
+  void create_htlc_via_wallet(const SHA256Hash &hash, int128_t amount,
+                              BlockHeight expiration_height)
+  {
+    using htlc_meta = ContractTraitMeta<htlc::HTLC>;
+
+    Calldata create_htlc_calldata =
+        x23::serialize(kHTLCContractAddress,
+                       htlc_meta::entrypoint<"create_htlc">(),
+                       GasAmount{UINT64_MAX},
+                       htlc_meta::make_calldata<"create_htlc">(
+                           kReceiverAddress, kERC20ContractAddress,
+                           to_xdr(amount), expiration_height, hash));
+    Ed25519Signature create_sig =
+        ed25519_sign(wallet_secret_key_, create_htlc_calldata);
+
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = wallet_client_.make_invocation<"do_action">(
+                        UINT64_MAX, create_sig, create_htlc_calldata),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    EXPECT_TRUE(handler.emit_events()());
+    advance_block();
+  }
+
+  // Helper to claim an HTLC - returns whether the claim succeeded
+  ExecResult claim_htlc(const SHA256Hash &hash, const SHA256Hash &preimage,
+                        bool advance_after = true)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = htlc_client_.make_invocation<"claim_htlc">(
+                        UINT64_MAX, hash, preimage),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    if (!res.is_root_success()) {
+      return ExecResult::ExecResultTxRootFrameReverted;
+    }
+    auto commit_res = handler.try_commit_transaction();
+    if (commit_res == ExecResult::ExecResultOK) {
+      EXPECT_TRUE(handler.emit_events()());
+    }
+    if (advance_after) {
+      advance_block();
+    }
+    return commit_res;
+  }
+
+  // Helper to refund (claw back) an HTLC - returns the result
+  ExecResult refund_htlc(const SHA256Hash &hash, bool advance_after = true)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = htlc_client_.make_invocation<"refund_htlc">(
+                        UINT64_MAX, hash),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    if (!res.is_root_success()) {
+      return ExecResult::ExecResultTxRootFrameReverted;
+    }
+    auto commit_res = handler.try_commit_transaction();
+    if (commit_res == ExecResult::ExecResultOK) {
+      EXPECT_TRUE(handler.emit_events()());
+    }
+    if (advance_after) {
+      advance_block();
+    }
+    return commit_res;
+  }
+
+  static SHA256Hash make_preimage(uint8_t seed)
+  {
+    SHA256Hash preimage{};
+    for (size_t i = 0; i < 32; i++) {
+      preimage[i] = static_cast<uint8_t>(seed + i);
+    }
+    return preimage;
+  }
+
   void initialize_htlc()
   {
     auto handler = make_new_system_call_handler(
@@ -212,7 +378,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events()());
 
     advance_block();
   }
@@ -244,7 +410,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events()());
 
     advance_block();
   }
@@ -278,7 +444,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events()());
 
     advance_block();
   }
@@ -300,7 +466,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events()());
 
     advance_block();
   }
@@ -381,8 +547,167 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    ASSERT_TRUE(handler.emit_events()());
+    EXPECT_TRUE(handler.emit_events()());
   }
+}
+
+// Test that an HTLC can be refunded after timeout
+TEST_F(HTLCIntegrationTest, TimeoutAndRefund)
+{
+  SHA256Hash preimage = make_preimage(0x01);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  // Set expiration to current block + 2 so we can advance past it
+  const BlockHeight expiration_height = get_block_number() + 2;
+
+  // Setup: mint and transfer tokens, create HTLC
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // Advance past expiration
+  while (get_block_number() <= expiration_height) {
+    advance_block();
+  }
+
+  // Refund should succeed after timeout
+  auto refund_result = refund_htlc(hash);
+  ASSERT_EQ(refund_result, ExecResult::ExecResultOK);
+}
+
+// Test that an HTLC cannot be claimed twice in the same block
+TEST_F(HTLCIntegrationTest, CannotDoubleClaimInSameBlock)
+{
+  SHA256Hash preimage = make_preimage(0x02);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  const BlockHeight expiration_height = get_block_number() + 100;
+
+  // Setup
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // First claim should succeed (don't advance block)
+  auto first_claim = claim_htlc(hash, preimage, false);
+  ASSERT_EQ(first_claim, ExecResult::ExecResultOK);
+
+  // Second claim in same block should fail
+  auto second_claim = claim_htlc(hash, preimage, false);
+  ASSERT_NE(second_claim, ExecResult::ExecResultOK);
+
+  advance_block();
+}
+
+// Test that an HTLC cannot be claimed after it was already claimed
+TEST_F(HTLCIntegrationTest, CannotClaimAfterAlreadyClaimed)
+{
+  SHA256Hash preimage = make_preimage(0x03);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  const BlockHeight expiration_height = get_block_number() + 100;
+
+  // Setup
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // First claim should succeed
+  auto first_claim = claim_htlc(hash, preimage);
+  ASSERT_EQ(first_claim, ExecResult::ExecResultOK);
+
+  // Second claim in later block should fail
+  auto second_claim = claim_htlc(hash, preimage);
+  ASSERT_NE(second_claim, ExecResult::ExecResultOK);
+}
+
+// Test that an HTLC cannot be claimed after it was refunded
+TEST_F(HTLCIntegrationTest, CannotClaimAfterRefund)
+{
+  SHA256Hash preimage = make_preimage(0x04);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  const BlockHeight expiration_height = get_block_number() + 2;
+
+  // Setup
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // Advance past expiration
+  while (get_block_number() <= expiration_height) {
+    advance_block();
+  }
+
+  // Refund should succeed
+  auto refund_result = refund_htlc(hash);
+  ASSERT_EQ(refund_result, ExecResult::ExecResultOK);
+
+  // Claim after refund should fail
+  auto claim_result = claim_htlc(hash, preimage);
+  ASSERT_NE(claim_result, ExecResult::ExecResultOK);
+}
+
+// Test that an HTLC cannot be refunded twice
+TEST_F(HTLCIntegrationTest, CannotRefundTwice)
+{
+  SHA256Hash preimage = make_preimage(0x05);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  const BlockHeight expiration_height = get_block_number() + 2;
+
+  // Setup
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // Advance past expiration
+  while (get_block_number() <= expiration_height) {
+    advance_block();
+  }
+
+  // First refund should succeed
+  auto first_refund = refund_htlc(hash);
+  ASSERT_EQ(first_refund, ExecResult::ExecResultOK);
+
+  // Second refund should fail
+  auto second_refund = refund_htlc(hash);
+  ASSERT_NE(second_refund, ExecResult::ExecResultOK);
+}
+
+// Test that an HTLC cannot be refunded in the same block it was refunded
+TEST_F(HTLCIntegrationTest, CannotDoubleRefundInSameBlock)
+{
+  SHA256Hash preimage = make_preimage(0x06);
+  SHA256Hash hash = sha256(preimage);
+
+  const int128_t htlc_amount = 1000;
+  const BlockHeight expiration_height = get_block_number() + 2;
+
+  // Setup
+  mint_tokens_to_wallet(htlc_amount);
+  transfer_tokens_to_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
+
+  // Advance past expiration
+  while (get_block_number() <= expiration_height) {
+    advance_block();
+  }
+
+  // First refund should succeed (don't advance block)
+  auto first_refund = refund_htlc(hash, false);
+  ASSERT_EQ(first_refund, ExecResult::ExecResultOK);
+
+  // Second refund in same block should fail
+  auto second_refund = refund_htlc(hash, false);
+  ASSERT_NE(second_refund, ExecResult::ExecResultOK);
+
+  advance_block();
 }
 
 } // namespace hogd
