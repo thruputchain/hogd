@@ -5,6 +5,7 @@ add_subdirectory(runtime_trampoline)
 add_subdirectory(interface)
 add_subdirectory(bench)
 add_subdirectory(precompiles)
+add_subdirectory(contract_tests)
 
 # Build the frontend executor (hogexec) executable
 add_executable(
