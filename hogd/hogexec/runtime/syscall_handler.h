@@ -87,7 +87,7 @@ public:
       }
       if (last_frame_.has_value() &&
           !last_frame_.value().extract_events().empty() &&
-          root_invoke_succeeded_) {
+          root_invoke_succeeded_ && !two_phase_commit_failed_) {
         panic("SystemCallHandler destroyed with events to emit");
       }
     }
@@ -275,6 +275,7 @@ private:
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
   bool transaction_committed_or_aborted_{false};
+  bool two_phase_commit_failed_{false};
 
   StorageSnapshotCache &snapshot_cache_;
 
