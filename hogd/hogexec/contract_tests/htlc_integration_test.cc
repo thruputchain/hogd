@@ -134,25 +134,25 @@ protected:
     advance_block();
   }
 
-  // Helper to transfer tokens from wallet to HTLC contract
-  void transfer_tokens_to_htlc(uint128_t amount)
+  // Helper to approve tokens from wallet to HTLC contract
+  void approve_tokens_for_htlc(int128_t amount)
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata transfer_calldata = x23::serialize(
-        kERC20ContractAddress, erc20_meta::entrypoint<"transfer">(),
+    Calldata approve_calldata = x23::serialize(
+        kERC20ContractAddress, erc20_meta::entrypoint<"adjust_allowance">(),
         GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kHTLCContractAddress,
-                                              to_xdr(amount)));
-    Ed25519Signature transfer_sig =
-        ed25519_sign(wallet_secret_key_, transfer_calldata);
+        erc20_meta::make_calldata<"adjust_allowance">(kHTLCContractAddress,
+                                                      to_xdr(amount)));
+    Ed25519Signature approve_sig =
+        ed25519_sign(wallet_secret_key_, approve_calldata);
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
                     .invocation = wallet_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
+                        UINT64_MAX, approve_sig, approve_calldata),
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -338,141 +338,21 @@ protected:
 
 TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
 {
-  using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-  using htlc_meta = ContractTraitMeta<htlc::HTLC>;
-
   // Generate a preimage and compute its hash
-  constexpr uint8_t kPreimageBytes[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-                                          0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
-                                          0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
-                                          0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-                                          0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
-                                          0x1f, 0x20};
-  SHA256Hash preimage;
-  std::memcpy(preimage.data(), kPreimageBytes, 32);
+  SHA256Hash preimage = make_preimage(0x00);
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
   const BlockHeight expiration_height = get_block_height() + 100;
 
-  // Mint tokens to wallet via wallet's do_action (wallet is the ERC20 owner)
-  // Create internal calldata for the mint
-  Calldata mint_calldata = x23::serialize(
-      kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
-      GasAmount{UINT64_MAX},
-      erc20_meta::make_calldata<"mint">(kWalletContractAddress,
-                                        to_xdr(uint128_t{htlc_amount})));
-  // Sign the calldata
-  Ed25519Signature mint_sig = ed25519_sign(wallet_secret_key_, mint_calldata);
-  // Call wallet's do_action to mint tokens
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation = wallet_client_.make_invocation<"do_action">(
-                        UINT64_MAX, mint_sig, mint_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 3}}},
-        *wasm_runtime_context_);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
-
-    advance_block();
-  }
-
-  // Transfer tokens from wallet to HTLC contract via wallet's do_action
-  // Create internal calldata for the transfer
-  Calldata transfer_calldata = x23::serialize(
-      kERC20ContractAddress, erc20_meta::entrypoint<"transfer">(),
-      GasAmount{UINT64_MAX},
-      erc20_meta::make_calldata<"transfer">(kHTLCContractAddress,
-                                            to_xdr(uint128_t{htlc_amount})));
-  // Sign the calldata
-  Ed25519Signature transfer_sig =
-      ed25519_sign(wallet_secret_key_, transfer_calldata);
-  // Call wallet's do_action to transfer tokens
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation = wallet_client_.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 4}}},
-        *wasm_runtime_context_);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
-
-    advance_block();
-  }
-
-  // Create HTLC via wallet's do_action
-  // Create internal calldata for create_htlc
-  Calldata create_htlc_calldata =
-      x23::serialize(kHTLCContractAddress,
-                     htlc_meta::entrypoint<"create_htlc">(),
-                     GasAmount{UINT64_MAX},
-                     htlc_meta::make_calldata<"create_htlc">(
-                         kReceiverAddress, kERC20ContractAddress,
-                         to_xdr(htlc_amount), expiration_height, hash));
-  // Sign the calldata
-  Ed25519Signature create_sig =
-      ed25519_sign(wallet_secret_key_, create_htlc_calldata);
-  // Call wallet's do_action to create HTLC
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation = wallet_client_.make_invocation<"do_action">(
-                        UINT64_MAX, create_sig, create_htlc_calldata),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 5}}},
-        *wasm_runtime_context_);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
-
-    advance_block();
-  }
+  // Setup: mint and approve tokens, create HTLC
+  mint_tokens_to_wallet(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
+  create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Claim HTLC with preimage
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation = htlc_client_.make_invocation<"claim_htlc">(
-                        UINT64_MAX, hash, preimage),
-                    .uniquifier =
-                        Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = 6}}},
-        *wasm_runtime_context_);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
-    EXPECT_TRUE(handler.emit_events()());
-
-    advance_block();
-  }
+  auto claim_result = claim_htlc(hash, preimage);
+  ASSERT_EQ(claim_result, ExecResult::ExecResultOK);
 
   // Verify receiver has the tokens via native contract
   {
@@ -566,7 +446,7 @@ TEST_F(HTLCIntegrationTest, TimeoutAndRefund)
 
   // Setup: mint and transfer tokens, create HTLC
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
@@ -590,7 +470,7 @@ TEST_F(HTLCIntegrationTest, CannotDoubleClaimInSameBlock)
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // First claim should succeed (don't advance block)
@@ -615,7 +495,7 @@ TEST_F(HTLCIntegrationTest, CannotClaimAfterAlreadyClaimed)
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // First claim should succeed
@@ -638,7 +518,7 @@ TEST_F(HTLCIntegrationTest, CannotClaimAfterRefund)
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
@@ -666,7 +546,7 @@ TEST_F(HTLCIntegrationTest, CannotRefundTwice)
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
@@ -694,7 +574,7 @@ TEST_F(HTLCIntegrationTest, CannotDoubleRefundInSameBlock)
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
-  transfer_tokens_to_htlc(htlc_amount);
+  approve_tokens_for_htlc(htlc_amount);
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
