@@ -108,11 +108,11 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata mint_calldata = x23::serialize(
-        kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"mint">(kWalletContractAddress,
-                                          to_xdr(amount)));
+    Calldata mint_calldata =
+        x23::serialize(kERC20ContractAddress, erc20_meta::entrypoint<"mint">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"mint">(kWalletContractAddress,
+                                                         to_xdr(amount)));
     Ed25519Signature mint_sig = ed25519_sign(wallet_secret_key_, mint_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -237,8 +237,9 @@ protected:
         SignedTransaction{
             .tx =
                 Transaction{
-                    .invocation = htlc_client_.make_invocation<"refund_htlc">(
-                        UINT64_MAX, hash),
+                    .invocation =
+                        htlc_client_.make_invocation<"refund_htlc">(UINT64_MAX,
+                                                                    hash),
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
