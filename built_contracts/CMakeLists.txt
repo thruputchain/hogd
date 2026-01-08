@@ -105,19 +105,10 @@ function(add_wasm_builds)
     
     # Add individual cargo build command for this target
     list(APPEND build_commands
-      COMMAND env CARGO_NET_GIT_FETCH_WITH_CLI=true RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=immediate-abort'
-          cargo build
-          -p ${target_name}
-          --target wasm32-unknown-unknown
-          --release
-          --locked
-          --frozen
-          -F guest
-          ${WASM_FLAGS}
-          --offline
-          --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
-          -Zbuild-std=core,alloc
-          -Zbuild-std-features=std/optimize_for_size)
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
+        ${target_name}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        "${WASM_FLAGS}")
   endforeach()
   
   # Single custom command that builds all unoptimized WASMs with separate cargo commands
