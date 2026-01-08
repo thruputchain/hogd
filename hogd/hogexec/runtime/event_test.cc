@@ -556,6 +556,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events()());
 
+  // Now invoke the contract with method 1
   EphemeralTxIdentifier tx_id_2;
   auto handler2 = make_new_system_call_handler(
       SignedTransaction{
@@ -573,7 +574,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(res2.is_root_success());
 
   auto r2 = handler2.try_commit_transaction();
-  ASSERT_EQ(r2, ExecResult::ExecResultOK);
+  ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
   ASSERT_TRUE(handler2.emit_events()());
 
   advance_block();
