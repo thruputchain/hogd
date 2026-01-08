@@ -107,8 +107,8 @@ function(add_wasm_builds)
     list(APPEND build_commands
       COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
         ${target_name}
-        "${WASM_FLAGS}"
-        ${CMAKE_CURRENT_BINARY_DIR})
+        ${CMAKE_CURRENT_BINARY_DIR}
+        "${WASM_FLAGS}")
   endforeach()
   
   # Single custom command that builds all unoptimized WASMs with separate cargo commands
