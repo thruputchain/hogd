@@ -9,12 +9,16 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+
+#include "x23/format.h"
+#include "x23/x23.h"
 
 #include "account.hh"
 #include "contract.hh"
@@ -56,6 +60,15 @@
 #include "x23/srpc.h"
 
 namespace hogd {
+
+// GTest custom printer for XDR enums - prints enum names instead of numbers
+// Must be in hogd namespace for ADL to find it
+template<x23::is_xdr_enum T>
+void
+PrintTo(const T &value, ::std::ostream *os) // NOLINT
+{
+  *os << x23::show(value);
+}
 
 enum class TestDB : int8_t {
   kMockInMemory = 0,
