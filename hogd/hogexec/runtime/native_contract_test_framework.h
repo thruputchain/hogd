@@ -478,7 +478,16 @@ public:
 
   // Only for use in tests if precise control over rpcs is needed
   DatabaseProxy &get_db_proxy() { return *db_proxy_; }
-  uint64_t get_block_number() const { return block_number_; }
+  BlockID get_block_number() const { return block_number_; }
+
+  DbTip get_db_tip() const
+  {
+    auto r = db_proxy_->get_db_tip(block_number_);
+    if (!r) {
+      throw std::runtime_error("get_db_tip: db_proxy_->get_db_tip failed");
+    }
+    return *r;
+  }
 
   PerTransactionEventServerProxy
   make_new_per_tx_event_server_proxy(TransactionID tx_id)

@@ -332,6 +332,8 @@ protected:
 
     advance_block();
   }
+
+  BlockHeight get_block_height() const { return get_db_tip().height; }
 };
 
 TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
@@ -351,7 +353,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 100;
+  const BlockHeight expiration_height = get_block_height() + 100;
 
   // Mint tokens to wallet via wallet's do_action (wallet is the ERC20 owner)
   // Create internal calldata for the mint
@@ -560,7 +562,7 @@ TEST_F(HTLCIntegrationTest, TimeoutAndRefund)
 
   const int128_t htlc_amount = 1000;
   // Set expiration to current block + 2 so we can advance past it
-  const BlockHeight expiration_height = get_block_number() + 2;
+  const BlockHeight expiration_height = get_block_height() + 2;
 
   // Setup: mint and transfer tokens, create HTLC
   mint_tokens_to_wallet(htlc_amount);
@@ -568,7 +570,7 @@ TEST_F(HTLCIntegrationTest, TimeoutAndRefund)
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
-  while (get_block_number() <= expiration_height) {
+  while (get_block_height() <= expiration_height) {
     advance_block();
   }
 
@@ -584,7 +586,7 @@ TEST_F(HTLCIntegrationTest, CannotDoubleClaimInSameBlock)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 100;
+  const BlockHeight expiration_height = get_block_height() + 100;
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
@@ -609,7 +611,7 @@ TEST_F(HTLCIntegrationTest, CannotClaimAfterAlreadyClaimed)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 100;
+  const BlockHeight expiration_height = get_block_height() + 100;
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
@@ -632,7 +634,7 @@ TEST_F(HTLCIntegrationTest, CannotClaimAfterRefund)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 2;
+  const BlockHeight expiration_height = get_block_height() + 2;
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
@@ -640,7 +642,7 @@ TEST_F(HTLCIntegrationTest, CannotClaimAfterRefund)
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
-  while (get_block_number() <= expiration_height) {
+  while (get_block_height() <= expiration_height) {
     advance_block();
   }
 
@@ -660,7 +662,7 @@ TEST_F(HTLCIntegrationTest, CannotRefundTwice)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 2;
+  const BlockHeight expiration_height = get_block_height() + 2;
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
@@ -668,7 +670,7 @@ TEST_F(HTLCIntegrationTest, CannotRefundTwice)
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
-  while (get_block_number() <= expiration_height) {
+  while (get_block_height() <= expiration_height) {
     advance_block();
   }
 
@@ -688,7 +690,7 @@ TEST_F(HTLCIntegrationTest, CannotDoubleRefundInSameBlock)
   SHA256Hash hash = sha256(preimage);
 
   const int128_t htlc_amount = 1000;
-  const BlockHeight expiration_height = get_block_number() + 2;
+  const BlockHeight expiration_height = get_block_height() + 2;
 
   // Setup
   mint_tokens_to_wallet(htlc_amount);
@@ -696,7 +698,7 @@ TEST_F(HTLCIntegrationTest, CannotDoubleRefundInSameBlock)
   create_htlc_via_wallet(hash, htlc_amount, expiration_height);
 
   // Advance past expiration
-  while (get_block_number() <= expiration_height) {
+  while (get_block_height() <= expiration_height) {
     advance_block();
   }
 
