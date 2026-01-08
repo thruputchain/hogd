@@ -123,10 +123,10 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  // Transaction should still commit successfully (this is the key difference
-  // from normal revert)
+  // Error code is the main external difference between root frame revert and
+  // normal success
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
 
@@ -357,7 +357,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
 
     auto commit_res = handler.try_commit_transaction();
     // should commit successfully
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
     advance_block();
   }
@@ -471,7 +471,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   ASSERT_GE(gas_consumed, 10000);
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
 
@@ -623,7 +623,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   ASSERT_TRUE(res.is_root_success());
 
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
 
@@ -775,7 +775,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
         << "Error type " << error_type << " should succeed via manual revert";
 
     auto commit_res = handler.try_commit_transaction();
-    ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
+    ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted)
         << "Error type " << error_type << " transaction should commit";
 
     advance_block();

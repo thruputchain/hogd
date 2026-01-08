@@ -101,7 +101,7 @@ TEST_P(RevertTest, RootFrameReverts)
 
   // Commit the transaction - it should succeed
   auto commit_res = handler.try_commit_transaction();
-  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+  ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
 
