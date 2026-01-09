@@ -15,6 +15,7 @@
 #include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/status.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/version.h"
@@ -33,7 +34,8 @@ public:
   {}
 
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, SignedTransactionBatch txs);
+  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs,
+                      size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
 
@@ -50,6 +52,13 @@ public:
   x23::Async<void>
   register_auth_data_updates(BlockHeight height,
                              KeyChangeBatch const &key_changes);
+  void add_auth_data_updates_callback(
+      const std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>
+          &callback)
+  {
+    std::lock_guard<std::mutex> lock(auth_data_changes_callbacks_lock_);
+    auth_data_changes_callbacks_.push_back(callback);
+  }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard const &card);
 
@@ -75,6 +84,11 @@ private:
   // Used to stall incoming requests until the updates from the db are present,
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
+
+  std::mutex auth_data_changes_callbacks_lock_;
+  std::vector<
+      std::function<x23::Async<void>(BlockHeight, const KeyChangeBatch &)>>
+      auth_data_changes_callbacks_;
 };
 
 class AuthDBRpc {
@@ -109,7 +123,8 @@ public:
   authmempool_verify_transactions(BlockHeight height,
                                   SignedTransactionBatch txs)
   {
-    return auth_server_.verify_transactions(height, std::move(txs));
+    x23::span<SignedTransaction> txs_span(txs.begin(), txs.end());
+    return auth_server_.verify_transactions(height, txs_span);
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
@@ -139,7 +154,7 @@ public:
   AuthCard make_auth_card(std::string hostname = "")
   {
     if (hostname.empty()) {
-      CHECK_EQ(gethostname(hostname.data(), hostname.size()), 0);
+      CHECK_EQ(get_hostname(hostname), 0);
     }
     return {
         .protocol = version::kHogdProtocol(),
