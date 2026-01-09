@@ -16,6 +16,7 @@ members = [
     "integration_test_contracts/authclaim_test",
     "integration_test_contracts/hash_bug",
     "integration_test_contracts/htlc",
+    "integration_test_contracts/payment_channel",
 ]
 resolver = "2"
 

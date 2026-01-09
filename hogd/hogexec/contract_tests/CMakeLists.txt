@@ -1,5 +1,6 @@
 add_library(contract_tests_objects OBJECT
     contract_tests_main.cc
+    payment_channel_integration_test.cc
     htlc_integration_test.cc
 )
 
