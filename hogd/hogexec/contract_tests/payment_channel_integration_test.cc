@@ -914,4 +914,57 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
   ASSERT_NE(second_join, ExecResult::ExecResultOK);
 }
 
+// Test that two join transactions in the same block - one should fail
+TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
+{
+  const int128_t deposit_a = 1000;
+  const int128_t deposit_b = 500;
+
+  // Setup
+  mint_tokens(kWalletAAddress, deposit_a + (deposit_b * 2), party_a_secret_);
+  {
+    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b * 2})));
+    Ed25519Signature transfer_sig =
+        ed25519_sign(party_a_secret_, transfer_calldata);
+
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation = wallet_a_client_.make_invocation<"do_action">(
+                        UINT64_MAX, transfer_sig, transfer_calldata),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
+        *wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+    EXPECT_TRUE(handler.emit_events()());
+    advance_block();
+  }
+
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b * 2, party_b_secret_);
+
+  uint64_t channel_id = open_channel(deposit_a);
+
+  // First join should succeed (don't advance block)
+  auto first_join = join_channel(channel_id, deposit_b, false);
+  ASSERT_EQ(first_join, ExecResult::ExecResultOK);
+
+  // Second join in same block should fail (channel already joined)
+  auto second_join = join_channel(channel_id, deposit_b, false);
+  ASSERT_NE(second_join, ExecResult::ExecResultOK);
+
+  advance_block();
+}
+
 } // namespace hogd
