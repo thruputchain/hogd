@@ -34,7 +34,8 @@ public:
   {}
 
   x23::Async<AuthErrorCodeBatch>
-  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs);
+  verify_transactions(BlockHeight height, x23::span<SignedTransaction> txs,
+                      size_t max_parallelism = 1);
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
                                          SignedTransactionBatch txs);
 
