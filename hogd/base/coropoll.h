@@ -56,8 +56,6 @@ make_chunks(size_t total_size, size_t chunk_count)
     chunks.push_back({start, end});
     offset = end;
   }
-  info("make_chunks, total_size {}, chunk_count {}, offset {}", total_size,
-       chunk_count, offset);
   CHECK_EQ(offset, total_size);
 
   return chunks;
