@@ -97,7 +97,9 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
   decorated_signatures.list.push_back(make_signature(sk, tx, 0));
   stx.signatures.push_back(decorated_signatures);
 
-  auto result = auth_server().verify_transactions(1, {stx})();
+  x23::Vec<SignedTransaction> stx_vec{stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(1, stx_span)();
   ASSERT_EQ(result.size(), 1);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
 }
@@ -171,7 +173,9 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   decorated_signatures3.list.push_back(make_signature(sk2, tx3, 0));
   stx3.signatures.push_back(decorated_signatures3);
 
-  auto result = auth_server().verify_transactions(1, {stx1, stx2, stx3})();
+  x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(1, stx_vec)();
 
   ASSERT_EQ(result.size(), 3);
   EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
