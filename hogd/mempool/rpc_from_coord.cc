@@ -68,35 +68,24 @@ MempoolCoordinatorRpc::verify_transactions(
     SignedTransactionBatch &batch, x23::Vec<SignedTransactionHash> &to_remove,
     x23::Vec<size_t> &to_remove_indices)
 {
-  co_await default_coropoll().pool_.bg();
+  ElapsedTimer timer;
+  // TODO(jhumphri): What if [current_block] is incremented before we add
+  // the txs to the scheduler? In that case, the auth_changed callback
+  // would not see these txs, so we could end up adding unauthorized txs
+  // to the scheduler. Maybe this race is okay if the executor detects
+  // that the txs are now unauthorized?
+  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
+      /*height=*/scheduler_->current_block(), batch, /*max_parallelism=*/128);
 
-  constexpr size_t kNumThreads = 108;
-  const std::vector<ChunkRange> chunks = make_chunks(batch.size(), kNumThreads);
-  x23::Vec<x23::Async<AuthErrorCodeBatch>> auth_rets;
-  auth_rets.reserve(chunks.size());
-  for (const ChunkRange &chunk : chunks) {
-    x23::span<SignedTransaction> to_check(batch.begin() + chunk.start,
-                                          batch.begin() + chunk.end);
-    // TODO(jhumphri): What if [current_block] is incremented before we add
-    // the txs to the scheduler? In that case, the auth_changed callback
-    // would not see these txs, so we could end up adding unauthorized txs
-    // to the scheduler. Maybe this race is okay if the executor detects
-    // that the txs are now unauthorized?
-    auth_rets.push_back(auth_->verify_transactions(
-        /*height=*/scheduler_->current_block(), to_check));
-  }
-  size_t absolute_idx = 0;
-  for (x23::Async<AuthErrorCodeBatch> &a : auth_rets) {
-    AuthErrorCodeBatch auth_ret = co_await a;
-    for (size_t i = 0; i < auth_ret.size(); i++) {
-      const AuthErrorCode &code = auth_ret[i];
-      if (code != AuthErrorCode::kAuthSuccess) {
-        to_remove.push_back(sha256(batch[i]));
-        to_remove_indices.push_back(absolute_idx);
-      }
-      absolute_idx++;
+  for (size_t i = 0; i < auth_ret.size(); i++) {
+    const AuthErrorCode &code = auth_ret[i];
+    if (code != AuthErrorCode::kAuthSuccess) {
+      to_remove.push_back(sha256(batch[i]));
+      to_remove_indices.push_back(i);
     }
   }
+  double verify_duration = timer.elapsed();
+  info("verify_transactions verify_duration {}", verify_duration);
 }
 
 x23::Async<void>
@@ -105,28 +94,31 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 {
   ElapsedTimer timer;
   info("submit_unvetted, {} txs", batch.size());
+  // std::this_thread::sleep_for(std::chrono::seconds(20));
   x23::Vec<SignedTransactionHash> to_remove;
   x23::Vec<size_t> to_remove_indices;
   auto auth_handle = verify_transactions(batch, to_remove, to_remove_indices);
 
-  co_await scheduler_->add_txs(batch);
-  ElapsedTimer timer2;
+  // co_await scheduler_->add_txs(batch);
+  // ElapsedTimer timer2;
   co_await auth_handle;
-  double auth_handle_duration = timer2.elapsed();
-  info("{} txs were invalid", to_remove.size());
-  if (!to_remove.empty()) {
-    // The txs are on the runqueue and need to be removed, so we set
-    // [validated_block] to true.
-    co_await scheduler_->remove_from_scheduler(to_remove,
-                                               /*validated_block=*/true);
-    remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
-  }
+  info("auth took {}", timer.elapsed());
+  // double auth_handle_duration = timer2.elapsed();
+  // info("{} txs were invalid", to_remove.size());
+  // if (!to_remove.empty()) {
+  //   // The txs are on the runqueue and need to be removed, so we set
+  //   // [validated_block] to true.
+  //   co_await scheduler_->remove_from_scheduler(to_remove,
+  //                                              /*validated_block=*/true);
+  //   remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+  // }
 
-  co_await coord_client_->coordscheduler_notify_vetted(batch);
-  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
-       "= {}, auth_handle_duration = {}",
-       scheduler_->size(), timer.elapsed(), auth_handle_duration);
-  co_return;
+  // // co_await coord_client_->coordscheduler_notify_vetted(batch);
+  // info("about to return from submit_unvetted, scheduler.size() = {}, duration
+  // "
+  //      "= {}, auth_handle_duration = {}",
+  //      scheduler_->size(), timer.elapsed(), auth_handle_duration);
+  // co_return;
 }
 
 x23::Async<void>

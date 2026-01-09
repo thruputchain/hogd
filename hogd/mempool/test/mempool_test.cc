@@ -4,6 +4,7 @@
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "discovery.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/mempool/rpc_from_coord.h"
@@ -436,7 +437,7 @@ TEST(Mempool, GenerateBlockId)
 
 namespace {
 
-constexpr size_t kNumSubmitChunks = 20;
+constexpr size_t kNumSubmitChunks = 1;
 
 } // namespace
 
@@ -451,7 +452,7 @@ TEST(Mempool, AuthChanged)
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   SignedTransactionBatch txs =
       generate_unsigned_txs(fib_client,
-                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
+                            MempoolCoordinatorRpc::kMaxBlockSize - 1);
   SignedTransaction auth_tx =
       generate_change_nonce_config(fib_client, /*required_weight=*/10);
 
@@ -499,18 +500,32 @@ TEST(Mempool, AuthChanged)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted({auth_tx})();
   }
 
-  // We break the tx vector into chunks to avoid exceeding the max RPC size.
-  const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), kNumSubmitChunks);
-  for (size_t i = 0; i < kNumSubmitChunks; i++) {
-    const ChunkRange &chunk = chunks[i];
-    SignedTransactionBatch to_submit(txs.begin() + chunk.start,
-                                     txs.begin() + chunk.end);
-    server.mempool_coord_rpc().schedulercoord_submit_unvetted(to_submit)();
-  }
+  std::promise<void> promise;
+  std::future<void> future = promise.get_future();
+  default_threadpool().spawn([&server, &txs, &promise]() -> void {
+    [](MempoolTestInfra &server, SignedTransactionBatch &txs,
+       std::promise<void> &promise) -> x23::Detached {
+      // We break the tx vector into chunks to avoid exceeding the max RPC size.
+      const std::vector<ChunkRange> chunks =
+          make_chunks(txs.size(), kNumSubmitChunks);
 
-  info("OK HERE!!! scheduler size is {}",
-       server.mempool_coord_rpc().scheduler()->size());
+      std::vector<x23::Async<void>> handles;
+      handles.reserve(kNumSubmitChunks);
+      for (size_t i = 0; i < kNumSubmitChunks; i++) {
+        const ChunkRange &chunk = chunks[i];
+        SignedTransactionBatch to_submit(txs.begin() + chunk.start,
+                                         txs.begin() + chunk.end);
+        handles.push_back(
+            server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+                to_submit));
+      }
+      for (x23::Async<void> &handle : handles) {
+        co_await handle;
+      }
+      promise.set_value();
+    }(server, txs, promise);
+  });
+  future.get();
 
   // Now change the [AccountAuthData].
   auth_data.nonce_config.required_weight = 2;
