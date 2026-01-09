@@ -71,8 +71,11 @@ public:
     CoordCard card;
     CHECK(Registration::registration().coordinator_registered(&card));
 
-    return create_client<CoordScheduler1>(
-        server_address_to_sockaddr(card.address_for_sched));
+    auto ret = create_client<CoordScheduler1>(
+        server_address_to_sockaddr(card.address_for_sched),
+        /*retry=*/false,
+        /*max_message_size=*/LoadgenRpc::kRpcMaxMessageSize);
+    return ret;
   }
 
   static x23::Async<void> schedulercoord_null() { co_return; }
@@ -287,11 +290,6 @@ private:
   x23::Detached finish_nominating_block(PendingBlock &cache);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
-
-  x23::Async<void>
-  verify_transactions(SignedTransactionBatch &batch,
-                      x23::Vec<SignedTransactionHash> &to_remove,
-                      x23::Vec<size_t> &to_remove_indices);
 
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs,

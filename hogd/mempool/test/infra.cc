@@ -56,6 +56,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block)
   // the mempool. The real coordinator implementation is in the chuckd repo
   // and is written in go. So to ease test implementation, we use a fake
   // coordinator.
+  coordinator_sched_server_->max_message_size_ = LoadgenRpc::kRpcMaxMessageSize;
   coordinator_sched_server_.start_server(/*port=*/0);
 
   // Now have all of the subsystems register themselves with the mempool.

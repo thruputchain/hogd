@@ -64,19 +64,27 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> indices)
 } // namespace
 
 x23::Async<void>
-MempoolCoordinatorRpc::verify_transactions(
-    SignedTransactionBatch &batch, x23::Vec<SignedTransactionHash> &to_remove,
-    x23::Vec<size_t> &to_remove_indices)
+MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
+    SignedTransactionBatch batch)
 {
   ElapsedTimer timer;
+  info("submit_unvetted, {} txs", batch.size());
+  // std::this_thread::sleep_for(std::chrono::seconds(20));
   // TODO(jhumphri): What if [current_block] is incremented before we add
   // the txs to the scheduler? In that case, the auth_changed callback
   // would not see these txs, so we could end up adding unauthorized txs
   // to the scheduler. Maybe this race is okay if the executor detects
   // that the txs are now unauthorized?
-  AuthErrorCodeBatch auth_ret = co_await auth_->verify_transactions(
+  auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), batch, /*max_parallelism=*/128);
 
+  co_await scheduler_->add_txs(batch);
+  ElapsedTimer timer2;
+  AuthErrorCodeBatch auth_ret = co_await auth_handle;
+  info("auth took {}", timer.elapsed());
+  double auth_handle_duration = timer2.elapsed();
+  x23::Vec<SignedTransactionHash> to_remove;
+  x23::Vec<size_t> to_remove_indices;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {
@@ -84,41 +92,20 @@ MempoolCoordinatorRpc::verify_transactions(
       to_remove_indices.push_back(i);
     }
   }
-  double verify_duration = timer.elapsed();
-  info("verify_transactions verify_duration {}", verify_duration);
-}
+  info("{} txs were invalid", to_remove.size());
+  if (!to_remove.empty()) {
+    // The txs are on the runqueue and need to be removed, so we set
+    // [validated_block] to true.
+    co_await scheduler_->remove_from_scheduler(to_remove,
+                                               /*validated_block=*/true);
+    remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
+  }
 
-x23::Async<void>
-MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
-    SignedTransactionBatch batch)
-{
-  ElapsedTimer timer;
-  info("submit_unvetted, {} txs", batch.size());
-  // std::this_thread::sleep_for(std::chrono::seconds(20));
-  x23::Vec<SignedTransactionHash> to_remove;
-  x23::Vec<size_t> to_remove_indices;
-  auto auth_handle = verify_transactions(batch, to_remove, to_remove_indices);
-
-  // co_await scheduler_->add_txs(batch);
-  // ElapsedTimer timer2;
-  co_await auth_handle;
-  info("auth took {}", timer.elapsed());
-  // double auth_handle_duration = timer2.elapsed();
-  // info("{} txs were invalid", to_remove.size());
-  // if (!to_remove.empty()) {
-  //   // The txs are on the runqueue and need to be removed, so we set
-  //   // [validated_block] to true.
-  //   co_await scheduler_->remove_from_scheduler(to_remove,
-  //                                              /*validated_block=*/true);
-  //   remove_indices(/*remove_from=*/batch, /*indices=*/to_remove_indices);
-  // }
-
-  // // co_await coord_client_->coordscheduler_notify_vetted(batch);
-  // info("about to return from submit_unvetted, scheduler.size() = {}, duration
-  // "
-  //      "= {}, auth_handle_duration = {}",
-  //      scheduler_->size(), timer.elapsed(), auth_handle_duration);
-  // co_return;
+  co_await coord_client_->coordscheduler_notify_vetted(batch);
+  info("about to return from submit_unvetted, scheduler.size() = {}, duration "
+       "= {}, auth_handle_duration = {}",
+       scheduler_->size(), timer.elapsed(), auth_handle_duration);
+  co_return;
 }
 
 x23::Async<void>
