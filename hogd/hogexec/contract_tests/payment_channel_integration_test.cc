@@ -17,6 +17,8 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/payment_channel.h"
@@ -26,29 +28,32 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
+#include "x23/serialize_cxs.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
-// Use a short dispute period for faster tests
-constexpr uint64_t kTestDisputePeriod = 10;
-
 class PaymentChannelIntegrationTest : public ::testing::Test,
-                                       public NativeContractTestFramework {
+                                      public NativeContractTestFramework {
 public:
   PaymentChannelIntegrationTest()
-      : NativeContractTestFramework(false,
-                                    BlockExecutionMode::kBlockExecutionModeProposal,
-                                    TestDB::kHogDB),
-        wasm_runtime_context_(make_hogexec_context()) {}
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDB),
+      wasm_runtime_context_(make_hogexec_context())
+  {}
 
 protected:
-  void SetUp() override {
+  void SetUp() override
+  {
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
@@ -95,6 +100,7 @@ protected:
   constexpr static ContractAddress kERC20Address = make_contract_address(1);
   constexpr static ContractAddress kWalletAAddress = make_contract_address(2);
   constexpr static ContractAddress kWalletBAddress = make_contract_address(3);
+  constexpr static uint64_t kTestDisputePeriod = 10;
 
   ContractTraitClient<payment_channel::PaymentChannel> pc_client_ =
       ContractTraitClient<payment_channel::PaymentChannel>(
@@ -118,24 +124,58 @@ protected:
 
   uint64_t nonce_ = 0;
 
-  // Serialize ChannelState to XDR bytes for signing
+  // Compute channel_id the same way the contract does
+  uint64_t compute_channel_id(uint64_t salt) const
+  {
+    // Channel ID = hash(party_a_dest, party_a_pubkey, party_b_pubkey, token,
+    // salt)
+    std::vector<uint8_t> hasher_input;
+    hasher_input.insert(hasher_input.end(), kWalletAAddress.begin(),
+                        kWalletAAddress.end());
+    hasher_input.insert(hasher_input.end(), party_a_pubkey_.begin(),
+                        party_a_pubkey_.end());
+    hasher_input.insert(hasher_input.end(), party_b_pubkey_.begin(),
+                        party_b_pubkey_.end());
+    hasher_input.insert(hasher_input.end(), kERC20Address.begin(),
+                        kERC20Address.end());
+    // Add salt as little-endian bytes
+    for (size_t i = 0; i < sizeof(salt); ++i) {
+      hasher_input.push_back(static_cast<uint8_t>(salt >> (i * 8)));
+    }
+    auto hash = sha256(hasher_input);
+    // Take first 8 bytes as u64 little-endian
+    return static_cast<uint64_t>(hash[0]) |
+           (static_cast<uint64_t>(hash[1]) << 8) |
+           (static_cast<uint64_t>(hash[2]) << 16) |
+           (static_cast<uint64_t>(hash[3]) << 24) |
+           (static_cast<uint64_t>(hash[4]) << 32) |
+           (static_cast<uint64_t>(hash[5]) << 40) |
+           (static_cast<uint64_t>(hash[6]) << 48) |
+           (static_cast<uint64_t>(hash[7]) << 56);
+  }
+
+  // Serialize ChannelState to CXS bytes for signing (must match Rust's
+  // serialize_cxs)
   static x23::Vec<uint8_t> serialize_state(uint64_t channel_id,
-                                            int128_t balance_a,
-                                            int128_t balance_b,
-                                            uint64_t state_nonce) {
+                                           int128_t balance_a,
+                                           int128_t balance_b,
+                                           uint64_t state_nonce)
+  {
     payment_channel::ChannelState state{
         .channel_id = channel_id,
         .balance_a = to_xdr(balance_a),
         .balance_b = to_xdr(balance_b),
         .nonce = state_nonce,
     };
-    return x23::serialize(state);
+    return x23::serialize_cxs(state);
   }
 
   // Sign a state update with both parties
-  std::pair<Ed25519Signature, Ed25519Signature>
-  sign_state(uint64_t channel_id, int128_t balance_a, int128_t balance_b,
-             uint64_t state_nonce) {
+  std::pair<Ed25519Signature, Ed25519Signature> sign_state(uint64_t channel_id,
+                                                           int128_t balance_a,
+                                                           int128_t balance_b,
+                                                           uint64_t state_nonce)
+  {
     auto msg = serialize_state(channel_id, balance_a, balance_b, state_nonce);
     Ed25519Signature sig_a = ed25519_sign(party_a_secret_, msg);
     Ed25519Signature sig_b = ed25519_sign(party_b_secret_, msg);
@@ -144,13 +184,15 @@ protected:
 
   // Mint tokens to a wallet
   void mint_tokens(const ContractAddress &wallet, uint128_t amount,
-                   const Ed25519SecretKey &secret_key) {
+                   const Ed25519SecretKey &secret_key)
+  {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
     Calldata mint_calldata =
         x23::serialize(kERC20Address, erc20_meta::entrypoint<"mint">(),
                        GasAmount{UINT64_MAX},
-                       erc20_meta::make_calldata<"mint">(wallet, to_xdr(amount)));
+                       erc20_meta::make_calldata<"mint">(wallet,
+                                                         to_xdr(amount)));
     Ed25519Signature mint_sig = ed25519_sign(secret_key, mint_calldata);
 
     auto &wallet_client =
@@ -163,10 +205,9 @@ protected:
                     .invocation = wallet_client.make_invocation<"do_action">(
                         UINT64_MAX, mint_sig, mint_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -176,17 +217,22 @@ protected:
     advance_block();
   }
 
-  // Transfer tokens from a wallet to payment channel contract
-  void transfer_to_pc(const ContractAddress &wallet, uint128_t amount,
-                      const Ed25519SecretKey &secret_key) {
+  // Approve payment channel contract to spend tokens from a wallet
+  void approve_pc(const ContractAddress &wallet, uint128_t amount,
+                  const Ed25519SecretKey &secret_key)
+  {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kPaymentChannelAddress,
-                                               to_xdr(amount)));
-    Ed25519Signature transfer_sig = ed25519_sign(secret_key, transfer_calldata);
+    // Use adjust_allowance to set the allowance (i128 can be positive to
+    // increase)
+    Calldata approve_calldata =
+        x23::serialize(kERC20Address,
+                       erc20_meta::entrypoint<"adjust_allowance">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"adjust_allowance">(
+                           kPaymentChannelAddress,
+                           to_xdr(static_cast<int128_t>(amount))));
+    Ed25519Signature approve_sig = ed25519_sign(secret_key, approve_calldata);
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -196,12 +242,11 @@ protected:
             .tx =
                 Transaction{
                     .invocation = wallet_client.make_invocation<"do_action">(
-                        UINT64_MAX, transfer_sig, transfer_calldata),
+                        UINT64_MAX, approve_sig, approve_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -212,16 +257,16 @@ protected:
   }
 
   // Open a channel via wallet A
-  uint64_t open_channel(int128_t amount,
-                        uint64_t dispute_period = kTestDisputePeriod) {
+  uint64_t open_channel(int128_t amount, uint64_t salt = 0)
+  {
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
 
     Calldata open_calldata = x23::serialize(
         kPaymentChannelAddress, pc_meta::entrypoint<"open_channel">(),
         GasAmount{UINT64_MAX},
-        pc_meta::make_calldata<"open_channel">(
-            party_a_pubkey_, kWalletAAddress, party_b_pubkey_, kWalletBAddress,
-            kERC20Address, to_xdr(amount), dispute_period));
+        pc_meta::make_calldata<"open_channel">(party_a_pubkey_, party_b_pubkey_,
+                                               kWalletBAddress, kERC20Address,
+                                               to_xdr(amount), salt));
     Ed25519Signature open_sig = ed25519_sign(party_a_secret_, open_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -231,10 +276,9 @@ protected:
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, open_sig, open_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     EXPECT_TRUE(res.is_root_success());
@@ -243,19 +287,22 @@ protected:
     EXPECT_TRUE(handler.emit_events()());
     advance_block();
 
-    // Return channel ID (first channel is ID 1)
-    return 1;
+    // Compute and return the channel ID (same algorithm as the contract)
+    return compute_channel_id(salt);
   }
 
   // Join a channel via wallet B
   ExecResult join_channel(uint64_t channel_id, int128_t amount,
-                          bool advance_after = true) {
+                          bool advance_after = true)
+  {
     using pc_meta = ContractTraitMeta<payment_channel::PaymentChannel>;
 
-    Calldata join_calldata = x23::serialize(
-        kPaymentChannelAddress, pc_meta::entrypoint<"join_channel">(),
-        GasAmount{UINT64_MAX},
-        pc_meta::make_calldata<"join_channel">(channel_id, to_xdr(amount)));
+    Calldata join_calldata =
+        x23::serialize(kPaymentChannelAddress,
+                       pc_meta::entrypoint<"join_channel">(),
+                       GasAmount{UINT64_MAX},
+                       pc_meta::make_calldata<"join_channel">(channel_id,
+                                                              to_xdr(amount)));
     Ed25519Signature join_sig = ed25519_sign(party_b_secret_, join_calldata);
 
     auto handler = make_new_system_call_handler(
@@ -265,10 +312,9 @@ protected:
                     .invocation = wallet_b_client_.make_invocation<"do_action">(
                         UINT64_MAX, join_sig, join_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
@@ -287,8 +333,10 @@ protected:
   // Close channel with signed state
   ExecResult close_channel(uint64_t channel_id, int128_t balance_a,
                            int128_t balance_b, uint64_t state_nonce,
-                           bool advance_after = true) {
-    auto [sig_a, sig_b] = sign_state(channel_id, balance_a, balance_b, state_nonce);
+                           bool advance_after = true)
+  {
+    auto [sig_a, sig_b] =
+        sign_state(channel_id, balance_a, balance_b, state_nonce);
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -298,10 +346,9 @@ protected:
                         UINT64_MAX, channel_id, to_xdr(balance_a),
                         to_xdr(balance_b), state_nonce, sig_a, sig_b),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
@@ -320,8 +367,10 @@ protected:
   // Dispute with a newer signed state
   ExecResult dispute(uint64_t channel_id, int128_t balance_a,
                      int128_t balance_b, uint64_t state_nonce,
-                     bool advance_after = true) {
-    auto [sig_a, sig_b] = sign_state(channel_id, balance_a, balance_b, state_nonce);
+                     bool advance_after = true)
+  {
+    auto [sig_a, sig_b] =
+        sign_state(channel_id, balance_a, balance_b, state_nonce);
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -331,10 +380,9 @@ protected:
                         UINT64_MAX, channel_id, to_xdr(balance_a),
                         to_xdr(balance_b), state_nonce, sig_a, sig_b),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
@@ -351,18 +399,19 @@ protected:
   }
 
   // Finalize a channel after dispute period
-  ExecResult finalize(uint64_t channel_id, bool advance_after = true) {
+  ExecResult finalize(uint64_t channel_id, bool advance_after = true)
+  {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
-                    .invocation = pc_client_.make_invocation<"finalize">(
-                        UINT64_MAX, channel_id),
+                    .invocation =
+                        pc_client_.make_invocation<"finalize">(UINT64_MAX,
+                                                               channel_id),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
@@ -379,24 +428,25 @@ protected:
   }
 
   // Advance multiple blocks
-  void advance_blocks(int count) {
+  void advance_blocks(int count)
+  {
     for (int i = 0; i < count; i++) {
       advance_block();
     }
   }
 
-  void initialize_payment_channel() {
+  void initialize_payment_channel()
+  {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
-                    .invocation =
-                        pc_client_.make_invocation<"initialize">(UINT64_MAX),
+                    .invocation = pc_client_.make_invocation<"initialize">(
+                        UINT64_MAX, kTestDisputePeriod),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 0}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 0}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -405,7 +455,8 @@ protected:
     advance_block();
   }
 
-  void initialize_erc20() {
+  void initialize_erc20()
+  {
     // Wallet A is set as owner of ERC20 (has minting privileges)
     // Both wallets can mint for testing purposes
     auto handler = make_new_system_call_handler(
@@ -415,10 +466,9 @@ protected:
                     .invocation = erc20_client_.make_invocation<"initialize">(
                         UINT64_MAX, kWalletAAddress),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 1}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 1}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -427,7 +477,8 @@ protected:
     advance_block();
   }
 
-  void initialize_wallet_a() {
+  void initialize_wallet_a()
+  {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -436,10 +487,9 @@ protected:
                         wallet_a_client_.make_invocation<"initialize">(
                             UINT64_MAX, party_a_pubkey_),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 2}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 2}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -448,7 +498,8 @@ protected:
     advance_block();
   }
 
-  void initialize_wallet_b() {
+  void initialize_wallet_b()
+  {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -457,10 +508,9 @@ protected:
                         wallet_b_client_.make_invocation<"initialize">(
                             UINT64_MAX, party_b_pubkey_),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 3}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 3}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -473,22 +523,24 @@ protected:
 };
 
 // Test opening a channel, joining, and basic close flow
-TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose) {
+TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
   // Mint tokens to both wallets
   mint_tokens(kWalletAAddress, deposit_a, party_a_secret_);
-  mint_tokens(kWalletAAddress, deposit_b, party_a_secret_); // Mint for B via A (owner)
+  mint_tokens(kWalletAAddress, deposit_b,
+              party_a_secret_); // Mint for B via A (owner)
 
   // Transfer B's tokens to B's wallet first
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -499,10 +551,9 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -513,12 +564,11 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose) {
   }
 
   // Transfer tokens to payment channel contract
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   // Open channel
   uint64_t channel_id = open_channel(deposit_a);
-  ASSERT_EQ(channel_id, 1);
 
   // Join channel
   auto join_result = join_channel(channel_id, deposit_b);
@@ -537,7 +587,8 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose) {
 }
 
 // Test dispute mechanism - party B challenges with newer state
-TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState) {
+TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 1000;
 
@@ -545,11 +596,11 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState) {
   mint_tokens(kWalletAAddress, deposit_a + deposit_b, party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -560,10 +611,9 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -573,8 +623,8 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   // Open and join channel
   uint64_t channel_id = open_channel(deposit_a);
@@ -598,7 +648,8 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState) {
 }
 
 // Test that finalize fails before dispute period ends
-TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod) {
+TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
@@ -606,11 +657,11 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod) {
   mint_tokens(kWalletAAddress, deposit_a + deposit_b, party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -621,10 +672,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -634,8 +684,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   uint64_t channel_id = open_channel(deposit_a);
   join_channel(channel_id, deposit_b);
@@ -649,7 +699,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod) {
 }
 
 // Test that dispute fails after dispute period ends
-TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod) {
+TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
@@ -657,11 +708,11 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod) {
   mint_tokens(kWalletAAddress, deposit_a + deposit_b, party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -672,10 +723,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -685,8 +735,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   uint64_t channel_id = open_channel(deposit_a);
   join_channel(channel_id, deposit_b);
@@ -701,7 +751,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod) {
 }
 
 // Test that dispute with lower/equal nonce fails
-TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState) {
+TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
@@ -709,11 +760,11 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState) {
   mint_tokens(kWalletAAddress, deposit_a + deposit_b, party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -724,10 +775,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -737,8 +787,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   uint64_t channel_id = open_channel(deposit_a);
   join_channel(channel_id, deposit_b);
@@ -756,7 +806,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState) {
 }
 
 // Test that double finalize fails
-TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock) {
+TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
@@ -764,11 +815,11 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock) {
   mint_tokens(kWalletAAddress, deposit_a + deposit_b, party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -779,10 +830,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -792,8 +842,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b, party_b_secret_);
 
   uint64_t channel_id = open_channel(deposit_a);
   join_channel(channel_id, deposit_b);
@@ -814,7 +864,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock) {
 }
 
 // Test that channel cannot be joined twice
-TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice) {
+TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
+{
   const int128_t deposit_a = 1000;
   const int128_t deposit_b = 500;
 
@@ -822,11 +873,11 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice) {
   mint_tokens(kWalletAAddress, deposit_a + (deposit_b * 2), party_a_secret_);
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    Calldata transfer_calldata = x23::serialize(
-        kERC20Address, erc20_meta::entrypoint<"transfer">(),
-        GasAmount{UINT64_MAX},
-        erc20_meta::make_calldata<"transfer">(kWalletBAddress,
-                                               to_xdr(uint128_t{deposit_b * 2})));
+    Calldata transfer_calldata =
+        x23::serialize(kERC20Address, erc20_meta::entrypoint<"transfer">(),
+                       GasAmount{UINT64_MAX},
+                       erc20_meta::make_calldata<"transfer">(
+                           kWalletBAddress, to_xdr(uint128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata);
 
@@ -837,10 +888,9 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice) {
                     .invocation = wallet_a_client_.make_invocation<"do_action">(
                         UINT64_MAX, transfer_sig, transfer_calldata),
                     .uniquifier =
-                        Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = nonce_++}}},
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}},
         *wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -850,8 +900,8 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice) {
     advance_block();
   }
 
-  transfer_to_pc(kWalletAAddress, deposit_a, party_a_secret_);
-  transfer_to_pc(kWalletBAddress, deposit_b * 2, party_b_secret_);
+  approve_pc(kWalletAAddress, deposit_a, party_a_secret_);
+  approve_pc(kWalletBAddress, deposit_b * 2, party_b_secret_);
 
   uint64_t channel_id = open_channel(deposit_a);
 

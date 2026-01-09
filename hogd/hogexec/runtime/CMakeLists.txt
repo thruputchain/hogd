@@ -91,11 +91,6 @@ add_library(runtime_test_objects OBJECT
   fibonacci_test.cc
   gas_api_test.cc
   hash_buffers_test.cc
-<<<<<<< HEAD
-  htlc_integration_test.cc
-  payment_channel_integration_test.cc
-=======
->>>>>>> main
   sha256_incremental_test.cc
   interleaving_tests.cc
   instantiate_test.cc
