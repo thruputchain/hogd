@@ -1,11 +1,17 @@
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <print>
-
-#include <sys/socket.h>
-
-#include "x23/rpc.h"
-#include "x23/sockio.h"
+#include <string>
+#include <utility>
 
 #include "tests/xdrtest.hh"
+#include "x23/async.h"
+#include "x23/err.h"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/threadpool.h"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 using namespace std::string_literals;

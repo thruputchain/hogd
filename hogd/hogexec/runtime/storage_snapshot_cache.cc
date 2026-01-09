@@ -25,7 +25,10 @@ StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
   : block_id_(block_id), db_proxy_(db_proxy)
 {}
 
-StorageSnapshotCache::~StorageSnapshotCache() = default;
+StorageSnapshotCache::~StorageSnapshotCache()
+{
+  release_db_tip();
+}
 
 SystemStatus<std::optional<DeployedContractHash>>
 StorageSnapshotCache::try_get_deployed_contract_hash(

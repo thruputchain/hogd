@@ -283,7 +283,7 @@ SystemCallHandler::try_commit_transaction()
     last_frame_.value().extract_events();
 
     transaction_committed_or_aborted_ = true;
-    return ExecResult::ExecResultOK;
+    return ExecResult::ExecResultTxRootFrameReverted;
   }
 
   auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
@@ -296,6 +296,7 @@ SystemCallHandler::try_commit_transaction()
   bool result = r.value();
   // check if any of the 2pc database operations failed
   if (!result) {
+    two_phase_commit_failed_ = true;
 
     auto abort_status = abort_transaction();
     if (!abort_status.has_value()) {
@@ -509,7 +510,8 @@ SystemCallHandler::get_calldata() const
 NondeterministicProposalData const &
 SystemCallHandler::get_proposal_data() const
 {
-  // Either succeeded on the root tx, or deterministic error during execution.
+  // Either succeeded on the root tx (with or without a revert)
+  // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
   assert(cumulative_invoke_result_.has_readable_proposal_data());
   return std::visit([](auto const &arg) -> NondeterministicProposalData const

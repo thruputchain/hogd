@@ -129,7 +129,7 @@ def map_type_from_typespec(typespec):
         return "int32_t"
     elif t == "unsigned hyper":
         return "uint64_t"
-    elif t == "signed hyper":
+    elif t == "hyper":
         return "int64_t"
     elif t == "bool":
         return "bool"

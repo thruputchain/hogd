@@ -238,9 +238,10 @@ unsafe extern "C" fn test_get_simple_add_contract_get_fn(
 }
 
 unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
-    _userctx: *mut c_void,
+    userctx: *mut c_void,
     hash: *const u8,
 ) -> ContractGetResult {
+    assert!(!userctx.is_null());
     let wasm_bytes = load_wasm_file("fibonacci.wasm");
 
     // Check that the contract hash is [1;32]. If not, return kUnrecoverable error.
@@ -259,19 +260,20 @@ unsafe extern "C" fn test_get_fibonacci_contract_get_fn(
 fn test_create_runtime() {
     unsafe {
         let global_context = new_wasmtime_global_context(8);
-        println!("global_context created");
         let context = new_wasmtime_context(
             test_get_simple_add_contract_get_fn,
             global_context,
         );
-        println!("context created");
         // Create a dummy contract hash
         let contract_hash = [0u8; 32];
+
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
 
         // Create a runtime with null host context (no syscalls needed for basic test)
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -283,6 +285,8 @@ fn test_create_runtime() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -296,9 +300,12 @@ fn test_get_memory() {
         );
         let contract_hash = [0u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -319,6 +326,8 @@ fn test_get_memory() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -332,9 +341,12 @@ fn test_invoke_function() {
         );
         let contract_hash = [1u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -355,6 +367,8 @@ fn test_invoke_function() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -368,9 +382,12 @@ fn test_gas_metering() {
         );
         let contract_hash = [1u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -390,6 +407,8 @@ fn test_gas_metering() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -435,9 +454,12 @@ fn test_multiple_runtimes() {
         let contract_hash = [1u8; 32];
 
         // Create multiple runtimes from the same context
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime1 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -446,7 +468,7 @@ fn test_multiple_runtimes() {
 
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -460,6 +482,8 @@ fn test_multiple_runtimes() {
         free_wasmtime_runtime(runtime2);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -475,9 +499,12 @@ fn test_fibonacci_computation() {
         );
         let contract_hash = [1u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -504,6 +531,8 @@ fn test_fibonacci_computation() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -517,9 +546,12 @@ fn test_fibonacci_computation_overflow() {
         );
         let contract_hash = [1u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         let runtime = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -545,6 +577,8 @@ fn test_fibonacci_computation_overflow() {
         free_wasmtime_runtime(runtime);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
 
@@ -577,10 +611,13 @@ fn test_module_cache() {
         );
         let contract_hash = [0u8; 32];
 
+        let context_ptr: *mut c_void =
+            core::mem::transmute(Box::into_raw(Box::new(1)));
+
         // Create first runtime - this should compile and cache the module
         let runtime1 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -592,7 +629,7 @@ fn test_module_cache() {
         // Create second runtime with same hash - should use cached module
         let runtime2 = new_wasmtime_runtime(
             contract_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -605,7 +642,7 @@ fn test_module_cache() {
         let fibonacci_hash = [1u8; 32];
         let runtime3 = new_wasmtime_runtime(
             fibonacci_hash.as_ptr(),
-            std::ptr::null_mut(),
+            context_ptr,
             false,
             context,
         )
@@ -631,5 +668,7 @@ fn test_module_cache() {
         free_wasmtime_runtime(runtime3);
         free_wasmtime_context(context);
         free_wasmtime_global_context(global_context);
+
+        let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
