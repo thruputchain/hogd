@@ -16,6 +16,8 @@ concept is_syscall_meta = requires(SyscallMeta syscall_meta) {
   syscall_meta.kInputNames;
   // should deduce to an array of string_view
   syscall_meta.kOutputNames;
+  // should deduce to an array of SyscallErrorCode
+  syscall_meta.kAllowedErrors;
 
   // Can the syscall return to the wasm environment
   { syscall_meta.kCanReturn } -> std::convertible_to<bool>;
