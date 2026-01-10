@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -432,6 +434,16 @@ protected:
   using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;
   using txs_client_t = ContractTraitClient<txs_roundtrip::TxsRoundtrip>;
 
+  template<typename S>
+  S check_result(HostFnStatus<SyscallStatus<std::optional<S>>> res)
+  {
+    if (!res.has_value() || !res.value().has_value() ||
+        !res.value().value().has_value()) {
+      throw std::runtime_error("Failed to invoke method");
+    }
+    return res.value().value().value();
+  };
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   template<StringLiteral MethodName, typename T>
   void roundtrip_test(T const &value, SystemCallHandler &handler, bool &success)
@@ -441,10 +453,8 @@ protected:
       // CXS
       auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
       ASSERT_TRUE(calldata.has_value());
-      auto [res, _gas] = cxs_client_.invoke<MethodName>(handler, *calldata);
-      ASSERT_TRUE(res.has_value());
-      ASSERT_TRUE(res.value().has_value());
-      auto return_buf = res.value().value();
+      auto [res, _gas] = cxs_client_.invoke_opt<MethodName>(handler, *calldata);
+      auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kCxs>::deserialize<T>(
               std::as_bytes(std::span(return_buf)));
@@ -455,10 +465,8 @@ protected:
       // TXS
       auto calldata = Serializer<SerializationFormat::kTxs>::serialize(value);
       ASSERT_TRUE(calldata.has_value());
-      auto [res, _gas] = txs_client_.invoke<MethodName>(handler, *calldata);
-      ASSERT_TRUE(res.has_value());
-      ASSERT_TRUE(res.value().has_value());
-      auto return_buf = res.value().value();
+      auto [res, _gas] = txs_client_.invoke_opt<MethodName>(handler, *calldata);
+      auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kTxs>::deserialize<T>(
               std::as_bytes(std::span(return_buf)));

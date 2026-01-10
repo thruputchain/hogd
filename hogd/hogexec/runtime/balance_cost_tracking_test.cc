@@ -74,16 +74,13 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
                  to_xdr(static_cast<uint128_t>(kTransferAmount)));
 
-             if (!r_transfer.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             if (!r_transfer.value().has_value() ||
-                 !r_transfer.value().value().is_ok()) {
+             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+                 !r_transfer.value().value().has_value() ||
+                 !r_transfer.value().value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -163,16 +160,12 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
                  to_xdr(static_cast<uint128_t>(kFirstTransferAmount)));
 
-             if (!r_transfer.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             if (!r_transfer.value().has_value() ||
-                 !r_transfer.value().value().is_ok()) {
+             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+                 !r_transfer.value().value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -184,16 +177,12 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
              auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
                  GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-             auto [r_transfer, _g] = native_token_client.invoke<"transfer">(
+             auto [r_transfer, _g] = native_token_client.invoke_opt<"transfer">(
                  handler, kReceiverAddr,
                  to_xdr(static_cast<uint128_t>(kSecondTransferAmount)));
 
-             if (!r_transfer.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-
-             if (!r_transfer.value().has_value() ||
-                 !r_transfer.value().value().is_ok()) {
+             if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
+                 !r_transfer.value().value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 

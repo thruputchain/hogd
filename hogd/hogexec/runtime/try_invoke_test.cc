@@ -2150,6 +2150,19 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_long);
 }
 
+namespace {
+template<typename T>
+T
+check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
+{
+  if (!res.has_value() || !res.value().has_value() ||
+      !res.value().value().has_value()) {
+    throw std::runtime_error("Failed to invoke method");
+  }
+  return res.value().value().value();
+};
+} // namespace
+
 TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 {
   if (GetParam() == TestDB::kMockInMemory) {
@@ -2194,10 +2207,12 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              uint128_t amount = write_cost;
 
              auto [r_transfer, g_transfer] =
-                 native_token_client.invoke<"transfer">(handler, receiver_addr,
-                                                        to_xdr(amount));
+                 native_token_client.invoke_opt<"transfer">(handler,
+                                                            receiver_addr,
+                                                            to_xdr(amount));
 
-             if (!r_transfer.has_value()) {
+             auto transfer_result = check_result(r_transfer);
+             if (!transfer_result.is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -2212,13 +2227,13 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              }
 
              auto [r_balance, g_balance] =
-                 native_token_client.invoke<"get_balance">(handler);
-             if ((!r_balance.has_value()) || !r_balance.value().has_value() ||
-                 !r_balance.value().value().is_ok()) {
+                 native_token_client.invoke_opt<"get_balance">(handler);
+             auto balance_result = check_result(r_balance);
+             if (!balance_result.is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (from_xdr(r_balance.value().value().ok()) != 0) {
+             if (from_xdr(balance_result.ok()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
