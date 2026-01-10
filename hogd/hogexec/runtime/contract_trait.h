@@ -193,25 +193,6 @@ public:
     return make_encoding(return_value);
   }
 
-  // Native contract is responsible for handling errors related to failing to
-  // parse calldata. This behavior mirrors the behavior implemented in the SDK.
-  /*template<StringLiteral Name>
-  static auto decode_calldata(std::span<const std::byte> data)
-  {
-    using args_type =
-        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
-    return [data] -> SyscallStatus<args_type> {
-      auto out =
-          Serializer<kSerializationFormat>::template deserialize<args_type>(
-              data);
-      if (!out.has_value()) {
-        return SyscallError{
-            SyscallErrorCode::kSyscallErrorCodeCalldataParseError};
-      }
-      return *out;
-    }();
-  } */
-
   // Returns nullopt if decoding fails.
   template<StringLiteral Name>
   static auto decode_return(std::span<const std::byte> data,
