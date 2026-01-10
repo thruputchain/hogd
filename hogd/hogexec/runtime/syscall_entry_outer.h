@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -15,6 +17,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -91,6 +94,24 @@ struct tuple_element<Idx, hogd::TupleIndexSequence<Is...>> {
 } // namespace std
 
 namespace hogd {
+
+// Helper to check if a syscall error code is in the allowed list for a syscall.
+// Used in debug builds to validate that syscalls only return documented errors.
+template<typename SyscallMeta>
+constexpr bool
+is_allowed_error_code(SyscallErrorCode code)
+{
+  // kSyscallErrorCodeNone is always allowed (success case)
+  // kSyscallErrorCodeFault is allowed as all syscalls can be given an invalid
+  // input
+  if (code == SyscallErrorCode::kSyscallErrorCodeNone ||
+      code == SyscallErrorCode::kSyscallErrorCodeFault) {
+    return true;
+  }
+
+  return std::ranges::any_of(SyscallMeta::kAllowedErrors,
+                             [code](auto allowed) { return code == allowed; });
+}
 
 // Creates an index sequence for a given set of args, denoting
 // at what indices (into the list of uint64_t syscall inputs)
@@ -438,8 +459,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
-             -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
+  auto [syscall_result,
+        gas_consumed] = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
+      -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
@@ -451,6 +473,28 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
                                              runtime.get_available_gas()},
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+
+  if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
+    // If the syscall cannot return to the wasm environment but the syscall
+    // tried to return an error code, abort the entire call frame.
+    if (runtime_log_level(LogLevel::kTrace)) {
+      trace("Syscall {} attempted to return an error code {} but cannot return",
+            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+    }
+    return {HostFnError{HostFnErrorCode::kHostExit}, gas_consumed};
+  }
+
+  if constexpr (is_debug_build()) {
+    // In debug builds, verify that the syscall only returns documented error
+    // codes. This helps catch cases where a syscall returns an error that isn't
+    // documented in syscalls.yaml.
+    if (syscall_result.has_value() &&
+        !is_allowed_error_code<SyscallMeta>(syscall_result.value())) {
+      panic("Syscall {} returned undocumented error code {}",
+            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+    }
+  }
+  return {syscall_result, gas_consumed};
 }
 
 } // namespace hogd

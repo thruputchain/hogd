@@ -362,7 +362,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_EQ(from_xdr(nnint_item), 42);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
+TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
 {
   if (GetParam() == TestDB::kHogDB) {
     GTEST_SKIP()

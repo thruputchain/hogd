@@ -11,8 +11,11 @@ CWD=$(pwd)
 rm -rf $CWD/tmp
 mkdir -p $CWD/tmp
 
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
-$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24 0 | sed 's/^/Default: /'
+
+rm -rf $CWD/tmp
+mkdir -p $CWD/tmp
+
+$BUILD_DIR/hogd/hogdb/hogdb_bench $CWD/tmp manytoone_payments 1000000 24 1 | sed 's/^/ReplayCache: /'
 
 rm -rf $CWD/tmp

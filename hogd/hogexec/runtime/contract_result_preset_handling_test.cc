@@ -96,11 +96,13 @@ make_caller_contract()
   builder.add<CallerContract, "call_return_ok_void">(
       [](SystemCallHandler &handler) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] = client.template invoke<"return_ok_void">(handler);
-        if (!result.has_value() || !result.value().has_value()) {
+        auto [result, _gas] =
+            client.template invoke_opt<"return_ok_void">(handler);
+        if (!result.has_value() || !result.value().has_value() ||
+            !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (!result.value().value().is_ok()) {
+        if (!result.value().value().value().is_ok()) {
           ADD_FAILURE() << "Return value is not ok";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -111,15 +113,17 @@ make_caller_contract()
   builder.add<CallerContract, "call_return_ok_int">(
       [](SystemCallHandler &handler) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] = client.template invoke<"return_ok_int">(handler);
-        if (!result.has_value() || !result.value().has_value()) {
+        auto [result, _gas] =
+            client.template invoke_opt<"return_ok_int">(handler);
+        if (!result.has_value() || !result.value().has_value() ||
+            !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (!result.value().value().is_ok()) {
+        if (!result.value().value().value().is_ok()) {
           ADD_FAILURE() << "Return value is not ok";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (result.value().value().ok() != 123) {
+        if (result.value().value().value().ok() != 123) {
           ADD_FAILURE() << "Return value is not the expected value";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -131,11 +135,12 @@ make_caller_contract()
       [](SystemCallHandler &handler) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
         auto [result, _gas] =
-            client.template invoke<"return_err_void">(handler);
-        if (!result.has_value() || !result.value().has_value()) {
+            client.template invoke_opt<"return_err_void">(handler);
+        if (!result.has_value() || !result.value().has_value() ||
+            !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (!result.value().value().is_err()) {
+        if (!result.value().value().value().is_err()) {
           ADD_FAILURE() << "Return value is not err";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -146,15 +151,17 @@ make_caller_contract()
   builder.add<CallerContract, "call_return_err_int">(
       [](SystemCallHandler &handler) -> InvokeStatus<void> {
         test_contract_client_t client(kTestContractAddr);
-        auto [result, _gas] = client.template invoke<"return_err_int">(handler);
-        if (!result.has_value() || !result.value().has_value()) {
+        auto [result, _gas] =
+            client.template invoke_opt<"return_err_int">(handler);
+        if (!result.has_value() || !result.value().has_value() ||
+            !result.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (!result.value().value().is_err()) {
+        if (!result.value().value().value().is_err()) {
           ADD_FAILURE() << "Return value is not err";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (result.value().value().err() != 456) {
+        if (result.value().value().value().err() != 456) {
           ADD_FAILURE() << "Return err value is not the expected value";
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

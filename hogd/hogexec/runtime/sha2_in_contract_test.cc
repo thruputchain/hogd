@@ -41,6 +41,8 @@ protected:
   ContractAddress contract_addr_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // This test demonstrates that winch is broken on arch64
 //
 // [[package]]
@@ -111,5 +113,7 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

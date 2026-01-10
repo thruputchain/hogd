@@ -110,7 +110,7 @@ process_contract(std::string const &contract_name, std::string const &filename)
 } // namespace hogd
 
 int
-main(int argc, char *argv[])
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   if (argc < 2) {
     std::println(stderr, "Usage: {} <wasm_file1> [wasm_file2] ...", argv[0]);

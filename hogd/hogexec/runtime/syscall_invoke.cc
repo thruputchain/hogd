@@ -118,6 +118,12 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer,
                      bool input_revert_frame)
 {
+  // If the return buffer is too large, we return a deterministic error`
+  // equivalent to a wasm `unreachable` instruction.
+  // This is instead of return a kInvalidSyscallInput error.  The generated
+  // contract bindings in the SDK for this call has a signature of (&[u8], bool)
+  // -> !, which could lead to UB in the contract code if that function then
+  // returns an error.
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {HostFnError{HostFnErrorCode::kHostExit},
             static_cast<int32_t>(

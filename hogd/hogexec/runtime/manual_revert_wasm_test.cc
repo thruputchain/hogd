@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -12,6 +14,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -54,6 +57,20 @@ protected:
   ContractAddress contract_addr_;
 
   constexpr static GasAmount kSufficientGas = 100000;
+
+  template<typename T>
+  T check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
+  {
+    if (!res.has_value() || !res.value().has_value() ||
+        !res.value().value().has_value()) {
+      ADD_FAILURE() << "Function call should have succeeded";
+      throw std::runtime_error("Function call should have succeeded");
+    }
+    if (!res.value().value().has_value()) {
+      ADD_FAILURE() << "Returned buffer decode should have succeeded";
+    }
+    return res.value().value().value();
+  }
 };
 
 //
@@ -80,26 +97,16 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              // Call test_basic_manual_revert with should_revert=true
              auto [res, _gas] =
-                 client.invoke<"test_basic_manual_revert">(handler, true);
-             if (!res.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // if (res.value().error().code() !=
-             // SyscallErrorCode::kFrameReverted) {
-             //   ADD_FAILURE() << "Function call should have succeeded and
-             //   reverted"; return
-             //   InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             // }
-             if (!res.value().has_value()) {
-               ADD_FAILURE() << "Function call should have succeeded";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             if (res.value().value().is_ok()) {
+                 client.invoke_opt<"test_basic_manual_revert">(handler, true);
+
+             auto result = check_result(res);
+
+             if (!result.is_err()) {
                ADD_FAILURE()
                    << "Function call should have returned a contract error";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             auto err = res.value().value().err();
+             auto const &err = result.err();
              auto expected_err = manual_revert_test::Error(
                  manual_revert_test::ErrorType::Contract);
              expected_err.contract_error() = manual_revert_test::ContractError(
@@ -117,19 +124,17 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
              // The manual revert should have succeeded (no error)
              // and storage should be reverted (tested by check_storage_exists)
              auto [storage_check, _gas2] =
-                 client.invoke<"check_storage_exists">(handler);
-             if (!storage_check.has_value()) {
-               ADD_FAILURE()
-                   << "Function call should have succeeded and returned a bool";
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
+                 client.invoke_opt<"check_storage_exists">(handler);
 
              // Storage should not exist due to manual revert
-             if (!storage_check.value().value().is_ok()) {
+             if (!storage_check.has_value() ||
+                 !storage_check.value().has_value() ||
+                 !storage_check.value().value().has_value() ||
+                 !storage_check.value().value().value().is_ok()) {
                ADD_FAILURE() << "Function call encountered unexpected error";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (storage_check.value().value().ok()) {
+             if (storage_check.value().value().value().ok()) {
                ADD_FAILURE() << "Storage check should have returned false "
                                 "(revert should wipe changes)";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -199,24 +204,25 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              // Call test_basic_manual_revert with should_revert=false
              auto [res, _gas] =
-                 client.invoke<"test_basic_manual_revert">(handler, false);
-             if (!res.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             if (!res.value().has_value()) {
+                 client.invoke_opt<"test_basic_manual_revert">(handler, false);
+             if (!res.has_value() || !res.value().has_value() ||
+                 !res.value().value().has_value() ||
+                 !res.value().value().value().is_ok()) {
                ADD_FAILURE() << "Function call should have succeeded";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Storage should exist because no revert occurred
              auto [storage_check, _gas2] =
-                 client.invoke<"check_storage_exists">(handler);
-             if (!storage_check.has_value()) {
+                 client.invoke_opt<"check_storage_exists">(handler);
+             if (!storage_check.has_value() ||
+                 !storage_check.value().has_value() ||
+                 !storage_check.value().value().has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Storage should exist (no revert)
-             if (!storage_check.value().value().is_ok()) {
+             if (!storage_check.value().value().value().is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -281,12 +287,12 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              // Call test_nested_manual_revert with child_should_revert=true
              auto [res, _gas] =
-                 client.invoke<"test_nested_manual_revert">(handler, true);
-             if (!res.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             if (!res.value().has_value()) {
-               ADD_FAILURE() << "Function call should have succeeded";
+                 client.invoke_opt<"test_nested_manual_revert">(handler, true);
+             auto result = check_result(res);
+
+             if (!result.is_err()) {
+               ADD_FAILURE()
+                   << "Function call should have returned a contract error";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -355,12 +361,12 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
                              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                // Call test_error_type_revert with specific error type
                auto [res, _gas] =
-                   client.invoke<"test_error_type_revert">(handler, error_type);
-               if (!res.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
-               if (!res.value().has_value()) {
-                 ADD_FAILURE() << "Function call should have succeeded";
+                   client.invoke_opt<"test_error_type_revert">(handler,
+                                                               error_type);
+               auto result = check_result(res);
+               if (!result.is_err()) {
+                 ADD_FAILURE()
+                     << "Function call should have returned a contract error";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -432,8 +438,11 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              // Call test_error_type_revert with error_type=0 (no error)
              auto [res, _gas] =
-                 client.invoke<"test_error_type_revert">(handler, 0U);
-             if (!res.has_value()) {
+                 client.invoke_opt<"test_error_type_revert">(handler, 0U);
+             auto result = check_result(res);
+             if (!result.is_ok()) {
+               ADD_FAILURE()
+                   << "Function call should have returned a contract error";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -502,12 +511,12 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                  NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                // Call test_storage_manual_revert with should_revert=true
                auto [res, _gas] =
-                   client.invoke<"test_storage_manual_revert">(handler, true);
-               if (!res.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
-               if (!res.value().has_value()) {
-                 ADD_FAILURE() << "Function call should have succeeded";
+                   client.invoke_opt<"test_storage_manual_revert">(handler,
+                                                                   true);
+               auto result = check_result(res);
+               if (!result.is_err()) {
+                 ADD_FAILURE()
+                     << "Function call should have returned a contract error";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -562,11 +571,10 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
                  NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                // Call test_storage_manual_revert with should_revert=false
                auto [res, _gas] =
-                   client.invoke<"test_storage_manual_revert">(handler, false);
-               if (!res.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
-               if (!res.value().has_value()) {
+                   client.invoke_opt<"test_storage_manual_revert">(handler,
+                                                                   false);
+               auto result = check_result(res);
+               if (!result.is_ok()) {
                  ADD_FAILURE() << "Function call should have succeeded";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }

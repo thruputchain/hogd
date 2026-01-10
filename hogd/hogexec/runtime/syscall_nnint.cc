@@ -38,6 +38,8 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   }
   output_current_add = status.value().value().second;
 
+  // If we load from the snapshot, we must have a set value.
+  assert(!input_force_load_from_snapshot || output_current_set_opt);
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
