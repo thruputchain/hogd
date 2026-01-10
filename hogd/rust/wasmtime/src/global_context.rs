@@ -116,7 +116,7 @@ impl WasmtimeGlobalContext {
     pub fn alloc_engine_index(&self) -> usize {
         static ALLOCATOR: AtomicUsize = AtomicUsize::new(0);
         thread_local! {
-            static THREAD_LOCAL_ALLOC: Cell<Option<usize>> = Cell::new(None);
+            static THREAD_LOCAL_ALLOC: Cell<Option<usize>> = const { Cell::new(None) };
         }
 
         THREAD_LOCAL_ALLOC.with(|cell| {
@@ -195,7 +195,7 @@ impl WasmtimeGlobalContext {
             (0..engine_count).map(|_| Self::new_engine()).collect();
         // Create one linker per engine
         let linkers: Vec<Linker<*mut c_void>> =
-            engines.iter().map(|engine| Linker::new(engine)).collect();
+            engines.iter().map(Linker::new).collect();
         Self {
             engines,
             instance_pre_cache,

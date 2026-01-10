@@ -46,6 +46,8 @@ protected:
   }
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // Transfer a large number of units of native token to an address that doesn't
 // exist. This should succeed, but then after the block closes the value should
 // be discounted the balance cost.
@@ -394,5 +396,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   int128_t receiver_balance = from_xdr(receiver_balance_opt.value().nnint());
   EXPECT_EQ(receiver_balance, 0);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

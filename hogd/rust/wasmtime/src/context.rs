@@ -76,7 +76,9 @@ impl WasmtimeContext {
         self.global_context.linker(self.engine_index)
     }
 
-    pub fn get_instance_pre(
+    /// # Safety
+    /// user_context must be a valid pointer to a HostCallContext
+    pub unsafe fn get_instance_pre(
         &mut self,
         hash: &[u8; 32],
         user_context: *mut c_void,
@@ -138,7 +140,7 @@ impl WasmtimeContext {
             instance_pre.clone(),
         );
 
-        return Ok(Some(instance_pre));
+        Ok(Some(instance_pre))
     }
 
     pub fn verify_contract(&self, contract_data: &[u8]) -> bool {

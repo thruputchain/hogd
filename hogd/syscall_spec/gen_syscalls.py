@@ -25,6 +25,32 @@ def load_known_primitive_types(spec: dict) -> list[str]:
     ]
 
 
+def validate_and_extract_error_codes(syscall: dict) -> list[str]:
+    """
+    Extract and validate error codes from a syscall specification.
+    Returns a list of valid error code names.
+    Raises ValueError if an invalid error code is found.
+    """
+    errors = syscall.get("errors", None)
+    if errors is None:
+        return []
+
+    error_codes = []
+    for error in errors:
+        code = error.get("code", None)
+        if code is None:
+            raise ValueError(
+                f"Syscall {syscall['name']}: error entry missing 'code' field"
+            )
+        if code in error_codes:
+            raise ValueError(
+                f"Syscall {syscall['name']}: duplicate error code '{code}'"
+            )
+        error_codes.append(code)
+
+    return error_codes
+
+
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -286,6 +312,10 @@ def gen_syscall_meta(syscall: dict) -> str:
     if "returns" in syscall and not syscall["returns"]:
         can_return = "false"
 
+    # Extract and validate error codes
+    error_codes = validate_and_extract_error_codes(syscall)
+    error_codes_cpp = [f"SyscallErrorCode::{code}" for code in error_codes]
+
     return f"""template<>
 struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static bool kIsReadOnlySyscall = {read_only};
@@ -300,6 +330,10 @@ struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static std::array<std::string_view, {len(syscall_output_names)}>
         kOutputNames = {{
         {", ".join(syscall_output_names)}
+    }};
+    constexpr static std::array<SyscallErrorCode, {len(error_codes_cpp)}>
+        kAllowedErrors = {{
+        {",\n        ".join(error_codes_cpp)}
     }};
 }};
 static_assert(is_syscall_meta<SyscallMeta<SyscallNo::k{name}>>);
@@ -318,9 +352,10 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
 #include <string_view>
 #include <array>
 
-#include "syscall.hh"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "syscall.hh"
+#include "syscall_error.hh"
 
 namespace hogd {{
 

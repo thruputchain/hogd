@@ -103,9 +103,10 @@ InvokeTX::update_balance_lock(Address const &addr)
       if constexpr (is_debug_build()) {
         ContractAddress contract_addr = addr.get_raw();
         assert(new_item.is_balance());
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
         trace("failed to lock balance item for address {}: {}",
               x23::show(contract_addr), *new_item.to_balance());
+        // NOLINTEND(bugprone-unchecked-optional-access)
       }
       return status.error();
     }
@@ -135,9 +136,10 @@ InvokeTX::update_balance_lock(Address const &addr)
   if (!status) {
     if constexpr (is_debug_build()) {
       ContractAddress contract_addr = addr.get_raw();
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      // NOLINTBEGIN(bugprone-unchecked-optional-access)
       trace("failed to modify lock for address {}: {}",
             x23::show(contract_addr), *last.change.get_raw_nnint128());
+      // NOLINTEND(bugprone-unchecked-optional-access)
     }
     return status.error();
   }

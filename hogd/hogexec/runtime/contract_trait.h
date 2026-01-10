@@ -235,7 +235,7 @@ public:
           trace("Decode Return Failed: Failed to deserialize return value");
           return std::nullopt;
         }
-        return *out;
+        return out;
       }
     }();
   }

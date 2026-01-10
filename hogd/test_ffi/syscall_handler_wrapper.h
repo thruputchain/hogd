@@ -13,6 +13,7 @@
 
 #include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -198,6 +199,17 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     if (!SyscallMeta::kCanReturn && inner_res.first.has_value()) {
       return {.result_code = 0,
               .panic = std::to_underlying(HostFnErrorCode::kHostExit)};
+    }
+
+    if constexpr (is_debug_build()) {
+      // In debug builds, verify that the syscall only returns documented error
+      // codes. This helps catch cases where a syscall returns an error that
+      // isn't documented in syscalls.yaml.
+      if (inner_res.first.has_value() &&
+          !is_allowed_error_code<SyscallMeta>(inner_res.first.value())) {
+        panic("Syscall {} returned undocumented error code {}",
+              SyscallMeta::kSyscallNo, x23::show(inner_res.first.value()));
+      }
     }
 
     return from_status(inner_res);

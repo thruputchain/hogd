@@ -89,6 +89,8 @@ struct IntTypeTestSyscallMeta {
                                                                    "out_2",
                                                                    "out_128"};
   constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
 };
 
 struct SpanTypeTestSyscallMeta {
@@ -98,6 +100,7 @@ struct SpanTypeTestSyscallMeta {
   constexpr static std::array<std::string_view, 1> kInputNames = {"span_in"};
   constexpr static std::array<std::string_view, 1> kOutputNames = {"span_out"};
   constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 static_assert(is_syscall_meta<IntTypeTestSyscallMeta>);
 static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
@@ -110,6 +113,7 @@ struct NoReturnSyscallMeta {
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};
   constexpr static bool kCanReturn = false;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
 TEST(MockSyscallTest, IntTypeTest)

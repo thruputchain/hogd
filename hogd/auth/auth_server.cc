@@ -5,18 +5,23 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "account.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/status.h"
+#include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

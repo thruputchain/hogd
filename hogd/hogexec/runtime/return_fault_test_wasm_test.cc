@@ -22,7 +22,7 @@ class ReturnFaultTestWasmTest : public ::testing::Test,
 public:
   ReturnFaultTestWasmTest()
     : NativeContractTestFramework(
-          true, BlockExecutionMode::kBlockExecutionModeProposal,
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDB),
       wasm_runtime_context_(make_hogexec_context())
   {}
