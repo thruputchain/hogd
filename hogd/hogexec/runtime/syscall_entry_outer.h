@@ -438,7 +438,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
+  auto [syscall_result, gas_consumed] = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
              -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
@@ -451,6 +451,18 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
                                              runtime.get_available_gas()},
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+
+  if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
+    // If the syscall cannot return to the wasm environment but the syscall tried to return an error code,
+    // abort the entire call frame.
+    if (runtime_log_level(LogLevel::kTrace)) {
+      trace("Syscall {} attempted to return an error code {} but cannot return",
+            SyscallMeta::kSyscallNo, x23::show(syscall_result.value()));
+    }
+    return {HostFnError{HostFnErrorCode::kHostExit}, gas_consumed};
+  }
+
+  return {syscall_result, gas_consumed};
 }
 
 } // namespace hogd

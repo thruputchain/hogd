@@ -195,6 +195,11 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
               .panic = std::to_underlying(HostFnErrorCode::kHostOutOfGas)};
     }
 
+    if (!SyscallMeta::kCanReturn && inner_res.first.has_value()) {
+      return {.result_code = 0,
+              .panic = std::to_underlying(HostFnErrorCode::kHostExit)};
+    }
+
     return from_status(inner_res);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 }
