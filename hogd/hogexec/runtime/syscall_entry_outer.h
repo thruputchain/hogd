@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -106,12 +108,9 @@ is_allowed_error_code(SyscallErrorCode code)
       code == SyscallErrorCode::kSyscallErrorCodeFault) {
     return true;
   }
-  for (auto allowed : SyscallMeta::kAllowedErrors) {
-    if (code == allowed) {
-      return true;
-    }
-  }
-  return false;
+
+  return std::ranges::any_of(SyscallMeta::kAllowedErrors,
+                             [code](auto allowed) { return code == allowed; });
 }
 
 // Creates an index sequence for a given set of args, denoting

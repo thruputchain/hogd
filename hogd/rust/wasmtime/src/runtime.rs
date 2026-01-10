@@ -227,7 +227,9 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
     };
 
     NewWasmtimeRuntimeResult::ok(unsafe {
-        core::mem::transmute(Box::into_raw(b))
+        core::mem::transmute::<*mut WasmtimeRuntime, *mut c_void>(
+            Box::into_raw(b),
+        )
     })
 }
 

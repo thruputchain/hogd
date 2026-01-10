@@ -24,4 +24,5 @@ cat "$LOG_FILE" |
   grep -v "^[[:space:]]*Checking" |
   grep -v "^[[:space:]]*Compiling" |
   grep -v "^[[:space:]]*Finished" |
+  grep -v "^/usr/bin/clang-tidy-" |
   grep -v "^$"
