@@ -78,7 +78,8 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
 } // namespace
 
 struct IntTypeTestSyscallMeta {
-  // bypasses having to load the most recent call frame to check for the read only flag
+  // bypasses having to load the most recent call frame to check for the read
+  // only flag
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &int_type_test;
@@ -103,7 +104,8 @@ static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
 
 struct NoReturnSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = true;
-  constexpr static SyscallNo kSyscallNo = SyscallNo::kGetReturnedBuffer; // dummy syscall no
+  constexpr static SyscallNo kSyscallNo =
+      SyscallNo::kGetReturnedBuffer; // dummy syscall no
   constexpr static auto kInnerFunc = &no_return_test;
   constexpr static std::array<std::string_view, 0> kInputNames = {};
   constexpr static std::array<std::string_view, 0> kOutputNames = {};

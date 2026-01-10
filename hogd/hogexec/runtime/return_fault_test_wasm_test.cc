@@ -18,7 +18,7 @@
 namespace hogd {
 
 class ReturnFaultTestWasmTest : public ::testing::Test,
-                                 public NativeContractTestFramework {
+                                public NativeContractTestFramework {
 public:
   ReturnFaultTestWasmTest()
     : NativeContractTestFramework(
@@ -44,12 +44,10 @@ protected:
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
   }
 
-  constexpr static ContractAddress kContractAddress =
-      make_contract_address(0);
+  constexpr static ContractAddress kContractAddress = make_contract_address(0);
 
   ContractTraitClient<return_fault_test::ReturnFaultTest> client_ =
-      ContractTraitClient<return_fault_test::ReturnFaultTest>(
-          kContractAddress);
+      ContractTraitClient<return_fault_test::ReturnFaultTest>(kContractAddress);
 
   std::unique_ptr<RuntimeContext> wasm_runtime_context_;
 
@@ -70,8 +68,6 @@ TEST_F(ReturnFaultTestWasmTest, InvokeRunTest)
                                  .nonce = nonce_++}}},
       *wasm_runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
-
 }
 
 } // namespace hogd
-
