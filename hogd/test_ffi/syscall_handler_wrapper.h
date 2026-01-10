@@ -207,9 +207,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
       // isn't documented in syscalls.yaml.
       if (inner_res.first.has_value() &&
           !is_allowed_error_code<SyscallMeta>(inner_res.first.value())) {
-        error("Syscall {} returned undocumented error code {}",
+        panic("Syscall {} returned undocumented error code {}",
               SyscallMeta::kSyscallNo, x23::show(inner_res.first.value()));
-        assert(false && "Syscall returned undocumented error code");
       }
     }
 
