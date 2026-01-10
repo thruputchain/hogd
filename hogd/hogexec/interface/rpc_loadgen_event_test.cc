@@ -217,6 +217,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     TransactionID tx_id = num_init_txs + i + kExecutorIdShift;
     auto events = event_wrapper_.get_events(test_block_id, tx_id);
     ASSERT_TRUE(events.has_value()) << "Events should be present";
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_GT(events->events.size(), 0)
         << "Events should have at least one event";
   }

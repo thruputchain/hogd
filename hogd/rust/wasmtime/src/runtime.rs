@@ -8,17 +8,9 @@ use crate::invoke_result::WasmtimeInvokeResult;
 use common::{InvokeErrorCode, SystemErrorCode};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct WasmtimeModuleStats {
     pub serialized_module_size: usize,
-}
-
-impl WasmtimeModuleStats {
-    pub fn new() -> Self {
-        Self {
-            serialized_module_size: 0,
-        }
-    }
 }
 
 // A WasmiRuntime implements a single WebAssembly module,
@@ -47,12 +39,14 @@ use crate::debug_log;
 
 impl WasmtimeRuntime {
     // Invariant required: the input wasm module must have passed validation.
+    // userctx must be a valid pointer to a HostCallContext
     fn new(
         hash: &[u8; 32],
         context: &mut WasmtimeContext,
         userctx: *mut c_void,
     ) -> Option<WasmtimeRuntime> {
-        let instance_pre = context.get_instance_pre(hash, userctx).unwrap()?;
+        let instance_pre =
+            unsafe { context.get_instance_pre(hash, userctx).unwrap()? };
         let mut store = Store::new(context.engine(), userctx);
         let instance = match instance_pre.instantiate(&mut store) {
             Ok(instance) => instance,
@@ -242,7 +236,8 @@ pub unsafe extern "C" fn new_wasmtime_runtime(
 /// Runtime must have been created by new_wasmtime_runtime.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmtime_runtime(p: *mut c_void) {
-    let runtime: *mut WasmtimeRuntime = unsafe { core::mem::transmute(p) };
+    let runtime: *mut WasmtimeRuntime =
+        unsafe { core::mem::transmute::<*mut c_void, *mut WasmtimeRuntime>(p) };
     debug_assert!(!runtime.is_null());
 
     unsafe { drop(Box::from_raw(runtime)) };
@@ -275,7 +270,7 @@ pub unsafe extern "C" fn wasmtime_get_module_stats(
         Err(_) => {
             // On error, set stats to zero values
             unsafe {
-                *stats_out = WasmtimeModuleStats::new();
+                *stats_out = WasmtimeModuleStats::default();
             }
             false
         }

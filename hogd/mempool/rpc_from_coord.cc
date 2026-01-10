@@ -28,7 +28,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/mempool/shared.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
