@@ -24,6 +24,7 @@ def load_known_primitive_types(spec: dict) -> list[str]:
             type_mapping["primitive_type"])
     ]
 
+
 def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     """
     Extract and validate error codes from a syscall specification.
