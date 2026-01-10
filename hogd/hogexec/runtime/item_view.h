@@ -193,9 +193,6 @@ private:
 // it.
 class ItemView {
 public:
-  ItemView(SnapshotStorageItem *base_item)
-    : delta_args_(UnmodifiedItem(base_item))
-  {}
   ItemView() : delta_args_(UnmodifiedItem()) {}
 
   // Returns a pointer to the item view if it is of the given type,
