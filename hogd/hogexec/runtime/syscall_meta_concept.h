@@ -16,6 +16,9 @@ concept is_syscall_meta = requires(SyscallMeta syscall_meta) {
   syscall_meta.kInputNames;
   // should deduce to an array of string_view
   syscall_meta.kOutputNames;
+
+  // Can the syscall return to the wasm environment
+  { syscall_meta.kCanReturn } -> std::convertible_to<bool>;
 };
 
 } // namespace hogd

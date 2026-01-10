@@ -282,12 +282,16 @@ def gen_syscall_meta(syscall: dict) -> str:
     if "outputs" in syscall and syscall["outputs"] is not None:
         for arg in syscall["outputs"]:
             syscall_output_names.append("\"" + arg["name"] + "\"")
+    can_return = "true"
+    if "returns" in syscall and not syscall["returns"]:
+        can_return = "false"
 
     return f"""template<>
 struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static bool kIsReadOnlySyscall = {read_only};
     constexpr static auto kInnerFunc = &syscall_{name}_inner;
     constexpr static SyscallNo kSyscallNo = SyscallNo::k{name};
+    constexpr static bool kCanReturn = {can_return};
 
     constexpr static std::array<std::string_view, {len(syscall_input_names)}>
         kInputNames = {{
