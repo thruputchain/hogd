@@ -142,7 +142,7 @@ public:
 private:
   std::vector<std::unique_ptr<WorkerPool>> pools_;
 
-  struct alignas(kCacheLineSize) JobCount {
+  struct alignas(64) JobCount {
     std::atomic<size_t> count_;
 
     size_t get() const { return count_.load(std::memory_order_relaxed); }
