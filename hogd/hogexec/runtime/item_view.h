@@ -163,8 +163,6 @@ private:
 // read outside.
 class UnmodifiedItem {
 public:
-  // UnmodifiedItem(const SnapshotStorageItem *base_item) :
-  // base_item_(base_item) {}
   UnmodifiedItem() : base_item_(std::nullopt) {}
 
   constexpr static std::optional<StorageDelta> get_delta()
