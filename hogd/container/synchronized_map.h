@@ -288,7 +288,7 @@ private:
 
   // get_bucket_shared returns the bucket and its associated shared lock.
   ATTRIBUTE_ALWAYS_INLINE
-  std::pair<const Map &, std::shared_lock<std::shared_mutex>>
+  std::pair<Map &, std::shared_lock<std::shared_mutex>>
   get_bucket_shared(const Key &key)
   {
     assert(std::has_single_bit(locks_.size()));
