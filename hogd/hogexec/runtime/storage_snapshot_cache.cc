@@ -120,16 +120,16 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   StorageItem db_item = db_res.value().has_value()
                             ? db_res.value().value()
                             : StorageItem(StorageItemType::kItemTypeDeleted);
-  {
-    auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
-                                                 block_id_, db_proxy_);
-    if (out) {
-      // insertion happened; return the result
-      return out;
-    }
+
+  auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
+                                               block_id_, db_proxy_);
+  if (out) {
+    // insertion happened; return the result
+    return out;
   }
+
+  auto *obj = snapshot_item_cache_.find(addrkey, ul);
   // otherwise, lookup the item in the cache again
-  auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
   assert(obj);
   return obj;
 }
