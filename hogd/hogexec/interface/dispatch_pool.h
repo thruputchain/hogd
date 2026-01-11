@@ -146,7 +146,10 @@ private:
     std::atomic<size_t> count_;
 
     size_t get() const { return count_.load(std::memory_order_relaxed); }
-    void inc(size_t val = 1) { count_.fetch_add(val, std::memory_order_relaxed); }
+    void inc(size_t val = 1)
+    {
+      count_.fetch_add(val, std::memory_order_relaxed);
+    }
   };
   std::vector<JobCount> job_counts_;
 };
