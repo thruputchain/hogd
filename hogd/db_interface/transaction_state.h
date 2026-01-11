@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <mutex>
 #include <optional>
-#include <shared_mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -100,7 +99,7 @@ public:
   // Get the state associated with one transaction.
   // Returns a pointer to the state and a unique lock on the state.
   // If the state does not exist, it is created.
-  std::pair<TransactionState &, std::unique_lock<std::shared_mutex>>
+  std::pair<TransactionState &, std::unique_lock<std::mutex>>
   get(TransactionID txid);
 
   // Returns the number of new transactions created.
