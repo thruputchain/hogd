@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <shared_mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -23,6 +24,24 @@
 #include "hogd/base/worker_pool.h"
 
 namespace hogd {
+
+template<typename Lock>
+concept mutex_like = requires(Lock lock) {
+  { lock.lock() } -> std::same_as<void>;
+  { lock.unlock() } -> std::same_as<void>;
+  { lock.try_lock() } -> std::same_as<bool>;
+};
+
+static_assert(mutex_like<std::mutex>);
+
+template<typename Lock>
+concept shared_mutex_like = requires(Lock lock) {
+  { lock.lock_shared() } -> std::same_as<void>;
+  { lock.unlock_shared() } -> std::same_as<void>;
+  { lock.try_lock_shared() } -> std::same_as<bool>;
+} && mutex_like<Lock>;
+
+static_assert(shared_mutex_like<std::shared_mutex>);
 
 // SynchronizedMap is similar to a std::unordered_map, but provides scalable
 // synchronization through a sharded hash table with buckets that are each
@@ -39,12 +58,14 @@ namespace hogd {
 // ul.unlock();
 template<class Key, class T, class Hash = std::hash<Key>,
          class KeyEqual = std::equal_to<Key>,
-         class Allocator = std::allocator<std::pair<const Key, T>>>
+         class Allocator = std::allocator<std::pair<const Key, T>>,
+         mutex_like Lock = std::mutex>
 class SynchronizedMap {
 public:
   // type definitions
   using key_type = Key;
   using map_type = T;
+  using lock_type = Lock;
   using value_type = std::pair<const Key, T>;
   using size_type = size_t;
   using hasher = Hash;
@@ -90,13 +111,14 @@ public:
   SynchronizedMap(SynchronizedMap &&map) noexcept = default;
   SynchronizedMap &operator=(SynchronizedMap &&map) noexcept = default;
 
-  std::pair<T &, std::unique_lock<std::mutex>> operator[](const Key &key)
+  std::pair<T &, std::unique_lock<lock_type>> operator[](const Key &key)
   {
     auto [map, ul] = get_bucket(key);
     return {map[key], std::move(ul)};
   }
 
-  std::pair<T *, std::unique_lock<std::mutex>> find(const Key &key)
+  // find with exclusive lock (for when you need to modify the value)
+  std::pair<T *, std::unique_lock<lock_type>> find(const Key &key)
   {
     auto [map, ul] = get_bucket(key);
     auto it = map.find(key);
@@ -105,7 +127,19 @@ public:
     return {&it->second, std::move(ul)};
   }
 
-  T *find(const Key &key, const std::unique_lock<std::mutex> &ul)
+  // find_shared with shared lock
+  // Note that this does not provide synchronization on the inner object.
+  std::pair<T *, std::shared_lock<lock_type>> find_shared(const Key &key)
+      requires shared_mutex_like<lock_type>
+  {
+    auto [map, sl] = get_bucket_shared(key);
+    auto it = map.find(key);
+    if (it == map.end())
+      return {nullptr, std::move(sl)};
+    return {&it->second, std::move(sl)};
+  }
+
+  T *find(const Key &key, const std::unique_lock<lock_type> &ul)
   {
     assert(ul.owns_lock());
     auto &map = get_bucket(key, ul);
@@ -116,8 +150,8 @@ public:
   }
 
   template<typename... Args> requires std::constructible_from<T, Args...>
-  std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k,
-                                                      Args &&...args)
+  std::pair<T *, std::unique_lock<lock_type>> insert(const Key &k,
+                                                     Args &&...args)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] =
@@ -128,8 +162,7 @@ public:
     return {&it->second, std::move(ul)};
   }
 
-  std::pair<T *, std::unique_lock<std::mutex>> insert(const Key &k,
-                                                      const T &obj)
+  std::pair<T *, std::unique_lock<lock_type>> insert(const Key &k, const T &obj)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert({k, obj});
@@ -138,7 +171,7 @@ public:
     return {&it->second, std::move(ul)};
   }
 
-  T *insert(const Key &key, T &&obj, const std::unique_lock<std::mutex> &ul)
+  T *insert(const Key &key, T &&obj, const std::unique_lock<lock_type> &ul)
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
@@ -153,16 +186,16 @@ public:
     return &it->second;
   }
 
-  std::pair<T *, std::unique_lock<std::mutex>> find_or_insert(const Key &k,
-                                                              const T &obj)
+  std::pair<T *, std::unique_lock<lock_type>> find_or_insert(const Key &k,
+                                                             const T &obj)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, _] = map.insert({k, obj});
     return {&it->second, std::move(ul)};
   }
 
-  std::pair<T *, std::unique_lock<std::mutex>> insert_or_assign(const Key &k,
-                                                                T &&obj)
+  std::pair<T *, std::unique_lock<lock_type>> insert_or_assign(const Key &k,
+                                                               T &&obj)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert_or_assign(k, std::move(obj));
@@ -175,7 +208,7 @@ public:
     return map.erase(key);
   }
 
-  size_t remove(const Key &key, const std::unique_lock<std::mutex> &ul)
+  size_t remove(const Key &key, const std::unique_lock<lock_type> &ul)
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
@@ -230,7 +263,7 @@ public:
 
     pool.for_each_parallel(
         std::views::zip(locks_, buckets_),
-        [func](std::pair<std::mutex &, Map &> arg) {
+        [func](std::pair<lock_type &, Map &> arg) {
           std::scoped_lock guard(std::get<0>(arg));
           for (value_type &v : std::get<1>(arg)) {
             func(v);
@@ -257,22 +290,34 @@ private:
 
   Hash hash_fn_ = Hash();
 
-  std::vector<std::mutex> locks_;
+  std::vector<lock_type> locks_;
   std::vector<Map> buckets_;
 
-  // get_bucket returns the bucket and its associated lock for a given key.
-  ATTRIBUTE_ALWAYS_INLINE std::pair<Map &, std::unique_lock<std::mutex>>
+  // get_bucket returns the bucket and its associated exclusive lock.
+  ATTRIBUTE_ALWAYS_INLINE std::pair<Map &, std::unique_lock<lock_type>>
   get_bucket(const Key &key)
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    return {buckets_[idx], std::unique_lock<std::mutex>(locks_[idx])};
+    return {buckets_[idx], std::unique_lock<lock_type>(locks_[idx])};
   }
 
-  ATTRIBUTE_ALWAYS_INLINE Map &
-  get_bucket(const Key &key, const std::unique_lock<std::mutex> &ul)
+  // get_bucket_shared returns the bucket and its associated shared lock.
+  ATTRIBUTE_ALWAYS_INLINE
+  std::pair<Map &, std::shared_lock<lock_type>>
+  get_bucket_shared(const Key &key) requires shared_mutex_like<lock_type>
+  {
+    assert(std::has_single_bit(locks_.size()));
+    assert(locks_.size() == buckets_.size());
+
+    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
+    return {buckets_[idx], std::shared_lock<lock_type>(locks_[idx])};
+  }
+
+  ATTRIBUTE_ALWAYS_INLINE Map &get_bucket(const Key &key,
+                                          const std::unique_lock<lock_type> &ul)
   {
     assert(ul.owns_lock());
     assert(std::has_single_bit(locks_.size()));
