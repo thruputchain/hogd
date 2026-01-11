@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <shared_mutex>
 #include <unordered_set>
 #include <utility>
 
@@ -83,7 +84,7 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  std::pair<HogAge *, std::unique_lock<std::mutex>>
+  std::pair<HogAge *, std::unique_lock<std::shared_mutex>>
   get_cached_hog_age(const ContractAddress &address);
 
   x23::Async<void>

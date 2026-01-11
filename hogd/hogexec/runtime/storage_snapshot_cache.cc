@@ -35,7 +35,8 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {
   {
-    auto [obj, ul] = deployment_cache_.find(addr);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
       return *obj;
     }
@@ -55,7 +56,8 @@ SystemStatus<const Contract *>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   {
-    auto [obj, ul] = contract_cache_.find(hash);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
       if (obj->has_value()) {
         return &obj->value();
@@ -102,7 +104,8 @@ SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   {
-    auto [obj, ul] = snapshot_item_cache_.find(addrkey);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
     if (obj) {
       return obj;
     }
@@ -126,7 +129,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     }
   }
   // otherwise, lookup the item in the cache again
-  auto [obj, ul] = snapshot_item_cache_.find(addrkey);
+  auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
   assert(obj);
   return obj;
 }
