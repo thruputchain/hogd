@@ -52,7 +52,7 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<std::optional<DeployedContractHash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  SystemStatus<SnapshotStorageItem *>
+  SystemStatus<const SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
   SystemStatus<const DbTip *> try_get_db_tip();
