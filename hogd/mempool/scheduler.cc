@@ -47,7 +47,7 @@ compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
 
 } // namespace
 
-std::pair<HogAge *, std::unique_lock<std::shared_mutex>>
+std::pair<HogAge *, std::unique_lock<std::mutex>>
 Scheduler::get_cached_hog_age(const ContractAddress &address)
 {
   auto [value_ptr, lock] = accounts_.find(address);
