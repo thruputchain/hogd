@@ -90,10 +90,10 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     }
     return nullptr;
   }
-  assert(lock.owns_lock());
+  CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
-  assert(obj2 != nullptr);
+  CHECK_PTR(obj2);
   if (obj2->has_value()) {
     return &obj2->value();
   }
@@ -127,11 +127,11 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     // insertion happened; return the result
     return out;
   }
-  assert(ul.owns_lock());
+  CHECK(ul.owns_lock());
 
   auto *obj = snapshot_item_cache_.find(addrkey, ul);
   // otherwise, lookup the item in the cache again
-  assert(obj);
+  CHECK_PTR(obj);
   return obj;
 }
 
@@ -152,7 +152,7 @@ StorageSnapshotCache::try_get_db_tip()
   if (db_tip_.compare_exchange_strong(tip, tip_unique.get())) {
     return tip_unique.release();
   }
-  assert(tip != nullptr);
+  CHECK_PTR(tip);
   return tip;
 }
 
