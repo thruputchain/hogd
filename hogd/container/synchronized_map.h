@@ -226,7 +226,7 @@ public:
 
     size_t ret = 0;
     for (size_t i = 0; i < locks_.size(); ++i) {
-      std::shared_lock guard(locks_[i]);
+      std::scoped_lock guard(locks_[i]);
       ret += buckets_[i].size();
     }
     return ret;

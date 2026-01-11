@@ -127,6 +127,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     // insertion happened; return the result
     return out;
   }
+  assert(ul.owns_lock());
 
   auto *obj = snapshot_item_cache_.find(addrkey, ul);
   // otherwise, lookup the item in the cache again
