@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -38,7 +39,7 @@ public:
 
     for (int i = 0; i < bucket_count; ++i) {
       pools_[i] = std::make_unique<WorkerPool>(threads_per_pool);
-      job_counts_[i].store(0, std::memory_order_relaxed);
+      job_counts_[i].count_.store(0, std::memory_order_relaxed);
     }
   }
 
@@ -70,7 +71,7 @@ public:
 
     // Only relevant for stress tests where DEFAULT_THREADPOOL_SIZE == 1
     if (pools_.size() == 1) [[unlikely]] {
-      job_counts_[0].fetch_add(1, std::memory_order_relaxed);
+      job_counts_[0].inc();
       return pools_[0]->submit(std::forward<Func>(func));
     }
     // Pick a random other pool to compare (excluding affinity_pool)
@@ -105,7 +106,7 @@ public:
     int pool_idx = (pending_2 < pending_1) ? r2 : r1;
 
     // Increment counters
-    job_counts_[pool_idx].fetch_add(1, std::memory_order_relaxed);
+    job_counts_[pool_idx].inc();
 
     return pools_[pool_idx]->submit(std::forward<Func>(func));
   }
@@ -118,7 +119,7 @@ public:
     size_t total = 0;
     size_t total_pending = 0;
     for (auto i = 0U; i < pools_.size(); ++i) {
-      counts[i] = job_counts_[i].load(std::memory_order_relaxed);
+      counts[i] = job_counts_[i].get();
       pending[i] = pools_[i]->pending_jobs();
       total += counts[i];
       total_pending += pending[i];
@@ -134,13 +135,20 @@ public:
     }
     // Reset counters after printing
     for (auto i = 0U; i < pools_.size(); ++i) {
-      job_counts_[i].store(0, std::memory_order_relaxed);
+      job_counts_[i].count_.store(0, std::memory_order_relaxed);
     }
   }
 
 private:
   std::vector<std::unique_ptr<WorkerPool>> pools_;
-  std::vector<std::atomic<size_t>> job_counts_;
+
+  struct alignas(kCacheLineSize) JobCount {
+    std::atomic<size_t> count_;
+
+    size_t get() const { return count_.load(std::memory_order_relaxed); }
+    void inc(size_t val = 1) { count_.fetch_add(val, std::memory_order_relaxed); }
+  };
+  std::vector<JobCount> job_counts_;
 };
 
 } // namespace hogd
