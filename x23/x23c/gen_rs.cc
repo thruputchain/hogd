@@ -514,11 +514,14 @@ GenRs::show_type(const StructBody &s, string const &tname)
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
-    if (s.transparent)
+    if (s.transparent) {
       prtop("#[repr(transparent)]\n");
+      prtop("#[cfg_attr(feature = \"serde\", serde(transparent))]\n");
+    }
     else
       // We want this, at least optionally on some structs,
-      // to enable FFI usage via memcpy instead of a full de/serialize via XDR.
+      // to enable FFI usage via memcpy instead of a full de/serialize via
+      // XDR.
       prtop("#[repr(C)]\n");
 
     prtop("pub struct {} ", tname);
