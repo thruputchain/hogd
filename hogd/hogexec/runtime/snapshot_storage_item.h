@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "account.hh"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -55,9 +56,9 @@ public:
   // these methods, rather than storing the same data access parameters in and
   // out of the variant.
   SystemStatus<const RetrocausalQueueBlock *>
-  get_next_rcq_block(uint64_t search_start_block);
+  get_next_rcq_block(uint64_t search_start_block) const;
   SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
-  get_concurrent_rcq_entry(uint32_t index);
+  get_concurrent_rcq_entry(uint32_t index) const;
 
   std::optional<ItemViewType> type() const
   {
@@ -94,6 +95,12 @@ public:
   auto const &addrkey() const { return addrkey_; }
 
 private:
+#ifdef NDEBUG
+  using mutex_type = std::mutex;
+#else
+  using mutex_type = ThreadCheckedMutex<std::mutex>;
+#endif
+
   struct BytestringEntry {
     Bytestring bytestring_;
     constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
@@ -134,12 +141,16 @@ private:
     // only returns from past blocks
     SystemStatus<const RetrocausalQueueBlock *>
     get_next_block(DatabaseProxy &db_proxy, BlockID block_id,
-                   AddressAndKey const &addrkey, uint64_t search_start_index);
+                   AddressAndKey const &addrkey, uint64_t search_start_index,
+                   std::unique_lock<mutex_type> &ul) const;
 
   private:
-    std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
+    // INVARIANT: These should only be modified while holding the rcq_mtx_ lock.
+    // These are only lazily loaded from the db; as such, concurrent loads might
+    // be interleaved in arbitrary ways, but will still return the same results.
+    mutable std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
     // no need to repeatedly query for blocks above this number.
-    std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
+    mutable std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
   struct ReplayCacheEntry {
@@ -161,14 +172,20 @@ private:
 
   // Protects both the concurrent_queue_entries and the RetrocausalQueueEntry
   // contents.
-  std::mutex rcq_mtx_;
+  //
+  // This mutex is checked (currently only in debug builds) for migration across
+  // threads because it is held accesses to hogdb via the DatabaseProxy, which
+  // currently uses an SRpcClient. An SRpcClient is safe inside DatabaseProxy,
+  // as calls suspend instead of migrating across threads. If we ever change the
+  // internals of DatabaseProxy, this mutex would cause
+  mutable mutex_type rcq_mtx_;
 
   // Note: the elements of the concurrent read cache
   // can't be part of the variant, since the type of the storage item
   // might be different from the snapshot item.
   // (to be explicit: an address might have no element, but then
   // a queue might be read/consumed from that address).
-  std::vector<QueueEntry> concurrent_queue_entries_;
+  mutable std::vector<QueueEntry> concurrent_queue_entries_;
 };
 
 } // namespace hogd

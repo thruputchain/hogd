@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -60,6 +61,13 @@ span_type_test(std::span<const std::byte> span_in,
 
   return {{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist}, 0};
 }
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+no_return_test()
+{
+  return {{SyscallErrorCode::kSyscallErrorCodeNone}, 0};
+}
+
 // just used to instantiate the mock contract
 ForeignInvokeResult
 dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
@@ -70,6 +78,8 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
 } // namespace
 
 struct IntTypeTestSyscallMeta {
+  // bypasses having to load the most recent call frame to check for the read
+  // only flag
   constexpr static bool kIsReadOnlySyscall = true;
   constexpr static SyscallNo kSyscallNo = SyscallNo::kExit; // dummy syscall no
   constexpr static auto kInnerFunc = &int_type_test;
@@ -78,6 +88,9 @@ struct IntTypeTestSyscallMeta {
   constexpr static std::array<std::string_view, 3> kOutputNames = {"out_1",
                                                                    "out_2",
                                                                    "out_128"};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable};
 };
 
 struct SpanTypeTestSyscallMeta {
@@ -86,9 +99,23 @@ struct SpanTypeTestSyscallMeta {
   constexpr static auto kInnerFunc = &span_type_test;
   constexpr static std::array<std::string_view, 1> kInputNames = {"span_in"};
   constexpr static std::array<std::string_view, 1> kOutputNames = {"span_out"};
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<SyscallErrorCode, 1> kAllowedErrors = {
+      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
 };
 static_assert(is_syscall_meta<IntTypeTestSyscallMeta>);
 static_assert(is_syscall_meta<SpanTypeTestSyscallMeta>);
+
+struct NoReturnSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = true;
+  constexpr static SyscallNo kSyscallNo =
+      SyscallNo::kGetReturnedBuffer; // dummy syscall no
+  constexpr static auto kInnerFunc = &no_return_test;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static bool kCanReturn = false;
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
 
 TEST(MockSyscallTest, IntTypeTest)
 {
@@ -161,6 +188,27 @@ TEST(MockSyscallTest, SpanTest)
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist));
 
   EXPECT_EQ(out, 0x04030201);
+}
+
+TEST(MockSyscallTest, NoReturnTest)
+{
+  DBContext db_context;
+  auto runtime_context =
+      std::make_unique<hogd::MockRuntimeContext>(make_hogexec_context());
+  SyscallHandlerContext context(runtime_context.get(), SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  context.push_mock_runtime(&mock_runtime);
+  mock_runtime.set_available_gas(1000);
+
+  auto res = mock_syscall_parser<NoReturnSyscallMeta>(0, 0, 0, 0, 0, 0, 0);
+  context.pop_mock_runtime();
+  context.pop_context();
+
+  ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::kHostExit));
+  ASSERT_EQ(res.result_code, 0);
 }
 
 } // namespace hogd

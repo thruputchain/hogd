@@ -17,7 +17,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "db_sched.hh"
 #include "hogd/base/perthread.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/container/merkle/merkle_trie.h"

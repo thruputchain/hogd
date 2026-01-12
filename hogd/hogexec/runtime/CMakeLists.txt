@@ -101,8 +101,10 @@ add_library(runtime_test_objects OBJECT
   manual_revert_wasm_test.cc
   manual_revert_caller_wasm_test.cc
   memory_access_test.cc
+  return_fault_test_wasm_test.cc
   native_contract_test.cc
   nnint_add_test.cc
+  nnint_get_test.cc
   rcq_test.cc
   read_only_test.cc
   reference_leak_test.cc

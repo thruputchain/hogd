@@ -33,6 +33,7 @@
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -381,8 +382,7 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
   }
   if (!runtime.value()) {
     trace("Failed to instantiate runtime for address: {}", x23::show(address));
-    return std::pair{SyscallErrorCode::kSyscallErrorCodeContractLookupFailed,
-                     0};
+    return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
@@ -614,6 +614,18 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                                .contract_hash = contract_hash});
 }
 
+namespace {
+constexpr bool
+is_banned_redeploy_native_contract(uint32_t native_contract_id)
+{
+  switch (static_cast<HogexecPrecompiledNativeContracts>(native_contract_id)) {
+  case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+    return true;
+  }
+  panic("Unknown native contract deployed: {}", native_contract_id);
+}
+} // namespace
+
 SystemStatus<SyscallStatus<ContractAddress>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
@@ -630,11 +642,17 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return contract_res.error();
   }
   if (contract_res.value() == nullptr) {
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
+
+  // Native (precompiled) contracts cannot be deployed - they are set up at
+  // genesis and should not be redeployed by user transactions
+  if (contract.contract_type() == ContractType::kNative &&
+      is_banned_redeploy_native_contract(contract.native_contract_id())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
@@ -767,9 +785,12 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     if (!snapshot_value.has_value()) {
       return snapshot_value.error();
     }
-    // defaulting to 0, instead of returning an error, because there's already
-    // an NNintItem at this storage location, even if the snapshot value is
-    // different type.
+
+    // In this case, we're returning the parameters of the prior NNInt write.
+    // A bit of a weird case, because we're following an NNintSet(nullopt, add)
+    // with a Get(force_load_from_snapshot=true).  We augment the prior NNint
+    // write with what the set value will be, when the write is applied to the
+    // database. Hence we default to 0 if the snapshot value is not an NNInt.
     auto snapshot_type = snapshot_value.value()->type();
     if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
       return std::make_pair(0, nnint_item->add_value_);
@@ -779,6 +800,9 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
   }
 
   if (item_view->get<DeletedItem>()) {
+    if (!load_from_snapshot) {
+      return {std::make_pair(std::nullopt, 0)};
+    }
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
@@ -797,6 +821,9 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
+      assert(load_from_snapshot);
+      // We are in load_from_snapshot mode, so we return KeyNotExist instead of
+      // std::nullopt, mirroring the behavior above of the DeletedItem case.
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
     }
@@ -807,6 +834,12 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     return {std::make_pair(base_item.nnint(), 0)};
   }
 
+  // the value written at this key is not an NNInt, so we return an
+  // InvalidSyscallInput error. This mirrors the case above, where the snapshot
+  // *type != kNNInt.
+  if (!load_from_snapshot) {
+    return {std::make_pair(std::nullopt, 0)};
+  }
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
@@ -891,6 +924,12 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   // In this case, we need to load the base item from the snapshot and create a
   // new RCQItem.
   if (item_view->get<DeletedItem>()) {
+    // TODO(geoff): Fix, but this has to somehow account for the edge case of
+    // deleting the queue and re-creating it. In that scenario, we shouldn't be
+    // able to read queue entries from the snapshot queue. Correct behavior is
+    // to treat that scenario as a queue that consumes the entirety of the prior
+    // queue.
+    panic("This behavior is incorrect");
     UnmodifiedItem unmodified_item;
     assert(!unmodified_item.is_loaded());
     auto load_status = unmodified_item.load(snapshot_cache, addrkey);
@@ -914,6 +953,9 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
+  if (queue_entry.size() > kQueueEntryMaxLen) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
@@ -1067,6 +1109,10 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
+  if (key_index >= kMaxSigners) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   assert(!invocation_frame_stack_.empty());
   auto addr = invocation_frame_stack_.get_active_frame().address();
   AddressAndKey addrkey = auth_data_addrkey(addr);

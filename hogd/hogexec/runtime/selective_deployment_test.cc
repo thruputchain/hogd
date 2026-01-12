@@ -17,7 +17,9 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -142,6 +144,88 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   auto deployment_1 = lookup_deployment_from_db(deployed_addr_1);
   ASSERT_TRUE(deployment_1.has_value());
   EXPECT_EQ(deployment_1.value().hash, contract_1_hash);
+}
+
+// Test that verifies attempting to deploy a precompiled (native) contract fails
+// with kSyscallErrorCodeInvalidSyscallInput. Native contracts like the HOG
+// token are set up at genesis and should not be redeployable.
+TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
+{
+  // Create a native contract (the precompiled token contract)
+  auto native_token_contract = make_native_contract(0);
+  auto native_token_hash = sha256(*native_token_contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 42;
+    return nonce;
+  }();
+
+  // Create a native contract that will attempt to deploy the native token
+  auto make_context = [native_token_hash]() -> std::unique_ptr<RuntimeContext> {
+    auto native_contract_0 = std::make_unique<NativeContract>(
+        std::unordered_map<MethodID, NativeContract::function_t>{
+            {0,
+             [native_token_hash](SystemCallHandler &handler,
+                                 NativeRuntime & /*runtime*/)
+                 -> InvokeStatus<void> {
+               // Attempt to deploy the native token contract - should fail
+               ContractAddress deploy_addr;
+               auto [syscall_res, _gas] =
+                   syscall_DeployContract_inner(handler, kDeployNonce,
+                                                native_token_hash, deploy_addr);
+               if (!syscall_res.has_value() ||
+                   syscall_res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               return {};
+             }}});
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    contract_map.emplace(0, std::move(native_contract_0));
+    return std::make_unique<NativeContext>(std::move(contract_map));
+  };
+
+  auto context = make_context();
+
+  // Mark the deployer contract as existing and deployed within the database
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  // Write the native token contract to the database (it exists but cannot be
+  // deployed)
+  write_contract(native_token_contract);
+
+  // Grant storage tokens to the deployer
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  // Setup the transaction - note we don't need the native token contract in
+  // contracts_to_deploy since it already exists in the database
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+              }},
+      *context);
+
+  // Invoke the contract - it should succeed (contract caught the error)
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  ContractAddress deploy_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   native_token_hash);
+
+  // Verify that the deployment failed
+  auto deployment_lookup = lookup_deployment_from_db(deploy_addr);
+  EXPECT_FALSE(deployment_lookup.has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

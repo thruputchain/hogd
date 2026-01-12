@@ -369,15 +369,16 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
           auto [result, _gas] =
-              erc20_client.template invoke<"get_balance_of">(handler,
-                                                             kReceiverAddress);
-          if (!result.has_value() || !result.value().has_value()) {
+              erc20_client.template invoke_opt<"get_balance_of">(
+                  handler, kReceiverAddress);
+          if (!result.has_value() || !result.value().has_value() ||
+              !result.value().value().has_value()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
-          if (!result.value().value().is_ok()) {
+          if (!result.value().value().value().is_ok()) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }
-          uint128_xdr balance = result.value().value().ok();
+          uint128_xdr balance = result.value().value().value().ok();
           if (balance != expected_balance) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
           }

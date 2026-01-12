@@ -120,11 +120,12 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
          uint32_t expect) -> InvokeStatus<void> {
         fib_client_t client(kFibContractAddr);
         auto [decoded, _gas] =
-            client.template invoke<"fibonacci">(handler, input);
-        if (!decoded.has_value() || !decoded.value().has_value()) {
+            client.template invoke_opt<"fibonacci">(handler, input);
+        if (!decoded.has_value() || !decoded.value().has_value() ||
+            !decoded.value().value().has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        if (decoded.value().value() != expect) {
+        if (decoded.value().value().value() != expect) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         return {};

@@ -34,10 +34,13 @@ dispatch_balance_deltas(
     BackgroundCommitWorker::sched_db_client_t &sched_db_client)
 {
   HogsTransferred transferred{.block = block_height, .deltas = {}};
-  auto ul = balance_deltas.lock_threads();
-  balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
-    transferred.deltas.append_range(deltas);
-  });
+  // Release ul before calling the rpc client
+  {
+    auto ul = balance_deltas.lock_threads();
+    balance_deltas.for_each(ul, [&](const std::vector<Delta> &deltas) {
+      transferred.deltas.append_range(deltas);
+    });
+  }
   return sched_db_client.scheddb_hogs_transferred(std::move(transferred));
 }
 } // namespace

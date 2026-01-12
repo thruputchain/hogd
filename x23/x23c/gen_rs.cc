@@ -32,7 +32,6 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
-  bool needs_serde_imports = false;
   bool needs_xdr_common_imports = false;
 
   constexpr static int kIndentWidth = 4;
@@ -120,7 +119,7 @@ struct GenRs {
       prtop("{}\n", d.attrs);
     }
 
-    if (get_opaque_array_size(d).has_value() && needs_serde_imports) {
+    if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
       prtop(
           "#[cfg_attr(feature = \"serde\", serde(with = \"serde_arrays\"))]\n");
@@ -293,7 +292,6 @@ GenRs::convert_to_newtype(const Definition &d)
         attrs += "\n";
       }
       attrs += kSerdeArrays;
-      needs_serde_imports = true;
     }
 
     auto visitor = NewtypeVisitor{.comment = comment, .attrs = attrs};
@@ -506,24 +504,24 @@ GenRs::show_type(const StructBody &s, string const &tname)
         }
 
         derive_traits.emplace_back("Copy");
-
-        needs_serde_imports = true; // for Serialize, Deserialize
-        prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, "
-              "Deserialize))]\n");
       }
     }
 
+    prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
     prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
     prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
-    if (s.transparent)
+    if (s.transparent) {
       prtop("#[repr(transparent)]\n");
+      prtop("#[cfg_attr(feature = \"serde\", serde(transparent))]\n");
+    }
     else
       // We want this, at least optionally on some structs,
-      // to enable FFI usage via memcpy instead of a full de/serialize via XDR.
+      // to enable FFI usage via memcpy instead of a full de/serialize via
+      // XDR.
       prtop("#[repr(C)]\n");
 
     prtop("pub struct {} ", tname);
@@ -681,6 +679,7 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
+  prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
   prtop(R"(#[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))])");
   prtop("\n");
   prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
@@ -780,6 +779,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   constexpr static auto kEnumBaseType = "i32";
   {
     prtop("{}\n", kDefaultDerives);
+    prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
     prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
     prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
     // This repr(i32) suffices to fully specify the layout of the enum, making
@@ -1110,14 +1110,12 @@ use xdr_common::*;
 )";
   }
 
-  if (gs.needs_serde_imports) {
-    preamble += R"(
+  preamble += R"(
 #[cfg(feature = "serde")]
 use ::serde::{Serialize, Deserialize};
 #[cfg(feature = "serde")]
 use ::serde_arrays;
 )";
-  }
 
   return preamble + gs.top_ + R"(
 //

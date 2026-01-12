@@ -75,8 +75,9 @@ SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
 SystemStatus<const RetrocausalQueueBlock *>
 SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
     DatabaseProxy &db_proxy, BlockID block_id, AddressAndKey const &addrkey,
-    uint64_t search_start_index)
+    uint64_t search_start_index, std::unique_lock<mutex_type> &ul) const
 {
+  assert(ul.owns_lock());
   // If we've already queried for a block below search_start_index and that
   // search failed, then there's no reason to query the database again.
   if (block_number_upper_bound_ &&
@@ -111,21 +112,22 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
 }
 
 SystemStatus<const RetrocausalQueueBlock *>
-SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block)
+SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block) const
 {
   // This method is only valid for RCQ items
   if (!std::holds_alternative<RetrocausalQueueEntry>(entry_)) {
     return nullptr;
   }
-  auto &rcq = std::get<RetrocausalQueueEntry>(entry_);
-  std::lock_guard<std::mutex> lock(rcq_mtx_);
-  return rcq.get_next_block(db_proxy_, block_id_, addrkey_, search_start_block);
+  auto const &rcq = std::get<RetrocausalQueueEntry>(entry_);
+  std::unique_lock ul(rcq_mtx_);
+  return rcq.get_next_block(db_proxy_, block_id_, addrkey_, search_start_block,
+                            ul);
 }
 
 SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
-SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index)
+SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
 {
-  std::lock_guard<std::mutex> lock(rcq_mtx_);
+  std::lock_guard ul(rcq_mtx_);
   if (index < concurrent_queue_entries_.size()) {
     return concurrent_queue_entries_[index];
   }

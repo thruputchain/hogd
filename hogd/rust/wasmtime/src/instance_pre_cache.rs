@@ -57,7 +57,9 @@ impl InstancePreCache {
         hash: &SHA256Hash,
         engine_index: usize,
     ) -> Option<Arc<InstancePre<*mut c_void>>> {
-        self.map.find(hash)?.value().get(engine_index).clone()
+        // Use find_read() for concurrent read access - multiple threads can
+        // read the same cache entry simultaneously without blocking each other.
+        self.map.find_read(hash)?.value().get(engine_index).clone()
     }
 
     fn get_or_create_entry(

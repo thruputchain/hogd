@@ -79,17 +79,15 @@ impl LinkEntry {
     }
 }
 
+#[derive(Default)]
 pub struct WasmiGlobalContext {
     entries: Vec<LinkEntry>,
 }
 
-impl WasmiGlobalContext {
-    pub fn new() -> WasmiGlobalContext {
-        Self {
-            entries: Vec::new(),
-        }
-    }
+unsafe impl Send for WasmiGlobalContext {}
+unsafe impl Sync for WasmiGlobalContext {}
 
+impl WasmiGlobalContext {
     pub fn add_entry(&mut self, entry: LinkEntry) {
         self.entries.push(entry);
     }
@@ -163,7 +161,7 @@ impl WasmiContext {
         get_fn: ContractGetFn,
     ) -> WasmiContext {
         Self {
-            global_context: global_context,
+            global_context,
             // Performance is somewhat sensitive to module cache size.
             // We need to change the caching strategy anyways once we go to winch.
             module_cache: Some(ModuleCache::new(10)),
@@ -403,12 +401,10 @@ pub unsafe extern "C" fn wasmi_link_nargs(
     // Forward to global context FFI function
     let c = unsafe { &*context };
     // Get the Arc pointer - we need to get the inner pointer from the Arc
-    let global_context_ptr: *mut c_void = unsafe {
-        core::mem::transmute::<
-            &std::sync::Arc<WasmiGlobalContext>,
-            *const std::sync::Arc<WasmiGlobalContext>,
-        >(&c.global_context) as *mut c_void
-    };
+    let global_context_ptr: *mut c_void = &c.global_context
+        as *const std::sync::Arc<WasmiGlobalContext>
+        as *mut c_void;
+
     wasmi_global_link_nargs(
         global_context_ptr,
         module_name,
@@ -486,7 +482,7 @@ pub unsafe extern "C" fn wasmi_global_link_nargs(
 /// Global context is threadsafe.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_global_context() -> *mut c_void {
-    let global_context = std::sync::Arc::new(WasmiGlobalContext::new());
+    let global_context = std::sync::Arc::new(WasmiGlobalContext::default());
 
     let b = Box::into_raw(Box::new(global_context));
     unsafe { core::mem::transmute(b) }

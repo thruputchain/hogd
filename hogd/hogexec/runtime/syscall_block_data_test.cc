@@ -32,6 +32,8 @@ public:
   {}
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // Test GetBlockHeight syscall returns the correct block height
 TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
 {
@@ -176,5 +178,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
   auto commit_res = handler.try_commit_transaction();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

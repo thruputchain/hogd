@@ -136,7 +136,7 @@ jobs:
             printf 'Tidy checks failed!\n'
             printf '\n===== tidy log =====\n'
             cat tidy.log
-            printf '===== end tidy log =====\n\n'
+            printf '\n===== end tidy log =====\n\n'
             printf '\n===== filtered tidy log =====\n'
             ./scripts/filter_tidy_log.sh tidy.log
             printf '\n===== end filtered tidy log =====\n\n'

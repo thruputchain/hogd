@@ -35,7 +35,8 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {
   {
-    auto [obj, ul] = deployment_cache_.find(addr);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
       return *obj;
     }
@@ -55,7 +56,8 @@ SystemStatus<const Contract *>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   {
-    auto [obj, ul] = contract_cache_.find(hash);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
       if (obj->has_value()) {
         return &obj->value();
@@ -88,21 +90,22 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     }
     return nullptr;
   }
-  assert(lock.owns_lock());
+  CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
-  assert(obj2 != nullptr);
+  CHECK_PTR(obj2);
   if (obj2->has_value()) {
     return &obj2->value();
   }
   return nullptr;
 }
 
-SystemStatus<SnapshotStorageItem *>
+SystemStatus<const SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   {
-    auto [obj, ul] = snapshot_item_cache_.find(addrkey);
+    // Use shared lock for read-only cache lookup
+    auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
     if (obj) {
       return obj;
     }
@@ -117,17 +120,18 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   StorageItem db_item = db_res.value().has_value()
                             ? db_res.value().value()
                             : StorageItem(StorageItemType::kItemTypeDeleted);
-  {
-    auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
-                                                 block_id_, db_proxy_);
-    if (out) {
-      // insertion happened; return the result
-      return out;
-    }
+
+  auto [out, ul] = snapshot_item_cache_.insert(addrkey, db_item, addrkey,
+                                               block_id_, db_proxy_);
+  if (out) {
+    // insertion happened; return the result
+    return out;
   }
+  CHECK(ul.owns_lock());
+
+  auto *obj = snapshot_item_cache_.find(addrkey, ul);
   // otherwise, lookup the item in the cache again
-  auto [obj, ul] = snapshot_item_cache_.find(addrkey);
-  assert(obj);
+  CHECK_PTR(obj);
   return obj;
 }
 
@@ -148,7 +152,7 @@ StorageSnapshotCache::try_get_db_tip()
   if (db_tip_.compare_exchange_strong(tip, tip_unique.get())) {
     return tip_unique.release();
   }
-  assert(tip != nullptr);
+  CHECK_PTR(tip);
   return tip;
 }
 

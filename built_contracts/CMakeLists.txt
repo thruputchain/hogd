@@ -300,6 +300,8 @@ add_wasm_builds(
   authclaim_test
   hash_bug
   htlc
+  payment_channel
+  return_fault_test
 )
 
 # Build all spec JSONs and types XDR in one cargo invocation (separate target-dir to avoid conflicts)
@@ -318,11 +320,14 @@ add_spec_and_types_generation(
     itc_erc20 
     authclaim_test
     htlc
-  TYPES_TARGETS 
-    itc_erc20 
-    manual_revert_test 
-    txs_roundtrip 
-    cxs_roundtrip 
+    payment_channel
+    return_fault_test
+  TYPES_TARGETS
+    itc_erc20
+    manual_revert_test
+    txs_roundtrip
+    cxs_roundtrip
+    payment_channel
 )
 
 # Make all headers wait for all specs to be generated
@@ -342,8 +347,11 @@ add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
 add_contract_header(authclaim_test)
 add_contract_header(htlc)
+add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_channel.hh")
+add_contract_header(return_fault_test)
 
 add_dependencies(itc_erc20_header itc_erc20_hh)
+add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
 add_dependencies(txs_roundtrip_header txs_roundtrip_hh)
 add_dependencies(manual_revert_test_header manual_revert_test_hh)
