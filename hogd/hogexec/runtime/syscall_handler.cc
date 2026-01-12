@@ -618,9 +618,11 @@ namespace {
 constexpr bool
 is_banned_redeploy_native_contract(uint32_t native_contract_id)
 {
-  return native_contract_id ==
-         std::to_underlying(
-             HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+  switch (static_cast<HogexecPrecompiledNativeContracts>(native_contract_id)) {
+  case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+    return true;
+  }
+  panic("Unknown native contract deployed: {}", native_contract_id);
 }
 } // namespace
 
