@@ -128,9 +128,8 @@ public:
   }
 
   // find_shared with shared lock
-  // Note that this does not provide synchronization on the inner object.
-  std::pair<T *, std::shared_lock<lock_type>> find_shared(const Key &key)
-      requires shared_mutex_like<lock_type>
+  std::pair<const T *, std::shared_lock<lock_type>>
+  find_shared(const Key &key) const requires shared_mutex_like<lock_type>
   {
     auto [map, sl] = get_bucket_shared(key);
     auto it = map.find(key);
@@ -290,7 +289,7 @@ private:
 
   Hash hash_fn_ = Hash();
 
-  std::vector<lock_type> locks_;
+  mutable std::vector<lock_type> locks_;
   std::vector<Map> buckets_;
 
   // get_bucket returns the bucket and its associated exclusive lock.
@@ -306,8 +305,8 @@ private:
 
   // get_bucket_shared returns the bucket and its associated shared lock.
   ATTRIBUTE_ALWAYS_INLINE
-  std::pair<Map &, std::shared_lock<lock_type>>
-  get_bucket_shared(const Key &key) requires shared_mutex_like<lock_type>
+  std::pair<const Map &, std::shared_lock<lock_type>>
+  get_bucket_shared(const Key &key) const requires shared_mutex_like<lock_type>
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());

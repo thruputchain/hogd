@@ -100,7 +100,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   return nullptr;
 }
 
-SystemStatus<SnapshotStorageItem *>
+SystemStatus<const SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   {
