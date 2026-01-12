@@ -37,8 +37,8 @@ public:
   void wait_for_changes(BlockHeight height);
 
   // RPC method
-  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
-                                              KeyChangeBatch key_changes);
+  void authdb_forward_key_changes(BlockHeight height,
+                                  KeyChangeBatch key_changes);
 
 private:
   std::map<BlockHeight, KeyChangeBatch> received_changes_;
@@ -46,7 +46,7 @@ private:
   std::condition_variable cv_;
 };
 
-static_assert(is_AuthDB1<MockAuthDBRpc *, x23::Async>);
+static_assert(is_AuthDB1<MockAuthDBRpc *, x23::MaybeAsync>);
 
 class MockAuthDBServer : public RpcServer<MockAuthDBRpc> {
 public:

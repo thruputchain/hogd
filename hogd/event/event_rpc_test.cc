@@ -33,21 +33,21 @@ TEST_F(EventRpcTest, BasicUsage)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{}),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
-  EXPECT_EQ(mempool_rpc.eventsched_open_block(1), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
 
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{}),
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{})(),
             RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{}),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(2, 2, TxEventLog{})(),
             RPCError::kRPCNone);
 
   auto result = mempool_rpc.eventsched_close_block(1)();
   EXPECT_EQ(result.error(), RPCError::kRPCNone);
 
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{}),
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
             RPCError::kRPCNone);
-  EXPECT_NE(mempool_rpc.eventsched_abandon_block(1), RPCError::kRPCNone);
+  EXPECT_NE(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TestAbandonBlock)
@@ -56,20 +56,20 @@ TEST_F(EventRpcTest, TestAbandonBlock)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
-  EXPECT_EQ(mempool_rpc.eventsched_open_block(1), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
 
   // the tx ctx should keep the block open, at least to keep the pointer alive
-  auto *tx_ctx = ctx.get_context(1);
+  auto *tx_ctx = ctx.get_context(1)();
   EXPECT_NE(tx_ctx, nullptr);
 
-  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1), RPCError::kRPCNone);
-  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{}),
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_NE(exec_rpc.eventexecutor_emit_event(1, 2, TxEventLog{})(),
             RPCError::kRPCNone);
 
   tx_ctx->get().add_event(TxEventLog{});
 
   ASSERT_TRUE(tx_ctx->release_reference());
-  ctx.gc_context(1);
+  ctx.gc_context(1)();
 }
 
 TEST_F(EventRpcTest, TestEmptyBlock)
@@ -78,7 +78,7 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
-  EXPECT_EQ(mempool_rpc.eventsched_open_block(1), RPCError::kRPCNone);
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(mempool_rpc.eventsched_close_block(1)().error(),
             RPCError::kRPCNone);
 }

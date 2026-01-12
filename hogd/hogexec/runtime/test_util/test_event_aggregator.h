@@ -8,6 +8,7 @@
 #include "event_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -49,10 +50,13 @@ public:
   }
 
 private:
-  std::mutex mtx_;
+  ThreadCheckedMutex<std::mutex> mtx_;
   x23::CoroFutex<bool> should_block_futex_{false};
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
+
+  RPCError do_emit_event(BlockID block_id, TransactionID tx_id,
+                         TxEventLog event_log);
 
   bool is_block_open(BlockID block_id) const
   {
