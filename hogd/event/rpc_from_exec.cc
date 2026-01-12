@@ -10,7 +10,7 @@ namespace hogd {
 x23::Async<RPCError>
 EventExecRpc::eventexecutor_emit_event(BlockID block_id,
                                        TransactionID /*unused*/,
-                                       TxEventLog const &event_log)
+                                       TxEventLog event_log)
 {
   auto *context = co_await ctx_.get_context(block_id);
   if (!context) {

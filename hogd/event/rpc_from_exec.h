@@ -20,7 +20,7 @@ public:
 
   x23::Async<RPCError> eventexecutor_emit_event(BlockID block_id,
                                                 TransactionID tx_id,
-                                                TxEventLog const &event_log);
+                                                TxEventLog event_log);
 
 private:
   EventRPCContext &ctx_;
