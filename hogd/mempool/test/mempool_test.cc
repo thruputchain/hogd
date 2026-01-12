@@ -435,22 +435,21 @@ TEST(Mempool, GenerateBlockId)
   EXPECT_NE(first, second);
 }
 
-// [kMaxBlockSize] is 1,000,000, which causes this test to time out. We should
-// re-enable this test once we add performance improvements.
-// NOLINTNEXTLINE
 TEST(Mempool, AuthChanged)
 {
-  ElapsedTimer timer;
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
   // txs.
   // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
   SignedTransactionBatch txs =
       generate_unsigned_txs(fib_client, MempoolCoordinatorRpc::kMaxBlockSize);
-  double a = timer.elapsed();
   SignedTransaction auth_tx =
       generate_change_nonce_config(fib_client, /*required_weight=*/10);
-  double b = timer.elapsed();
+  // We set a lower [block_expiry_height] on [auth_tx] than in [txs] so that
+  // [auth_tx] gets ordered first by the scheduler.
+  auth_tx.tx.uniquifier.block_expiry_height = 100;
+  EXPECT_LT(auth_tx.tx.uniquifier.block_expiry_height,
+            txs[0].tx.uniquifier.block_expiry_height);
 
   MempoolTestInfra server;
   server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
@@ -476,7 +475,6 @@ TEST(Mempool, AuthChanged)
   server.register_auth_data_updates(
       /*height=*/0, key_changes)();
 
-  double c = timer.elapsed();
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
   WorkerPool &pool = WorkerPool::get_default_pool();
@@ -491,7 +489,6 @@ TEST(Mempool, AuthChanged)
         stx.signatures.push_back(decorated_signatures);
       },
       /*width=*/txs.size() / available_parallelism());
-  double d = timer.elapsed();
   {
     // Handle [auth_tx].
     auth_tx.tx.auth_claims.push_back(make_sign_claim(0));
@@ -503,13 +500,7 @@ TEST(Mempool, AuthChanged)
     server.mempool_coord_rpc().schedulercoord_submit_unvetted({auth_tx})();
   }
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
-  double e = timer.elapsed();
-  info("AuthChanged a = {}, b = {}, c = {}, d = {}, e = {}", a, b, c, d, e);
 
-  // Now change the [AccountAuthData].
-  //  auth_data.nonce_config.required_weight = 2;
-  //  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
-  //                               auth_data);
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate =
       server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -532,71 +523,11 @@ TEST(Mempool, AuthChanged)
             SchedulerNominationOutcome::SchedulerNominationOK);
   nomination = server.coord_sched_rpc().get_nomination()().nomination;
   EXPECT_TRUE(nomination.transaction_hashes.empty());
+
+  // Check that if we resubmit [txs], they are all discarded.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(txs)();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
-
-// TODO(geoff): Pending executor auth data, and/or checking the updated auth
-// data in the scheduler. NOLINTNEXTLINE
-#if 0
-TEST(Mempool, AuthInvalidated)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  // TODO(jhumphri): [generate_unsigned_txs] should returned properly signed
-  // txs.
-  // TODO(jhumphri): Move all of the configuration below to [MempoolTestInfra].
-  const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client,
-                            MempoolCoordinatorRpc::kMaxBlockSize + 1);
-
-  MempoolTestInfra server;
-  server.set_hogs(MempoolTestInfra::kAccountAddresses[0],
-                  /*group=*/kHogAgeGroupToSchedule, /*age=*/1,
-                  /*num_hogs=*/5'000'000'000 *
-                      MempoolCoordinatorRpc::kMaxBlockSize * 2);
-
-  AccountAuthData auth_data = get_default_account();
-  auth_data.nonce_config.required_weight = 1;
-  set_nonce_key(auth_data, /*idx=*/0);
-  add_gas_config(auth_data, /*gas=*/5'000'000'000, /*keys=*/{0},
-                 /*required_weight=*/1);
-  const Ed25519SecretKey private_key =
-      create_key_pair(auth_data, /*idx=*/0, /*weight=*/2);
-  // TODO(jhumphri): Add this to each of the tests and more extensively verify
-  // the output of nominations, etc.
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-
-  SignedTransactionBatch signed_txs;
-  for (const SignedTransaction &stx : txs) {
-    Transaction tx = stx.tx;
-    tx.auth_claims.push_back(make_sign_claim(0));
-    signed_txs.push_back(
-        hogd::Authentication::sign_claims(tx, {{0, private_key}},
-                                          /*auxiliary_private_keys=*/{}));
-  }
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(signed_txs)();
-
-  // Now change the [AccountAuthData].
-  auth_data.nonce_config.required_weight = 10;
-  server.set_account_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                               auth_data);
-
-  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
-  auto res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  ASSERT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
-  EXPECT_EQ(res.scheduler_nomination().nomination.transaction_hashes.size(),
-            MempoolCoordinatorRpc::kMaxBlockSize);
-
-  // Now check that the last tx is not nominated.
-  db_tip = {.height = res.scheduler_nomination().nomination.block_height,
-            .hash = res.scheduler_nomination().nomination.block_hash,
-            .id = res.scheduler_nomination().block_id};
-  res = server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
-  // [schedulercoord_nominate()] returns an error if there are no vetted txs to
-  // nominate.
-  EXPECT_EQ(res.outcome(),
-            SchedulerNominationOutcome::SchedulerNominationError);
-}
-#endif
 
 } // namespace hogd
 
