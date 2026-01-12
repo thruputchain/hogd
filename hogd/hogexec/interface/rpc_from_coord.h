@@ -76,8 +76,8 @@ public:
   executorsched_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);
 
-  ExecResult executorsched_open_proposal_block(BlockID id);
-  ExecResult executorsched_open_validation_block(BlockID id);
+  x23::Async<ExecResult> executorsched_open_proposal_block(BlockID id);
+  x23::Async<ExecResult> executorsched_open_validation_block(BlockID id);
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all
   // transactions on this block have been committed or aborted.
@@ -102,9 +102,10 @@ private:
     return executor_states_ != nullptr;
   }
 
-  PerThreadARC<ExecutorContext> *try_get_context(BlockID block_id,
-                                                 ExecutionMode mode);
-  void release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
+  x23::Async<PerThreadARC<ExecutorContext> *>
+  try_get_context(BlockID block_id, ExecutionMode mode);
+  x23::Async<void> release_context(BlockID block_id,
+                                   PerThreadARC<ExecutorContext> *ctx);
 
   std::atomic<uint64_t> self_id_ = 0;
   uint16_t self_executor_id_ = std::numeric_limits<uint16_t>::max();
