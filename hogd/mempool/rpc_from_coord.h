@@ -323,7 +323,6 @@ private:
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
 
-  // TODO(jhumphri): Make the mempool work with multiple threads.
   std::shared_ptr<Scheduler> scheduler_;
   std::unique_ptr<AuthServer> auth_;
   std::unique_ptr<AuthRpcServers> auth_rpc_;
