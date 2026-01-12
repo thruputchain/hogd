@@ -215,8 +215,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
               }},
       *context);
 
-  // Invoke the contract - it should fail because deploy_contract returns an
-  // error
+  // Invoke the contract - it should succeed (contract caught the error)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
@@ -224,7 +223,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
       SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
                                                    native_token_hash);
 
-  // Verify that the deployment failed with the expected error
+  // Verify that the deployment failed
   auto deployment_lookup = lookup_deployment_from_db(deploy_addr);
   EXPECT_FALSE(deployment_lookup.has_value());
 }
