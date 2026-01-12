@@ -28,24 +28,24 @@ to_rpc_error(EventErrorCode error_code)
 }
 } // namespace
 
-RPCError
+x23::Async<RPCError>
 EventMempoolRpc::eventsched_open_block(BlockID block_id)
 {
-  auto r = ctx_.open_block(block_id);
+  auto r = co_await ctx_.open_block(block_id);
   if (!r) {
-    return to_rpc_error(r.error().code());
+    co_return to_rpc_error(r.error().code());
   }
-  return RPCError::kRPCNone;
+  co_return RPCError::kRPCNone;
 }
 
-RPCError
+x23::Async<RPCError>
 EventMempoolRpc::eventsched_abandon_block(BlockID block_id)
 {
-  auto r = ctx_.abandon_block(block_id);
+  auto r = co_await ctx_.abandon_block(block_id);
   if (!r) {
-    return to_rpc_error(r.error().code());
+    co_return to_rpc_error(r.error().code());
   }
-  return RPCError::kRPCNone;
+  co_return RPCError::kRPCNone;
 }
 
 x23::Async<EventBlockResult>
