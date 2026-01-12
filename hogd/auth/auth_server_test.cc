@@ -205,9 +205,14 @@ TEST_F(AuthServerTest, QueriesDelayed)
   std::atomic<bool> sequence = false;
 
   std::jthread thread([&] {
+    sequence = true;
+    sequence.notify_all();
     auto res = auth_server().lookup_auth_data(5, address)();
-    ASSERT_TRUE(sequence);
   });
+
+  // hack to make sure the query thread is actually waiting on the coro futex
+  sequence.wait(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   auth_server().register_auth_data_updates(1,
                                            mock_db().get_key_changes_at_height(
@@ -218,6 +223,58 @@ TEST_F(AuthServerTest, QueriesDelayed)
   auth_server().register_auth_data_updates(3,
                                            mock_db().get_key_changes_at_height(
                                                3))();
+  auth_server().register_auth_data_updates(4,
+                                           mock_db().get_key_changes_at_height(
+                                               4))();
+  sequence = true;
+  auth_server().register_auth_data_updates(5,
+                                           mock_db().get_key_changes_at_height(
+                                               5))();
+
+  thread.join();
+}
+
+TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
+{
+  ContractAddress address = make_test_address(6);
+  AccountAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height(); // 1
+  mock_db().increment_height(); // 2
+  mock_db().increment_height(); // 3
+  mock_db().increment_height(); // 4
+  mock_db().increment_height(); // 5
+
+  // Unlike QueriesDelayed, start with an auth server that's properly initialized,
+  // but just missing recent updates.
+
+  auth_server().register_auth_data_updates(1,
+    mock_db().get_key_changes_at_height(
+        1))();
+  auth_server().register_auth_data_updates(2,
+      mock_db().get_key_changes_at_height(
+          2))();
+
+  std::atomic<bool> sequence = false;
+
+  std::jthread thread([&] {
+    sequence = true;
+    sequence.notify_all();
+    auto res = auth_server().lookup_auth_data(5, address)();
+  });
+
+  // hack to make sure the query thread is actually waiting on the coro futex
+  sequence.wait(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  auth_server().register_auth_data_updates(3,
+                                           mock_db().get_key_changes_at_height(
+                                               3))();
+  // make sure that the waiting thread wakes up and then goes back to sleep
+  // TODO(geoff): I don't have a good way to test whether the thread actually wakes and 
+  // goes back to sleep.  That's not required for correct external behavior of the auth server,
+  // but I do want to test the logic for when threads decide to stop waiting.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   auth_server().register_auth_data_updates(4,
                                            mock_db().get_key_changes_at_height(
                                                4))();

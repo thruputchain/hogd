@@ -2,16 +2,18 @@
 
 #include <format>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server.h"
+#include "hogd/auth/dbauth_client.h"
 #include "hogd/auth/mock_dbauth_rpc.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
-#include "hogd/version.h"
-#include "sched_db.hh"
+#include "x23/async.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
