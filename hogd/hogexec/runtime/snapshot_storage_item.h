@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "account.hh"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -94,6 +95,12 @@ public:
   auto const &addrkey() const { return addrkey_; }
 
 private:
+#ifdef NDEBUG
+  using mutex_type = std::mutex;
+#else
+  using mutex_type = ThreadCheckedMutex<std::mutex>;
+#endif
+
   struct BytestringEntry {
     Bytestring bytestring_;
     constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
@@ -135,7 +142,7 @@ private:
     SystemStatus<const RetrocausalQueueBlock *>
     get_next_block(DatabaseProxy &db_proxy, BlockID block_id,
                    AddressAndKey const &addrkey, uint64_t search_start_index,
-                   std::unique_lock<std::mutex> &ul) const;
+                   std::unique_lock<mutex_type> &ul) const;
 
   private:
     // INVARIANT: These should only be modified while holding the rcq_mtx_ lock.
@@ -165,7 +172,13 @@ private:
 
   // Protects both the concurrent_queue_entries and the RetrocausalQueueEntry
   // contents.
-  mutable std::mutex rcq_mtx_;
+  //
+  // This mutex is checked (currently only in debug builds) for migration across
+  // threads because it is held accesses to hogdb via the DatabaseProxy, which
+  // currently uses an SRpcClient. An SRpcClient is safe inside DatabaseProxy,
+  // as calls suspend instead of migrating across threads. If we ever change the
+  // internals of DatabaseProxy, this mutex would cause
+  mutable mutex_type rcq_mtx_;
 
   // Note: the elements of the concurrent read cache
   // can't be part of the variant, since the type of the storage item

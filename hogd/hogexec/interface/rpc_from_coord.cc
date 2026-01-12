@@ -18,27 +18,27 @@
 
 namespace hogd {
 
-PerThreadARC<ExecutorContext> *
+x23::Async<PerThreadARC<ExecutorContext> *>
 ExecutorMempoolRpc::try_get_context(BlockID block_id, ExecutionMode mode)
 {
   if (!initialize_check()) [[unlikely]] {
     warn("ExecutorMempoolRpc: accessing context before initialization");
-    return nullptr;
+    co_return nullptr;
   }
 
-  auto *ctx = executor_states_->get_executor_context(block_id);
+  auto *ctx = co_await executor_states_->get_executor_context(block_id);
   if (!ctx) {
-    return nullptr;
+    co_return nullptr;
   }
   if (ctx->get().mode() != mode) {
     warn("Expected executor context for block {} to be in {} mode, but found "
          "in {} mode",
          block_id, mode, ctx->get().mode());
-    release_context(block_id, ctx);
-    return nullptr;
+    co_await release_context(block_id, ctx);
+    co_return nullptr;
   }
 
-  return ctx;
+  co_return ctx;
 }
 
 x23::Async<ExecProposeResult>
@@ -46,14 +46,14 @@ ExecutorMempoolRpc::executorsched_propose_transaction(
     BlockID block_id, SignedTransaction signed_tx)
 {
 
-  auto *ctx = try_get_context(block_id, ExecutionMode::kProposing);
+  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
   auto r =
       co_await ctx->get().propose_transaction(signed_tx, allocate_tx_ids(1));
-  release_context(block_id, ctx);
+  co_await release_context(block_id, ctx);
   co_return r;
 }
 
@@ -61,14 +61,14 @@ x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_validate_transaction(
     BlockID block_id, ProposedTransaction proposed_tx)
 {
-  auto *ctx = try_get_context(block_id, ExecutionMode::kValidating);
+  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kValidating);
   if (!ctx) {
     co_return ExecResult::ExecResultSystemError;
   }
 
   auto r =
       co_await ctx->get().validate_transaction(proposed_tx, allocate_tx_ids(1));
-  release_context(block_id, ctx);
+  co_await release_context(block_id, ctx);
   co_return r;
 }
 
@@ -76,7 +76,7 @@ x23::Async<ExecProposeBatchResult>
 ExecutorMempoolRpc::executorsched_propose_batch(
     BlockID block_id, SignedTransactionBatch signed_txs)
 {
-  auto *ctx = try_get_context(block_id, ExecutionMode::kProposing);
+  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kProposing);
   if (!ctx) {
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
@@ -85,7 +85,7 @@ ExecutorMempoolRpc::executorsched_propose_batch(
 
   auto r = co_await ctx->get().propose_transaction_batch(
       signed_txs, allocate_tx_ids(signed_txs.size()));
-  release_context(block_id, ctx);
+  co_await release_context(block_id, ctx);
   co_return r;
 }
 
@@ -93,7 +93,7 @@ x23::Async<ExecValidateBatchResult>
 ExecutorMempoolRpc::executorsched_validate_batch(
     BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
-  auto *ctx = try_get_context(block_id, ExecutionMode::kValidating);
+  auto *ctx = co_await try_get_context(block_id, ExecutionMode::kValidating);
   if (!ctx) {
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
@@ -102,26 +102,26 @@ ExecutorMempoolRpc::executorsched_validate_batch(
   auto r = ctx->get().validate_transaction_batch(proposed_txs,
                                                  allocate_tx_ids(
                                                      proposed_txs.size()));
-  release_context(block_id, ctx);
+  co_await release_context(block_id, ctx);
   co_return co_await r;
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
 {
   if (!initialize_check()) [[unlikely]] {
-    return ExecResult::ExecResultSystemError;
+    co_return ExecResult::ExecResultSystemError;
   }
-  return executor_states_->open_proposal(id);
+  co_return co_await executor_states_->open_proposal(id);
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
 {
   if (!initialize_check()) [[unlikely]] {
-    return ExecResult::ExecResultSystemError;
+    co_return ExecResult::ExecResultSystemError;
   }
-  return executor_states_->open_validation(id);
+  co_return co_await executor_states_->open_validation(id);
 }
 
 x23::Async<ExecResult>
@@ -148,12 +148,12 @@ ExecutorMempoolRpc::executorsched_shutdown()
   co_return;
 }
 
-void
+x23::Async<void>
 ExecutorMempoolRpc::release_context(BlockID block_id,
                                     PerThreadARC<ExecutorContext> *ctx)
 {
   if (ctx->release_reference()) {
-    executor_states_->gc_executor_context(block_id);
+    co_await executor_states_->gc_executor_context(block_id);
   }
 }
 
