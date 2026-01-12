@@ -22,6 +22,26 @@
 // exits.  Instead we went with a per-thread std::vector<T> for each T, so that
 // each type is grouped together, making it easier to construct and destruct
 // items.
+//
+// WARNING: Coroutine safety
+// -------------------------
+// Do NOT hold a reference/pointer obtained from operator*() or operator->()
+// across a co_await boundary. After co_await, the coroutine may resume on a
+// different thread, and the reference would then point to the wrong thread's
+// data. Always scope PerThread access within synchronous blocks that complete
+// before any co_await:
+//
+//   // WRONG:
+//   Cache& cache = *perthread_cache_;
+//   co_await something();
+//   cache.use();  // BUG: may be wrong thread's cache!
+//
+//   // CORRECT:
+//   { Cache& cache = *perthread_cache_; cache.use(); }
+//   co_await something();
+//
+// Similarly, lock_threads() returns a std::unique_lock that must not be held
+// across co_await.
 
 #pragma once
 

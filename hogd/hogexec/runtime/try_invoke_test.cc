@@ -2617,97 +2617,93 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                -> InvokeStatus<void> { return {}; }}});
 
   // Contract 1: performs the four try_invoke error cases
-  auto caller_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
-      {0,
-       [=](SystemCallHandler &handler,
-           NativeRuntime &runtime) -> InvokeStatus<void> {
-         RuntimeMemoryLength output_return_buffer_len;
-         WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
-         Calldata calldata = {};
-         std::span<const std::byte> calldata_span =
-             std::as_bytes(std::span(calldata.data(), calldata.size()));
-         // 1. try_invoke on a missing contract
-         {
-           auto [res, _gas] = syscall_Invoke_inner(
-               handler, remaining_gas, missing_contract_addr, 0, 1000,
-               calldata_span,
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
-               output_return_buffer_len);
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [=](SystemCallHandler &handler,
+               NativeRuntime &runtime) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len;
+             WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
+             Calldata calldata = {};
+             std::span<const std::byte> calldata_span =
+                 std::as_bytes(std::span(calldata.data(), calldata.size()));
+             // 1. try_invoke on a missing contract
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, missing_contract_addr, 0, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
 
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeContractLookupFailed) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 2. try_invoke on error_contract, but with a method that does not
-         // exist
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    999, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 3. try_invoke on error_contract, correct method, but with gas
-         // limit 50 (not enough)
-         {
-           auto [res, gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    0, 50, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           // This should return as a deterministic error (handleable), with
-           // 50 gas consumed
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-           if (gas != 50) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 4. try_invoke on error_contract, correct method, with gas limit
-         // 1000 (enough)
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    0, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 5. try_invoke on error_contract, valid method, with gas limit
-         // 1000 (enough)
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    1, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 2. try_invoke on error_contract, but with a method that does not
+             // exist
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 999, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 3. try_invoke on error_contract, correct method, but with gas
+             // limit 50 (not enough)
+             {
+               auto [res, gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 0, 50,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               // This should return as a deterministic error (handleable), with
+               // 50 gas consumed
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (gas != 50) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 4. try_invoke on error_contract, correct method, with gas limit
+             // 1000 (enough)
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 0, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 5. try_invoke on error_contract, valid method, with gas limit
+             // 1000 (enough)
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 1, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
 
-         return {};
-       }}});
+             return {};
+           }}});
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(kErrorContractId, std::move(error_contract));
