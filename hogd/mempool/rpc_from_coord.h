@@ -333,11 +333,11 @@ private:
   // Protects [validated_block_cache_].
   x23::CoroLock validated_block_cache_lock_;
   size_t num_validations_in_progress_ = 0;
-  // Ensures that a commit does not occur while a block is being nominated or
-  // validated, and vice versa.
-  // This lock is acquired in shared mode when a block is being nominated or
-  // validated. This lock is acquired in exclusive mode when a block is being
-  // committed.
+  // Ensures that a commit does not occur while txs are being verified. Txs are
+  // verified against a certain block height, so if they race with a block
+  // commit, we could add txs to the scheduler that are no longer verified as of
+  // the last committed block.
+  x23::CoroLock commit_lock_;
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};

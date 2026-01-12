@@ -67,14 +67,11 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     SignedTransactionBatch batch)
 {
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+
   ElapsedTimer timer;
   info("submit_unvetted, {} txs", batch.size());
-  // std::this_thread::sleep_for(std::chrono::seconds(20));
-  // TODO(jhumphri): What if [current_block] is incremented before we add
-  // the txs to the scheduler? In that case, the auth_changed callback
-  // would not see these txs, so we could end up adding unauthorized txs
-  // to the scheduler. Maybe this race is okay if the executor detects
-  // that the txs are now unauthorized?
   auto auth_handle = auth_->verify_transactions(
       /*height=*/scheduler_->current_block(), batch, /*max_parallelism=*/128);
 
@@ -865,6 +862,9 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(BlockID block_id)
 {
   info("schedulercoord_commit_block!!!");
+  x23::CoroGuard commit_cg;
+  co_await commit_cg(commit_lock_);
+
   x23::CoroGuard validate_cg;
   co_await validate_cg(validated_block_cache_lock_);
   if (num_validations_in_progress_) {
@@ -976,6 +976,9 @@ x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
                                          const KeyChangeBatch &key_changes)
 {
+  x23::CoroGuard cg;
+  co_await cg(commit_lock_);
+
   static SignedTransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
