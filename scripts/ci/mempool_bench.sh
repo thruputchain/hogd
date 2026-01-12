@@ -133,8 +133,8 @@ echo 'launch mempool'
 bash -c 'timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec 1 3; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that comes last alphabetically.
-scp hog4:"$(ssh -n hog4 'ls -1 /tmp/hogd_stdout* | tail -n 1')" ./coordinator_output.txt
+# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
+scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -192,39 +193,22 @@ public:
     return make_encoding(return_value);
   }
 
-  // Native contract is responsible for handling errors related to failing to
-  // parse calldata. This behavior mirrors the behavior implemented in the SDK.
-  template<StringLiteral Name>
-  static auto decode_calldata(std::span<const std::byte> data)
-  {
-    using args_type =
-        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
-    return [data] -> SyscallStatus<args_type> {
-      auto out =
-          Serializer<kSerializationFormat>::template deserialize<args_type>(
-              data);
-      if (!out.has_value()) {
-        return SyscallError{
-            SyscallErrorCode::kSyscallErrorCodeCalldataParseError};
-      }
-      return *out;
-    }();
-  }
-
+  // Returns nullopt if decoding fails.
   template<StringLiteral Name>
   static auto decode_return(std::span<const std::byte> data,
                             bool manually_reverted)
   {
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
-    return [data, manually_reverted] -> SyscallStatus<return_type> {
+    return [data, manually_reverted] -> std::optional<return_type> {
       if constexpr (is_contract_result_type<return_type>) {
         if (manually_reverted) {
           auto out = Serializer<kSerializationFormat>::template deserialize<
               typename return_type::err_type>(data);
           if (!out.has_value()) {
-            return SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeReturnParseError};
+            trace("Decode Return Failed: Failed to deserialize return error "
+                  "type");
+            return std::nullopt;
           }
           return return_type::make_err(*out);
         }
@@ -232,27 +216,26 @@ public:
         auto out = Serializer<kSerializationFormat>::template deserialize<
             typename return_type::ok_type>(data);
         if (!out.has_value()) {
-          return SyscallError{
-              SyscallErrorCode::kSyscallErrorCodeReturnParseError};
+          trace("Decode Return Failed: Failed to deserialize return ok type");
+          return std::nullopt;
         }
         return return_type::make_ok(*out);
       }
       else {
-
         // not using the manual revert path
-
         if (manually_reverted) {
-          return SyscallError{SyscallErrorCode::kSyscallErrorCodeFrameReverted};
+          trace("Decode Return Failed: Manually reverted in non-result return "
+                "type");
+          return std::nullopt;
         }
-
         auto out =
             Serializer<kSerializationFormat>::template deserialize<return_type>(
                 data);
         if (!out.has_value()) {
-          return SyscallError{
-              SyscallErrorCode::kSyscallErrorCodeReturnParseError};
+          trace("Decode Return Failed: Failed to deserialize return value");
+          return std::nullopt;
         }
-        return *out;
+        return out;
       }
     }();
   }
@@ -297,9 +280,9 @@ public:
 
   template<StringLiteral Name, InvokeFlagSet Flags = std::to_underlying(
                                    InvokeFlag::kInvokeFlagNone)>
-  auto invoke(SystemCallHandler &handler, auto &&...args)
-      -> std::pair<HostFnStatus<SyscallStatus<
-                       typename trait_meta_t::template return_t<Name>>>,
+  auto invoke_opt(SystemCallHandler &handler, auto &&...args)
+      -> std::pair<HostFnStatus<SyscallStatus<std::optional<
+                       typename trait_meta_t::template return_t<Name>>>>,
                    uint64_t>
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
@@ -345,8 +328,9 @@ public:
         trait_meta_t::template decode_return<Name>(return_span,
                                                    manually_reverted);
     if (!return_value.has_value()) {
-      trace("Invoke Error: Decode Return Failed: {}", return_value.error());
-      return std::pair{return_value.error(), res.second};
+      trace("Invoke Error: Decode Return Failed");
+      // return nullopt to indicate that the return value is not available
+      return std::pair{std::nullopt, res.second};
     }
     return std::pair{return_value.value(), res.second};
   }

@@ -9,12 +9,16 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+
+#include "x23/format.h"
+#include "x23/x23.h"
 
 #include "account.hh"
 #include "contract.hh"
@@ -57,6 +61,15 @@
 
 namespace hogd {
 
+// GTest custom printer for XDR enums - prints enum names instead of numbers
+// Must be in hogd namespace for ADL to find it
+template<x23::is_xdr_enum T>
+void
+PrintTo(const T &value, ::std::ostream *os) // NOLINT
+{
+  *os << x23::show(value);
+}
+
 enum class TestDB : int8_t {
   kMockInMemory = 0,
   kHogDB = 1,
@@ -73,6 +86,7 @@ get_default_cost_model_xdr()
       .contract_deployment_cost_per_byte = to_xdr(int128_t{10}),
       .auth_per_key_cost = to_xdr(int128_t{1111}),
       .replay_cache_cost_per_entry = to_xdr(int128_t{7}),
+      .balance_cost = to_xdr(int128_t{1234}),
   };
 }
 
@@ -213,6 +227,10 @@ public:
   {
     return event_server_.get_events(block_id, tx_id);
   }
+
+  // Blocking control for testing delays
+  void block_emit_events() { event_server_.block_emit_events(); }
+  void unblock_emit_events() { event_server_.unblock_emit_events(); }
 
 private:
   TestEventAggregator event_server_;
@@ -460,7 +478,16 @@ public:
 
   // Only for use in tests if precise control over rpcs is needed
   DatabaseProxy &get_db_proxy() { return *db_proxy_; }
-  uint64_t get_block_number() const { return block_number_; }
+  BlockID get_block_number() const { return block_number_; }
+
+  DbTip get_db_tip() const
+  {
+    auto r = db_proxy_->get_db_tip(block_number_);
+    if (!r) {
+      throw std::runtime_error("get_db_tip: db_proxy_->get_db_tip failed");
+    }
+    return *r;
+  }
 
   PerTransactionEventServerProxy
   make_new_per_tx_event_server_proxy(TransactionID tx_id)

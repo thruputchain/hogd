@@ -33,6 +33,7 @@
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -63,91 +64,92 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   // 2: Invokes method 0 and then method 1, checking that the written value is
   // read correctly.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
-            {0,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-               auto const &calldata = handler.get_calldata();
-               auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(calldata)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+    auto native_contract_0 = std::make_unique<
+        NativeContract>(std::unordered_map<MethodID,
+                                           NativeContract::function_t>{
+        {0,
+         [](SystemCallHandler &handler,
+            NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           auto const &calldata = handler.get_calldata();
+           auto key = make_storage_key("test");
+           auto [res, _gas] = syscall_BytestringSet_inner(
+               handler, key, std::as_bytes(std::span(calldata)),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+           if (!res.has_value() ||
+               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+             ADD_FAILURE()
+                 << "ReadWriteBytestring: Failed to set bytestring in method 0";
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               return {};
-             }},
-            {1,
-             [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-               auto key = make_storage_key("test");
-               auto res = handler.get_bytestring(key);
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+           return {};
+         }},
+        {1,
+         [](SystemCallHandler &handler,
+            NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+           auto key = make_storage_key("test");
+           auto res = handler.get_bytestring(key);
+           if (!res.has_value()) {
+             return res.error().to_invoke_error();
+           }
+           if (!res.value().has_value()) {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               ReturnBuffer out;
-               out.resize(res.value().value().size());
-               if (!out.empty()) {
-                 std::memcpy(out.data(), res.value().value().data(),
-                             res.value().value().size());
-               }
+           ReturnBuffer out;
+           out.resize(res.value().value().size());
+           if (!out.empty()) {
+             std::memcpy(out.data(), res.value().value().data(),
+                         res.value().value().size());
+           }
 
-               handler.set_return_buffer(std::move(out), false);
-               return {};
-             }},
-            {2,
-             [](SystemCallHandler &handler,
-                NativeRuntime &runtime) -> InvokeStatus<void> {
-               auto calldata = handler.get_calldata();
+           handler.set_return_buffer(std::move(out), false);
+           return {};
+         }},
+        {2,
+         [](SystemCallHandler &handler,
+            NativeRuntime &runtime) -> InvokeStatus<void> {
+           auto calldata = handler.get_calldata();
 
-               auto [r0, _g0] = handler.invoke(
-                   handler.get_current_address(), 0,
-                   runtime.get_available_gas(), handler.get_calldata(),
-                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
+           auto [r0, _g0] =
+               handler.invoke(handler.get_current_address(), 0,
+                              runtime.get_available_gas(),
+                              handler.get_calldata(),
+                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-               if (!r0.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+           if (!r0.has_value()) {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               auto [r1, _g1] =
-                   handler.invoke(handler.get_current_address(), 1,
-                                  runtime.get_available_gas(), Calldata{},
-                                  std::to_underlying(
-                                      InvokeFlag::kInvokeFlagNone));
+           auto [r1, _g1] =
+               handler.invoke(handler.get_current_address(), 1,
+                              runtime.get_available_gas(), Calldata{},
+                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-               if (!r1.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+           if (!r1.has_value()) {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               auto returned_buffer = handler.get_return_buffer();
-               if (!returned_buffer.has_value()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+           auto returned_buffer = handler.get_return_buffer();
+           if (!returned_buffer.has_value()) {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               auto const &returned_buffer_data = returned_buffer.value();
+           auto const &returned_buffer_data = returned_buffer.value();
 
-               if (returned_buffer_data->size() != calldata.size()) {
-                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-               }
+           if (returned_buffer_data->size() != calldata.size()) {
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }
 
-               if (!returned_buffer_data->empty()) {
-                 if (std::memcmp(returned_buffer_data->data(), calldata.data(),
-                                 calldata.size()) != 0) {
-                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                 }
-               }
+           if (!returned_buffer_data->empty()) {
+             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                             calldata.size()) != 0) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+           }
 
-               return {};
-             }}});
+           return {};
+         }}});
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract_0));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -235,11 +237,14 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span{"hello"}));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span{"hello"}),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "TryInvokeGoodWorkflow: Failed to set "
+                                  "bytestring in method 1";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
                return {};
@@ -307,11 +312,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span{"hello"}));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span{"hello"}),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                                  "bytestring in method 0";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};
              }},
@@ -319,11 +327,14 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span{"world"}));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span{"world"}),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "TryInvokeHandleErrors: Failed to set "
+                                  "bytestring in method 1";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};
              }},
@@ -536,7 +547,9 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                auto add_value = static_cast<int8_t>(calldata[0]);
 
                auto system_res =
-                   handler.set_nnint(key, std::nullopt, add_value);
+                   handler.set_nnint(key, std::nullopt, add_value,
+                                     std::to_underlying(
+                                         StorageItemRPCFlags::kStorageNone));
 
                if (!system_res.has_value()) {
                  ADD_FAILURE() << "set_nnint should have succeeded";
@@ -662,13 +675,12 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
                auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(calldata)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(calldata)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "Failed to set bytestring in method 0";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};
@@ -808,13 +820,12 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
                auto key = make_storage_key("test");
-               auto res =
-                   handler.set_bytestring(key,
-                                          std::as_bytes(std::span(calldata)));
-               if (!res.has_value()) {
-                 return res.error().to_invoke_error();
-               }
-               if (!res.value().has_value()) {
+               auto [res, _gas] = syscall_BytestringSet_inner(
+                   handler, key, std::as_bytes(std::span(calldata)),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 ADD_FAILURE() << "Failed to set bytestring in method 0";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                return {};
@@ -982,7 +993,9 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                auto add_value = static_cast<int8_t>(calldata[0]);
 
                auto system_res =
-                   handler.set_nnint(key, std::nullopt, add_value);
+                   handler.set_nnint(key, std::nullopt, add_value,
+                                     std::to_underlying(
+                                         StorageItemRPCFlags::kStorageNone));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation
@@ -1143,7 +1156,10 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                auto set_value = static_cast<int8_t>(calldata[0]);
                auto add_value = static_cast<int8_t>(calldata[1]);
 
-               auto system_res = handler.set_nnint(key, set_value, add_value);
+               auto system_res =
+                   handler.set_nnint(key, set_value, add_value,
+                                     std::to_underlying(
+                                         StorageItemRPCFlags::kStorageNone));
 
                if (!system_res.has_value()) {
                  // System-level error during async operation
@@ -1399,64 +1415,74 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // 1: Write "abc" to key0 and "def" to key1
   // 2: Root method: try_invoke method 0 (succeeds), then try_invoke method 1
   // (fails)
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [str_abc](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<void> {
-             auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_abc)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }},
-          {1,
-           [str_abc, str_def](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<void> {
-             auto key0 = make_storage_key("test0");
-             auto key1 = make_storage_key("test1");
-             auto res0 =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_abc)));
-             if (!res0.has_value() || !res0.value().has_value())
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             auto res1 =
-                 handler.set_bytestring(key1,
-                                        std::as_bytes(std::span(str_def)));
-             if (!res1.has_value() || !res1.value().has_value())
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return {};
-           }},
-          {2,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // First, try_invoke method 1 (should fail)
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Should fail (not enough tokens for two writes)
-             if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Then, try_invoke method 0 (should succeed)
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value() ||
-                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }}});
+  auto native_contract = std::make_unique<
+      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      {0,
+       [str_abc](SystemCallHandler &handler,
+                 NativeRuntime &) -> InvokeStatus<void> {
+         auto key0 = make_storage_key("test0");
+         auto [res, _gas] = syscall_BytestringSet_inner(
+             handler, key0, std::as_bytes(std::span(str_abc)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res.has_value() ||
+             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE()
+               << "StorageCostAccounting: Failed to set bytestring in method 0";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {1,
+       [str_abc, str_def](SystemCallHandler &handler,
+                          NativeRuntime &) -> InvokeStatus<void> {
+         auto key0 = make_storage_key("test0");
+         auto key1 = make_storage_key("test1");
+         auto [res0, _gas0] = syscall_BytestringSet_inner(
+             handler, key0, std::as_bytes(std::span(str_abc)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res0.has_value() ||
+             res0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
+                            "in method 1 (key0)";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         auto [res1, _gas1] = syscall_BytestringSet_inner(
+             handler, key1, std::as_bytes(std::span(str_def)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res1.has_value() ||
+             res1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE() << "StorageCostAccounting: Failed to set bytestring "
+                            "in method 1 (key1)";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {2,
+       [](SystemCallHandler &handler,
+          NativeRuntime &runtime) -> InvokeStatus<void> {
+         // First, try_invoke method 1 (should fail)
+         auto [r1, _g1] = handler.invoke(handler.get_current_address(), 1,
+                                         runtime.get_available_gas(), {},
+                                         std::to_underlying(
+                                             InvokeFlag::kInvokeFlagTryInvoke));
+         if (!r1.has_value()) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         // Should fail (not enough tokens for two writes)
+         if (r1.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         // Then, try_invoke method 0 (should succeed)
+         auto [r0, _g0] = handler.invoke(handler.get_current_address(), 0,
+                                         runtime.get_available_gas(), {},
+                                         std::to_underlying(
+                                             InvokeFlag::kInvokeFlagTryInvoke));
+         if (!r0.has_value() ||
+             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }}});
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
@@ -1542,39 +1568,45 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
            [str_abc](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_abc)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key0, std::as_bytes(std::span(str_abc)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
+                                "bytestring in method 0";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {1,
            [str_def](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
              auto key1 = make_storage_key("test1");
-             auto res =
-                 handler.set_bytestring(key1,
-                                        std::as_bytes(std::span(str_def)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key1, std::as_bytes(std::span(str_def)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
+                                "bytestring in method 1";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {2,
            [str_ghi](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
              auto key2 = make_storage_key("test2");
-             auto res =
-                 handler.set_bytestring(key2,
-                                        std::as_bytes(std::span(str_ghi)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key2, std::as_bytes(std::span(str_ghi)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "MarginalCostAccounting: Failed to set "
+                                "bytestring in method 2";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {3,
@@ -1704,79 +1736,88 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // 1: Write "abc" to key1
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [str_short](SystemCallHandler &handler,
-                       NativeRuntime &) -> InvokeStatus<void> {
-             auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_short)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return {};
-           }},
-          {1,
-           [str_medium](SystemCallHandler &handler,
-                        NativeRuntime &) -> InvokeStatus<void> {
-             auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_medium)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return {};
-           }},
-          {2,
-           [str_long](SystemCallHandler &handler,
-                      NativeRuntime &) -> InvokeStatus<void> {
-             auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_long)));
-             if (!res.has_value())
-               return res.error().to_invoke_error();
-             if (!res.value().has_value())
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return {};
-           }},
-          {3,
-           [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 (short)
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r0.has_value() ||
-                 r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Try invoke method 1 (medium)
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 1, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r1.has_value() ||
-                 r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Try invoke method 2 (long) -- should fail
-             auto [r2, _g2] = handler.invoke(
-                 handler.get_current_address(), 2, runtime.get_available_gas(),
-                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-             if (!r2.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // expects an error
-             if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return {};
-           }}});
+  auto native_contract = std::make_unique<
+      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      {0,
+       [str_short](SystemCallHandler &handler,
+                   NativeRuntime &) -> InvokeStatus<void> {
+         auto key0 = make_storage_key("test0");
+         auto [res, _gas] = syscall_BytestringSet_inner(
+             handler, key0, std::as_bytes(std::span(str_short)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res.has_value() ||
+             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE()
+               << "CostChangeAccounting: Failed to set bytestring in method 0";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {1,
+       [str_medium](SystemCallHandler &handler,
+                    NativeRuntime &) -> InvokeStatus<void> {
+         auto key0 = make_storage_key("test0");
+         auto [res, _gas] = syscall_BytestringSet_inner(
+             handler, key0, std::as_bytes(std::span(str_medium)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res.has_value() ||
+             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE()
+               << "CostChangeAccounting: Failed to set bytestring in method 1";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {2,
+       [str_long](SystemCallHandler &handler,
+                  NativeRuntime &) -> InvokeStatus<void> {
+         auto key0 = make_storage_key("test0");
+         auto [res, _gas] = syscall_BytestringSet_inner(
+             handler, key0, std::as_bytes(std::span(str_long)),
+             std::to_underlying(StorageItemRPCFlags::kStorageNone));
+         if (!res.has_value() ||
+             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           ADD_FAILURE()
+               << "CostChangeAccounting: Failed to set bytestring in method 2";
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {3,
+       [](SystemCallHandler &handler,
+          NativeRuntime &runtime) -> InvokeStatus<void> {
+         // Try invoke method 0 (short)
+         auto [r0, _g0] = handler.invoke(handler.get_current_address(), 0,
+                                         runtime.get_available_gas(), {},
+                                         std::to_underlying(
+                                             InvokeFlag::kInvokeFlagTryInvoke));
+         if (!r0.has_value() ||
+             r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         // Try invoke method 1 (medium)
+         auto [r1, _g1] = handler.invoke(handler.get_current_address(), 1,
+                                         runtime.get_available_gas(), {},
+                                         std::to_underlying(
+                                             InvokeFlag::kInvokeFlagTryInvoke));
+         if (!r1.has_value() ||
+             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         // Try invoke method 2 (long) -- should fail
+         auto [r2, _g2] = handler.invoke(handler.get_current_address(), 2,
+                                         runtime.get_available_gas(), {},
+                                         std::to_underlying(
+                                             InvokeFlag::kInvokeFlagTryInvoke));
+         if (!r2.has_value()) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         // expects an error
+         if (r2.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }}});
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
@@ -1859,22 +1900,30 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_long)));
-             if (!res.has_value() || !res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key0, std::as_bytes(std::span(str_long)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
+                                "bytestring in method 0";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {1,
            [str_short](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_short)));
-             if (!res.has_value() || !res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key0, std::as_bytes(std::span(str_short)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "CostChangeDecreaseSuccessCase: Failed to set "
+                                "bytestring in method 1";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {2,
@@ -1985,22 +2034,30 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_long)));
-             if (!res.has_value() || !res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key0, std::as_bytes(std::span(str_long)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
+                                "bytestring in method 0";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {1,
            [str_short](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
-             auto res =
-                 handler.set_bytestring(key0,
-                                        std::as_bytes(std::span(str_short)));
-             if (!res.has_value() || !res.value().has_value())
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key0, std::as_bytes(std::span(str_short)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "CostChangeDecreaseFailCase: Failed to set "
+                                "bytestring in method 1";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
              return {};
            }},
           {2,
@@ -2093,6 +2150,19 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_long);
 }
 
+namespace {
+template<typename T>
+T
+check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
+{
+  if (!res.has_value() || !res.value().has_value() ||
+      !res.value().value().has_value()) {
+    throw std::runtime_error("Failed to invoke method");
+  }
+  return res.value().value().value();
+};
+} // namespace
+
 TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 {
   if (GetParam() == TestDB::kMockInMemory) {
@@ -2121,7 +2191,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   auto const *cost_model = get_default_cost_model();
   auto str_hello = make_bytestring("hello");
-  uint128_t write_cost = cost_model->get_bytestring_cost(str_hello.size());
+  int128_t write_cost = cost_model->get_bytestring_cost(str_hello.size());
   ASSERT_GT(write_cost, 0);
 
   // Sender contract
@@ -2134,11 +2204,15 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              auto native_token_client =
                  ContractTraitClient<itc_erc20::ERC20>(token_contract_addr);
 
-             auto [r_transfer, g_transfer] =
-                 native_token_client.invoke<"transfer">(handler, receiver_addr,
-                                                        to_xdr(write_cost));
+             uint128_t amount = write_cost;
 
-             if (!r_transfer.has_value()) {
+             auto [r_transfer, g_transfer] =
+                 native_token_client.invoke_opt<"transfer">(handler,
+                                                            receiver_addr,
+                                                            to_xdr(amount));
+
+             auto transfer_result = check_result(r_transfer);
+             if (!transfer_result.is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -2153,13 +2227,13 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
              }
 
              auto [r_balance, g_balance] =
-                 native_token_client.invoke<"get_balance">(handler);
-             if ((!r_balance.has_value()) || !r_balance.value().has_value() ||
-                 !r_balance.value().value().is_ok()) {
+                 native_token_client.invoke_opt<"get_balance">(handler);
+             auto balance_result = check_result(r_balance);
+             if (!balance_result.is_ok()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             if (from_xdr(r_balance.value().value().ok()) != 0) {
+             if (from_xdr(balance_result.ok()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -2173,10 +2247,14 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
            [str_hello](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(str_hello)));
-             if (!res.has_value() || !res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(str_hello)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE()
+                   << "TransferAndUseStorageWithinTransaction: Failed to set "
+                      "bytestring in receiver contract method 0";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};
@@ -2207,6 +2285,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Grant initial tokens to sender
   setup_grant_storage_token(sender_addr, write_cost);
+  setup_grant_storage_token(receiver_addr, 0);
 
   // Invoke the sender contract
   auto handler = make_new_system_call_handler(
@@ -2258,8 +2337,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   if (GetParam() == TestDB::kHogDB) {
     auto hogs_transferred = get_hogs_transferred(1);
     ASSERT_EQ(hogs_transferred.size(), 2);
-    ASSERT_EQ(hogs_transferred[sender_addr], -write_cost);
-    ASSERT_EQ(hogs_transferred[receiver_addr], 0);
+    ASSERT_EQ(hogs_transferred.at(sender_addr), -write_cost);
+    ASSERT_EQ(hogs_transferred.at(receiver_addr), 0);
   }
 }
 
@@ -2278,9 +2357,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         [](SystemCallHandler &handler, int64_t set_amount,
            int64_t add_amount) -> InvokeStatus<void> {
           int128_t set_128 = set_amount;
-          auto [r, _gas] =
-              syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_128,
-                                                 add_amount);
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kKey, &set_128, add_amount,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
 
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -2294,9 +2373,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         1,
         [](SystemCallHandler &handler,
            int64_t add_amount) -> InvokeStatus<void> {
-          auto [r, _gas] =
-              syscall_NonnegativeIntSetAdd_inner(handler, kKey, nullptr,
-                                                 add_amount);
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kKey, nullptr, add_amount,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -2342,8 +2421,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
         3, [](SystemCallHandler &handler) -> InvokeStatus<void> {
           // reset contract state
           int128_t set_value = 35;
-          auto [r, _gas] =
-              syscall_NonnegativeIntSetAdd_inner(handler, kKey, &set_value, 0);
+          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+              handler, kKey, &set_value, 0,
+              std::to_underlying(StorageItemRPCFlags::kStorageNone));
           // auto r = handler.set_nnint(key, 35, 0);
           // if (!r.has_value() || !r.value().has_value()) {
           if (!r.has_value() ||
@@ -2537,97 +2617,93 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                -> InvokeStatus<void> { return {}; }}});
 
   // Contract 1: performs the four try_invoke error cases
-  auto caller_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
-      {0,
-       [=](SystemCallHandler &handler,
-           NativeRuntime &runtime) -> InvokeStatus<void> {
-         RuntimeMemoryLength output_return_buffer_len;
-         WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
-         Calldata calldata = {};
-         std::span<const std::byte> calldata_span =
-             std::as_bytes(std::span(calldata.data(), calldata.size()));
-         // 1. try_invoke on a missing contract
-         {
-           auto [res, _gas] = syscall_Invoke_inner(
-               handler, remaining_gas, missing_contract_addr, 0, 1000,
-               calldata_span,
-               std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
-               output_return_buffer_len);
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [=](SystemCallHandler &handler,
+               NativeRuntime &runtime) -> InvokeStatus<void> {
+             RuntimeMemoryLength output_return_buffer_len;
+             WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
+             Calldata calldata = {};
+             std::span<const std::byte> calldata_span =
+                 std::as_bytes(std::span(calldata.data(), calldata.size()));
+             // 1. try_invoke on a missing contract
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, missing_contract_addr, 0, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
 
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeContractLookupFailed) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 2. try_invoke on error_contract, but with a method that does not
-         // exist
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    999, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 3. try_invoke on error_contract, correct method, but with gas
-         // limit 50 (not enough)
-         {
-           auto [res, gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    0, 50, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           // This should return as a deterministic error (handleable), with
-           // 50 gas consumed
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-           if (gas != 50) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 4. try_invoke on error_contract, correct method, with gas limit
-         // 1000 (enough)
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    0, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() !=
-                   SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
-         // 5. try_invoke on error_contract, valid method, with gas limit
-         // 1000 (enough)
-         {
-           auto [res, _gas] =
-               syscall_Invoke_inner(handler, remaining_gas, error_contract_addr,
-                                    1, 1000, calldata_span,
-                                    std::to_underlying(
-                                        InvokeFlag::kInvokeFlagTryInvoke),
-                                    output_return_buffer_len);
-           if (!res.has_value() ||
-               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-         }
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 2. try_invoke on error_contract, but with a method that does not
+             // exist
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 999, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 3. try_invoke on error_contract, correct method, but with gas
+             // limit 50 (not enough)
+             {
+               auto [res, gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 0, 50,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               // This should return as a deterministic error (handleable), with
+               // 50 gas consumed
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (gas != 50) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 4. try_invoke on error_contract, correct method, with gas limit
+             // 1000 (enough)
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 0, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() !=
+                       SyscallErrorCode::kSyscallErrorCodeDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
+             // 5. try_invoke on error_contract, valid method, with gas limit
+             // 1000 (enough)
+             {
+               auto [res, _gas] = syscall_Invoke_inner(
+                   handler, remaining_gas, error_contract_addr, 1, 1000,
+                   calldata_span,
+                   std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
+                   output_return_buffer_len);
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+             }
 
-         return {};
-       }}});
+             return {};
+           }}});
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(kErrorContractId, std::move(error_contract));
@@ -2750,13 +2826,13 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
           {2,
            [str_hello, key](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
-             auto res =
-                 handler.set_bytestring(key,
-                                        std::as_bytes(std::span(str_hello)));
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
-             }
-             if (!res.value().has_value()) {
+             auto [res, _gas] = syscall_BytestringSet_inner(
+                 handler, key, std::as_bytes(std::span(str_hello)),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+             if (!res.has_value() ||
+                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+               ADD_FAILURE() << "ManualRevertUndoesTryInvokeLocks: Failed to "
+                                "set bytestring in method 2";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};

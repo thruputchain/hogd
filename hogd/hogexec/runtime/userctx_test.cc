@@ -10,7 +10,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall_error.hh"
 
 namespace hogd {
@@ -29,37 +28,50 @@ foo(HostCallContext *ctx, uint64_t value)
 
 } // namespace
 
+class UserCtxTest : public ::testing::TestWithParam<WasmEngine>,
+                    public WasmTestFramework {
+protected:
+  void SetUp() override
+  {
+    Contract contract(ContractType::kWasmi);
+    contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
+
+    deployed_contract_hash_ = DeployedContractHash{
+        .hash = sha256(contract),
+        .contract_size =
+            static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
+        .contract_type = ContractType::kWasmi,
+    };
+
+    setup_wasm_context(GetParam());
+    link_fn("test", "redir_call", &foo);
+    make_syscall_handler(contract);
+  }
+
+  DeployedContractHash deployed_contract_hash_;
+};
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST(UserCtxTest, CheckCtxCorrect)
+TEST_P(UserCtxTest, CheckCtxCorrect)
 {
-  WasmTestFramework framework;
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
-
-  framework.make_syscall_handler(contract);
-  auto deployed_contract_hash = DeployedContractHash{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().wasm.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-
-  WasmiContext context;
-
-  context.link_fn("test", "redir_call", &foo);
-
-  auto runtime =
-      context.make_new_runtime(deployed_contract_hash,
-                               framework.syscall_handler_.get(), true);
+  auto runtime = get_context()->make_new_runtime(deployed_contract_hash_,
+                                                 get_syscall_handler(), true);
   ASSERT_TRUE(runtime.has_value());
   ASSERT_TRUE(runtime.value() != nullptr);
 
-  ctx_check = framework.syscall_handler_.get();
+  ctx_check = get_syscall_handler();
 
   auto res = runtime.value()->invoke("calltest", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(WasmEngines, UserCtxTest,
+                         ::testing::Values(WasmEngine::kWasmi,
+                                           WasmEngine::kWasmtime),
+                         [](const ::testing::TestParamInfo<WasmEngine> &info) {
+                           return WasmTestFramework::engine_to_string(
+                               info.param);
+                         });
 
 } // namespace hogd

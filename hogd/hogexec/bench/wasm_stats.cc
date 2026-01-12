@@ -8,6 +8,7 @@
 
 #include "account.hh"
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/precompiles/context.h"
@@ -65,16 +66,16 @@ process_contract(std::string const &contract_name, std::string const &filename)
                                          static_cast<uint32_t>(contract_size),
                                      .contract_type = ContractType::kWasmi};
 
-  static WasmTestFramework framework;
+  WasmTestFramework framework;
+  framework.set_context(make_hogexec_context());
   framework.make_syscall_handler(contract);
-
-  auto runtime_context = make_hogexec_context();
+  CHECK(framework.get_syscall_handler() != nullptr);
 
   // Create runtime
   auto runtime_result =
-      runtime_context->make_new_runtime(deployed_hash,
-                                        framework.syscall_handler_.get(),
-                                        false);
+      framework.get_context()->make_new_runtime(deployed_hash,
+                                                framework.get_syscall_handler(),
+                                                false);
 
   if (!runtime_result.has_value()) {
     std::println(stderr, "Failed to create runtime for {}", contract_name);
@@ -109,7 +110,7 @@ process_contract(std::string const &contract_name, std::string const &filename)
 } // namespace hogd
 
 int
-main(int argc, char *argv[])
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   if (argc < 2) {
     std::println(stderr, "Usage: {} <wasm_file1> [wasm_file2] ...", argv[0]);

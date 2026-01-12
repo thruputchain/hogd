@@ -3,12 +3,11 @@
 #pragma once
 
 #include <algorithm>
-#include <climits>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <expected>
-
 #include <iterator>
 #include <span>
 #include <sys/uio.h>

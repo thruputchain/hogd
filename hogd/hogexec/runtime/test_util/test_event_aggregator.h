@@ -6,10 +6,15 @@
 
 #include "event.hh"
 #include "event_rpc.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -27,16 +32,31 @@ public:
 
   RPCError open_block(BlockID block_id);
   EventBlockResult close_block(BlockID block_id);
-  RPCError emit_event(BlockID block_id, TransactionID tx_id,
-                      TxEventLog const &event_log);
+  x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
+                                  TxEventLog event_log);
 
   // Get all events for a specific block and transaction
   std::optional<TxEventLog> get_events(BlockID block_id, TransactionID tx_id);
 
+  // Blocking control: block emit_event calls until unblock_emit_events is
+  // called
+  void block_emit_events() { should_block_futex_.store(true); }
+
+  // Unblock emit_event calls (wakes up all waiting calls)
+  void unblock_emit_events(x23::ThreadPool *pool = &default_threadpool())
+  {
+    should_block_futex_.store(false);
+    should_block_futex_.broadcast(pool);
+  }
+
 private:
-  std::mutex mtx_;
+  ThreadCheckedMutex<std::mutex> mtx_;
+  x23::CoroFutex<bool> should_block_futex_{false};
   // Track opened/closed blocks
   std::map<BlockID, int32_t> block_refcounts_;
+
+  RPCError do_emit_event(BlockID block_id, TransactionID tx_id,
+                         TxEventLog event_log);
 
   bool is_block_open(BlockID block_id) const
   {
@@ -57,8 +77,9 @@ struct TestEventAggregatorExecRpc {
 
   static void eventexecutor_null() {}
 
-  RPCError eventexecutor_emit_event(BlockID block_id, TransactionID tx_id,
-                                    TxEventLog const &event_log)
+  x23::Async<RPCError> eventexecutor_emit_event(BlockID block_id,
+                                                TransactionID tx_id,
+                                                TxEventLog const &event_log)
   {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }

@@ -32,6 +32,7 @@ add_library(runtime_objects OBJECT
   storage_snapshot_cache.cc
   snapshot_storage_item.cc
   syscall_auth.cc
+  syscall_block_data.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
@@ -70,6 +71,7 @@ target_link_libraries(
 
 add_library(runtime_test_objects OBJECT
   authclaim_test.cc
+  balance_cost_tracking_test.cc
   contract_result_preset_handling_test.cc
   contract_trait_test.cc
   cross_call_tests.cc
@@ -99,8 +101,10 @@ add_library(runtime_test_objects OBJECT
   manual_revert_wasm_test.cc
   manual_revert_caller_wasm_test.cc
   memory_access_test.cc
+  return_fault_test_wasm_test.cc
   native_contract_test.cc
   nnint_add_test.cc
+  nnint_get_test.cc
   rcq_test.cc
   read_only_test.cc
   reference_leak_test.cc
@@ -108,9 +112,11 @@ add_library(runtime_test_objects OBJECT
   runtime_test.cc
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
+  sha2_in_contract_test.cc
   shutdown_test.cc
   snapshot_storage_item_test.cc
   syscall_auth_config_test.cc
+  syscall_block_data_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   try_invoke_test.cc

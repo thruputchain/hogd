@@ -2,12 +2,14 @@
 
 #include <mutex>
 #include <optional>
+#include <utility>
 
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -15,7 +17,7 @@ RPCError
 TestEventAggregator::open_block(BlockID block_id)
 {
   info("Opening block {}", block_id);
-  std::lock_guard<std::mutex> lock(mtx_);
+  std::scoped_lock lock(mtx_);
   block_refcounts_[block_id]++;
   return RPCError::kRPCNone;
 }
@@ -23,7 +25,7 @@ TestEventAggregator::open_block(BlockID block_id)
 EventBlockResult
 TestEventAggregator::close_block(BlockID block_id)
 {
-  std::lock_guard<std::mutex> lock(mtx_);
+  std::scoped_lock lock(mtx_);
   if (!block_refcounts_.contains(block_id)) {
     error("Block {} is not open", block_id);
     return EventBlockResult(RPCError::kRPCBadBlockID);
@@ -43,32 +45,42 @@ TestEventAggregator::close_block(BlockID block_id)
 }
 
 RPCError
-TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
-                                TxEventLog const &event_log)
+TestEventAggregator::do_emit_event(BlockID block_id, TransactionID tx_id,
+                                   TxEventLog event_log)
 {
-  std::lock_guard<std::mutex> lock(mtx_);
+  std::scoped_lock lock(mtx_);
   if (!is_block_open(block_id)) {
+    error("Block {} is not open", block_id);
     return RPCError::kRPCBadBlockID;
   }
-
   if (events_[block_id].contains(tx_id)) {
+    error("Unrecoverable: Tx {} already exists for block {}", tx_id, block_id);
     return RPCError::kRPCUnrecoverable;
   }
-
-  events_[block_id][tx_id] = event_log;
+  events_[block_id][tx_id] = std::move(event_log);
   return RPCError::kRPCNone;
+}
+
+x23::Async<RPCError>
+TestEventAggregator::emit_event(BlockID block_id, TransactionID tx_id,
+                                TxEventLog event_log)
+{
+  co_await should_block_futex_.wait(true);
+  co_return do_emit_event(block_id, tx_id, std::move(event_log));
 }
 
 std::optional<TxEventLog>
 TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
 {
-  std::lock_guard<std::mutex> lock(mtx_);
+  std::scoped_lock lock(mtx_);
   auto it = events_.find(block_id);
   if (it == events_.end()) {
+    error("Block {} not found", block_id);
     return std::nullopt;
   }
 
   if (!it->second.contains(tx_id)) {
+    error("Tx {} not found in block {}", tx_id, block_id);
     return std::nullopt;
   }
   return it->second.at(tx_id);

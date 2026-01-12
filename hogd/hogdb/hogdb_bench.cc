@@ -170,7 +170,7 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers,
     // db tip at start is height 1, so all uniquifiers must have
     // expiry height of at least 1.
     ops.emplace_back(make_key(0, 0), make_key(0, i), 1,
-                     maybe_uniquifier((i / 1024) + 1, i, nonces));
+                     maybe_uniquifier((i % 1024) + 1, i, nonces));
   }
 
   // create the benchmark.

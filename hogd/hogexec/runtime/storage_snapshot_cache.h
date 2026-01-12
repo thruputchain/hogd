@@ -1,8 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <shared_mutex>
+#include <utility>
 
 #include "account.hh"
 #include "contract.hh"
@@ -47,8 +52,10 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<std::optional<DeployedContractHash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  SystemStatus<SnapshotStorageItem *>
+  SystemStatus<const SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
+
+  SystemStatus<const DbTip *> try_get_db_tip();
 
   ~StorageSnapshotCache();
 
@@ -58,22 +65,46 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
+    release_db_tip();
   }
 
-  void set_block_id(BlockID block_id) { block_id_ = block_id; }
+  void set_block_id(BlockID block_id)
+  {
+    block_id_ = block_id;
+    release_db_tip();
+  }
 
 private:
+  void release_db_tip();
+
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
-  SynchronizedMap<SHA256Hash, std::optional<const Contract>> contract_cache_;
+  SynchronizedMap<SHA256Hash, std::optional<const Contract>,
+                  std::hash<SHA256Hash>, std::equal_to<>,
+                  std::allocator<std::pair<const SHA256Hash,
+                                           std::optional<const Contract>>>,
+                  std::shared_mutex>
+      contract_cache_;
   // Neither does the deployment cache
-  SynchronizedMap<ContractAddress, std::optional<DeployedContractHash>>
+  SynchronizedMap<
+      ContractAddress, std::optional<DeployedContractHash>,
+      std::hash<ContractAddress>, std::equal_to<>,
+      std::allocator<std::pair<const ContractAddress,
+                               std::optional<DeployedContractHash>>>,
+      std::shared_mutex>
       deployment_cache_;
 
-  SynchronizedMap<AddressAndKey, SnapshotStorageItem> snapshot_item_cache_;
+  SynchronizedMap<
+      AddressAndKey, SnapshotStorageItem, std::hash<AddressAndKey>,
+      std::equal_to<>,
+      std::allocator<std::pair<const AddressAndKey, SnapshotStorageItem>>,
+      std::shared_mutex>
+      snapshot_item_cache_;
 
   BlockID block_id_;
   DatabaseProxy &db_proxy_;
+
+  std::atomic<DbTip *> db_tip_ = nullptr;
 };
 
 } // namespace hogd

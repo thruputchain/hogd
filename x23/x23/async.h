@@ -282,11 +282,14 @@ public:
   }
 
   std::suspend_never initial_suspend() const noexcept { return {}; }
-  void unhandled_exception() { do_exception(std::current_exception()); }
+  void unhandled_exception() noexcept
+  {
+    do_exception(std::current_exception());
+  }
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
-    auto await_suspend(std::coroutine_handle<>) const noexcept
+    auto await_suspend(std::coroutine_handle<> /*unused*/) const noexcept
     {
       return caller_;
     }
@@ -297,11 +300,11 @@ public:
   //
   // Functions for use on the caller/awaiter/"future" side
   //
-
   bool await_ready() noexcept
   {
-    return flags_.load(std::memory_order_acquire) & kReturning;
+    return (flags_.load(std::memory_order_acquire) & kReturning) != 0U;
   }
+
   bool await_suspend(auto h SLOC_DECL) noexcept
   {
 #if X23_CORO_TRACE
@@ -312,11 +315,10 @@ public:
 #endif // X23_CORO_TRACE
     caller_ = h;
     unsigned oldflags = flags_.fetch_or(kAwaiting, std::memory_order_acq_rel);
-    if (oldflags & kReturning)
-      return false;
+
     // Once we set kAwaiting, the callee may resume us and destroy the
     // Awaitable at any time, so we must no longer touch *this.
-    return true;
+    return !(oldflags & kReturning);
   }
   auto await_resume()
   {
@@ -365,7 +367,7 @@ public:
 private:
   // Caller's handle after it decides to suspend itself (if the result
   // is not already ready).
-  std::coroutine_handle<> caller_{};
+  std::coroutine_handle<> caller_;
 
   // result_ has been constructed:
   static constexpr unsigned kResult = 1U << 0;
@@ -541,7 +543,8 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL)
+  void operator()(detail::is_callback_of<R> auto cb
+                      SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
@@ -559,7 +562,7 @@ template<typename R> struct [[nodiscard]] Async {
 
   // Return the Async value synchronously, pausing the current thread
   // until the result is ready.
-  R operator()(SLOC_DECL0)
+  R operator()(SLOC_DECL0) // NOLINT(misc-unused-parameters)
   {
     extern bool in_thread_pool();
     x23assert(!in_thread_pool());
@@ -588,12 +591,14 @@ namespace detail {
 
 // The is_awaiter concept is implemented as a template type to allow
 // it to be partially specialized.
+// NOLINTBEGIN(readability-identifier-naming)
 template<typename A>
     struct is_awaiter_impl : std::conditional_t < requires(A a) {
   {a.await_ready()}->std::same_as<bool>;
   a.await_suspend(std::noop_coroutine());
   a.await_resume();
 }, std::true_type, std::false_type>{};
+// NOLINTEND(readability-identifier-naming)
 
 // A concept that's 99% likely to determine whether a type is an
 // awaiter.  The exception is awaiters that can be awaited only in
@@ -754,6 +759,7 @@ make_async(source_location sloc = source_location::current())
 {
   CoroCB<R> cb;
   Async<R> async = [&cb](source_location) -> Async<R> {
+    // This is not an MVC because GetCoro never suspends.
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};
@@ -765,6 +771,7 @@ make_async(source_location sloc = source_location::current())
 // A function that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
   struct promise_type : PromiseBase {
     template<typename... Args> requires has_location<Args...>
     promise_type(Args &&...args) : PromiseBase(extract_location(args...))
@@ -779,6 +786,7 @@ struct Detached {
     }
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
+  // NOLINTEND(readability-convert-member-functions-to-static)
 
   Detached(Detached &&) noexcept = delete;
 
@@ -810,7 +818,7 @@ struct MapAwait {
   {
 #if X23_CORO_TRACE
     if constexpr (requires { a().await_suspend(h, sloc); })
-      a().await_suspend(h, sloc);
+      return a().await_suspend(h, sloc);
     else
 #endif // X23_CORO_TRACE
       return a().await_suspend(h);
@@ -862,7 +870,7 @@ emulate_final_suspend(std::coroutine_handle<Promise> h)
 template<typename T, typename E> struct ExpectAwait {
   std::expected<T, E> r_;
 
-  bool await_ready() { return r_.has_value(); }
+  bool await_ready() noexcept { return r_.has_value(); }
   template<typename P> auto await_suspend(std::coroutine_handle<P> h)
   {
     h.promise().return_value(std::unexpected(r_.error()));

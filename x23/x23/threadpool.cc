@@ -4,15 +4,18 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <coroutine>
+#include <csignal>
 #include <format>
 #include <functional>
 #include <memory>
-
-#include <signal.h>
 #include <string>
+#include <sys/signal.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
+#include "x23/cleanup.h"
 #include "x23/cpumap.h"
 #include "x23/debug.h"
 #include "x23/fastclock.h"
@@ -195,7 +198,7 @@ void
 ThreadPool::debug_dump()
 {
   std::string msg = show();
-  int fd = debug.fd();
+  int fd = debug.fd(); // NOLINT(readability-static-accessed-through-instance)
   if (fd < 0)
     fd = 2;
   ::write(fd, msg.data(), msg.size());
@@ -285,7 +288,7 @@ ThreadPool::Worker::getq() noexcept
 }
 
 std::coroutine_handle<>
-ThreadPool::Worker::qpop(QPtr &ptr)
+ThreadPool::Worker::qpop(QPtr &ptr) const
 {
   x23assert(!ptr->q.empty());
 
@@ -349,7 +352,7 @@ ThreadPool::Worker::work()
 bool
 in_thread_pool()
 {
-  return ThreadPool::get_thread_pool();
+  return ThreadPool::get_thread_pool() != nullptr;
 }
 
 } // namespace x23

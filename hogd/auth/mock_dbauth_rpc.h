@@ -13,6 +13,7 @@
 #include "auth_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "types.hh"
 #include "x23/async.h"
@@ -34,7 +35,7 @@ public:
   // Set auth data for an address (modifies current state)
   void set(ContractAddress address, const AccountAuthData &auth_data)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     current_auth_state_[address] = auth_data;
     x23::Ptr<AccountAuthData> auth_data_ptr;
     auth_data_ptr.emplace(current_auth_state_[address]);
@@ -45,7 +46,7 @@ public:
   // Delete auth data for an address (modifies current state)
   void delete_address(ContractAddress address)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     current_auth_state_.erase(address);
     current_key_changes_[address] =
         KeyChange{.address = address, .auth_data = nullptr};
@@ -55,7 +56,7 @@ public:
   // KeyChangeBatch
   void increment_height()
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     BlockHeight new_height = current_height_ + 1;
 
     KeyChangeBatch changes;
@@ -73,7 +74,7 @@ public:
   // Materialize the KeyChangeBatch for a particular block height
   KeyChangeBatch get_key_changes_at_height(BlockHeight height) const
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     auto it = changes_by_height_.find(height);
     if (it == changes_by_height_.end()) {
       return KeyChangeBatch{};
@@ -83,17 +84,17 @@ public:
 
   void address_should_be_cached(ContractAddress address)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     addresses_that_should_be_cached_.insert(address);
   }
 
   // RPC methods
-  x23::Async<DBAuthResult> authdb_get_auth_data(BlockHeight height,
-                                                ContractAddress address);
+  DBAuthResult authdb_get_auth_data(BlockHeight height,
+                                    ContractAddress address);
 
-  x23::Async<DBAuthResultBatch>
+  DBAuthResultBatch
   authdb_get_auth_data_batch(BlockHeight height,
-                             ContractAddressBatch addresses);
+                             ContractAddressBatch const &addresses);
 
   static x23::Async<bool> dbauth_intro(AuthCard card) { co_return true; }
 
@@ -116,11 +117,11 @@ private:
 
   // Map from block height to the key changes made at that height
   std::map<BlockHeight, KeyChangeBatch> changes_by_height_;
-  mutable std::mutex mutex_;
+  mutable ThreadCheckedMutex<std::mutex> mutex_;
   BlockHeight current_height_ = 0;
 };
 
-static_assert(is_DBAuth1<MockDBAuthRpc *, x23::Async>);
+static_assert(is_DBAuth1<MockDBAuthRpc *, x23::MaybeAsync>);
 
 class MockDBAuthServer : public RpcServer<MockDBAuthRpc> {
 public:

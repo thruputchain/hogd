@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -9,10 +10,57 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall_error.hh"
 
 namespace hogd {
 
 struct Contract;
+
+class WasmiGlobalContext {
+public:
+  WasmiGlobalContext();
+  ~WasmiGlobalContext();
+
+  WasmiGlobalContext(WasmiGlobalContext const &) = delete;
+
+  WasmiGlobalContext(WasmiGlobalContext &&other) noexcept
+    : global_context_ptr_(other.global_context_ptr_)
+  {
+    other.global_context_ptr_ = nullptr;
+  }
+
+  WasmiGlobalContext &operator=(WasmiGlobalContext const &) = delete;
+  WasmiGlobalContext &operator=(WasmiGlobalContext &&other) noexcept;
+
+  void *get_inner() const { return global_context_ptr_; }
+
+  // Provide the functions that are made available to wasm modules(as function
+  // imports). Imports in wasm are identified by "module name" and "function
+  // name". For simplicity, this API implements only u64 arguments (between 0
+  // and 8) and expects imported functions to return an i32 (i.e. an error
+  // code from the syscall).
+  //
+  // Imported functions functions have a signature of
+  // HostFnResult
+  // function(HostCallContext* context, uint64_t arg0,...);
+  template<std::same_as<uint64_t>... Args>
+  bool link_fn(std::string_view module_name, std::string_view fn_name,
+               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
+  {
+    if (!RuntimeContext::validate_link_fn_params(module_name, fn_name,
+                                                 reinterpret_cast<void *>(f)))
+      return false;
+    return link_fn_nargs(module_name, fn_name, reinterpret_cast<void *>(f),
+                         (kArgCount<Args>() + ... + 0));
+  }
+
+private:
+  bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
+                     void *fn_ptr, uint8_t nargs);
+
+  template<typename T> constexpr static auto kArgCount = [] { return 1; };
+  void *global_context_ptr_ = nullptr;
+};
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions
@@ -47,7 +95,7 @@ struct Contract;
 // are destroyed.
 class WasmiContext : public RuntimeContext {
 public:
-  WasmiContext();
+  WasmiContext(WasmiGlobalContext &global_context);
 
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
@@ -60,9 +108,7 @@ public:
   bool verify_contract(Contract const &contract) const override;
 
 private:
-  bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
-                     void *fn_ptr, uint8_t nargs) override;
-
+  WasmiGlobalContext &global_context_;
   void *wasmi_context_ptr_;
 };
 

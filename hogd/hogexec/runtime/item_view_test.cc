@@ -64,8 +64,7 @@ protected:
 
 TEST_F(ItemViewTest, Exists)
 {
-  auto item = make_empty_item();
-  ItemView proxy(item.get());
+  ItemView proxy;
   ASSERT_FALSE(proxy.template get<BytestringItem>());
 
   Bytestring bytes{0, 1, 2, 3};
@@ -82,8 +81,7 @@ TEST_F(ItemViewTest, Exists)
 
 TEST_F(ItemViewTest, SetBytestring)
 {
-  auto item = make_empty_item();
-  ItemView proxy(item.get());
+  ItemView proxy;
 
   Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0},
       bytes_long(kBytestringMaxLen + 10, 0);
@@ -104,8 +102,7 @@ TEST_F(ItemViewTest, SetBytestring)
 
 TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
 {
-  auto item = make_empty_item();
-  ItemView proxy(item.get());
+  ItemView proxy;
 
   ASSERT_FALSE(proxy.template get<NNIntItem>());
   EXPECT_TRUE(proxy.set(NNIntItem(100, 10)));
@@ -121,8 +118,7 @@ TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
 
 TEST_F(ItemViewTest, NNIntSetAddValidation)
 {
-  auto item = make_empty_item();
-  ItemView proxy(item.get());
+  ItemView proxy;
   ASSERT_FALSE(proxy.template get<NNIntItem>());
 
   EXPECT_TRUE(proxy.set(NNIntItem(100, -10)));
@@ -152,7 +148,7 @@ TEST_F(ItemViewTest, RCQRead)
       {make_test_queue_entry(6)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 100, 5);
+  StorageCostModel cost_model(12000, 1, 5, 100, 5, 0);
   server_->impl()->setup_create_item(AddressAndKey{},
                                      StorageItemWrapper(std::move(queue),
                                                         &cost_model));

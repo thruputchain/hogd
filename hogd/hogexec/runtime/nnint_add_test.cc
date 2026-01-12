@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -65,8 +66,9 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto [r, _gas] =
-                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 200);
+             auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+                 handler, key, nullptr, 200,
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
              if (!r.has_value() ||
                  r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -78,8 +80,9 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
                return err;
              }
 
-             auto [r3, _gas3] =
-                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 300);
+             auto [r3, _gas3] = syscall_NonnegativeIntSetAdd_inner(
+                 handler, key, nullptr, 300,
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
              if (!r3.has_value() ||
                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -148,16 +151,17 @@ TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              int128_t set_value = 200;
-             auto [res, _gas] =
-                 syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
-                                                    300);
+             auto [res, _gas] = syscall_NonnegativeIntSetAdd_inner(
+                 handler, key, &set_value, 300,
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
              if (!res.has_value() ||
                  res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [res2, _gas2] =
-                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 100);
+             auto [res2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
+                 handler, key, nullptr, 100,
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
              if (!res2.has_value() ||
                  res2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -238,9 +242,9 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
                int128_t set_value = 0;
-               auto [r, _gas] =
-                   syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
-                                                      200);
+               auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+                   handler, key, &set_value, 200,
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
                if (!r.has_value() ||
                    r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -251,9 +255,9 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto key = make_storage_key("test");
-               auto [r, _gas] =
-                   syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
-                                                      -100);
+               auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+                   handler, key, nullptr, -100,
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
                if (!r.has_value() ||
                    r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};

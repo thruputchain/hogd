@@ -4,11 +4,13 @@
 
 #include <concepts>
 #include <condition_variable>
+#include <cstddef>
 #include <mutex>
 #include <type_traits>
 #include <utility>
 
 #include <x23/cleanup.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
@@ -35,7 +37,7 @@ public:
       mv.m_.lock();
       mv_ = &mv;
     }
-    Ptr(MVar &mv, std::try_to_lock_t) noexcept
+    Ptr(MVar &mv, std::try_to_lock_t /*unused*/) noexcept
     {
       if (mv.m_.try_lock())
         mv_ = &mv;
@@ -167,7 +169,7 @@ public:
       mv.m_.lock();
       mv_ = &mv;
     }
-    Ptr(MVar &mv, std::try_to_lock_t)
+    Ptr(MVar &mv, std::try_to_lock_t /*unused*/)
     {
       if (mv.m_.try_lock())
         mv_ = &mv;

@@ -2,8 +2,11 @@
 #include <cstdlib>
 #include <format>
 #include <netdb.h>
+#include <string>
+#include <sys/socket.h>
 #include <tuple>
 
+#include <unistd.h>
 #include <x23/rpc_common.h>
 #include <x23/rpc_msg.hh>
 #include <x23/sockio.h>
@@ -70,7 +73,7 @@ msg_show_stat(const rpc_msg &msg)
           "PROG_MISMATCH[low={},high={}]",
           msg.body.rbody().areply().reply_data.mismatch_info().low,
           msg.body.rbody().areply().reply_data.mismatch_info().high);
-    else
+    else // NOLINT(readability-else-after-return)
       return std::format("{}", stat);
   }
   else if (reject_stat stat = msg.body.rbody().rreply().stat();

@@ -1,13 +1,16 @@
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <iterator>
 #include <mutex>
 #include <ranges>
 #include <span>
 #include <utility>
+#include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -27,9 +30,53 @@
 
 namespace hogd {
 
+HogDBStatus<ReplayCacheMetadata *>
+ReplayCacheLock::get_meta(const LockContext *ctx) const
+{
+  ReplayCacheMetadata *r = meta_.load(std::memory_order_acquire);
+  if (r != nullptr) {
+    return {r};
+  }
+
+  if (!ctx) {
+    return HogDBError{HogDBCode::kInternal};
+  }
+
+  HogDBStatus<void> ret;
+  std::call_once(meta_once_flag_, [this, &ctx, &ret]() {
+    assert(ctx->dao);
+    auto meta =
+        ctx->dao->read_address_replay_cache_meta(ctx->key.get_address());
+    if (!meta) {
+      if (meta.error() == HogDBCode::kNotFound) {
+        meta_cell_.emplace(ReplayCacheMetadata{});
+      }
+      else {
+        ret = meta.error();
+        return;
+      }
+    }
+    else {
+      meta_cell_.emplace(std::move(*meta));
+    }
+    meta_.store(&*meta_cell_, std::memory_order_release);
+    ret = {};
+  });
+
+  if (!ret.has_value()) {
+    return ret.error();
+  }
+
+  while ((r = meta_.load(std::memory_order_acquire)) == nullptr) {
+    cpu_relax();
+  }
+
+  return {r};
+}
+
 HogDBStatus<ReplayCacheData>
-ReplayCacheLock::build_result(const LockContext &ctx,
-                              BlockHeight block_height) const
+ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
+                              const std::span<Uniquifier> &uniquifiers) const
 {
   CHECK(block_height >= ctx.block_height);
 
@@ -42,8 +89,8 @@ ReplayCacheLock::build_result(const LockContext &ctx,
   // block_expiry_height.
   Uniquifier l(block_height, 0);
   Uniquifier u(block_height + 1, 0);
-  auto b = additions_.lower_bound(l);
-  auto e = additions_.lower_bound(u);
+  auto b = std::ranges::lower_bound(uniquifiers, l);
+  auto e = std::ranges::lower_bound(uniquifiers, u);
   auto filtered_nonces = std::ranges::subrange(b, e) |
                          std::views::transform([](const auto &uniquifier) {
                            return uniquifier.nonce;
@@ -63,6 +110,18 @@ HogDBStatus<ReplayCacheData *>
 ReplayCacheLock::get_base(const LockContext &ctx,
                           BlockHeight block_height) const
 {
+  {
+    // Fast path; shared lock only.
+    auto sl = bases_lock_.hold_shared();
+    if (bases_.contains(block_height)) {
+      return &bases_[block_height];
+    }
+  }
+
+  std::unique_lock<x23::TestLock> ul(bases_lock_);
+
+  // Seems dumb to double check, but x23::SharedLock doesn't support upgrades,
+  // and I'd rather not have wasted accesses to the db.
   if (bases_.contains(block_height)) {
     return &bases_[block_height];
   }
@@ -78,26 +137,35 @@ ReplayCacheLock::get_base(const LockContext &ctx,
   else {
     bases_.emplace(block_height, *base);
   }
+
   return &bases_[block_height];
 }
+
+class UniquifierHelper {
+public:
+  static Uniquifier from_uint128(uint128_t v)
+  {
+    return Uniquifier(v >> 64, v & 0xFFFFFFFFFFFFFFFF);
+  }
+  static uint128_t to_uint128(const Uniquifier &u)
+  {
+    return (static_cast<uint128_t>(u.block_expiry_height) << 64) | u.nonce;
+  }
+};
 
 HogDBStatus<int128_t>
 ReplayCacheLock::try_atomic_change_lock(
     const PointerItem<ReplayCacheIt> *before,
-    const PointerItem<ReplayCacheIt> *after, const StorageCostModel *cost_model,
-    const LockContext &ctx)
+    const PointerItem<ReplayCacheIt> *after, const LockContext &ctx)
 {
   // No single transaction is allowed to add to the replay cache twice.
   if (before != nullptr && after != nullptr) {
     return HogDBError{HogDBCode::kConflict};
   }
 
-  std::unique_lock<x23::TestLock> ul(lock_);
-
   // Need to remove a previously added Uniquifier (e.g. if a tx aborts).
   if (after == nullptr) {
-    CHECK(additions_.contains(before->get()->addition()));
-    additions_.erase(before->get()->addition());
+    conflicts_.erase(UniquifierHelper::to_uint128(before->get()->addition()));
     return {};
   }
 
@@ -110,9 +178,7 @@ ReplayCacheLock::try_atomic_change_lock(
     return HogDBError{HogDBCode::kConflict};
   }
 
-  if (additions_.contains(addition)) {
-    trace("attempted to consume {}.{} but it was already in cache additions",
-          addition.block_expiry_height, addition.nonce);
+  if (conflicts_.contains(UniquifierHelper::to_uint128(addition))) {
     return HogDBError{HogDBCode::kConflict};
   }
 
@@ -121,6 +187,7 @@ ReplayCacheLock::try_atomic_change_lock(
   if (!base) {
     return base.error();
   }
+
   if (std::binary_search(base.value()->nonces.begin(),
                          base.value()->nonces.end(), addition.nonce)) {
     trace("attempted to consume {}.{} but it was already the base cache",
@@ -128,25 +195,16 @@ ReplayCacheLock::try_atomic_change_lock(
     return HogDBError{HogDBCode::kConflict};
   }
 
-  additions_.insert(addition);
-
-  if (!meta_.has_value()) {
-    assert(ctx.dao);
-    auto meta = ctx.dao->read_address_replay_cache_meta(ctx.key.get_address());
-    if (!meta) {
-      if (meta.error() == HogDBCode::kNotFound) {
-        meta_.emplace(ReplayCacheMetadata{});
-      }
-      else {
-        return meta.error();
-      }
-    }
-    else {
-      meta_.emplace(std::move(*meta));
-    }
+  if (!conflicts_.try_insert(UniquifierHelper::to_uint128(addition))) {
+    return HogDBError{HogDBCode::kConflict};
   }
 
-  return cost_model->get_replay_cache_cost(meta_->size + 1);
+  auto meta = get_meta(&ctx);
+  if (!meta) {
+    return meta.error();
+  }
+
+  return ctx.cost_model->get_replay_cache_cost(meta.value()->size + 1);
 }
 
 int128_t
@@ -154,17 +212,14 @@ ReplayCacheLock::commit_change(bool did_finalize, int128_t snapshot_cost,
                                const PointerItem<ReplayCacheIt> & /*after*/,
                                const StorageCostModel *cost_model)
 {
-  std::unique_lock<x23::TestLock> ul(lock_);
-
-  if (!meta_.has_value()) {
-    panic("ReplayCacheLock::commit_change called without meta populated");
-  }
+  assert(meta_.load(std::memory_order_acquire) != nullptr);
+  auto &meta = **get_meta(nullptr);
 
   int128_t previous_cost = did_finalize
                                ? snapshot_cost
-                               : cost_model->get_replay_cache_cost(meta_->size);
+                               : cost_model->get_replay_cache_cost(meta.size);
 
-  int128_t new_cost = cost_model->get_replay_cache_cost(meta_->size + 1);
+  int128_t new_cost = cost_model->get_replay_cache_cost(meta.size + 1);
 
   return new_cost - previous_cost;
 }
@@ -175,24 +230,26 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
 {
   assert(ctx.key.is_replay_cache());
 
-  if (!meta_.has_value()) {
-    panic("write_committed_change called without meta populated");
-  }
+  assert(meta_.load(std::memory_order_acquire) != nullptr);
+  auto meta = **get_meta(nullptr);
 
-  // Build new heights list while iterating through list of heights modified in
-  // this block.
+  // Other operations on the lock should be quiescent, but acquiring the read
+  // lock here ensures we acquire any lazy init of elements in bases_.
+  auto sl = bases_lock_.hold_shared();
+
+  // Build new heights list while iterating through list of heights modified
+  // in this block.
   x23::Vec<ReplayCacheHeightCount> new_heights;
-  new_heights.reserve(meta_->heights.size() + bases_.size());
+  new_heights.reserve(meta.heights.size() + bases_.size());
 
-  // Find heights to prune: all heights < ctx.block_height (strictly less than)
-  // Heights == ctx.block_height should be kept as they are still valid.
-  auto prune_end =
-      std::ranges::lower_bound(meta_->heights, ctx.block_height, {},
-                               &ReplayCacheHeightCount::height);
+  // Find heights to prune: all heights < ctx.block_height (strictly less
+  // than) Heights == ctx.block_height should be kept as they are still valid.
+  auto prune_end = std::ranges::lower_bound(meta.heights, ctx.block_height, {},
+                                            &ReplayCacheHeightCount::height);
 
   // Delete old heights from DAO. Track total pruned nonces.
   size_t pruned_count = 0;
-  for (auto it = meta_->heights.begin(); it != prune_end; ++it) {
+  for (auto it = meta.heights.begin(); it != prune_end; ++it) {
     trace("pruning height {}, deleteing {} nonces from address {}", it->height,
           it->nonce_count, ctx.key.get_address());
     assert(ctx.dao);
@@ -210,12 +267,19 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
   }
 
   auto it = prune_end;
-  auto end = meta_->heights.end();
+  auto end = meta.heights.end();
+
+  std::vector<Uniquifier> all_additions;
+  all_additions.reserve(conflicts_.size());
+  for (const uint128_t &value : conflicts_) {
+    all_additions.push_back(UniquifierHelper::from_uint128(value));
+  }
+  std::ranges::sort(all_additions);
 
   // Track through all heights with changes.
   for (BlockHeight height : std::views::keys(bases_)) {
     CHECK(height >= ctx.block_height);
-    // Copy any heights from meta_ that come before this one
+    // Copy any heights from meta that come before this one
     while (it != end && it->height < height) {
       new_heights.push_back(*it);
       ++it;
@@ -226,7 +290,7 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
       ++it;
     }
 
-    auto res = build_result(ctx, height);
+    auto res = build_result(ctx, height, all_additions);
     if (!res) {
       return res.error();
     }
@@ -255,17 +319,17 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
     ++it;
   }
 
-  meta_->size = meta_->size - pruned_count + additions_.size();
-  meta_->heights = std::move(new_heights);
+  meta.size = meta.size - pruned_count + all_additions.size();
+  meta.heights = std::move(new_heights);
   trace("writing meta for address {} new size {} active height count {}",
-        ctx.key.get_address(), meta_->size, meta_->heights.size());
-  auto ret = ctx.dao->write_address_replay_cache_meta(ctx.key.get_address(),
-                                                      meta_.value());
+        ctx.key.get_address(), meta.size, meta.heights.size());
+  auto ret =
+      ctx.dao->write_address_replay_cache_meta(ctx.key.get_address(), meta);
   if (!ret) {
     return ret.error();
   }
 
-  auto buf = x23::serialize(meta_.value());
+  auto buf = x23::serialize(meta);
   CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, ctx.key, 0,
                                                   std::as_bytes(std::span(buf)))
             .has_value());

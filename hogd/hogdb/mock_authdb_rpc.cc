@@ -5,7 +5,6 @@
 
 #include "auth_rpc.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -16,7 +15,7 @@ MockAuthDBRpc::wait_for_changes(BlockHeight height)
   cv_.wait(lock, [this, height] { return received_changes_.contains(height); });
 }
 
-x23::Async<void>
+void
 MockAuthDBRpc::authdb_forward_key_changes(BlockHeight height,
                                           KeyChangeBatch key_changes)
 {
@@ -33,7 +32,6 @@ MockAuthDBRpc::authdb_forward_key_changes(BlockHeight height,
   }
 
   cv_.notify_all();
-  co_return;
 }
 
 } // namespace hogd

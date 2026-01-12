@@ -8,7 +8,6 @@
 #include "auth_rpc.hh"
 #include "hogd/base/types.h"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -25,39 +24,39 @@ MockDBAuthRpc::find_auth_data_at_height(ContractAddress address,
   return it->second;
 }
 
-x23::Async<DBAuthResult>
+DBAuthResult
 MockDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::scoped_lock lock(mutex_);
 
   if (height != current_height_) {
-    co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
+    return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
   }
 
   auto auth_data = find_auth_data_at_height(address, height);
   if (!auth_data.has_value()) {
-    co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
+    return DBAuthResult(DBAuthError::kDBAuthNotFound);
   }
 
   DBAuthResult result(DBAuthError::kDBAuthSuccess);
   result.auth_data() = *auth_data;
-  co_return result;
+  return result;
 }
 
-x23::Async<DBAuthResultBatch>
+DBAuthResultBatch
 MockDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
-                                          ContractAddressBatch addresses)
+                                          ContractAddressBatch const &addresses)
 {
   DBAuthResultBatch result;
   result.reserve(addresses.size());
 
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::scoped_lock lock(mutex_);
 
   if (height != current_height_) {
     for (size_t i = 0; i < addresses.size(); i++) {
       result.emplace_back(DBAuthError::kDBAuthStaleBlockHeight);
     }
-    co_return result;
+    return result;
   }
 
   for (const ContractAddress &address : addresses) {
@@ -70,7 +69,7 @@ MockDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
       result.back().auth_data() = *auth_data;
     }
   }
-  co_return result;
+  return result;
 }
 
 } // namespace hogd

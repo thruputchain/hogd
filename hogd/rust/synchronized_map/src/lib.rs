@@ -19,8 +19,10 @@
 
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
+
+use siphasher::sip::SipHasher24;
 
 /// Default shard base order (log2 of shards per core)
 const DEFAULT_SHARD_BASE_ORDER: u32 = 9;
@@ -35,22 +37,22 @@ fn scalable_shard_size(base_order: u32) -> usize {
     1usize << order
 }
 
-/// A guard that holds a lock on a bucket in the SynchronizedMap.
+/// A guard that holds a write lock on a bucket in the SynchronizedMap.
 /// Dropping this guard releases the lock.
 ///
-/// This guard provides access to a value in the map. The value reference
+/// This guard provides mutable access to a value in the map. The value reference
 /// is only valid while this guard is held.
 pub struct BucketGuard<'a, K, V, S = std::collections::hash_map::RandomState> {
-    _guard: std::sync::MutexGuard<'a, HashMap<K, V, S>>,
+    _guard: std::sync::RwLockWriteGuard<'a, HashMap<K, V, S>>,
     value: &'a mut V,
 }
 
 impl<'a, K, V, S> BucketGuard<'a, K, V, S> {
-    /// Create a new BucketGuard from a guard and a raw pointer to the value.
+    /// Create a new BucketGuard from a write guard and a raw pointer to the value.
     /// The raw pointer must point to a value within the HashMap guarded by `guard`.
     /// This is safe because the guard ensures the HashMap (and thus the value) remains valid.
     fn new(
-        guard: std::sync::MutexGuard<'a, HashMap<K, V, S>>,
+        guard: std::sync::RwLockWriteGuard<'a, HashMap<K, V, S>>,
         value_ptr: *mut V,
     ) -> Self {
         // SAFETY: The raw pointer points to a value within the HashMap guarded by `guard`.
@@ -69,26 +71,59 @@ impl<'a, K, V, S> BucketGuard<'a, K, V, S> {
     }
 }
 
+/// A guard that holds a read lock on a bucket in the SynchronizedMap.
+/// Dropping this guard releases the lock.
+///
+/// This guard provides immutable access to a value in the map. Multiple read guards
+/// can be held concurrently on the same bucket.
+pub struct BucketReadGuard<
+    'a,
+    K,
+    V,
+    S = std::collections::hash_map::RandomState,
+> {
+    _guard: std::sync::RwLockReadGuard<'a, HashMap<K, V, S>>,
+    value: &'a V,
+}
+
+impl<'a, K, V, S> BucketReadGuard<'a, K, V, S> {
+    /// Create a new BucketReadGuard from a read guard and a raw pointer to the value.
+    fn new(
+        guard: std::sync::RwLockReadGuard<'a, HashMap<K, V, S>>,
+        value_ptr: *const V,
+    ) -> Self {
+        // SAFETY: The raw pointer points to a value within the HashMap guarded by `guard`.
+        // The guard ensures the HashMap remains valid for the lifetime 'a, so the value is also valid.
+        let value = unsafe { &*value_ptr };
+        Self {
+            _guard: guard,
+            value,
+        }
+    }
+
+    /// Get an immutable reference to the value.
+    /// The reference is valid as long as this guard is held.
+    pub fn value(&self) -> &V {
+        self.value
+    }
+}
+
 /// A synchronized map that provides scalable synchronization through sharded
 /// hash tables with fine-grained locking.
 ///
-/// Each bucket is protected by its own mutex, allowing concurrent access to
-/// different buckets. The number of buckets must be a power of 2 for efficient
-/// hash-based bucket selection.
-pub struct SynchronizedMap<
-    K,
-    V,
-    H = siphasher::sip::SipHasher24,
-    S = std::collections::hash_map::RandomState,
-> where
+/// Each bucket is protected by its own RwLock, allowing concurrent read access to
+/// the same bucket and exclusive write access. The number of buckets must be a
+/// power of 2 for efficient hash-based bucket selection.
+pub struct SynchronizedMap<K, V, S = std::collections::hash_map::RandomState>
+where
     K: Hash + Eq,
-    H: Hasher + Default,
     S: BuildHasher + Default,
 {
-    /// Hash function state (for custom hashing)
-    hasher: H,
-    /// Vector of mutexes, one per bucket
-    locks: Vec<Mutex<HashMap<K, V, S>>>,
+    /// Vector of RwLocks, one per bucket
+    locks: Vec<RwLock<HashMap<K, V, S>>>,
+
+    /// Siphash24 keys
+    siphash24_keys: [u64; 2],
 }
 
 impl<K, V> SynchronizedMap<K, V>
@@ -111,44 +146,45 @@ where
 
         let mut locks = Vec::with_capacity(shard_count);
         for _ in 0..shard_count {
-            locks.push(Mutex::new(HashMap::new()));
+            locks.push(RwLock::new(HashMap::new()));
         }
 
+        // Initialize SipHash24 keys with random values for security
+        let mut siphash24_keys = [0u64; 2];
+        let mut key_bytes = [0u8; 16]; // 2 * u64 = 16 bytes
+        getrandom::fill(&mut key_bytes).unwrap();
+        // Convert bytes to u64 values (little-endian)
+        siphash24_keys[0] =
+            u64::from_le_bytes(key_bytes[0..8].try_into().unwrap());
+        siphash24_keys[1] =
+            u64::from_le_bytes(key_bytes[8..16].try_into().unwrap());
+
         Self {
-            hasher: siphasher::sip::SipHasher24::default(),
             locks,
+            siphash24_keys,
         }
     }
 }
 
-impl<K, V, H, S> SynchronizedMap<K, V, H, S>
+impl<K, V, S> SynchronizedMap<K, V, S>
 where
     K: Hash + Eq,
-    H: Hasher + Default + Clone,
     S: BuildHasher + Default,
 {
-    /// Create a new SynchronizedMap with custom hash function and shard count.
-    pub fn with_hasher_and_shard_count(shard_count: usize, hasher: H) -> Self {
-        assert!(
-            shard_count.is_power_of_two(),
-            "shard_count must be a power of 2"
-        );
-        assert!(shard_count > 0, "shard_count must be greater than 0");
-
-        let mut locks = Vec::with_capacity(shard_count);
-        for _ in 0..shard_count {
-            locks.push(Mutex::new(HashMap::with_hasher(S::default())));
-        }
-
-        Self { hasher, locks }
-    }
-
     /// Get the bucket index for a given key.
     #[inline]
     fn get_bucket_index(&self, key: &K) -> usize {
-        let mut hasher = self.hasher.clone();
+        let mut hasher = SipHasher24::new_with_keys(
+            self.siphash24_keys[0],
+            self.siphash24_keys[1],
+        );
         key.hash(&mut hasher);
         let hash = hasher.finish();
+        debug_assert!(
+            self.locks.len().is_power_of_two(),
+            "locks.len() must be a power of 2"
+        );
+
         (hash as usize) & (self.locks.len() - 1)
     }
 
@@ -165,7 +201,7 @@ where
         F: FnOnce() -> V,
     {
         let idx = self.get_bucket_index(&key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         // Get reference from entry - Entry::or_insert_with consumes the Entry and returns &mut V
         // Convert to raw pointer to avoid borrow checker issues when moving guard into BucketGuard
         let value_ref = guard.entry(key).or_insert_with(f);
@@ -173,10 +209,23 @@ where
         BucketGuard::new(guard, value_ptr)
     }
 
-    /// Find a value by key. Returns Some(guard) if found, None if not found.
+    /// Find a value by key (read-only). Returns Some(guard) if found, None if not found.
+    /// Multiple readers can hold read guards on the same bucket concurrently.
+    pub fn find_read(&self, key: &K) -> Option<BucketReadGuard<'_, K, V, S>> {
+        let idx = self.get_bucket_index(key);
+        let guard = self.locks[idx].read().unwrap();
+        if let Some(value_ref) = guard.get(key) {
+            let value_ptr = value_ref as *const V;
+            Some(BucketReadGuard::new(guard, value_ptr))
+        } else {
+            None
+        }
+    }
+
+    /// Find a value by key (mutable). Returns Some(guard) if found, None if not found.
     pub fn find(&self, key: &K) -> Option<BucketGuard<'_, K, V, S>> {
         let idx = self.get_bucket_index(key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         if let Some(value_ref) = guard.get_mut(key) {
             let value_ptr = value_ref as *mut V;
             Some(BucketGuard::new(guard, value_ptr))
@@ -189,7 +238,7 @@ where
     /// or None if the key already existed.
     pub fn insert(&self, key: K, value: V) -> Option<BucketGuard<'_, K, V, S>> {
         let idx = self.get_bucket_index(&key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         match guard.entry(key) {
             std::collections::hash_map::Entry::Occupied(_) => None,
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -208,7 +257,7 @@ where
         default: V,
     ) -> BucketGuard<'_, K, V, S> {
         let idx = self.get_bucket_index(&key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         let value_ref = guard.entry(key).or_insert(default);
         let value_ptr = value_ref as *mut V;
         BucketGuard::new(guard, value_ptr)
@@ -221,7 +270,7 @@ where
         value: V,
     ) -> BucketGuard<'_, K, V, S> {
         let idx = self.get_bucket_index(&key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         match guard.entry(key) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 *entry.get_mut() = value;
@@ -239,7 +288,7 @@ where
     /// Remove a value by key. Returns true if the key was present.
     pub fn remove(&self, key: &K) -> bool {
         let idx = self.get_bucket_index(key);
-        let mut guard = self.locks[idx].lock().unwrap();
+        let mut guard = self.locks[idx].write().unwrap();
         guard.remove(key).is_some()
     }
 
@@ -248,14 +297,14 @@ where
     pub fn size(&self) -> usize {
         self.locks
             .iter()
-            .map(|lock| lock.lock().unwrap().len())
+            .map(|lock| lock.read().unwrap().len())
             .sum()
     }
 
     /// Clear all elements from the map.
     pub fn clear(&self) {
         for lock in &self.locks {
-            lock.lock().unwrap().clear();
+            lock.write().unwrap().clear();
         }
     }
 }

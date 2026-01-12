@@ -17,6 +17,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/item_lock/auth_lock.h"
+#include "hogd/hogdb/item_lock/balance_lock.h"
 #include "hogd/hogdb/item_lock/bytestring_lock.h"
 #include "hogd/hogdb/item_lock/concepts.h"
 #include "hogd/hogdb/item_lock/deletion_lock.h"
@@ -27,7 +28,6 @@
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 #include "hogd/hogdb/status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "x23/testlock.h"
 
 namespace hogd {
@@ -52,30 +52,34 @@ public:
       return;
     }
     snapshot_cost_ = status->first;
-    if (status->second[0] == kItemLockCacheDataNNInt128BaseValue) {
+
+    if (status->second.is_cached_nnint128_base()) {
       padding_type_ = kItemLockCacheDataNNInt128BaseValue;
-      std::memcpy(&nnint_base_, status->second.data() + 1, sizeof(int128_t));
+      nnint_base_ = status->second.get_cached_nnint128_base();
+    }
+    else if (status->second.is_cached_balance()) {
+      padding_type_ = kItemLockCacheDataBalance;
+      auto balance = status->second.get_cached_balance();
+      balance_base_ =
+          balance.has_value() ? *balance : std::numeric_limits<int128_t>::min();
     }
     else {
-      CHECK(status->second[0] == kItemLockCacheDataTypeNone);
+      CHECK(status->second.is_none());
     }
   }
 
   // If after!=nullptr, returns a deterministic upper bound on the storage cost
   // required to support the after change. Is a no-op on failure.
-  HogDBStatus<int128_t>
-  try_atomic_change_lock(const ItemChange *before, const ItemChange *after,
-                         const StorageCostModel *cost_model,
-                         const LockContext &ctx);
+  HogDBStatus<int128_t> try_atomic_change_lock(const ItemChange *before,
+                                               const ItemChange *after,
+                                               const LockContext &ctx);
 
   // Commits the change to the item lock.
   // Returns the storage cost used to commit the change.
   // Must be less than or equal to the storage cost returned by
   // try_atomic_change_lock for that change.
   // change must be non-null.
-  int128_t commit_change(const ItemChange &change,
-                         const StorageCostModel *cost_model,
-                         const LockContext &ctx);
+  int128_t commit_change(const ItemChange &change, const LockContext &ctx);
 
   HogDBStatus<void> write_committed_change(LockContext const &ctx,
                                            MerkleTriePrefix &trie) const;
@@ -99,27 +103,29 @@ public:
   }
 
 private:
-  HogDBStatus<int128_t> handle_try_atomic_from_finalized(
-      const ItemChange *before, const ItemChange *after,
-      const StorageCostModel *cost_model, const LockContext &ctx);
+  HogDBStatus<int128_t>
+  handle_try_atomic_from_finalized(const ItemChange *before,
+                                   const ItemChange *after,
+                                   const LockContext &ctx);
   HogDBStatus<int128_t> handle_try_atomic_from_pending(
-      const ItemChange *before, const ItemChange *after,
-      const StorageCostModel *cost_model, const LockContext &ctx,
+      const ItemChange *before, const ItemChange *after, const LockContext &ctx,
       std::unique_lock<x23::TestLock> const &ul);
 
   // No change has committed on this item, and we would like to try to acquire a
   // change in a transaction that does not currently hold any lock on this item.
-  HogDBStatus<int128_t> handle_uncommitted_try_new_lock(
-      const ItemChange *after, const StorageCostModel *cost_model,
-      const LockContext &ctx, std::unique_lock<x23::TestLock> &ul);
-  void handle_release_uncommitted_lock(
-      const ItemChange *before, const StorageCostModel *cost_model,
-      const LockContext &ctx, std::unique_lock<x23::TestLock> const &ul);
+  HogDBStatus<int128_t>
+  handle_uncommitted_try_new_lock(const ItemChange *after,
+                                  const LockContext &ctx,
+                                  std::unique_lock<x23::TestLock> &ul);
+  void
+  handle_release_uncommitted_lock(const ItemChange *before,
+                                  const LockContext &ctx,
+                                  std::unique_lock<x23::TestLock> const &ul);
 
   // Set up lock_contents_ for a type of change.
   // does NOT modify pending_refcount_.
   // Does NOT set the type as ExclusiveLock.
-  void prepare_lock_contents(const ItemChange *after,
+  void prepare_lock_contents(const ItemChange *after, const LockContext &ctx,
                              std::unique_lock<x23::TestLock> const &ul);
   void reset_lock_contents(std::unique_lock<x23::TestLock> const &ul);
 
@@ -138,7 +144,7 @@ private:
   constexpr static uint32_t kFinalizedPermamentExclusiveLock = 2;
 
   std::variant<std::monostate, ExclusiveLock, BytestringLock, NNInt128Lock,
-               DeletionLock, NewContractLock, NewDeploymentLock,
+               BalanceLock, DeletionLock, NewContractLock, NewDeploymentLock,
                PointerLock<AuthLock>, PointerLock<ReplayCacheLock>>
       lock_contents_ = std::monostate{};
   // padding_ and snapshot_cost_ are readonly fields: set during the
@@ -152,9 +158,16 @@ private:
 
   int128_t snapshot_cost_;
 
+  enum {
+    kItemLockCacheDataTypeNone = 0,
+    kItemLockCacheDataNNInt128BaseValue = 1,
+    kItemLockCacheDataBalance = 2,
+  };
+
   union {
     std::monostate padding_none_;
     int128_t nnint_base_;
+    int128_t balance_base_;
   };
   uint8_t padding_type_ = kItemLockCacheDataTypeNone;
 

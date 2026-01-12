@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -25,10 +26,10 @@
 
 namespace hogd {
 
-class ReadOnlyTestRunner : public ::testing::TestWithParam<TestDB>,
-                           public NativeContractTestFramework {
+class ReadOnlyTest : public ::testing::TestWithParam<TestDB>,
+                     public NativeContractTestFramework {
 public:
-  ReadOnlyTestRunner()
+  ReadOnlyTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
@@ -49,17 +50,27 @@ protected:
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
 };
 
-TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
-{
+namespace {
 
+bool
+check_result(HostFnStatus<SyscallStatus<std::optional<std::tuple<>>>> res)
+{
+  return res.has_value() && res.value().has_value() &&
+         res.value().value().has_value();
+}
+
+} // namespace
+
+TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
+{
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto [res, _gas] =
-                 client_.invoke<"read_only_bytestring_set">(handler, false);
-             if (!res.has_value() || !res.value().has_value()) {
+                 client_.invoke_opt<"read_only_bytestring_set">(handler, false);
+             if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -68,13 +79,11 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
           {1,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             auto [res, _gas] =
-                 client_.invoke<"read_only_bytestring_set",
-                                std::to_underlying(
-                                    InvokeFlag::kInvokeFlagReadOnly)>(handler,
+             auto [res, _gas] = client_.invoke_opt<
+                 "read_only_bytestring_set",
+                 std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)>(handler,
                                                                       true);
-             if (!res.has_value() || !res.value().has_value()) {
-
+             if (!check_result(res)) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -144,7 +153,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
   }
 }
 
-TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
+TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 {
   auto native_contract_addr = make_contract_address(1);
   auto native_contract = std::make_unique<NativeContract>(
@@ -228,7 +237,7 @@ TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTestRunner,
+INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDB),
                          test_db_to_string);

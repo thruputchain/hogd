@@ -22,9 +22,30 @@
 // exits.  Instead we went with a per-thread std::vector<T> for each T, so that
 // each type is grouped together, making it easier to construct and destruct
 // items.
+//
+// WARNING: Coroutine safety
+// -------------------------
+// Do NOT hold a reference/pointer obtained from operator*() or operator->()
+// across a co_await boundary. After co_await, the coroutine may resume on a
+// different thread, and the reference would then point to the wrong thread's
+// data. Always scope PerThread access within synchronous blocks that complete
+// before any co_await:
+//
+//   // WRONG:
+//   Cache& cache = *perthread_cache_;
+//   co_await something();
+//   cache.use();  // BUG: may be wrong thread's cache!
+//
+//   // CORRECT:
+//   { Cache& cache = *perthread_cache_; cache.use(); }
+//   co_await something();
+//
+// Similarly, lock_threads() returns a std::unique_lock that must not be held
+// across co_await.
 
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <exception>
@@ -34,6 +55,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -97,7 +119,13 @@ public:
     }
   }
 
-  static inline std::mutex lock_;
+#ifdef NDEBUG
+  using mutex_type = std::mutex;
+#else
+  using mutex_type = ThreadCheckedMutex<std::mutex>;
+#endif
+
+  static inline mutex_type lock_;
 
 private:
   struct TLItems : public std::vector<T> {
@@ -109,6 +137,12 @@ private:
   // TODO(amb): use a dynamic bitset here.
   static inline std::vector<bool> slots_;
 
+  // Note that expand() and remove() are the only places that the threadlocal
+  // items_ is resized (and thus the only places that the T move ctor could be
+  // called). When those operations are performed, the lock_ is held, which
+  // makes it safe to resize or access the threadlocal storage while another
+  // thread might be calling for_each. The move ctor, as a consequence, need not
+  // be threadsafe.
   static void expand(size_t n)
   {
     std::scoped_lock g(lock_);
@@ -183,7 +217,7 @@ public:
   // lock_threads returns an acquired lock that prevents threads from leaving
   // or joining. It is usually used in combination with for_each(), and allows
   // for extra synchronization of any shared state.
-  std::unique_lock<std::mutex> lock_threads()
+  std::unique_lock<typename detail::TLStorage<T>::mutex_type> lock_threads()
   {
     return std::unique_lock(storage_.lock_);
   }
@@ -191,7 +225,9 @@ public:
   // for_each runs func on each thread-local copy of the variable. The lock
   // returned by lock_threads() must be passed as ul.
   // NOLINTBEGIN(misc-unused-parameters)
-  template<typename F> void for_each(std::unique_lock<std::mutex> &ul, F &&func)
+  template<typename F>
+  void for_each(std::unique_lock<typename detail::TLStorage<T>::mutex_type> &ul,
+                F &&func)
   {
     assert(ul.owns_lock());
     assert(ul.mutex() == &storage_.lock_);
@@ -217,8 +253,9 @@ public:
   {
     std::unique_lock ul = tl_counters_.lock_threads();
     T cnt = global_counter_;
-    tl_counters_.for_each(ul,
-                          [&cnt](const TLCounter &val) { cnt += val.count; });
+    tl_counters_.for_each(ul, [&cnt](const TLCounter &val) {
+      cnt += val.count.load(std::memory_order_relaxed);
+    });
     return cnt;
   }
 
@@ -226,7 +263,7 @@ public:
   void inc(T val = 1)
   {
     TLCounter &tl_count = *tl_counters_;
-    tl_count.count += val;
+    tl_count.count.fetch_add(val, std::memory_order_relaxed);
     if (!tl_count.global_count) [[unlikely]]
       tl_count.global_count = &global_counter_;
   }
@@ -241,16 +278,36 @@ public:
 
 private:
   struct TLCounter {
-    T count{0};
+    std::atomic<T> count{0};
     T *global_count{nullptr};
 
     TLCounter() = default;
+
+    TLCounter(TLCounter &&other) noexcept
+      : count(other.count.load(std::memory_order_relaxed)),
+        global_count(other.global_count)
+    {
+      other.count.store(0, std::memory_order_relaxed);
+      other.global_count = nullptr;
+    }
+
+    TLCounter &operator=(TLCounter &&other) noexcept
+    {
+      if (this == &other) [[unlikely]]
+        return *this;
+      count = other.count.load(std::memory_order_relaxed);
+      other.count.store(0, std::memory_order_relaxed);
+      global_count = other.global_count;
+      other.global_count = nullptr;
+      return *this;
+    }
+
     // The threads lock is held when this destructor is called, synchronizing
     // access to global_counter_.
     ~TLCounter()
     {
       if (global_count)
-        *global_count += count;
+        *global_count += count.load(std::memory_order_relaxed);
     }
   };
 

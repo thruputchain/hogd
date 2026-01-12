@@ -12,7 +12,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasm_test_framework.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall_error.hh"
 
 namespace hogd {
@@ -51,21 +50,16 @@ consume_gas_call2(HostCallContext *ctxp)
 
 } // namespace
 
-class GasApiTest : public ::testing::Test, public WasmTestFramework {
+class GasApiTest : public ::testing::TestWithParam<WasmEngine>,
+                   public WasmTestFramework {
 protected:
   void SetUp() override
   {
+    setup_wasm_context(GetParam());
     Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
     contract.wasmi_contract() =
         test::load_wasm_from_file("test_error_handling.wasm");
-
-    WasmiContext context;
-
-    context.link_fn("test", "good_call",
-                    &consume_gas_call2); // called by "call2"
-    context.link_fn("test", "external_call",
-                    &consume_gas_call); // called by "call1"
 
     auto deployed_contract_hash = DeployedContractHash{
         .hash = sha256(contract),
@@ -74,10 +68,16 @@ protected:
         .contract_type = ContractType::kWasmi,
     };
 
+    link_fn("test", "good_call",
+            &consume_gas_call2); // called by "call2"
+    link_fn("test", "external_call",
+            &consume_gas_call); // called by "call1"
+
     make_syscall_handler(contract);
 
-    auto runtime_res = context.make_new_runtime(deployed_contract_hash,
-                                                syscall_handler_.get(), true);
+    auto runtime_res =
+        get_context()->make_new_runtime(deployed_contract_hash,
+                                        get_syscall_handler(), true);
     ASSERT_TRUE(runtime_res.has_value());
     runtime_ = std::move(runtime_res.value());
 
@@ -87,7 +87,7 @@ protected:
   std::unique_ptr<Runtime> runtime_;
 };
 
-TEST_F(GasApiTest, SetGasNoInvoke)
+TEST_P(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
 
@@ -102,7 +102,7 @@ TEST_F(GasApiTest, SetGasNoInvoke)
   EXPECT_EQ(runtime_->get_available_gas(), 0);
 }
 
-TEST_F(GasApiTest, InvokeResetsGas)
+TEST_P(GasApiTest, InvokeResetsGas)
 {
   runtime_->set_available_gas(5000);
 
@@ -120,5 +120,13 @@ TEST_F(GasApiTest, InvokeResetsGas)
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.gas_consumed_, 80);
 }
+
+INSTANTIATE_TEST_SUITE_P(WasmEngines, GasApiTest,
+                         ::testing::Values(WasmEngine::kWasmi,
+                                           WasmEngine::kWasmtime),
+                         [](const ::testing::TestParamInfo<WasmEngine> &info) {
+                           return WasmTestFramework::engine_to_string(
+                               info.param);
+                         });
 
 } // namespace hogd

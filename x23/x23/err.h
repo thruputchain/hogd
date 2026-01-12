@@ -64,7 +64,7 @@ public:
   }
 
 protected:
-  ErrorBase() noexcept = default;
+  constexpr ErrorBase() noexcept = default;
 };
 
 // make_error_code converts an ErrorBase derived class into a std::error_code.

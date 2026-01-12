@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -79,10 +80,14 @@ public:
       if (!transaction_committed_or_aborted_) {
         warn("SystemCallHandler destroyed without committing or aborting "
              "transaction");
+        if (debug_force_commit_abort_) {
+          panic("SystemCallHandler destroyed at invalid state: {}",
+                transaction_committed_or_aborted_);
+        }
       }
       if (last_frame_.has_value() &&
           !last_frame_.value().extract_events().empty() &&
-          root_invoke_succeeded_) {
+          root_invoke_succeeded_ && !two_phase_commit_failed_) {
         panic("SystemCallHandler destroyed with events to emit");
       }
     }
@@ -182,7 +187,8 @@ public:
   get_bytestring(StorageKeyContractData const &storage_key);
   SystemStatus<SyscallStatus<void>>
   set_bytestring(StorageKeyContractData const &storage_key,
-                 std::span<const std::byte> input_bytestring);
+                 std::span<const std::byte> input_bytestring,
+                 StorageItemRPCFlagSet input_flags);
 
   // === Nonnegative Integer syscalls ===
   // get_nnint returns the base value and the add value.
@@ -194,7 +200,8 @@ public:
 
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key,
-            std::optional<int128_t> set_value, int128_t add_value);
+            std::optional<int128_t> set_value, int128_t add_value,
+            StorageItemRPCFlagSet input_flags);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -226,6 +233,11 @@ public:
   SystemStatus<SyscallStatus<void>> set_address_gas_permission_configs(
       x23::Vec<GasPermissionConfig, kMaxGasConfigs> gas_permission_configs);
 
+  // == Block statistics syscalls ==
+  // These are based on reading the db tip.
+  SystemStatus<BlockHeight> get_block_height() const;
+  SystemStatus<SHA256Hash> get_parent_block_hash() const;
+
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
@@ -234,6 +246,12 @@ public:
   // == Error converstion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
   static ExecResult to_exec_result(SystemErrorCode error_code);
+
+  static auto force_commit_or_abort()
+  {
+    debug_force_commit_abort_ = true;
+    return x23::Defer([]() { debug_force_commit_abort_ = false; });
+  }
 
 private:
   RuntimeContext &runtime_context_;
@@ -257,8 +275,11 @@ private:
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool root_invoke_succeeded_{false};
   bool transaction_committed_or_aborted_{false};
+  bool two_phase_commit_failed_{false};
 
   StorageSnapshotCache &snapshot_cache_;
+
+  inline static bool debug_force_commit_abort_{false};
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid.
