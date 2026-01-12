@@ -22,6 +22,26 @@
 // exits.  Instead we went with a per-thread std::vector<T> for each T, so that
 // each type is grouped together, making it easier to construct and destruct
 // items.
+//
+// WARNING: Coroutine safety
+// -------------------------
+// Do NOT hold a reference/pointer obtained from operator*() or operator->()
+// across a co_await boundary. After co_await, the coroutine may resume on a
+// different thread, and the reference would then point to the wrong thread's
+// data. Always scope PerThread access within synchronous blocks that complete
+// before any co_await:
+//
+//   // WRONG:
+//   Cache& cache = *perthread_cache_;
+//   co_await something();
+//   cache.use();  // BUG: may be wrong thread's cache!
+//
+//   // CORRECT:
+//   { Cache& cache = *perthread_cache_; cache.use(); }
+//   co_await something();
+//
+// Similarly, lock_threads() returns a std::unique_lock that must not be held
+// across co_await.
 
 #pragma once
 
@@ -35,6 +55,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -98,7 +119,13 @@ public:
     }
   }
 
-  static inline std::mutex lock_;
+#ifdef NDEBUG
+  using mutex_type = std::mutex;
+#else
+  using mutex_type = ThreadCheckedMutex<std::mutex>;
+#endif
+
+  static inline mutex_type lock_;
 
 private:
   struct TLItems : public std::vector<T> {
@@ -190,7 +217,7 @@ public:
   // lock_threads returns an acquired lock that prevents threads from leaving
   // or joining. It is usually used in combination with for_each(), and allows
   // for extra synchronization of any shared state.
-  std::unique_lock<std::mutex> lock_threads()
+  std::unique_lock<typename detail::TLStorage<T>::mutex_type> lock_threads()
   {
     return std::unique_lock(storage_.lock_);
   }
@@ -198,7 +225,9 @@ public:
   // for_each runs func on each thread-local copy of the variable. The lock
   // returned by lock_threads() must be passed as ul.
   // NOLINTBEGIN(misc-unused-parameters)
-  template<typename F> void for_each(std::unique_lock<std::mutex> &ul, F &&func)
+  template<typename F>
+  void for_each(std::unique_lock<typename detail::TLStorage<T>::mutex_type> &ul,
+                F &&func)
   {
     assert(ul.owns_lock());
     assert(ul.mutex() == &storage_.lock_);

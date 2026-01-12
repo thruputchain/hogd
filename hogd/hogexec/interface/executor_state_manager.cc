@@ -15,53 +15,56 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
-PerThreadARC<ExecutorContext> *
+x23::Async<PerThreadARC<ExecutorContext> *>
 ExecutorStateManager::get_executor_context_slow(BlockID block_id)
 {
   PerThreadARC<ExecutorContext> *ctx = nullptr;
 
-  std::scoped_lock g(active_blocks_lock_);
+  x23::CoroGuard g;
+  co_await g(active_blocks_lock_);
 
   if (auto it = active_blocks_.find(block_id); it != active_blocks_.end()) {
     ctx = &it->second.context;
   }
   if (!ctx) {
-    return nullptr;
+    co_return nullptr;
   }
 
   if (!ctx->try_acquire_reference()) [[unlikely]]
-    return nullptr;
+    co_return nullptr;
 
   // cache in threadlocal so we avoid contention on the active_blocks_ map
   {
     std::scoped_lock g(context_cache_->lock_);
     context_cache_->contexts_.emplace(block_id, ctx);
   }
-  return ctx;
+  co_return ctx;
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
 {
-  std::scoped_lock g(active_blocks_lock_);
+  x23::CoroGuard g;
+  co_await g(active_blocks_lock_);
 
   if (auto it = active_blocks_.find(new_block_id); it != active_blocks_.end()) {
     // Increase the refcount on an existing block
     if (it->second.context.get().mode() != mode) {
-      return ExecResult::ExecResultSystemError;
+      co_return ExecResult::ExecResultSystemError;
     }
     if (it->second.open_block_count == 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
-      return ExecResult::ExecResultSystemError;
+      co_return ExecResult::ExecResultSystemError;
     }
     assert(it->second.open_block_count > 0);
     it->second.open_block_count++;
     trace("Increased ref count on existing block {} in mode {}", new_block_id,
           mode);
-    return ExecResult::ExecResultOK;
+    co_return ExecResult::ExecResultOK;
   }
 
   // Create a new block
@@ -88,16 +91,16 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
                             worker_pool_));
   assert(inserted);
   trace("Opened new block {} in mode {}", new_block_id, mode);
-  return ExecResult::ExecResultOK;
+  co_return ExecResult::ExecResultOK;
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorStateManager::open_proposal(BlockID new_proposal_id)
 {
   return open_block(new_proposal_id, ExecutionMode::kProposing);
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorStateManager::open_validation(BlockID new_validation_id)
 {
   return open_block(new_validation_id, ExecutionMode::kValidating);
@@ -110,7 +113,8 @@ ExecutorStateManager::remove_block(BlockID block_id)
   ExecResult result = ExecResult::ExecResultOK;
   bool do_gc = false;
   {
-    std::scoped_lock g(active_blocks_lock_);
+    x23::CoroGuard g;
+    co_await g(active_blocks_lock_);
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
@@ -146,17 +150,19 @@ ExecutorStateManager::remove_block(BlockID block_id)
     }
   }
   if (do_gc) {
-    gc_executor_context(block_id);
+    co_await gc_executor_context(block_id);
   }
   co_return result;
 }
 
-void
+x23::Async<void>
 ExecutorStateManager::gc_executor_context(BlockID block_id)
 {
   trace("Garbage collecting state for block {}", block_id);
   // The blockID must already have had shutdown initiated.
-  std::scoped_lock g(active_blocks_lock_);
+  x23::CoroGuard g;
+  co_await g(active_blocks_lock_);
+
   auto it = active_blocks_.find(block_id);
   assert(it != active_blocks_.end());
 

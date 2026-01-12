@@ -75,7 +75,8 @@ public:
 // Represent state of an item that is a retrocausal queue.
 class RetrocausalQueueItem {
 public:
-  RetrocausalQueueItem(SnapshotStorageItem &base_item) : base_item_(base_item)
+  RetrocausalQueueItem(const SnapshotStorageItem &base_item)
+    : base_item_(base_item)
   {}
 
   StorageDelta get_delta() const
@@ -109,7 +110,7 @@ private:
   uint32_t self_consumed_index_ = 0;
   uint32_t locally_consumed_index_ = 0;
 
-  SnapshotStorageItem &base_item_;
+  const SnapshotStorageItem &base_item_;
 };
 
 class ReplayCacheItem {
@@ -162,7 +163,6 @@ private:
 // read outside.
 class UnmodifiedItem {
 public:
-  UnmodifiedItem(SnapshotStorageItem *base_item) : base_item_(base_item) {}
   UnmodifiedItem() : base_item_(std::nullopt) {}
 
   constexpr static std::optional<StorageDelta> get_delta()
@@ -176,7 +176,7 @@ public:
                           AddressAndKey const &addrkey) const;
   bool is_loaded() const { return base_item_.has_value(); }
 
-  SnapshotStorageItem &base_item() const
+  const SnapshotStorageItem &base_item() const
   {
     assert(base_item_.has_value());
     assert(base_item_.value());
@@ -184,7 +184,7 @@ public:
   }
 
 private:
-  mutable std::optional<SnapshotStorageItem *> base_item_;
+  mutable std::optional<const SnapshotStorageItem *> base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
