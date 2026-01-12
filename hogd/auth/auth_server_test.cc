@@ -245,15 +245,15 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
   mock_db().increment_height(); // 4
   mock_db().increment_height(); // 5
 
-  // Unlike QueriesDelayed, start with an auth server that's properly initialized,
-  // but just missing recent updates.
+  // Unlike QueriesDelayed, start with an auth server that's properly
+  // initialized, but just missing recent updates.
 
   auth_server().register_auth_data_updates(1,
-    mock_db().get_key_changes_at_height(
-        1))();
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
   auth_server().register_auth_data_updates(2,
-      mock_db().get_key_changes_at_height(
-          2))();
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
 
   std::atomic<bool> sequence = false;
 
@@ -271,9 +271,10 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
                                            mock_db().get_key_changes_at_height(
                                                3))();
   // make sure that the waiting thread wakes up and then goes back to sleep
-  // TODO(geoff): I don't have a good way to test whether the thread actually wakes and 
-  // goes back to sleep.  That's not required for correct external behavior of the auth server,
-  // but I do want to test the logic for when threads decide to stop waiting.
+  // TODO(geoff): I don't have a good way to test whether the thread actually
+  // wakes and goes back to sleep.  That's not required for correct external
+  // behavior of the auth server, but I do want to test the logic for when
+  // threads decide to stop waiting.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   auth_server().register_auth_data_updates(4,
                                            mock_db().get_key_changes_at_height(
