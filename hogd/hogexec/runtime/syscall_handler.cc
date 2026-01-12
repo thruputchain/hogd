@@ -33,6 +33,7 @@
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "storage_delta_flags.hh"
 #include "storage_item.hh"
@@ -381,8 +382,7 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
   }
   if (!runtime.value()) {
     trace("Failed to instantiate runtime for address: {}", x23::show(address));
-    return std::pair{SyscallErrorCode::kSyscallErrorCodeContractLookupFailed,
-                     0};
+    return std::pair{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
   if (!invocation_frame_stack_.empty() && is_read_only()) {
@@ -614,6 +614,16 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                                .contract_hash = contract_hash});
 }
 
+namespace {
+constexpr bool
+is_banned_redeploy_native_contract(uint32_t native_contract_id)
+{
+  return native_contract_id ==
+         std::to_underlying(
+             HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+}
+} // namespace
+
 SystemStatus<SyscallStatus<ContractAddress>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
@@ -630,11 +640,17 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return contract_res.error();
   }
   if (contract_res.value() == nullptr) {
-    return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeContractLookupFailed};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
+
+  // Native (precompiled) contracts cannot be deployed - they are set up at
+  // genesis and should not be redeployed by user transactions
+  if (contract.contract_type() == ContractType::kNative &&
+      is_banned_redeploy_native_contract(contract.native_contract_id())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
