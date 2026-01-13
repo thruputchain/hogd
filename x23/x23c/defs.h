@@ -234,4 +234,4 @@ struct Join {
 
 #ifndef FLEX_SCANNER
 #include "x23c/lex.hh" // IWYU pragma: keep
-#endif // !FLEX_SCANNER
+#endif                 // !FLEX_SCANNER

@@ -84,9 +84,9 @@ struct Gen {
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static string map_type(string const& t);
-  static string map_case(string const& c);
-  static string map_bound(string const& bound);
+  static string map_type(string const &t);
+  static string map_case(string const &c);
+  static string map_bound(string const &bound);
   string type_name(const Declaration &d, bool generate);
 
   template<typename... Args>
@@ -117,7 +117,7 @@ struct Gen {
     return ret;
   }
 
-  string join(auto &&v, string const& with)
+  string join(auto &&v, string const &with)
   {
     string ret;
     Join j(with);
