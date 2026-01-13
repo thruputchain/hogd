@@ -67,4 +67,42 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
   return create_client<T>(host_port, retry, max_message_size);
 }
 
+void
+parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
+                               SignedTransactionBatch &txs)
+{
+  CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
+
+  size_t total_segment_bytes = 0;
+  for (unsigned int segment_bytes : parallel.segment_bytes) {
+    total_segment_bytes += segment_bytes;
+  }
+  CHECK_EQ(total_segment_bytes, parallel.xdr.size());
+
+  size_t total_segment_tokens = 0;
+  for (unsigned int segment_tokens : parallel.segment_tokens) {
+    total_segment_tokens += segment_tokens;
+  }
+  txs.resize(total_segment_tokens, {});
+
+  size_t xdr_offset = 0;
+  size_t txs_offset = 0;
+  for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
+    unsigned int num_segment_tokens = parallel.segment_tokens[i];
+    size_t per_tx_size = parallel.segment_bytes[i] / num_segment_tokens;
+    CHECK_EQ(parallel.segment_bytes[i] % num_segment_tokens, 0UL);
+
+    for (size_t j = 0; j < num_segment_tokens; j++) {
+      // TODO(jhumphri): This needs to be fixed because the objects in a segment
+      // may not all be the same size.
+      CHECK(false);
+      const SignedTransaction &tx =
+          *reinterpret_cast<const SignedTransaction *>(
+              &parallel.xdr[xdr_offset + (j * per_tx_size)]);
+      txs[txs_offset++] = tx;
+    }
+    xdr_offset += parallel.segment_bytes[i];
+  }
+}
+
 } // namespace hogd
