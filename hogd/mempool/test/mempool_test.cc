@@ -248,8 +248,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
   // We reuse the [Nomination] struct and make some adjustments for the
   // validation.
-  Nomination nomination =
-      server.coord_sched_rpc().get_nomination()().nomination;
+  Nomination nomination = res_nominate.nominated_block();
   db_tip.height++;
   db_tip.hash = nomination.block_hash;
   db_tip.id++;
