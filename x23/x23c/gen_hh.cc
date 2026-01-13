@@ -1,8 +1,10 @@
+#include <cassert>
 #include <cstddef>
 #include <format>
 #include <map>
 #include <ranges>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -83,9 +85,9 @@ struct Gen {
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static const string &map_type(const string &);
-  static const string &map_case(const string &);
-  static const string &map_bound(const string &);
+  static string map_type(string const &t);
+  static string map_case(string const &c);
+  static string map_bound(string const &bound);
   string type_name(const Declaration &d, bool generate);
 
   template<typename... Args>
@@ -116,7 +118,7 @@ struct Gen {
     return ret;
   }
 
-  string join(auto &&v, string with)
+  string join(auto &&v, string const &with)
   {
     string ret;
     Join j(with);
@@ -744,7 +746,7 @@ Gen::show_comment(std::string_view comment, bool chomp, string prefix)
   }
 }
 
-const string &
+string
 Gen::map_type(const string &t)
 {
   static const std::map<string, string> type_map{
@@ -758,7 +760,7 @@ Gen::map_type(const string &t)
     return t;
 }
 
-const string &
+string
 Gen::map_case(const string &c)
 {
   static const std::map<string, string> case_map{
@@ -771,7 +773,7 @@ Gen::map_case(const string &c)
     return c;
 }
 
-const string &
+string
 Gen::map_bound(const string &b)
 {
   static const string defbound = "0xffffffff";
@@ -810,12 +812,15 @@ Gen::type_name(const Declaration &d, bool generate)
   case kArray:
     return std::format("std::array<{}, {}>", tname, d.bound);
   case kVec:
-    if (tname == "string"s)
-      return std::format("x23::BoundedStr<{}>", map_bound(d.bound));
+    assert(tname != "string"s);
     return std::format("x23::Vec<{}, {}>", tname, map_bound(d.bound));
-  default:
-    return {}; // suppress warnings
+  case kString:
+    return std::format("x23::BoundedStr<{}>", map_bound(d.bound));
+  case kVoid:
+    return {}; // nothing to do
   }
+  throw std::runtime_error(
+      std::format("Unknown declaration qual: {}", std::to_underlying(d.qual)));
 }
 
 string

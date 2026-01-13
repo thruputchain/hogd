@@ -246,6 +246,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "escape-bytes"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
+
+[[package]]
 name = "fibonacci"
 version = "0.1.0"
 dependencies = [
@@ -367,6 +373,12 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hex-literal"
@@ -812,7 +824,7 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 [[package]]
 name = "xdr-derive"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#61c05a9fc4b87a9b149c570097f6d162e16c556c"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#88dddc1238122abdaf16dffc1e7d511a848497a0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -823,7 +835,7 @@ dependencies = [
 [[package]]
 name = "xdr-repr"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#61c05a9fc4b87a9b149c570097f6d162e16c556c"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#88dddc1238122abdaf16dffc1e7d511a848497a0"
 dependencies = [
  "xdr_common",
 ]
@@ -831,12 +843,16 @@ dependencies = [
 [[package]]
 name = "xdr_common"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdr_common.git#6cd51c83ac2fe6defd80f81cb8b02340df5e0620"
+source = "git+ssh://git@github.com/groundhogchain/xdr_common.git#4e584a5b089eb2abfda18e560b39d1e20e37da81"
+dependencies = [
+ "escape-bytes",
+ "hex",
+]
 
 [[package]]
 name = "xdrs"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#61c05a9fc4b87a9b149c570097f6d162e16c556c"
+source = "git+ssh://git@github.com/groundhogchain/xdrs.git#88dddc1238122abdaf16dffc1e7d511a848497a0"
 dependencies = [
  "thiserror",
  "xdr-derive",
