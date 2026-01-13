@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <format>
 #include <iterator>
@@ -1015,6 +1016,7 @@ GenRs::type_name(const Declaration &d, bool generate,
 
   bool needs_box = (d.comment.find(kRustBoxPtr) != std::string::npos) ||
                    recursive_types.contains(tname);
+  std::string_view colons = in_colon_required_setting ? "::" : "";
 
   switch (d.qual) {
   case kScalar:
@@ -1041,9 +1043,9 @@ GenRs::type_name(const Declaration &d, bool generate,
   }
   case kVec:
   {
-    std::string_view colons = in_colon_required_setting ? "::" : "";
     needs_xdr_common_imports = true;
-    if (tname == "string"s || tname == "u8") {
+    assert(tname != "string"s);
+    if (tname == "u8") {
       if (d.bound.empty())
         return std::format("BytesM");
       return std::format("BytesM{}<{}>", colons, map_bound(d.bound));
@@ -1062,8 +1064,15 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
     return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
   }
-  default:
-    return {}; // suppress warnings
+  case kString:
+  {
+    if (d.bound.empty()) {
+      return "StringM";
+    }
+    return std::format("StringM{}<{}>", colons, map_bound(d.bound));
+  }
+  case kVoid:
+    return {}; // nothing to do
   }
 }
 

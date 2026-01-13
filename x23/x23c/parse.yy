@@ -291,7 +291,7 @@ declaration:
   }
 | T_STRING T_ID[id] '<' opt_value[bound] '>' {
     $$ = Declaration{ .type = $1->text, .id = $id->text,
-       	 	      .qual = kVec, .bound = $bound->text,
+       	 	      .qual = kString, .bound = $bound->text,
 		      .comment = $1->block_comment };
   }
 ;
