@@ -1074,6 +1074,7 @@ GenRs::type_name(const Declaration &d, bool generate,
   case kVoid:
     return {}; // nothing to do
   }
+  throw std::runtime_error(std::format("Unknown declaration qual: {}", std::to_underlying(d.qual)));
 }
 
 string
