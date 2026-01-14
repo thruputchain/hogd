@@ -147,9 +147,13 @@ validate(benchmark::State &state)
 
     nomination.block_height++;
     nomination.prev_block_hash = nomination.block_hash;
-    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-        nomination.transaction_hashes,
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    {
+      SignedTransactionHashBatch tx_hashes;
+      EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+          tx_hashes,
+          /*prev_block_hash=*/nomination.prev_block_hash);
+    }
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -259,9 +263,13 @@ loadgen_validate(benchmark::State &state)
 
     nomination.block_height++;
     nomination.prev_block_hash = nomination.block_hash;
-    nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-        nomination.transaction_hashes,
-        /*prev_block_hash=*/nomination.prev_block_hash);
+    {
+      SignedTransactionHashBatch tx_hashes;
+      EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+          tx_hashes,
+          /*prev_block_hash=*/nomination.prev_block_hash);
+    }
 
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             txs)();
@@ -354,9 +362,14 @@ loadgen_validate_throughput(benchmark::State &state)
 
       nomination.block_height++;
       nomination.prev_block_hash = nomination.block_hash;
-      nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
-          nomination.transaction_hashes,
-          /*prev_block_hash=*/nomination.prev_block_hash);
+      {
+        SignedTransactionHashBatch tx_hashes;
+        EXPECT_TRUE(
+            parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+        nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
+            tx_hashes,
+            /*prev_block_hash=*/nomination.prev_block_hash);
+      }
 
       ValidatorID validator_id{};
       server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
