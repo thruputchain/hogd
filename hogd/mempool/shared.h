@@ -67,7 +67,7 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
   return create_client<T>(host_port, retry, max_message_size);
 }
 
-void
+bool
 parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
                                SignedTransactionBatch &txs)
 {
@@ -102,17 +102,23 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
             &txs[txs_offset++],
             x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
                          num_segment_bytes - inner_xdr_offset));
-        // The tx may contain inner data that is allocated on the heap, such as
-        // signatures, so we expect the deserialized bytes to be at least as
-        // many as those in a bare [SignedTransaction] struct.
-        CHECK_GE(num_consumed, sizeof(SignedTransaction));
         inner_xdr_offset += num_consumed;
       } catch (const x23::XdrBadInput &e) {
         info("failed to deserialize: {}", e.what());
-        return;
+        return false;
       }
     }
   }
+  return true;
+}
+
+void
+transactions_to_parallel_batch(const SignedTransactionBatch &txs,
+                               ParallelSignedTransactionBatch &parallel)
+{
+  parallel.xdr = x23::serialize(txs);
+  parallel.segment_tokens = {static_cast<unsigned int>(txs.size())};
+  parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
 }
 
 } // namespace hogd
