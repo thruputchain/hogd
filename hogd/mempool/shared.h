@@ -67,9 +67,9 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
   return create_client<T>(host_port, retry, max_message_size);
 }
 
-bool
-parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
-                               SignedTransactionBatch &txs)
+template<typename T>
+inline bool
+parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
   CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
 
@@ -86,9 +86,9 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
   for (unsigned int segment_tokens : parallel.segment_tokens) {
     total_segment_tokens += segment_tokens;
   }
-  txs.resize(total_segment_tokens, {});
+  objs.resize(total_segment_tokens, {});
 
-  size_t txs_offset = 0;
+  size_t objs_offset = 0;
   // TODO(jhumphri): Each iteration of this for loop should run in a separate
   // thread.
   for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
@@ -99,7 +99,7 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
     for (size_t j = 0; j < num_segment_tokens; j++) {
       try {
         size_t num_consumed = x23::deserialize_from(
-            &txs[txs_offset++],
+            &objs[objs_offset++],
             x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
                          num_segment_bytes - inner_xdr_offset));
         inner_xdr_offset += num_consumed;
@@ -112,12 +112,12 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
   return true;
 }
 
-void
-transactions_to_parallel_batch(const SignedTransactionBatch &txs,
-                               ParallelSignedTransactionBatch &parallel)
+template<typename T>
+inline void
+t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
 {
-  parallel.xdr = x23::serialize(txs);
-  parallel.segment_tokens = {static_cast<unsigned int>(txs.size())};
+  parallel.xdr = x23::serialize(objs);
+  parallel.segment_tokens = {static_cast<unsigned int>(objs.size())};
   parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
 }
 

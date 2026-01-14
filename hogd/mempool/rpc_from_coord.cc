@@ -51,7 +51,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   static SignedTransactionBatch txs;
   txs.clear();
-  if (!parallel_batch_to_transactions(batch, txs)) {
+  if (!parallel_batch_to_t(batch, txs)) {
     info("submit_vetted, could not parse");
     co_return;
   }
@@ -75,7 +75,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 {
   static SignedTransactionBatch txs;
   txs.clear();
-  if (!parallel_batch_to_transactions(batch, txs)) {
+  if (!parallel_batch_to_t(batch, txs)) {
     info("submit_vetted, could not parse");
     co_return;
   }
