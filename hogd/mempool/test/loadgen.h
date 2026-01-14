@@ -76,12 +76,14 @@ public:
     constexpr ValidatorID kValidatorId{};
     DbTip ret{};
     for (const InitializationBlock &init_tx : init_txs) {
-      sched_coord_client.schedulercoord_submit_vetted(kValidatorId, init_tx)();
+      sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
+                                                      t_to_parallel_batch(
+                                                          {init_tx}))();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
       size_t num_nominated_txs = 0;
-      SchedulerNomination nomination{};
+      SchedulerNominatedBlock nomination{};
       while (num_nominated_txs < init_tx.size()) {
         DbTip db_tip{.height = nomination.nomination.block_height,
                      .hash = nomination.nomination.block_hash,
@@ -90,12 +92,12 @@ public:
             sched_coord_client.schedulercoord_nominate(db_tip)();
         CHECK_EQ(res_nominate.outcome(),
                  SchedulerNominationOutcome::SchedulerNominationOK);
-        nomination = coord_sched_rpc.get_nomination()();
-        CHECK_EQ(res_nominate.block_id(), nomination.block_id);
+        nomination = res_nominate.nominated_block();
+        CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
         num_nominated_txs += nomination.nomination.transaction_hashes.size();
 
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
-                     res_nominate.block_id())(),
+                     res_nominate.nominated_block().block_id)(),
                  SchedulerCommitOutcome::SchedulerCommitOK);
       }
       CHECK_EQ(num_nominated_txs, init_tx.size());
@@ -178,9 +180,8 @@ public:
     for (size_t i = 0; i < kNumSchedClients; i++) {
       x23::span tx_chunk(txs.begin() + (i * kSchedTxBatchSize),
                          txs.begin() + ((i + 1) * kSchedTxBatchSize));
-      handles.push_back(
-          sched_coord_clients_[i].schedulercoord_submit_vetted(kValidatorId,
-                                                               tx_chunk));
+      handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
+          kValidatorId, t_to_parallel_batch(tx_chunk)));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       co_await handles[i];

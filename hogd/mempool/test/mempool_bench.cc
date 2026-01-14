@@ -140,8 +140,7 @@ validate(benchmark::State &state)
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -253,8 +252,7 @@ loadgen_validate(benchmark::State &state)
 
     // We reuse the [Nomination] struct and make some adjustments for the
     // validation.
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     db_tip.height++;
     db_tip.hash = nomination.block_hash;
     db_tip.id++;
@@ -293,7 +291,8 @@ loadgen_nominate_throughput(benchmark::State &state)
 
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
-                                                            txs)();
+                                                            t_to_parallel_batch(
+                                                                txs))();
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
@@ -306,8 +305,8 @@ loadgen_nominate_throughput(benchmark::State &state)
       CHECK_EQ(res_nominate.outcome(),
                SchedulerNominationOutcome::SchedulerNominationOK);
 
-      SchedulerNomination nomination =
-          server.coord_sched_rpc().get_nomination()();
+      const SchedulerNominatedBlock &nomination =
+          res_nominate.nominated_block();
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
                 .id = nomination.block_id};
@@ -342,8 +341,7 @@ loadgen_validate_throughput(benchmark::State &state)
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
-    Nomination nomination =
-        server.coord_sched_rpc().get_nomination()().nomination;
+    Nomination nomination = res_nominate.nominated_block().nomination;
     while (txs_so_far < kTotalTxsToRun) {
       std::println("txs_so_far {}, kTotalTxsToRun {}", txs_so_far,
                    kTotalTxsToRun);
@@ -369,7 +367,9 @@ loadgen_validate_throughput(benchmark::State &state)
                                                              nomination)();
       CHECK_EQ(res_validate.outcome(),
                SchedulerValidationResult::SchedulerValidationOK);
-      txs_so_far += nomination.transaction_hashes.size();
+      SignedTransactionHashBatch tx_hashes;
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      txs_so_far += tx_hashes.size();
     }
   }
 }
