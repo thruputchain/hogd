@@ -43,19 +43,26 @@ namespace hogd {
 
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
-    SignedTransactionBatch batch)
+    ParallelSignedTransactionBatch batch)
 {
   static std::atomic<int> counter = 0;
   static std::atomic<int> outstanding = 0;
   int c = counter++;
+
+  static SignedTransactionBatch txs;
+  txs.clear();
+  if (!parallel_batch_to_transactions(batch, txs)) {
+    info("submit_vetted, could not parse");
+    co_return;
+  }
   ElapsedTimer timer;
   info("submit_unvetted, {} txs, counter is {}, num outstanding calls is {}",
-       batch.size(), c, ++outstanding);
+       txs.size(), c, ++outstanding);
   // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
-  co_await scheduler_->add_txs(batch);
+  co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
   co_await coord_clients_[c % kNumCoordClients].coordscheduler_notify_vetted(
-      batch);
+      txs);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
        c, timer.elapsed(), --outstanding, timer2.elapsed());
@@ -64,13 +71,16 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
 x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
-    ValidatorID validator_id, SignedTransactionBatch batch)
+    ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
-  info("submit_vetted, {} txs", batch.size());
-  // We [co_await] rather than [return scheduler_->add_txs(batch)] directly
-  // because [add_txs] takes the txs as a const reference, so we need [batch] to
-  // stay in scope.
-  co_await scheduler_->add_txs(batch);
+  static SignedTransactionBatch txs;
+  txs.clear();
+  if (!parallel_batch_to_transactions(batch, txs)) {
+    info("submit_vetted, could not parse");
+    co_return;
+  }
+  info("submit_vetted, {} txs", txs.size());
+  co_await scheduler_->add_txs(txs);
   co_return;
 }
 
