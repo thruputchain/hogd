@@ -279,7 +279,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
     // Remove a transaction from the nomination.
     tx_hashes.pop_back();
-    x23::Vec<NondeterministicProposalData> tx_nondeterministic_data;
+    x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(
         parallel_batch_to_t(nomination.transactions_nondeterministic_data,
                             tx_nondeterministic_data));
