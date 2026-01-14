@@ -1,9 +1,12 @@
 #pragma once
 
+#include <atomic>
 #include <map>
+#include <memory>
 #include <optional>
 
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_set.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
@@ -38,11 +41,20 @@ private:
   HogDBStatus<ReplayCacheData>
   build_result(const LockContext &ctx, BlockHeight block_height,
                const std::span<Uniquifier> &uniquifiers) const;
-  HogDBStatus<ReplayCacheData *> get_base(const LockContext &ctx,
-                                          BlockHeight block_height) const;
+
+  struct ActiveHeight {
+    ActiveHeight(ReplayCacheData &&data) : data(std::move(data)) {}
+    ActiveHeight() : data(), is_new(true) {}
+    ReplayCacheData data;
+    std::atomic<int32_t> pending_additions{0};
+    bool is_new{false};
+  };
+
+  HogDBStatus<ActiveHeight *> get_base(const LockContext &ctx,
+                                       BlockHeight block_height) const;
   HogDBStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
-  mutable std::map<BlockHeight, ReplayCacheData> bases_;
+  mutable std::map<BlockHeight, std::unique_ptr<ActiveHeight>> bases_;
   mutable x23::SharedLock bases_lock_;
 
   mutable std::atomic<ReplayCacheMetadata *> meta_;
@@ -50,6 +62,8 @@ private:
   mutable std::once_flag meta_once_flag_;
 
   mutable ConcurrentSet<uint128_t> conflicts_;
+
+  mutable std::atomic<int32_t> pending_new_heights_{0};
 
   friend class ReplayCacheIt;
   friend class ReplayCacheLockTestHelper;
