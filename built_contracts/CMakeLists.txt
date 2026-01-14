@@ -271,6 +271,7 @@ function(add_contract_header target_name)
         ${extra_includes}
     DEPENDS 
       ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
+      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
     COMMENT "Generating ${target_name}.h from spec"
   )
 
