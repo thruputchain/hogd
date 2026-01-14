@@ -73,8 +73,11 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
 {
   CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
 
+  std::vector<size_t> byte_offsets;
+  byte_offsets.reserve(parallel.segment_bytes.size());
   size_t total_segment_bytes = 0;
   for (unsigned int segment_bytes : parallel.segment_bytes) {
+    byte_offsets.push_back(total_segment_bytes);
     total_segment_bytes += segment_bytes;
   }
   CHECK_EQ(total_segment_bytes, parallel.xdr.size());
@@ -85,23 +88,30 @@ parallel_batch_to_transactions(const ParallelSignedTransactionBatch &parallel,
   }
   txs.resize(total_segment_tokens, {});
 
-  size_t xdr_offset = 0;
   size_t txs_offset = 0;
+  // TODO(jhumphri): Each iteration of this for loop should run in a separate
+  // thread.
   for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
-    unsigned int num_segment_tokens = parallel.segment_tokens[i];
-    size_t per_tx_size = parallel.segment_bytes[i] / num_segment_tokens;
-    CHECK_EQ(parallel.segment_bytes[i] % num_segment_tokens, 0UL);
+    const unsigned int num_segment_tokens = parallel.segment_tokens[i];
+    const unsigned int num_segment_bytes = parallel.segment_bytes[i];
 
+    size_t inner_xdr_offset = 0;
     for (size_t j = 0; j < num_segment_tokens; j++) {
-      // TODO(jhumphri): This needs to be fixed because the objects in a segment
-      // may not all be the same size.
-      CHECK(false);
-      const SignedTransaction &tx =
-          *reinterpret_cast<const SignedTransaction *>(
-              &parallel.xdr[xdr_offset + (j * per_tx_size)]);
-      txs[txs_offset++] = tx;
+      try {
+        size_t num_consumed = x23::deserialize_from(
+            &txs[txs_offset++],
+            x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
+                         num_segment_bytes - inner_xdr_offset));
+        // The tx may contain inner data that is allocated on the heap, such as
+        // signatures, so we expect the deserialized bytes to be at least as
+        // many as those in a bare [SignedTransaction] struct.
+        CHECK_GE(num_consumed, sizeof(SignedTransaction));
+        inner_xdr_offset += num_consumed;
+      } catch (const x23::XdrBadInput &e) {
+        info("failed to deserialize: {}", e.what());
+        return;
+      }
     }
-    xdr_offset += parallel.segment_bytes[i];
   }
 }
 
