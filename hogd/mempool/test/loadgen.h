@@ -234,7 +234,7 @@ public:
                SchedulerNominationOutcome::SchedulerNominationOK);
       x23::Async<SchedulerCommitOutcome> commit_handle =
           sched_coord_clients_[0].schedulercoord_commit_block(
-              res_nominate.block_id());
+              res_nominate.nominated_block().block_id);
 
       co_await submit_vetted_handle;
 
@@ -243,9 +243,14 @@ public:
                SchedulerCommitOutcome::SchedulerCommitOK);
       info("commit handle took {} seconds", timer.elapsed());
 
-      const auto &[nomination, num_txs] =
-          coord_sched_rpc_.get_nomination_no_txs()();
+      const Nomination &nomination = res_nominate.nominated_block().nomination;
       CHECK_EQ(res_nominate.block_id(), nomination.block_id);
+      size_t num_txs = 0;
+      {
+        SignedTransactionHashBatch tx_hashes;
+        parallel_batch_to_t(nomination.transactions_hash, tx_hashes);
+        num_txs = tx_hashes.size();
+      }
 
       db_tip = {.height = nomination.nomination.block_height,
                 .hash = nomination.nomination.block_hash,
