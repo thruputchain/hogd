@@ -376,11 +376,11 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
 
-  Nomination &nomination = cache.nomination_result.nomination();
+  Nomination &nomination = cache.nomination_result.nominated_block().nomination;
   nomination.block_height = cache.db_tip.height + 1;
   nomination.prev_block_hash = cache.db_tip.hash;
-  nomination.transaction_hashes.clear();
-  nomination.transaction_nominations.clear();
+  nomination.transactions_hash = {};
+  nomination.transactions_nondeterministic_data = {};
   // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
   // [nomination.transaction_hashes] is written in [process_tx_outcomes] and
   // [nomination.transaction_nominations] is filled in below.
@@ -425,8 +425,7 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
 
   for (size_t i = 0; i < handles.size(); i++) {
     co_await handles[i];
-    cache.nomination.transaction_nominations +=
-        cache.transaction_nomination_chunks[i];
+    cache.result_tx_nominations += cache.transaction_nomination_chunks[i];
   }
 
   co_return;
@@ -439,10 +438,7 @@ MempoolCoordinatorRpc::process_tx_outcomes(PendingBlock &cache)
 
   for (size_t i = 0; i < cache.txs.size(); i++) {
     if (cache.statuses[i]) {
-      SchedulerNominationChunk &nomination =
-          cache.sched_nominations[i / kNumTxsPerNominationChunk];
-      nomination.chunk.nomination.transaction_hashes.push_back(
-          cache.tx_hashes[i]);
+      cache.result_tx_hashes.push_back(cache.tx_hashes[i]);
     }
     else {
       cache.failed_txs.push_back(cache.txs[i]);
@@ -462,18 +458,18 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
   }
 
   {
-    Nomination &nomination = cache.nomination_result.nomination();
+    Nomination &nomination =
+        cache.nomination_result.nominated_block().nomination;
     nomination.block_height = cache.db_tip.height + 1;
     nomination.block_hash =
         get_block_hash(cache.tx_hashes,
                        /*prev_block_hash=*/cache.db_tip.hash);
     nomination.prev_block_hash = cache.db_tip.hash;
-    // TODO(jhumphri): Add the txs and tx hashes to [nomination].
-    CHECK(nomination.transaction_hashes.empty());
-    CHECK(nomination.transaction_nominations.empty());
+    t_to_parallel_batch(cache.result_tx_hashes, nomination.transactions_hash);
+    t_to_parallel_batch(cache.result_tx_nominations,
+                        nomination.transactions_nondeterministic_data);
   }
 
-  // [co_await] all of the handles.
   for (x23::Async<void> &handle : finish_block_handles) {
     co_await handle;
   }
@@ -550,8 +546,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   // memory allocation/free overhead.
   nominated_block_cache_.txs.clear();
   nominated_block_cache_.tx_hashes.clear();
+  nominated_block_cache_.result_tx_hashes.clear();
+  nominated_block_cache_.result_tx_nominations.clear();
   nominated_block_cache_.txs.reserve(kMaxBlockSize);
   nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
+  nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
+  nominated_block_cache_.result_tx_nominations.reserve(kMaxBlockSize);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
@@ -596,26 +596,17 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   if (!nominated_block_cache_.failed_txs.empty()) {
     co_await scheduler_->add_txs(nominated_block_cache_.failed_txs);
   }
-  // if (nominated_block_cache_.tx_hashes.empty() ||
-  //     nominated_block_cache_.failed_txs.size() ==
-  //         nominated_block_cache_.tx_hashes.size()) {
-  //   // There are no txs for the block, so we cannot propose a block.
-  //   co_await finish_all_executors(nominated_block_cache_.block_id);
-  //   co_await abandon_block(nominated_block_cache_);
-  //   info("ret");
-  //   co_return SchedulerNominationResult(
-  //       SchedulerNominationOutcome::SchedulerNominationError);
-  // }
 
   co_await finish_nominating_block(nominated_block_cache_);
 
-  nominated_block_cache_.result =
-      SchedulerNominationOutcome::SchedulerNominationOK;
-  nominated_block_cache_.result.block_id() = nominated_block_cache_.block_id;
+  nominated_block_cache_.nomination_result = SchedulerNominationResult(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  nominated_block_cache_.nomination_result.nominated_block().block_id =
+      nominated_block_cache_.block_id;
   info("ret");
   info("nominate() took {}", timer.elapsed());
   last = std::chrono::steady_clock::now();
-  co_return result;
+  co_return nominated_block_cache_.nomination_result;
 }
 
 x23::Async<bool>
@@ -659,14 +650,15 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
 
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
-  if (nomination.transaction_nominations.empty()) {
+  x23::XdrVec<NondeterministicProposalData> tx_nominations;
+  CHECK(parallel_batch_to_t(nomination.transactions_nondeterministic_data,
+                            tx_nominations));
+  if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-
-  co_await scheduler_->transfer_finished_.acquire();
 
   // TODO(jhumphri): Remember that we need to pre-size the vectors in [cache]
   // correctly when we use the helper functions above to send txs to the
@@ -675,6 +667,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   cache.block_id = generate_block_id();
   cache.db_tip = db_tip;
   CHECK(parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes));
+
+  co_await scheduler_->transfer_finished_.acquire();
+
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=

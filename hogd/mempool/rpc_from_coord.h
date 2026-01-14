@@ -196,6 +196,8 @@ private:
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<SignedTransactionHash> tx_hashes;
 
+    x23::XdrVec<SignedTransactionHash> result_tx_hashes;
+    x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerNominationResult nomination_result;
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
@@ -264,7 +266,7 @@ private:
   x23::Async<bool> initialize_block(const PendingBlock &cache);
   x23::Async<void> schedule(PendingBlock &cache);
   static void process_tx_outcomes(PendingBlock &cache);
-  x23::Detached finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> finish_nominating_block(PendingBlock &cache);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
