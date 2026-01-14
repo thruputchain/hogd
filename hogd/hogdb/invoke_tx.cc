@@ -20,6 +20,7 @@
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -137,8 +138,13 @@ InvokeTX::update_balance_lock(Address const &addr)
     if constexpr (is_debug_build()) {
       ContractAddress contract_addr = addr.get_raw();
       // NOLINTBEGIN(bugprone-unchecked-optional-access)
-      trace("failed to modify lock for address {}: {}",
-            x23::show(contract_addr), *last.change.get_raw_nnint128());
+      auto i = last.change.get_raw_nnint128();
+      if (i)
+        trace("failed to modify lock for address {}: {}",
+              x23::show(contract_addr), *i);
+      else
+        trace("failed to modify lock for address {}: nullopt",
+              x23::show(contract_addr));
       // NOLINTEND(bugprone-unchecked-optional-access)
     }
     return status.error();
@@ -456,6 +462,19 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
 
   return request_change(make_replay_cache_item_key(addr),
                         ReplayCacheIt{uniquifier});
+}
+
+HogDBStatus<void>
+InvokeTX::request_retrocausal_queue(const ItemKey &key,
+                                    const RetrocausalQueueDelta &delta,
+                                    StorageDeltaFlagSet flags)
+{
+  auto change = ItemChange(RetrocausalQueueIt(delta));
+  if (flags &
+      std::to_underlying(StorageDeltaFlags::kStorageDeltaFlagExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
+  return request_change(key, std::move(change));
 }
 
 HogDBStatus<void>

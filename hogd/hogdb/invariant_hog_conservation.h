@@ -33,6 +33,8 @@ private:
                                             HogDBStatus<DBItem> const &after);
   void handle_replay_cache_item_change(HogDBStatus<DBItem> const &before,
                                        HogDBStatus<DBItem> const &after);
+  void handle_retrocausal_queue_item_change(HogDBStatus<DBItem> const &before,
+                                            HogDBStatus<DBItem> const &after);
 
   void update_total_supply(int128_t change);
 

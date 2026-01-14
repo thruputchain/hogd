@@ -139,7 +139,7 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                    &cost_model, item.get()));
 
   EXPECT_EQ(
-      (2 * cost_model.kRCQCostPerEntry) + cost_model.kRCQCostPerBlock,
+      cost_model.get_retrocausal_queue_cost(2, 1),
       variant.get_marginal_cost_upper_bound(
           make_rcq_delta(std::nullopt,
                          RetrocausalQueueInsertDelta{
@@ -161,7 +161,7 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                 &cost_model, item.get()));
   // same test case as above, but after a try_reserve_consume has been called.
   EXPECT_EQ(
-      (2 * cost_model.kRCQCostPerEntry) + cost_model.kRCQCostPerBlock,
+      cost_model.get_retrocausal_queue_cost(2, 1),
       variant.get_marginal_cost_upper_bound(
           make_rcq_delta(std::nullopt,
                          RetrocausalQueueInsertDelta{
@@ -199,7 +199,7 @@ TEST(RefcountedDeltaVariant, RCQCosts)
   // During the marginal cost upper bound, we don't check to see whether the
   // entries being committed were already consumed.
   EXPECT_EQ(
-      cost_model.kRCQCostPerEntry + cost_model.kRCQCostPerBlock,
+      cost_model.get_retrocausal_queue_cost(1, 1),
       variant.get_marginal_cost_upper_bound(
           make_rcq_delta(std::nullopt,
                          RetrocausalQueueInsertDelta{
@@ -213,7 +213,7 @@ TEST(RefcountedDeltaVariant, RCQCosts)
   // After previous state, there still isn't a new block, so this insert would
   // create a new one.
   EXPECT_EQ(
-      cost_model.kRCQCostPerEntry + cost_model.kRCQCostPerBlock,
+      cost_model.get_retrocausal_queue_cost(1, 1),
       variant.get_marginal_cost_upper_bound(
           make_rcq_delta(std::nullopt,
                          RetrocausalQueueInsertDelta{
@@ -259,7 +259,7 @@ TEST(RefcountedDeltaVariant, RCQCostsBlockCountUpperBound)
 
   // inserting entries creates a new block
   EXPECT_EQ(
-      (2 * cost_model.kRCQCostPerEntry) + cost_model.kRCQCostPerBlock,
+      cost_model.get_retrocausal_queue_cost(2, 1),
       variant.get_marginal_cost_upper_bound(
           make_rcq_delta(std::nullopt,
                          RetrocausalQueueInsertDelta{

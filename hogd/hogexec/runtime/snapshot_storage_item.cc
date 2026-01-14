@@ -31,7 +31,8 @@ SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
     return variant_type{std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
   }
   case StorageItemType::kItemTypeRetrocausalQueue:
-    return variant_type{std::in_place_type<RetrocausalQueueEntry>};
+    return variant_type{std::in_place_type<RetrocausalQueueEntry>,
+                        std::move(item.metadata())};
   case StorageItemType::kItemTypeDeleted:
     return variant_type{std::in_place_type<DeletedEntry>};
   case StorageItemType::kItemTypeReplayCacheData:

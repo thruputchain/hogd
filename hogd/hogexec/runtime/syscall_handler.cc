@@ -1005,6 +1005,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (value.has_value()) {
     return value.value();
   }
+
   return SyscallError{
       SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
 }

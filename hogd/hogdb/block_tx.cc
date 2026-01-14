@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "hogd/hogdb/item_lock/deletion_lock.h"
 #include "hogd/hogdb/item_lock/pointer_lock.h"
 #include "hogd/hogdb/status.h"
+#include "retrocausal_queue.hh"
 #include "sched_db.hh"
 #include "x23/x23.h"
 
@@ -170,6 +172,17 @@ BlockTX::commit_change(const ItemKey &key, ItemChange const &change)
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   return lock->commit_change(change, ctx);
+}
+
+HogDBStatus<std::optional<QueueEntry>>
+BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
+{
+  auto *lock = item_locks_.get(key);
+  if (!lock) {
+    error("hogexec bug: do not ask for concurrent rcq entry if rcq unlocked");
+    return HogDBError{HogDBCode::kInternal};
+  }
+  return lock->get_concurrent_entry(index);
 }
 
 HogDBStatus<int128_t>

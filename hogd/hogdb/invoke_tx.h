@@ -107,6 +107,12 @@ public:
                                                Uniquifier uniquifier,
                                                StorageDeltaFlagSet flags);
 
+  // request_retrocausal_queue requests to apply a retrocausal queue delta.
+  HogDBStatus<void>
+  request_retrocausal_queue(const ItemKey &key,
+                            const RetrocausalQueueDelta &delta,
+                            StorageDeltaFlagSet flags);
+
   bool release_blocktx_reference() { return block_.release_reference(); }
 
   void assert_is_valid() const noexcept;

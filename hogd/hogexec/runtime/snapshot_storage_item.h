@@ -61,6 +61,12 @@ public:
   SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
   get_concurrent_rcq_entry(uint32_t index) const;
 
+  RetrocausalQueueMetadata const &retrocausal_queue_metadata() const
+  {
+    CHECK(type() == ItemViewType::kRetrocausalQueue);
+    return std::get<RetrocausalQueueEntry>(entry_).metadata();
+  }
+
   std::optional<ItemViewType> type() const
   {
     return std::visit(
@@ -130,6 +136,9 @@ private:
 
   class RetrocausalQueueEntry {
   public:
+    RetrocausalQueueEntry(RetrocausalQueueMetadata metadata)
+      : metadata_(std::move(metadata))
+    {}
     RetrocausalQueueEntry() = default;
 
     RetrocausalQueueEntry(RetrocausalQueueEntry const &) = delete;
@@ -138,6 +147,8 @@ private:
     RetrocausalQueueEntry &operator=(RetrocausalQueueEntry &&) = delete;
 
     constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
+
+    RetrocausalQueueMetadata const &metadata() const { return metadata_; }
 
     // only returns from past blocks
     SystemStatus<const RetrocausalQueueBlock *>
@@ -152,6 +163,7 @@ private:
     mutable std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
     // no need to repeatedly query for blocks above this number.
     mutable std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
+    RetrocausalQueueMetadata metadata_;
   };
 
   struct ReplayCacheEntry {

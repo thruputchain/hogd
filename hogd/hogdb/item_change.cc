@@ -73,8 +73,34 @@ ReplayCacheIt::narrow( // NOLINT - lint wants static
   // twice, narrow() shouldn't be possible on it. Later, if we allow
   // transactions to interact with replay caches then this will need to be
   // implemented.
-  assert(false);
+  CHECK(false);
   return false;
+}
+
+bool
+RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
+{
+  // Inserts are always compatible, but it is probably worth double checking
+  // that the executor didn't do anything weird like drop any inserts compared
+  // with the prior delta for this transaction.
+  CHECK(delta_.insert.added_entries.size() >=
+        earlier.delta_.insert.added_entries.size());
+
+  // If a transaction did a consume, the new delta shouldn't forget about it.
+  CHECK(!earlier.delta_.consume || delta_.consume);
+
+  // If the old and new delta both have a consume, they should be monotonic.
+  CHECK(!(earlier.delta_.consume && delta_.consume) || // both have consume or
+        (earlier.delta_.consume->past_block_consume <  // earlier <= newer
+         delta_.consume->past_block_consume) ||
+        ((earlier.delta_.consume->past_block_consume ==
+              delta_.consume->past_block_consume &&
+          earlier.delta_.consume->current_block_consumed.size() <=
+              delta_.consume->current_block_consumed.size())));
+
+  // In any case, hogexec shouldn't ever issue an incompatible delta since
+  // a consumer is always self-compatible and all inserters commute.
+  return true;
 }
 
 namespace {
