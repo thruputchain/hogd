@@ -78,7 +78,7 @@ public:
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
                                                       t_to_parallel_batch(
-                                                          {init_tx}))();
+                                                          init_tx))();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
@@ -94,7 +94,11 @@ public:
                  SchedulerNominationOutcome::SchedulerNominationOK);
         nomination = res_nominate.nominated_block();
         CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
-        num_nominated_txs += nomination.nomination.transaction_hashes.size();
+        {
+          SignedTransactionHashBatch tx_hashes;
+          parallel_batch_to_t(nomination.transactions_hash, tx_hashes);
+          num_nominated_txs += tx_hashes.size();
+        }
 
         CHECK_EQ(sched_coord_client.schedulercoord_commit_block(
                      res_nominate.nominated_block().block_id)(),
@@ -244,7 +248,6 @@ public:
       info("commit handle took {} seconds", timer.elapsed());
 
       const Nomination &nomination = res_nominate.nominated_block().nomination;
-      CHECK_EQ(res_nominate.block_id(), nomination.block_id);
       size_t num_txs = 0;
       {
         SignedTransactionHashBatch tx_hashes;
@@ -252,9 +255,9 @@ public:
         num_txs = tx_hashes.size();
       }
 
-      db_tip = {.height = nomination.nomination.block_height,
-                .hash = nomination.nomination.block_hash,
-                .id = nomination.block_id};
+      db_tip = {.height = nomination.block_height,
+                .hash = nomination.block_hash,
+                .id = res_nominate.nominated_block().block_id};
 
       if (print_stats && block_iteration_count > kIgnoreFirstNBlocks) {
         // Compute and print the throughputs.
