@@ -80,10 +80,11 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
 {
   CHECK(block_height >= ctx.block_height);
 
-  auto base = get_base(ctx, block_height);
-  if (!base) {
-    return base.error();
+  auto r = get_base(ctx, block_height);
+  if (!r) {
+    return r.error();
   }
+  auto &base = *r.value();
 
   // Get an iterator to the range of additions with matching
   // block_expiry_height.
@@ -98,23 +99,24 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
 
   ReplayCacheData result;
   // An extra iteration over filtered_nonces avoids extra allocs.
-  result.nonces.reserve(base.value()->nonces.size() + std::distance(b, e));
+  result.nonces.reserve(base.data.nonces.size() + std::distance(b, e));
   // Merge sorted ranges to produce a sorted base nonce list.
-  std::ranges::set_union(base.value()->nonces, filtered_nonces,
+  std::ranges::set_union(base.data.nonces, filtered_nonces,
                          std::back_inserter(result.nonces));
 
   return result;
 }
 
-HogDBStatus<ReplayCacheData *>
+HogDBStatus<ReplayCacheLock::ActiveHeight *>
 ReplayCacheLock::get_base(const LockContext &ctx,
                           BlockHeight block_height) const
 {
   {
     // Fast path; shared lock only.
     auto sl = bases_lock_.hold_shared();
-    if (bases_.contains(block_height)) {
-      return &bases_[block_height];
+    auto it = bases_.find(block_height);
+    if (it != bases_.end()) {
+      return it->second.get();
     }
   }
 
@@ -122,23 +124,37 @@ ReplayCacheLock::get_base(const LockContext &ctx,
 
   // Seems dumb to double check, but x23::SharedLock doesn't support upgrades,
   // and I'd rather not have wasted accesses to the db.
-  if (bases_.contains(block_height)) {
-    return &bases_[block_height];
+  auto it = bases_.find(block_height);
+  if (it != bases_.end()) {
+    return it->second.get();
   }
 
   auto base = ctx.dao->read_address_replay_cache_data(ctx.key.get_address(),
                                                       block_height);
+
+  std::unique_ptr<ActiveHeight> entry{nullptr};
   if (!base) {
     if (base.error() != HogDBCode::kNotFound) {
       return base.error();
     }
-    bases_.emplace(block_height, ReplayCacheData{});
+    // New height. Check global active height limit.
+    auto meta = get_meta(&ctx);
+    if (!meta) {
+      return meta.error();
+    }
+    auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
+    if (meta.value()->heights.size() + pending > kReplayCacheHeightsMaxLen) {
+      pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
+      return HogDBError{HogDBCode::kConflict};
+    }
+    entry = std::make_unique<ActiveHeight>();
   }
   else {
-    bases_.emplace(block_height, *base);
+    entry = std::make_unique<ActiveHeight>(std::move(*base));
   }
 
-  return &bases_[block_height];
+  auto res = bases_.emplace(block_height, std::move(entry));
+  return res.first->second.get();
 }
 
 class UniquifierHelper {
@@ -165,7 +181,14 @@ ReplayCacheLock::try_atomic_change_lock(
 
   // Need to remove a previously added Uniquifier (e.g. if a tx aborts).
   if (after == nullptr) {
-    conflicts_.erase(UniquifierHelper::to_uint128(before->get()->addition()));
+    auto u = before->get()->addition();
+    auto r = get_base(ctx, u.block_expiry_height);
+    if (!r.has_value()) {
+      return HogDBError{HogDBCode::kInternal};
+    }
+    auto &base = *r.value();
+    conflicts_.erase(UniquifierHelper::to_uint128(u));
+    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
     return {};
   }
 
@@ -183,19 +206,31 @@ ReplayCacheLock::try_atomic_change_lock(
   }
 
   // Check if this nonce already exists in the base data for this height.
-  auto base = get_base(ctx, addition.block_expiry_height);
-  if (!base) {
-    return base.error();
+  auto r = get_base(ctx, addition.block_expiry_height);
+  if (!r) {
+    return r.error();
   }
+  auto &base = *r.value();
 
-  if (std::binary_search(base.value()->nonces.begin(),
-                         base.value()->nonces.end(), addition.nonce)) {
+  if (std::binary_search(base.data.nonces.begin(), base.data.nonces.end(),
+                         addition.nonce)) {
     trace("attempted to consume {}.{} but it was already the base cache",
           addition.block_expiry_height, addition.nonce);
     return HogDBError{HogDBCode::kConflict};
   }
 
+  // Reserve slot
+  auto additions =
+      base.pending_additions.fetch_add(1, std::memory_order_relaxed);
+
+  // Check limit
+  if (base.data.nonces.size() + additions + 1 > kReplayCacheNoncesMaxLen) {
+    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+    return HogDBError{HogDBCode::kConflict};
+  }
+
   if (!conflicts_.try_insert(UniquifierHelper::to_uint128(addition))) {
+    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
     return HogDBError{HogDBCode::kConflict};
   }
 

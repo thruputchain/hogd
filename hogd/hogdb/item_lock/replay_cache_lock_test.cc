@@ -51,12 +51,14 @@ public:
   static void set_base(ReplayCacheLock &lock, BlockHeight height,
                        const ReplayCacheData &data)
   {
-    lock.bases_[height] = data;
+    lock.bases_[height] =
+        std::make_unique<ReplayCacheLock::ActiveHeight>(ReplayCacheData{data});
+
     // Initialize metadata
     std::int64_t total = 0;
     x23::Vec<ReplayCacheHeightCount> heights;
     for (const auto &pair : lock.bases_) {
-      auto s = static_cast<std::int64_t>(pair.second.nonces.size());
+      auto s = static_cast<std::int64_t>(pair.second->data.nonces.size());
       total += s;
       if (s > 0) {
         heights.push_back({.height = pair.first,
@@ -74,7 +76,8 @@ public:
   {
     for (BlockHeight h = start; h <= end; ++h) {
       if (!lock.bases_.contains(h)) {
-        lock.bases_[h] = ReplayCacheData{.nonces = {}};
+        lock.bases_[h] = std::make_unique<ReplayCacheLock::ActiveHeight>();
+        lock.bases_[h]->is_new = false;
       }
     }
     // Initialize metadata if not already set
