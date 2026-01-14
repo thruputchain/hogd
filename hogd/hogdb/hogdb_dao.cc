@@ -19,6 +19,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
@@ -65,6 +66,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kWasmCodeRefcount:
   case Prefix::kWasmCode:
   case Prefix::kReplayCache:
+  case Prefix::kRetrocausalQueueBlock:
     return true;
   default:
     error("unknown prefix: {}", std::to_underlying(prefix));
@@ -372,8 +374,6 @@ HogDBDAO::write_address_replay_cache_data(Address const &addr,
   auto key = make_replay_cache_data_key(addr, height);
   auto buf = x23::serialize(data);
   auto key_span = std::as_bytes(std::span(key));
-  // trace("-> {} height {} nonces {}", std::string(key_span), height,
-  // data.nonces.size());
 
   auto before_item = get_before_item(key_span);
 
@@ -383,7 +383,7 @@ HogDBDAO::write_address_replay_cache_data(Address const &addr,
 }
 
 HogDBStatus<void>
-HogDBDAO::delete_address_replay_cache_data(const Address &addr,
+HogDBDAO::remove_address_replay_cache_data(const Address &addr,
                                            BlockHeight height)
 {
   auto key = make_replay_cache_data_key(addr, height);
@@ -393,6 +393,85 @@ HogDBDAO::delete_address_replay_cache_data(const Address &addr,
 
   auto ret = db_.remove(key_span);
   update_invariants_post(key_span, before_item);
+  return ret;
+}
+
+HogDBStatus<RetrocausalQueueBlock>
+HogDBDAO::read_retrocausal_queue_block(const ItemKey &key,
+                                       uint64_t block_number)
+{
+  auto block_key = make_retrocausal_queue_block_key(key, block_number);
+  auto raw = db_.get_if_type(std::as_bytes(std::span(block_key)), 0);
+  if (!raw)
+    return raw.error();
+
+  RetrocausalQueueBlock block;
+  try {
+    x23::deserialize(&block, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return block;
+}
+
+HogDBStatus<void>
+HogDBDAO::write_retrocausal_queue_block(const ItemKey &key,
+                                        const RetrocausalQueueBlock &block)
+{
+  auto block_key = make_retrocausal_queue_block_key(key, block.block_number);
+
+  auto buf = x23::serialize(block);
+
+  auto key_span = std::as_bytes(std::span(block_key));
+  auto ret = db_.put(key_span, 0, std::as_bytes(std::span(buf)));
+
+  // We don't update HogDB invariants for retrocausal queue blocks.
+  // This is because we *do* when the metadata is updated.
+  return ret;
+}
+
+HogDBStatus<void>
+HogDBDAO::remove_retrocausal_queue_block(const ItemKey &key,
+                                         uint64_t block_number)
+{
+  auto block_key = make_retrocausal_queue_block_key(key, block_number);
+
+  auto key_span = std::as_bytes(std::span(block_key));
+  auto ret = db_.remove(key_span);
+
+  // We don't update HogDB invariants for retrocausal queue blocks.
+  // This is because we *do* when the metadata is updated.
+  return ret;
+}
+
+HogDBStatus<RetrocausalQueueMetadata>
+HogDBDAO::read_retrocausal_queue_metadata(const ItemKey &key)
+{
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto raw = db_.get_if_type(db_key, kRetrocausalQueue);
+  if (!raw)
+    return raw.error();
+
+  RetrocausalQueueMetadata metadata;
+  try {
+    x23::deserialize(&metadata, x23::BufViewEnd(*raw));
+  } catch (x23::XdrException &e) {
+    return HogDBError(HogDBCode::kInternal);
+  }
+  return metadata;
+}
+
+HogDBStatus<void>
+HogDBDAO::write_retrocausal_queue_metadata(
+    const ItemKey &key, const RetrocausalQueueMetadata &metadata)
+{
+  auto db_key = make_contract_data_key(key.as_bytes());
+  auto buf = x23::serialize(metadata);
+
+  auto before_item = get_before_item(db_key);
+  auto ret = db_.put(db_key, kRetrocausalQueue, std::as_bytes(std::span(buf)));
+
+  update_invariants_post(db_key, before_item);
   return ret;
 }
 
@@ -541,6 +620,22 @@ HogDBDAO::get_charged_storage_cost_and_cache_data(
       return std::make_pair(cost_model->get_bytestring_cost(
                                 item.value().value.size()),
                             ItemLockCacheData::from_none());
+    case kRetrocausalQueue:
+    {
+      RetrocausalQueueMetadata meta;
+      try {
+        x23::deserialize(&meta, x23::BufViewEnd(item.value().value));
+      } catch (x23::XdrException &e) {
+        error("failed to deserialize rcq metadata: {}", e.what());
+        return HogDBError(HogDBCode::kInternal);
+      }
+      return std::make_pair(
+          cost_model->get_retrocausal_queue_cost(
+              meta.live_entries,
+              meta.max_live_block_num -
+                  meta.consume_state.max_fully_consumed_block_number),
+          ItemLockCacheData::from_none());
+    }
     default:
       error("unknown item type loaded from db: key={} type={}", key,
             item.value().type);

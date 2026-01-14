@@ -129,6 +129,7 @@ enum class Prefix : char {
   kWasmCode = 'C',
   kWasmCodeRefcount = 'R',
   kReplayCache = 'U',
+  kRetrocausalQueueBlock = 'Q',
   // global info, like the db tip, have prefixes that begin with (and may
   // extend) this character
   kGlobalMetadata = '<',
@@ -141,7 +142,8 @@ enum class Prefix : char {
 // kNNInt128 since hogdb treats them like a special ItemKey for native tokens.
 enum {
   kNNInt128 = 1,
-  kBytes,
+  kBytes = 2,
+  kRetrocausalQueue = 3,
 };
 
 // ItemLockCacheData is the data we use to cache type-specific info,
@@ -217,6 +219,24 @@ make_replay_cache_data_key(const Address &addr, BlockHeight height)
   std::ranges::copy(std::as_bytes(std::span(&h, 1)),
                     std::begin(std::as_writable_bytes(std::span(ret))) + 1 +
                         kAddressSize);
+  return ret;
+}
+
+constexpr auto
+make_retrocausal_queue_block_key(const ItemKey &key, uint64_t block_number)
+{
+  std::span<const std::byte> key_bytes = key.as_bytes();
+
+  std::vector<std::byte> ret;
+  ret.reserve(1 + key_bytes.size() + sizeof(uint64_t));
+
+  ret.push_back(static_cast<std::byte>(Prefix::kRetrocausalQueueBlock));
+
+  std::ranges::copy(key_bytes, std::back_inserter(ret));
+
+  auto n = cpu_to_le(block_number);
+  std::ranges::copy(std::as_bytes(std::span(&n, 1)), std::back_inserter(ret));
+
   return ret;
 }
 
@@ -296,8 +316,22 @@ public:
   HogDBStatus<void>
   write_address_replay_cache_data(Address const &addr, BlockHeight height,
                                   ReplayCacheData const &data);
-  HogDBStatus<void> delete_address_replay_cache_data(const Address &addr,
+  HogDBStatus<void> remove_address_replay_cache_data(const Address &addr,
                                                      BlockHeight height);
+
+  HogDBStatus<RetrocausalQueueBlock>
+  read_retrocausal_queue_block(const ItemKey &key, uint64_t block_number);
+  HogDBStatus<void>
+  write_retrocausal_queue_block(const ItemKey &key,
+                                const RetrocausalQueueBlock &block);
+  HogDBStatus<void> remove_retrocausal_queue_block(const ItemKey &key,
+                                                   uint64_t block_number);
+
+  HogDBStatus<RetrocausalQueueMetadata>
+  read_retrocausal_queue_metadata(const ItemKey &key);
+  HogDBStatus<void>
+  write_retrocausal_queue_metadata(const ItemKey &key,
+                                   const RetrocausalQueueMetadata &metadata);
 
   //
   // WASM Operations

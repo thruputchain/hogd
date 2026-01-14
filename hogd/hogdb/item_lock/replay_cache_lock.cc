@@ -289,7 +289,7 @@ ReplayCacheLock::write_committed_change(LockContext const &ctx,
     trace("pruning height {}, deleteing {} nonces from address {}", it->height,
           it->nonce_count, ctx.key.get_address());
     assert(ctx.dao);
-    auto ret = ctx.dao->delete_address_replay_cache_data(ctx.key.get_address(),
+    auto ret = ctx.dao->remove_address_replay_cache_data(ctx.key.get_address(),
                                                          it->height);
     if (!ret) {
       return ret.error();

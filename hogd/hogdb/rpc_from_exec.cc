@@ -14,14 +14,17 @@
 #include "hogd/base/log.h"
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/hogdb_dao.h"
 #include "hogd/hogdb/invoke_tx.h"
@@ -104,12 +107,13 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
     return to_rpc_error(
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
-    // Assume addrkey from FlaggedStorageDelta indicates correct ReplayCache for
-    // this tx.
-    assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeReplayCache);
+    CHECK(addrkey.key.key_type() == StorageKeyType::kStorageKeyTypeReplayCache);
     return to_rpc_error(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
+    return to_rpc_error(tx.request_retrocausal_queue(make_item_key(addrkey),
+                                                     delta.retrocausal_queue(),
+                                                     flags));
   default:
     error("requested unhandled change type: {}", delta.type());
     return RPCError::kRPCUnimplemented;
@@ -176,7 +180,7 @@ HogDBExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
         err != RPCError::kRPCNone) {
 
       if constexpr (is_debug_build()) {
-        trace("Failed to request delta: {}", x23::show(delta));
+        trace("Failed to request delta: {} {}", x23::show(delta), err);
       }
       itx->rollback_to_savepoint(depth - 1);
       return err;
@@ -265,6 +269,18 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
         std::span<const char>(cptr, item->value.size()));
     break;
   }
+  case kRetrocausalQueue:
+  {
+    out.type(StorageItemType::kItemTypeRetrocausalQueue);
+    try {
+      x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
+    } catch (x23::XdrException &e) {
+      error("failed to deserialize rcq metadata: {}", e.what());
+      return ExpectedStorageItem(
+          to_rpc_error(HogDBError(HogDBCode::kInternal)));
+    }
+    break;
+  }
   default:
     return ExpectedStorageItem(to_rpc_error(HogDBError(HogDBCode::kInternal)));
   }
@@ -309,18 +325,47 @@ HogDBExecutorRpc::get_deployment(BlockID /*unused*/,
 }
 
 ExpectedRetrocausalQueueBlock
-HogDBExecutorRpc::get_next_retrocausal_queue_block(
-    BlockID /*block*/, AddressAndKey const & /*addrkey*/,
-    uint64_t /*search_start_number*/)
+HogDBExecutorRpc::get_next_retrocausal_queue_block(BlockID /*block*/,
+                                                   AddressAndKey const &addrkey,
+                                                   uint64_t search_start_number)
 {
-  return ExpectedRetrocausalQueueBlock(RPCError::kRPCUnimplemented);
+  // TODO(stutsman): BlockID is ignored because we can only read the latest
+  // snapshot state.
+  HogDBStatus<RetrocausalQueueBlock> block =
+      ctx_.get_db().read_retrocausal_queue_block(make_item_key(addrkey),
+                                                 search_start_number);
+
+  if (!block) {
+    return ExpectedRetrocausalQueueBlock(to_rpc_error(block.error()));
+  }
+
+  ExpectedRetrocausalQueueBlock out;
+  out.error(RPCError::kRPCNone);
+  out.queue_block() = *block;
+  return out;
 }
 
 ExpectedQueueEntry
 HogDBExecutorRpc::get_concurrent_retrocausal_queue_entry(
-    BlockID /*block*/, AddressAndKey const & /*addrkey*/, uint32_t /*index*/)
+    BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
-  return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
+  PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block, false);
+  if (!btx) {
+    return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
+  }
+
+  auto entry_res =
+      btx->get().get_concurrent_rcq_entry(make_item_key(addrkey), index);
+  if (!entry_res) {
+    return ExpectedQueueEntry(to_rpc_error(entry_res.error()));
+  }
+
+  ExpectedQueueEntry ret;
+  ret.error(RPCError::kRPCNone);
+  if (entry_res->has_value()) {
+    ret.queue_entry() = **entry_res;
+  }
+  return ret;
 }
 
 ExpectedDBTip

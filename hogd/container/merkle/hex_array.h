@@ -39,7 +39,7 @@ namespace hogd {
 // std::cout << h << std::endl;
 class HexArray {
 public:
-  static constexpr size_t kMaxNumHexDigits = 130;
+  static constexpr size_t kMaxNumHexDigits = 196;
   static_assert(kMaxNumHexDigits % 2 == 0);
 
   HexArray() { init(); }

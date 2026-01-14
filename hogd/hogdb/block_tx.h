@@ -72,6 +72,11 @@ public:
   HogDBStatus<int128_t> read_nnint128_base(const ItemKey &key);
   HogDBStatus<int128_t> read_balance_base(const Address &addr);
 
+  // return entry from an RCQ that was created by a transaction in the current
+  // block if it exists.
+  HogDBStatus<std::optional<QueueEntry>>
+  get_concurrent_rcq_entry(const ItemKey &key, uint32_t index);
+
 private:
   HogDBStatus<std::pair<int128_t, ItemLockCacheData>>
   get_snapshot_cost_and_cache_data(const ItemKey &key);

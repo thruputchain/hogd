@@ -17,7 +17,9 @@ int128_t
 StorageCostModel::get_retrocausal_queue_cost(int64_t active_queue_size,
                                              uint64_t active_block_count) const
 {
-  // TODO(geoff): add the base item cost here too
+  if (active_queue_size == 0 && active_block_count == 0) {
+    return 0;
+  }
   return (active_queue_size * kRCQCostPerEntry) +
          (active_block_count * kRCQCostPerBlock);
 }

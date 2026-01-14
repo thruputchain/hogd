@@ -35,6 +35,8 @@ struct StorageCostModel {
       kContractDeploymentCostPerByte(
           from_xdr(model.contract_deployment_cost_per_byte)),
       kAuthPerKeyCost(from_xdr(model.auth_per_key_cost)),
+      kRCQCostPerEntry(from_xdr(model.rcq_cost_per_entry)),
+      kRCQCostPerBlock(from_xdr(model.rcq_cost_per_block)),
       kReplayCacheCostPerEntry(from_xdr(model.replay_cache_cost_per_entry)),
       kBalanceCost(from_xdr(model.balance_cost))
   {}
@@ -67,10 +69,10 @@ struct StorageCostModel {
 
   // TODO(geoff): make these part of the XDR, once we settle on
   // cost/design for the RCQs.
-  const int128_t kRCQCostPerEntry = 0;
-  const int128_t kRCQCostPerBlock = 0;
+  const int128_t kRCQCostPerEntry;
+  const int128_t kRCQCostPerBlock;
 
-  const int128_t kReplayCacheCostPerEntry = 0;
+  const int128_t kReplayCacheCostPerEntry;
 
   const int128_t kBalanceCost;
 
