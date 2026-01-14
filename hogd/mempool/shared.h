@@ -121,4 +121,13 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
   parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
 }
 
+template<typename T>
+inline ParallelBatch
+t_to_parallel_batch(const x23::XdrVec<T> &objs)
+{
+  ParallelBatch parallel;
+  t_to_parallel_batch(objs, parallel);
+  return parallel;
+}
+
 } // namespace hogd

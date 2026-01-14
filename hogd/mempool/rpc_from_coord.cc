@@ -49,8 +49,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   static std::atomic<int> outstanding = 0;
   int c = counter++;
 
-  static SignedTransactionBatch txs;
-  txs.clear();
+  SignedTransactionBatch txs;
   if (!parallel_batch_to_t(batch, txs)) {
     info("submit_vetted, could not parse");
     co_return;
@@ -61,8 +60,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   // TODO(jhumphri): Authenticate the txs. Is any other vetting needed?
   co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
+  ParallelBatch response;
+  t_to_parallel_batch(txs, response);
   co_await coord_clients_[c % kNumCoordClients].coordscheduler_notify_vetted(
-      txs);
+      response);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
        c, timer.elapsed(), --outstanding, timer2.elapsed());
@@ -73,8 +74,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
-  static SignedTransactionBatch txs;
-  txs.clear();
+  SignedTransactionBatch txs;
   if (!parallel_batch_to_t(batch, txs)) {
     info("submit_vetted, could not parse");
     co_return;
