@@ -680,7 +680,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   PendingBlock cache{};
   cache.block_id = generate_block_id();
   cache.db_tip = db_tip;
-  cache.tx_hashes = nomination.transaction_hashes;
+  parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes);
   if (co_await create_snapshot(
           /*prev_block_id=*/cache.db_tip.id, cache.block_id,
           BlockExecutionMode::kBlockExecutionModeValidation) !=
@@ -723,7 +723,7 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
   {
-    for (const SignedTransactionHash &tx_hash : nomination.transaction_hashes) {
+    for (const SignedTransactionHash &tx_hash : cache.tx_hashes) {
       SignedTransaction *tx = scheduler_->find_tx(tx_hash);
       if (!tx) {
         co_await finish_all_executors(cache.block_id);
@@ -751,9 +751,9 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       co_await validate_batch(cache.block_id, txs, /*executor_idx=*/0);
 
   // Check [validated] and verify the block hash. It is safe to directly use
-  // [nomination.transaction_hashes] here because we already checked above
-  // that all of these hashes correspond to vetted txs.
-  if (!validated || get_block_hash(nomination.transaction_hashes,
+  // [cache.tx_hashes] here because we already checked above that all of these
+  // hashes correspond to vetted txs.
+  if (!validated || get_block_hash(cache.tx_hashes,
                                    /*prev_block_hash=*/cache.db_tip.hash) !=
                         nomination.block_hash) {
     co_await scheduler_->add_txs(cache.txs);
