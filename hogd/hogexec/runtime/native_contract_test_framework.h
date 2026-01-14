@@ -17,6 +17,7 @@
 #include <utility>
 #include <variant>
 
+#include "x23/debug.h"
 #include "x23/format.h"
 #include "x23/x23.h"
 
@@ -249,12 +250,16 @@ public:
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
-    if (log) {
+    if (log || log_fd() >= 0) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();
+  }
+
+  static int log_fd() {
+    return x23::DebugFd<"HOGEXEC_TRACE">::fd();
   }
 
   void enable_logging();

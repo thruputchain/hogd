@@ -16,6 +16,7 @@ wat = "1.219.1"
 
 [features]
 debug_logging = []
+wasm_debug = ["wasmtime/debug-builtins", "wasmtime/debug"]
 
 [lib]
 crate-type = ["rlib"]

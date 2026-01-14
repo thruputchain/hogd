@@ -148,11 +148,12 @@ impl WasmtimeGlobalContext {
                 //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
+       let compiler = wasmtime::Strategy::Winch; 
+
         let mut config = Config::default();
         config
             .consume_fuel(true)
-            .wasm_backtrace(false)
-            .strategy(wasmtime::Strategy::Winch)
+            .strategy(compiler)
             // cranelift-only options
             //.signals_based_traps(false)
             //.table_lazy_init(true)
@@ -180,6 +181,23 @@ impl WasmtimeGlobalContext {
             .allocation_strategy(InstanceAllocationStrategy::Pooling(
                 allocation_config,
             ));
+
+        if compiler == wasmtime::Strategy::Cranelift {
+            config.signals_based_traps(false);
+            config.table_lazy_init(true);
+        }
+
+        if cfg!(feature = "wasm_debug") {
+            config.wasm_backtrace(true);
+            config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
+            config.debug_info(true);
+
+            #[cfg(feature = "wasm_debug")]
+            if compiler == wasmtime::Strategy::Cranelift {
+                // This option is not yet compatible with winch, apparently
+                config.guest_debug(true);
+            }
+        }
 
         //config.with_custom_code_memory(Some(Arc::new(MprotectCodeMemory::new())));
 
