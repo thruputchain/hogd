@@ -114,7 +114,7 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 
 template<typename T>
 inline void
-t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
+t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
   parallel.xdr = x23::serialize(objs);
   parallel.segment_tokens = {static_cast<unsigned int>(objs.size())};
@@ -123,10 +123,26 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
 
 template<typename T>
 inline ParallelBatch
-t_to_parallel_batch(const x23::XdrVec<T> &objs)
+t_to_parallel_batch(x23::span<T> objs)
 {
   ParallelBatch parallel;
   t_to_parallel_batch(objs, parallel);
+  return parallel;
+}
+
+template<typename T>
+inline void
+t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
+{
+  t_to_parallel_batch(x23::span<const T>(objs), parallel);
+}
+
+template<typename T>
+inline ParallelBatch
+t_to_parallel_batch(const x23::XdrVec<T> &objs)
+{
+  ParallelBatch parallel;
+  t_to_parallel_batch(x23::span<const T>(objs), parallel);
   return parallel;
 }
 

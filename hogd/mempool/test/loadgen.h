@@ -96,7 +96,8 @@ public:
         CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
         {
           SignedTransactionHashBatch tx_hashes;
-          parallel_batch_to_t(nomination.transactions_hash, tx_hashes);
+          parallel_batch_to_t(nomination.nomination.transactions_hash,
+                              tx_hashes);
           num_nominated_txs += tx_hashes.size();
         }
 
@@ -182,8 +183,9 @@ public:
     constexpr ValidatorID kValidatorId{};
     x23::Vec<x23::Async<void>> handles;
     for (size_t i = 0; i < kNumSchedClients; i++) {
-      x23::span tx_chunk(txs.begin() + (i * kSchedTxBatchSize),
-                         txs.begin() + ((i + 1) * kSchedTxBatchSize));
+      x23::span<const SignedTransaction> tx_chunk(
+          txs.begin() + (i * kSchedTxBatchSize),
+          txs.begin() + ((i + 1) * kSchedTxBatchSize));
       handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
           kValidatorId, t_to_parallel_batch(tx_chunk)));
     }
