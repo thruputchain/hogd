@@ -599,7 +599,7 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   co_await finish_nominating_block(nominated_block_cache_);
 
-  nominated_block_cache_.nomination_result = SchedulerNominationResult(
+  nominated_block_cache_.nomination_result.outcome(
       SchedulerNominationOutcome::SchedulerNominationOK);
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;

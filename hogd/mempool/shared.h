@@ -116,7 +116,11 @@ template<typename T>
 inline void
 t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
-  parallel.xdr = x23::serialize(objs);
+  // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
+  // serialize each object individually rather than serialize [objs] once.
+  for (T &obj : objs) {
+    parallel.xdr += x23::serialize(obj);
+  }
   parallel.segment_tokens = {static_cast<unsigned int>(objs.size())};
   parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
 }
