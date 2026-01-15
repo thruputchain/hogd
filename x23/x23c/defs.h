@@ -7,15 +7,18 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
-#include "x23/config.h"
+#include "x23/config.h" // IWYU pragma: keep
 #include "x23/utility.h"
 
+// NOLINTBEGIN(google-global-names-in-headers)
 using std::string;
 using std::variant;
 using std::vector;
+// NOLINTEND(google-global-names-in-headers)
 
 struct Terminal {
   string text;
@@ -51,7 +54,7 @@ struct TypeSpecifier : variant<string, EnumBody, StructBody, UnionBody> {
 };
 
 struct Declaration {
-  enum Qual { kVoid, kScalar, kPtr, kArray, kVec };
+  enum Qual { kVoid, kScalar, kPtr, kArray, kVec, kString };
 
   TypeSpecifier type;
   string id;
@@ -230,5 +233,5 @@ struct Join {
 };
 
 #ifndef FLEX_SCANNER
-#include "x23c/lex.hh"
-#endif // !FLEX_SCANNER
+#include "x23c/lex.hh" // IWYU pragma: keep
+#endif                 // !FLEX_SCANNER

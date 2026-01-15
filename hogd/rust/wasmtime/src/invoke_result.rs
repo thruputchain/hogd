@@ -25,59 +25,41 @@ impl WasmtimeInvokeResult {
         match trap {
             // Gas/fuel related - expected during normal operation
             wasmtime::Trap::OutOfFuel => {
-                debug_log!(eprintln!("Wasmtime trap: Out of fuel"));
                 Self::error(InvokeErrorCode::kInvokeOutOfGas)
             }
 
             // Deterministic errors - these are expected from bad contract code
             wasmtime::Trap::MemoryOutOfBounds => {
-                debug_log!(eprintln!("Wasmtime trap: Memory out of bounds"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::TableOutOfBounds => {
-                debug_log!(eprintln!("Wasmtime trap: Table out of bounds"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::IndirectCallToNull => {
-                debug_log!(eprintln!("Wasmtime trap: Indirect call to null"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::BadSignature => {
-                debug_log!(eprintln!("Wasmtime trap: Bad function signature"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::IntegerOverflow => {
-                debug_log!(eprintln!("Wasmtime trap: Integer overflow"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::IntegerDivisionByZero => {
-                debug_log!(eprintln!(
-                    "Wasmtime trap: Integer division by zero"
-                ));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::BadConversionToInteger => {
-                debug_log!(eprintln!(
-                    "Wasmtime trap: Bad conversion to integer"
-                ));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::UnreachableCodeReached => {
-                debug_log!(eprintln!(
-                    "Wasmtime trap: Unreachable code reached"
-                ));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::NullReference => {
-                debug_log!(eprintln!("Wasmtime trap: Null reference"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::ArrayOutOfBounds => {
-                debug_log!(eprintln!("Wasmtime trap: Array out of bounds"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
             wasmtime::Trap::CastFailure => {
-                debug_log!(eprintln!("Wasmtime trap: Cast failure"));
                 Self::error(InvokeErrorCode::kInvokeDeterministic)
             }
 

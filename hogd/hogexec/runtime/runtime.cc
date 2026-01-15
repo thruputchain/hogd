@@ -79,8 +79,10 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 
   trace("Invoking method {} with gas limit {}", method_name, gas_limit);
   auto res = invoke_internal(method_name);
-  trace("Invoke result: {}",
-        res.has_value() ? "success" : x23::show(res.error().code()));
+  uint64_t gas_remaining = get_available_gas();
+  trace("Invoke result: {}, gas consumed: {}",
+        res.has_value() ? "success" : x23::show(res.error().code()),
+        gas_limit - gas_remaining);
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.
@@ -92,7 +94,6 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   // consume_gas (defined in this file), which is what we use to consume gas
   // within syscalls.
 
-  uint64_t gas_remaining = get_available_gas();
   if (!res.has_value() &&
       res.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
     gas_remaining = 0;

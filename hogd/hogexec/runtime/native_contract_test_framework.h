@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -249,12 +250,22 @@ public:
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
-    if (log) {
+    if (log || do_logging_env()) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
     initialize(mode, empty_genesis);
     HogexecMetrics::launch_log_worker();
+  }
+
+  static bool do_logging_env() noexcept
+  {
+    if (char *p = getenv("HOGEXEC_TRACE")) {
+      if (int n = atoi(p); n > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void enable_logging();

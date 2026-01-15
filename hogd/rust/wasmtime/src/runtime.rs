@@ -78,6 +78,10 @@ impl WasmtimeRuntime {
             Ok(_) => WasmtimeInvokeResult::success(),
             Err(err) => {
                 if let Some(trap_code) = err.downcast_ref::<wasmtime::Trap>() {
+                    #[cfg(feature = "wasm_debug")]
+                    {
+                        eprintln!("WASM backtrace:\n{:#}", err);
+                    }
                     return WasmtimeInvokeResult::from_wasmtime_trap_code(
                         trap_code,
                     );
@@ -92,6 +96,14 @@ impl WasmtimeRuntime {
                         )
                     },
                     |trampoline_error| {
+                        #[cfg(feature = "wasm_debug")]
+                        match trampoline_error.error {
+                            // We don't print the backtrace for "errors" that correspond to normal shutdown
+                            common::HostFnErrorCode::kHostReturn => {},
+                            _ => {
+                                eprintln!("WASM backtrace:\n{:#}", err);
+                            }
+                        }
                         trampoline_error.to_wasmtime_invoke_result()
                     },
                 )

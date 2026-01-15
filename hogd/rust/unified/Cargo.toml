@@ -11,6 +11,7 @@ wasmtime_lib = { path = "../wasmtime" }
 
 [features]
 debug_logging = ["wasmi_lib/debug_logging", "wasmtime_lib/debug_logging"]
+wasm_debug = ["wasmtime_lib/wasm_debug"]
 
 [lib]
 crate-type = ["staticlib"]

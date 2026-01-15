@@ -14,6 +14,10 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+# Enable WASM debug backtraces (preserves function names in stack traces)
+# When OFF (default): builds release WASMs, minimal size, no backtraces
+# When ON: builds debug WASMs with name section for useful backtraces
+option(WASM_DEBUG_BACKTRACES "Enable WASM debug backtraces with function names" OFF)
 # Enable logging of build failures to a file
 # This is used to track build failures in CI,
 # so that we can see what failed more easily (without info buried under pages of logs).
