@@ -52,7 +52,6 @@ public:
 
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
-  static constexpr size_t kNumCoordClients = 10;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc) : db_rpc_(db_rpc) {}
 
@@ -208,9 +207,8 @@ private:
 
   x23::Async<void> finish_init()
   {
-    for (size_t i = 0; i < kNumCoordClients; i++) {
-      coord_clients_.push_back(co_await get_client());
-    }
+    coord_client_ =
+        std::make_unique<coord_sched_client_t>(co_await get_client());
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
@@ -293,7 +291,7 @@ private:
 
   MempoolDbRpc *db_rpc_;
 
-  x23::Vec<coord_sched_client_t> coord_clients_;
+  x23::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;

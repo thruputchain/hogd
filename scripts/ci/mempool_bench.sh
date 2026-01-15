@@ -100,7 +100,6 @@ echo 'launch coordinator and scp'
   -l info \
   --skip 20 \
   --stack \
-  --rpc-log-stats \
   --config ./scripts/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \

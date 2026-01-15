@@ -59,8 +59,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   ElapsedTimer timer2;
   ParallelBatch response;
   t_to_parallel_batch(txs, response);
-  co_await coord_clients_[c % kNumCoordClients].coordscheduler_notify_vetted(
-      response);
+  co_await coord_client_->coordscheduler_notify_vetted(response);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
        c, timer.elapsed(), --outstanding, timer2.elapsed());
@@ -498,7 +497,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   {
     DbBlockResult result = co_await commit_snapshot_handle;
-    info("HERE {}", result.result());
     CHECK_EQ(result.result(), DbSchedResult::DbSchedResultOK);
   }
 }
