@@ -376,15 +376,6 @@ MempoolCoordinatorRpc::schedule(PendingBlock &cache)
   x23::CoroGuard cg;
   co_await cg(scheduler_->global_lock_);
 
-  Nomination &nomination = cache.nomination_result.nominated_block().nomination;
-  nomination.block_height = cache.db_tip.height + 1;
-  nomination.prev_block_hash = cache.db_tip.hash;
-  nomination.transactions_hash = {};
-  nomination.transactions_nondeterministic_data = {};
-  // [nomination.block_hash] is filled in by [schedulercoord_nominate()].
-  // [nomination.transaction_hashes] is written in [process_tx_outcomes] and
-  // [nomination.transaction_nominations] is filled in below.
-
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(kNumSchedulerIterations);
   cache.transaction_nomination_chunks.clear();
@@ -465,6 +456,8 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
         get_block_hash(cache.tx_hashes,
                        /*prev_block_hash=*/cache.db_tip.hash);
     nomination.prev_block_hash = cache.db_tip.hash;
+    nomination.transactions_hash = {};
+    nomination.transactions_nondeterministic_data = {};
     t_to_parallel_batch(cache.result_tx_hashes, nomination.transactions_hash);
     t_to_parallel_batch(cache.result_tx_nominations,
                         nomination.transactions_nondeterministic_data);
@@ -552,6 +545,12 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
   nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
   nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
   nominated_block_cache_.result_tx_nominations.reserve(kMaxBlockSize);
+  // We set the outcome here because doing so resets
+  // [nominated_block_cache_.nomination_result.nominated_block()]. We fill in
+  // [nominated_block()] throughout this function, so we want our writes to it
+  // preserved.
+  nominated_block_cache_.nomination_result.outcome(
+      SchedulerNominationOutcome::SchedulerNominationOK);
 
   // Block initialization work. We sent these RPCs concurrently and [co_await]
   // them below. This block initialization work takes ~10ms, so we schedule the
@@ -599,11 +598,11 @@ MempoolCoordinatorRpc::schedulercoord_nominate(DbTip db_tip)
 
   co_await finish_nominating_block(nominated_block_cache_);
 
-  nominated_block_cache_.nomination_result.outcome(
-      SchedulerNominationOutcome::SchedulerNominationOK);
+  // We set [nominated_block_cache_.nomination_result.outcome()] to
+  // [SchedulerNominationOutcome::SchedulerNominationOK] above. See the comments
+  // there.
   nominated_block_cache_.nomination_result.nominated_block().block_id =
       nominated_block_cache_.block_id;
-  info("ret");
   info("nominate() took {}", timer.elapsed());
   last = std::chrono::steady_clock::now();
   co_return nominated_block_cache_.nomination_result;
