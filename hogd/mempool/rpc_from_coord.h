@@ -291,7 +291,7 @@ private:
 
   MempoolDbRpc *db_rpc_;
 
-  x23::unique_ptr<coord_sched_client_t> coord_client_;
+  std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
