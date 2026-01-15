@@ -32,8 +32,7 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
     if (!res) {
       if (retry && res.error().error_code() == std::errc::connection_refused) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        warn_every_n_sec(5.0F, "RPC client on {} is not ready",
-                         x23::show_ipaddr(ss));
+        warn_every_n_sec(5.0F, "RPC client is not ready");
         continue;
       }
       throw std::runtime_error(

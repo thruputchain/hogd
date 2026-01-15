@@ -23,6 +23,7 @@ add_xdr(
   ../../protocol/hogexec_constants.x
   ../../protocol/loadgen.x
   ../../protocol/nomination.x
+  ../../protocol/parallel.x
   ../../protocol/port.x
   ../../protocol/precompiles.x
   ../../protocol/rpc_types.x

@@ -92,11 +92,13 @@ public:
   }
 
   // Submit an unvetted tx.
-  x23::Async<void> schedulercoord_submit_unvetted(SignedTransactionBatch batch);
+  x23::Async<void>
+  schedulercoord_submit_unvetted(ParallelSignedTransactionBatch batch);
 
   // Submit a vetted tx.
-  x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
-                                                SignedTransactionBatch batch);
+  x23::Async<void>
+  schedulercoord_submit_vetted(ValidatorID validator_id,
+                               ParallelSignedTransactionBatch batch);
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
@@ -181,14 +183,7 @@ public:
 
   void dump_stats() { scheduler_->dump_runqueue(); }
 
-  void shut_down()
-  {
-    size_t current_val;
-    while ((current_val = pending_detached_coroutines_.load(
-                std::memory_order_acquire)) != 0) {
-      pending_detached_coroutines_.wait(/*old=*/current_val);
-    }
-  }
+  void shut_down() {}
 
 private:
   // clang-tidy complains that an exception may be thrown in the function
@@ -200,12 +195,13 @@ private:
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<SignedTransactionHash> tx_hashes;
 
-    x23::Vec<SchedulerNominationChunk> sched_nominations =
-        x23::Vec<SchedulerNominationChunk>(kNumSchedulerIterations, {});
-    SchedulerNominationChunk last_chunk;
+    x23::XdrVec<SignedTransactionHash> result_tx_hashes;
+    x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
+    SchedulerNominationResult nomination_result;
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
-    x23::Vec<x23::XdrVec<NominatedTransaction>> transaction_nomination_chunks;
+    x23::Vec<x23::XdrVec<NondeterministicProposalData>>
+        transaction_nomination_chunks;
     x23::XdrVec<SignedTransaction> failed_txs;
   };
 
@@ -247,19 +243,19 @@ private:
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
 
-  x23::Async<void>
-  propose_batch(BlockID block_id, x23::span<const SignedTransaction> txs,
-                x23::XdrVec<NominatedTransaction> &transaction_nominations,
-                x23::span<bool> ret_chunk, size_t executor_idx);
+  x23::Async<void> propose_batch(
+      BlockID block_id, x23::span<const SignedTransaction> txs,
+      x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
+      x23::span<bool> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
       BlockID block_id, x23::span<const SignedTransaction> txs,
-      x23::Vec<x23::XdrVec<NominatedTransaction>> &nomination_chunks,
+      x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
       x23::span<bool> ret);
 
   x23::Async<void> propose_batch_in_chunks(
       BlockID block_id, x23::span<SignedTransaction> txs,
-      x23::XdrVec<NominatedTransaction> &transaction_nominations,
+      x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
       x23::span<bool> ret);
 
   x23::Async<ExecResult> open_proposal_block(BlockID block_id,
@@ -268,8 +264,7 @@ private:
   x23::Async<bool> initialize_block(const PendingBlock &cache);
   x23::Async<void> schedule(PendingBlock &cache);
   static void process_tx_outcomes(PendingBlock &cache);
-  x23::Async<void> send_nomination_chunk(const SchedulerNominationChunk &chunk);
-  x23::Detached finish_nominating_block(PendingBlock &cache);
+  x23::Async<void> finish_nominating_block(PendingBlock &cache);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<void> commit_block(const PendingBlock &cache);
 
@@ -317,9 +312,10 @@ private:
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
-  std::atomic<size_t> pending_detached_coroutines_ = 0;
 
   std::atomic<bool> ready_ = false;
+
+  std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 

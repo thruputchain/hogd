@@ -8,9 +8,9 @@ HOGD_BUILD_DIR="/home/hog12/$(whoami)/gcc"
 loadgen_server="hog3"
 chuckd_server="hog3"
 mempool_server="hog3"
-hogexec_servers=("hog12" "hog1" "hog2")
-event_server="hog12"
-hogdb_servers=("hog12")
+hogexec_servers=("hog1" "hog2")
+event_server="hog1"
+hogdb_servers=("hog1")
 logdir=/tmp/$(whoami)
 
 # override above in build or source directory hog.conf file
