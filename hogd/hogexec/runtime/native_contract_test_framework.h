@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -17,7 +18,6 @@
 #include <utility>
 #include <variant>
 
-#include "x23/debug.h"
 #include "x23/format.h"
 #include "x23/x23.h"
 
@@ -250,7 +250,7 @@ public:
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true)
     : db_wrapper_(make_db_wrapper(test_db))
   {
-    if (log || log_fd() >= 0) {
+    if (log || do_logging_env()) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
@@ -258,8 +258,14 @@ public:
     HogexecMetrics::launch_log_worker();
   }
 
-  static int log_fd() {
-    return x23::DebugFd<"HOGEXEC_TRACE">::fd();
+  static bool do_logging_env() noexcept
+  {
+    if (char *p = getenv("HOGEXEC_TRACE")) {
+      if (int n = atoi(p); n > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void enable_logging();

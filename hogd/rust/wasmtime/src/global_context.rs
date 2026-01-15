@@ -148,7 +148,7 @@ impl WasmtimeGlobalContext {
                 //.memory_protection_keys(wasmtime::Enabled::No)
                 .clone();
 
-       let compiler = wasmtime::Strategy::Winch; 
+        let compiler = wasmtime::Strategy::Winch;
 
         let mut config = Config::default();
         config
@@ -189,13 +189,14 @@ impl WasmtimeGlobalContext {
 
         if cfg!(feature = "wasm_debug") {
             config.wasm_backtrace(true);
-            config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
-            config.debug_info(true);
+            config
+                .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
 
             #[cfg(feature = "wasm_debug")]
             if compiler == wasmtime::Strategy::Cranelift {
-                // This option is not yet compatible with winch, apparently
+                // These options are not yet compatible with winch
                 config.guest_debug(true);
+                config.debug_info(true);
             }
         }
 

@@ -24,9 +24,19 @@ add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)
 add_dependencies(all_wasm_contracts all_wasm_headers)
 
-set(WASM_FLAGS "")
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Configure WASM build based on WASM_DEBUG_BACKTRACES flag
+if(WASM_DEBUG_BACKTRACES)
   set(WASM_FLAGS "-F logging")
+  set(WASM_BUILD_FOLDER "debug")
+  set(WASM_CARGO_RELEASE_FLAG "")
+  set(WASMOPT_DEBUG_FLAG "-g")
+  message(STATUS "WASM contracts: debug build with backtraces enabled")
+else()
+  set(WASM_FLAGS "")
+  set(WASM_BUILD_FOLDER "release")
+  set(WASM_CARGO_RELEASE_FLAG "--release")
+  set(WASMOPT_DEBUG_FLAG "")
+  message(STATUS "WASM contracts: release build (minimal size, no backtraces)")
 endif()
 
 # Tell CMake to clean cargo build directories
@@ -89,9 +99,9 @@ function(add_wasm_builds)
   set(all_optimized_wasms "")
   set(all_depends ${common_depends})
   set(build_commands "")
-  
+
   foreach(target_name ${ARGN})
-    list(APPEND all_unoptimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm)
+    list(APPEND all_unoptimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/${WASM_BUILD_FOLDER}/${target_name}.wasm)
     list(APPEND all_optimized_wasms ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
     
     # Get all .rs files but filter out generated roundtrip.rs
@@ -108,6 +118,7 @@ function(add_wasm_builds)
       COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh
         ${target_name}
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${WASM_CARGO_RELEASE_FLAG}
         "${WASM_FLAGS}")
   endforeach()
   
@@ -122,14 +133,14 @@ function(add_wasm_builds)
   
   # Create one target for all unoptimized WASMs
   add_custom_target(all_unoptimized_wasms DEPENDS ${all_unoptimized_wasms})
-  
+
   # Run wasm-opt on each WASM individually
   foreach(target_name ${ARGN})
     wasmopt_target(
-      ${target_name}_optimized 
-      ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm
-      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
-      -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
+      ${target_name}_optimized
+      ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/${WASM_BUILD_FOLDER}/${target_name}.wasm
+      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm
+      -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz ${WASMOPT_DEBUG_FLAG})
     
     # Make the optimized target depend on the shared unoptimized build
     add_dependencies(${target_name}_optimized all_unoptimized_wasms)
@@ -174,7 +185,8 @@ function(add_spec_and_types_generation)
       ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
       ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
       ${target_src_rs_files}
-      ${target_bin_rs_files})
+      ${target_bin_rs_files}
+      ${CMAKE_CURRENT_SOURCE_DIR}/build_wasm.sh)
     list(APPEND all_bins "--bin" "generate_spec_${target_name}")
   endforeach()
   

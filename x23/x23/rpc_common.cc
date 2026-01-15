@@ -19,6 +19,7 @@ size_t default_max_message_size = 0x100'0000;
 
 int RpcLogger::default_logfd = -1;
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 static const auto _init = ([] {
   if (RpcLogger::default_logfd == -1)
     if (char *p = getenv("X23TRACE"))

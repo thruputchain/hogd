@@ -29,10 +29,24 @@ endif()
 
 corrosion_add_target_rustflags(unified_lib "-C target-cpu=native")
 
+# Build list of features to enable
+set(FEATURES_TO_ENABLE "")
+
+# Enable debug_logging if build type is Debug
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  list(APPEND FEATURES_TO_ENABLE debug_logging)
+endif()
+
+# Enable wasm_debug if WASM_DEBUG_BACKTRACES is set
+if(WASM_DEBUG_BACKTRACES)
+  list(APPEND FEATURES_TO_ENABLE wasm_debug)
+endif()
+
+# Apply features if any are enabled
+if(FEATURES_TO_ENABLE)
   corrosion_set_features(unified_lib
       FEATURES
-          debug_logging
+          ${FEATURES_TO_ENABLE}
   )
 endif()
 
