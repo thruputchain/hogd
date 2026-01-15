@@ -9,6 +9,7 @@
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "loadgen.hh"
@@ -71,6 +72,7 @@ template<typename T>
 inline bool
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
+  ElapsedTimer timer;
   CHECK_EQ(parallel.segment_tokens.size(), parallel.segment_bytes.size());
 
   std::vector<size_t> byte_offsets;
@@ -82,24 +84,27 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   }
   CHECK_EQ(total_segment_bytes, parallel.xdr.size());
 
+  std::vector<size_t> obj_offsets;
+  obj_offsets.reserve(parallel.segment_tokens.size());
   size_t total_segment_tokens = 0;
   for (unsigned int segment_tokens : parallel.segment_tokens) {
+    obj_offsets.push_back(total_segment_tokens);
     total_segment_tokens += segment_tokens;
   }
   objs.resize(total_segment_tokens, {});
 
-  size_t objs_offset = 0;
   // TODO(jhumphri): Each iteration of this for loop should run in a separate
   // thread.
   for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
     const unsigned int num_segment_tokens = parallel.segment_tokens[i];
     const unsigned int num_segment_bytes = parallel.segment_bytes[i];
 
+    size_t inner_obj_offset = 0;
     size_t inner_xdr_offset = 0;
     for (size_t j = 0; j < num_segment_tokens; j++) {
       try {
         size_t num_consumed = x23::deserialize_from(
-            &objs[objs_offset++],
+            &objs[obj_offsets[i] + inner_obj_offset++],
             x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
                          num_segment_bytes - inner_xdr_offset));
         inner_xdr_offset += num_consumed;
@@ -109,6 +114,7 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
       }
     }
   }
+  info("parallel_batch_to_t took {}", timer.elapsed());
   return true;
 }
 
@@ -116,6 +122,7 @@ template<typename T>
 inline void
 t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
+  ElapsedTimer timer;
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
   for (T &obj : objs) {
@@ -123,6 +130,7 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   }
   parallel.segment_tokens = {static_cast<unsigned int>(objs.size())};
   parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
+  info("t_to_parallel_batch took {}", timer.elapsed());
 }
 
 template<typename T>
