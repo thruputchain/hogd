@@ -27,7 +27,6 @@ export RUSTFLAGS='-C link-args=-zstack-size=30000 -Zunstable-options -Cpanic=imm
 exec cargo build \
     -p "${TARGET_NAME}" \
     --target wasm32-unknown-unknown \
-    --release \
     --locked \
     --frozen \
     -F guest \

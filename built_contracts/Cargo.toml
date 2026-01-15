@@ -38,7 +38,7 @@ bottle-test-if = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git"}
 opt-level = "z"
 overflow-checks = false
 debug = false
-strip = "debuginfo"
+strip = "none"
 panic = "abort"
 
 [profile.release]
