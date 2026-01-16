@@ -24,7 +24,6 @@
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 namespace hogd {
 
