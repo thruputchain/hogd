@@ -371,9 +371,9 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-SystemCallHandler::invoke(ContractAddress const &address, Runtime::MethodID method,
-                          GasAmount gas_limit, Calldata calldata,
-                          InvokeFlagSet flags)
+SystemCallHandler::invoke(ContractAddress const &address,
+                          Runtime::MethodID method, GasAmount gas_limit,
+                          Calldata calldata, InvokeFlagSet flags)
 {
   auto runtime = resolve_runtime(address);
   if (!runtime) {

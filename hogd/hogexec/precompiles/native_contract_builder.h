@@ -137,7 +137,8 @@ public:
     add<kFormat>(id, std::forward<decltype(lambda)>(lambda));
   }
 
-  template<SerializationFormat Format> void add(Runtime::MethodID id, auto lambda)
+  template<SerializationFormat Format>
+  void add(Runtime::MethodID id, auto lambda)
   {
     add<Format>(id, +lambda);
   }

@@ -60,7 +60,8 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  InvokeStatus<void> invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
+  InvokeStatus<void> invoke(Runtime::MethodID method,
+                            SystemCallHandler &syscall_handler,
                             NativeRuntime &runtime) const;
 
 private:

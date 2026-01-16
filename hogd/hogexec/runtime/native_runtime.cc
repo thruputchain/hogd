@@ -16,7 +16,8 @@
 namespace hogd {
 
 InvokeStatus<void>
-NativeContract::invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
+NativeContract::invoke(Runtime::MethodID method,
+                       SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime) const
 {
   // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3

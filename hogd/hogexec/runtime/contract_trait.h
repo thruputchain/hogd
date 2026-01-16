@@ -35,7 +35,6 @@ namespace hogd {
 
 // Common utilities for building preset contracts
 
-
 ContractEntrypointID
 sdk_entrypoint_derivation(std::string_view identifier_name,
                           std::string_view identifier_version,
@@ -44,10 +43,13 @@ Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // Get the method ID for a given method,
 // at which contracts using the SDK will expect to find it.
-inline Runtime::MethodID 
+inline Runtime::MethodID
 sdk_method_id(std::string_view identifier_name,
-  std::string_view identifier_version, uint16_t method_id) {
-  return sdk_method_id(sdk_entrypoint_derivation(identifier_name, identifier_version, method_id));
+              std::string_view identifier_version, uint16_t method_id)
+{
+  return sdk_method_id(sdk_entrypoint_derivation(identifier_name,
+                                                 identifier_version,
+                                                 method_id));
 }
 ContractEntrypointID entrypoint_from_method_id(Runtime::MethodID method_id);
 

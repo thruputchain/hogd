@@ -151,7 +151,8 @@ class Runtime {
 public:
   Runtime(std::unique_ptr<HostCallContext> host_call_context);
 
-  using MethodID = uint64_t; // from ContractEntryPointID, interpreted in big-endian
+  using MethodID =
+      uint64_t; // from ContractEntryPointID, interpreted in big-endian
 
   // Disable copy and move
   Runtime(Runtime const &) = delete;
