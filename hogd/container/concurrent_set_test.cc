@@ -21,18 +21,15 @@ public:
       ConcurrentSet<uint128_t>::Traits::kTombstone;
   static constexpr uint128_t kEmpty = ConcurrentSet<uint128_t>::Traits::kEmpty;
 
-  static size_t levels(const ConcurrentSet<uint128_t> &s)
-  {
-    return s.levels_.size();
-  }
+  static size_t levels(const ConcurrentSet<uint128_t> &s) { return s.levels(); }
 
-  static size_t count_elements_at_level(const ConcurrentSet<uint128_t> &s,
+  static size_t count_elements_at_level(ConcurrentSet<uint128_t> &s,
                                         size_t level)
   {
     size_t level_capacity = ConcurrentSet<uint128_t>::entries_for_level(level);
     size_t count = 0;
     for (size_t i = 0; i < level_capacity; i++) {
-      if (s.levels_[level][i].load(std::memory_order_relaxed) != kEmpty) {
+      if (s.get_level(level)[i].load(std::memory_order_relaxed) != kEmpty) {
         count++;
       }
     }
