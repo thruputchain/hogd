@@ -1416,7 +1416,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // 2: Root method: try_invoke method 0 (succeeds), then try_invoke method 1
   // (fails)
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_abc](SystemCallHandler &handler,
                  NativeRuntime &) -> InvokeStatus<void> {
@@ -1737,7 +1738,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_short](SystemCallHandler &handler,
                    NativeRuntime &) -> InvokeStatus<void> {
