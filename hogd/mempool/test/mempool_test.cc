@@ -172,7 +172,7 @@ TEST(Mempool, Validate)
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
         tx_hashes,
         /*prev_block_hash=*/nomination.prev_block_hash);
@@ -214,7 +214,7 @@ TEST(Mempool, ValidateBatch)
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
         tx_hashes,
         /*prev_block_hash=*/nomination.prev_block_hash);
@@ -272,7 +272,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
         tx_hashes,
         /*prev_block_hash=*/nomination.prev_block_hash);
@@ -282,7 +282,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(
         parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nondeterministic_data));
+                            tx_nondeterministic_data)());
     tx_nondeterministic_data.pop_back();
 
     nomination.transactions_hash = t_to_parallel_batch(tx_hashes);
@@ -375,7 +375,7 @@ TEST(Mempool, ValidateCommit)
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
         tx_hashes,
         /*prev_block_hash=*/nomination.prev_block_hash);
@@ -425,7 +425,7 @@ TEST(Mempool, GetTip)
   nomination.prev_block_hash = nomination.block_hash;
   {
     SignedTransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+    EXPECT_TRUE(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
     nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
         tx_hashes,
         /*prev_block_hash=*/nomination.prev_block_hash);

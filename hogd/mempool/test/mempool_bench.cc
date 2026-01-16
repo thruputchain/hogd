@@ -153,7 +153,7 @@ validate(benchmark::State &state)
     nomination.prev_block_hash = nomination.block_hash;
     {
       SignedTransactionHashBatch tx_hashes;
-      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
       nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
           tx_hashes,
           /*prev_block_hash=*/nomination.prev_block_hash);
@@ -274,7 +274,7 @@ loadgen_validate(benchmark::State &state)
     nomination.prev_block_hash = nomination.block_hash;
     {
       SignedTransactionHashBatch tx_hashes;
-      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
       nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
           tx_hashes,
           /*prev_block_hash=*/nomination.prev_block_hash);
@@ -331,7 +331,7 @@ loadgen_nominate_throughput(benchmark::State &state)
       {
         SignedTransactionHashBatch tx_hashes;
         CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
-                                  tx_hashes));
+                                  tx_hashes)());
         txs_so_far += tx_hashes.size();
       }
     }
@@ -380,7 +380,7 @@ loadgen_validate_throughput(benchmark::State &state)
       nomination.prev_block_hash = nomination.block_hash;
       {
         SignedTransactionHashBatch tx_hashes;
-        CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+        CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
         nomination.block_hash = MempoolCoordinatorRpc::get_block_hash(
             tx_hashes,
             /*prev_block_hash=*/nomination.prev_block_hash);
@@ -396,7 +396,7 @@ loadgen_validate_throughput(benchmark::State &state)
       CHECK_EQ(res_validate.outcome(),
                SchedulerValidationResult::SchedulerValidationOK);
       SignedTransactionHashBatch tx_hashes;
-      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes));
+      CHECK(parallel_batch_to_t(nomination.transactions_hash, tx_hashes)());
       txs_so_far += tx_hashes.size();
     }
   }

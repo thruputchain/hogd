@@ -7,6 +7,7 @@
 #include "db_sched.hh"
 #include "event_rpc.hh"
 #include "exec_sched.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/time.h"
@@ -68,8 +69,12 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
   return create_client<T>(host_port, retry, max_message_size);
 }
 
+// The number of coroutines to use (one coroutine per thread) when converting
+// to/from a parallel batch.
+constexpr size_t kNumThreadsForParallelBatch = 20;
+
 template<typename T>
-inline bool
+inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 {
   ElapsedTimer timer;
@@ -93,29 +98,51 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   }
   objs.resize(total_segment_tokens, {});
 
-  // TODO(jhumphri): Each iteration of this for loop should run in a separate
-  // thread.
-  for (size_t i = 0; i < parallel.segment_tokens.size(); i++) {
-    const unsigned int num_segment_tokens = parallel.segment_tokens[i];
-    const unsigned int num_segment_bytes = parallel.segment_bytes[i];
+  const std::vector<ChunkRange> chunks =
+      make_chunks(parallel.segment_tokens.size(), kNumThreadsForParallelBatch);
+  x23::Vec<x23::Async<bool>> handles;
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
+    handles.push_back([](const ChunkRange &chunk, const ParallelBatch &parallel,
+                         x23::XdrVec<T> &objs,
+                         const std::vector<size_t> &byte_offsets,
+                         const std::vector<size_t> &obj_offsets)
+                          -> x23::Async<bool> {
+      co_await default_coropoll().pool_.bg();
 
-    size_t inner_obj_offset = 0;
-    size_t inner_xdr_offset = 0;
-    for (size_t j = 0; j < num_segment_tokens; j++) {
-      try {
-        size_t num_consumed = x23::deserialize_from(
-            &objs[obj_offsets[i] + inner_obj_offset++],
-            x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
-                         num_segment_bytes - inner_xdr_offset));
-        inner_xdr_offset += num_consumed;
-      } catch (const x23::XdrBadInput &e) {
-        info("failed to deserialize: {}", e.what());
-        return false;
+      for (size_t i = chunk.start; i < chunk.end; i++) {
+        const unsigned int num_segment_tokens = parallel.segment_tokens[i];
+        const unsigned int num_segment_bytes = parallel.segment_bytes[i];
+
+        size_t inner_obj_offset = 0;
+        size_t inner_xdr_offset = 0;
+        for (size_t j = 0; j < num_segment_tokens; j++) {
+          try {
+            size_t num_consumed = x23::deserialize_from(
+                &objs[obj_offsets[i] + inner_obj_offset++],
+                x23::BufView(&parallel.xdr[byte_offsets[i] + inner_xdr_offset],
+                             num_segment_bytes - inner_xdr_offset));
+            inner_xdr_offset += num_consumed;
+          } catch (const x23::XdrBadInput &e) {
+            info("failed to deserialize: {}", e.what());
+            co_return false;
+          }
+        }
       }
-    }
+      co_return true;
+    }(chunk, parallel, objs, byte_offsets, obj_offsets));
+  }
+  bool ret = true;
+  for (x23::Async<bool> &handle : handles) {
+    // Careful, we deliberately have [co_await handle] as the first operand of
+    // the AND statement to avoid short-circuiting. If we did it the other way
+    // around ([ret && (co_await handle)]), then if any of the handles return
+    // false and we set [ret] to false, we would fail to [co_await] the
+    // remaining handles in [handles] due to short-circuiting.
+    ret = (co_await handle) && ret;
   }
   info("parallel_batch_to_t took {}", timer.elapsed());
-  return true;
+  co_return ret;
 }
 
 template<typename T>

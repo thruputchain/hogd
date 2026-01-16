@@ -96,8 +96,8 @@ public:
         CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
         {
           SignedTransactionHashBatch tx_hashes;
-          parallel_batch_to_t(nomination.nomination.transactions_hash,
-                              tx_hashes);
+          CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
+                                    tx_hashes)());
           num_nominated_txs += tx_hashes.size();
         }
 
@@ -253,7 +253,8 @@ public:
       size_t num_txs = 0;
       {
         SignedTransactionHashBatch tx_hashes;
-        parallel_batch_to_t(nomination.transactions_hash, tx_hashes);
+        CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
+                                           tx_hashes));
         num_txs = tx_hashes.size();
       }
 
