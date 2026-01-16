@@ -91,7 +91,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
 
   // Create a native contract that calls the WASM contract to test manual revert
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -198,7 +198,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
 
   // Create a native contract that calls the WASM contract without revert
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -281,7 +281,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
 
   // Create a native contract that tests nested manual revert
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -355,7 +355,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
   for (uint32_t error_type = 1; error_type <= 4; ++error_type) {
     // Create a native contract that calls the WASM contract's error type method
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [&, error_type](SystemCallHandler &handler,
                              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -432,7 +432,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   // Create a native contract that calls test_error_type_revert with
   // error_type=0
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -505,7 +505,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
   // Test with should_revert=true (storage should be reverted)
   {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [&](SystemCallHandler &handler,
                  NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -565,7 +565,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
   // Test with should_revert=false (storage should be preserved)
   {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [&](SystemCallHandler &handler,
                  NativeRuntime & /*unused*/) -> InvokeStatus<void> {

@@ -127,8 +127,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-  invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
-         Calldata calldata, InvokeFlagSet flags);
+  invoke(ContractAddress const &address, Runtime::MethodID method,
+         GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)

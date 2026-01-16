@@ -245,7 +245,7 @@ struct GenRs {
   static constexpr string_view kDefaultDerives =
       R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
-  optional<Definition> convert_to_newtype(const Definition &d);
+  static optional<Definition> convert_to_newtype(const Definition &d);
 };
 
 optional<Definition>
@@ -382,12 +382,12 @@ impl ::rpc_driver::ServerDispatch for {0}_{1}_Dispatcher {{
     prtop("            // {}\n", proc.id);
     prtop("            {} => {{\n", proc.val);
     prtop("                let args: ({}) =\n", type_args);
-    prtop("                    xdrs::serialize_txs::decode(data).map_err(|_| "
+    prtop("                    xdrs::txs::decode(data).map_err(|_| "
           "::rpc_driver::RpcError::GarbageArguments)?;\n");
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
           "::rpc_driver::RpcError::SystemError)?;\n",
           proc.id, make_arg_detuple(proc.arg_types.size()));
-    prtop("                xdrs::serialize_txs::encode(&res).map_err(|_| "
+    prtop("                xdrs::txs::encode(&res).map_err(|_| "
           "::rpc_driver::RpcError::SystemError)\n");
     prtop("            }}\n");
   }
@@ -442,13 +442,13 @@ impl {0}_{1}_Client {{
     }
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_driver::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
-    prtop("         let data = xdrs::serialize_txs::encode(&({})).map_err(|_| "
+    prtop("         let data = xdrs::txs::encode(&({})).map_err(|_| "
           "::rpc_driver::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
           "&data).await?;\n",
           proc.val);
-    prtop("         xdrs::serialize_txs::decode(&buf).map_err(|_| "
+    prtop("         xdrs::txs::decode(&buf).map_err(|_| "
           "::rpc_driver::RpcError::SystemError)\n");
     prtop("    }}\n");
   }
@@ -710,9 +710,6 @@ pub enum {} )",
       prtop("{} = {} as i32,\n", cd.id, cd.val);
     }
   }
-
-  // Export the variants of the enum
-  prtop("\npub use {}::*;\n", tname);
 
   // generate a TryFrom implementation for the enum
   prtop("\nimpl TryFrom<i32> for {} {{\n", tname);

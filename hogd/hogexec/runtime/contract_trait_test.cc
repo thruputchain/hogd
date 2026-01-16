@@ -5,7 +5,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
-#include "types.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -19,7 +19,7 @@ TEST(ContractTraitTest, MethodIDDerivation)
 
 TEST(ContractTraitTest, EntrypointFromMethodID)
 {
-  MethodID method_id = 0x1234567890ABCDEF;
+  Runtime::MethodID method_id = 0x1234567890ABCDEF;
   auto entrypoint = entrypoint_from_method_id(method_id);
   ASSERT_EQ(method_id, sdk_method_id(entrypoint));
 }

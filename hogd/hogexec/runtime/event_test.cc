@@ -62,7 +62,7 @@ TEST_F(EventTest, EventSuccess)
   // 1: Produces an event with 1 topic
   // 2: Invokes method 0 and then method 1
   auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -195,7 +195,7 @@ TEST_F(EventTest, EventSuccess)
 TEST_F(EventTest, BadEventInputs)
 {
   auto native_contract_0 = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -204,7 +204,7 @@ TEST_F(EventTest, BadEventInputs)
              SHA256Hash topic2 = sha256(std::string("topic"));
 
              x23::Vec<uint8_t> too_long_event;
-             too_long_event.resize(kMaxLogMessageLen + 1);
+             too_long_event.resize(kMaxEventLength + 1);
 
              {
                auto [status, gas] =
@@ -311,7 +311,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             // Method 0: Produces an event with 0 topics, with event data from
             // calldata
             {0,

@@ -58,7 +58,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -213,7 +213,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -376,7 +376,7 @@ TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
   //    Expected behavior: all three of those calls should succeed.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -526,7 +526,7 @@ TEST_P(DeleteRecreateTest, DISABLED_DeleteRecreateRetrocausalQueue)
   // second should fail
   auto make_verify_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {

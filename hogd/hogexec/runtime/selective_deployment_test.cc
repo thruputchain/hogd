@@ -64,7 +64,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Create a native contract that will deploy only the first contract
   auto make_context = [contract_1_hash]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [contract_1_hash](SystemCallHandler &handler,
                                NativeRuntime & /*runtime*/)
@@ -164,7 +164,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
   // Create a native contract that will attempt to deploy the native token
   auto make_context = [native_token_hash]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [native_token_hash](SystemCallHandler &handler,
                                  NativeRuntime & /*runtime*/)

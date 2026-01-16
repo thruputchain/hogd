@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -52,7 +51,7 @@ public:
   using function_t =
       std::function<InvokeStatus<void>(SystemCallHandler &, NativeRuntime &)>;
 
-  NativeContract(std::unordered_map<MethodID, function_t> functions)
+  NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)
     : functions_(std::move(functions))
   {}
 
@@ -61,11 +60,12 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  InvokeStatus<void> invoke(MethodID method, SystemCallHandler &syscall_handler,
+  InvokeStatus<void> invoke(Runtime::MethodID method,
+                            SystemCallHandler &syscall_handler,
                             NativeRuntime &runtime) const;
 
 private:
-  const std::unordered_map<MethodID, function_t> functions_;
+  const std::unordered_map<Runtime::MethodID, function_t> functions_;
 };
 
 // Context that can instantiate native contracts from a predefined set of

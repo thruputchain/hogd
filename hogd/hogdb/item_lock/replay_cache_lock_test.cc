@@ -1,3 +1,4 @@
+#include "hogd/base/types.h"
 #include "hogd/hogdb/item_lock/replay_cache_lock.h"
 
 #include <gtest/gtest.h>
@@ -25,7 +26,7 @@ constexpr StorageCostModel kTestCostModel =
     StorageCostModel(12000, 1, 1, 1, 7, 1234);
 
 Uniquifier
-u(BlockHeight const &height, ReplayNonce const &nonce)
+u(BlockHeight const &height, uint64_t const &nonce)
 {
   return Uniquifier{.block_expiry_height = height, .nonce = nonce};
 }

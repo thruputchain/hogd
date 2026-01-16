@@ -72,7 +72,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
   // Contract A: Calls Contract B and writes its own state
   auto contract_a = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
             contract_b_addr](SystemCallHandler &handler,
@@ -121,7 +121,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
   // Contract B: Writes state and then reverts with return data
   auto contract_b = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_b_data, contract_b_return_data,
             contract_b_key](SystemCallHandler &handler,
@@ -223,7 +223,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
   // Contract A: Calls Contract B and writes its own state
   auto contract_a = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
             contract_b_addr](SystemCallHandler &handler,
@@ -273,7 +273,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
   // Contract B: Calls Contract C, processes C's return data, and returns
   // processed data
   auto contract_b = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_b_data, contract_b_return_data, contract_b_key,
             contract_c_addr](SystemCallHandler &handler,
@@ -328,7 +328,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
   // Contract C: Writes state and reverts with return data
   auto contract_c = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_c_data, contract_c_return_data,
             contract_c_key](SystemCallHandler &handler,
@@ -430,7 +430,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
   // Contract A: Calls Contract B and writes its own state
   auto contract_a = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_a_data, contract_a_key,
             contract_b_addr](SystemCallHandler &handler,
@@ -479,7 +479,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
   // Contract B: Reverts with return data
   auto contract_b = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [contract_b_return_data](SystemCallHandler &handler,
                                     NativeRuntime &) -> InvokeStatus<void> {

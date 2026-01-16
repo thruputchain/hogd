@@ -89,7 +89,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     auto contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
                  -> InvokeStatus<void> { return {}; }},
@@ -101,21 +101,22 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
     // Invokes another contract, returns the error code of the other contract
     auto contract_1 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
 
                if (calldata.size() !=
-                   sizeof(MethodID) + sizeof(ContractAddress)) {
+                   sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
-               MethodID invoked_id =
-                   *reinterpret_cast<const MethodID *>(calldata.data());
+               Runtime::MethodID invoked_id =
+                   *reinterpret_cast<const Runtime::MethodID *>(
+                       calldata.data());
                ContractAddress invoked_addr;
                std::memcpy(invoked_addr.data(),
-                           calldata.data() + sizeof(MethodID),
+                           calldata.data() + sizeof(Runtime::MethodID),
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
