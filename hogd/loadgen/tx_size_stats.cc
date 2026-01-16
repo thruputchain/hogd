@@ -26,7 +26,7 @@ print_tx_size_stats()
   std::println("Creating ERC20 experiment with {} accounts...", num_accounts);
 
   auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-      .num_accounts = num_accounts,
+      .num_addresses = num_accounts,
   });
 
   std::println("Generating experiment...");

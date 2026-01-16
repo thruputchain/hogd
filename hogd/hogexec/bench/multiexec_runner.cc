@@ -34,12 +34,12 @@
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
 #include "x23/format.h"
@@ -456,7 +456,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments() = {
-      .num_accounts = num_accounts,
+      .num_addresses = num_accounts,
   };
 
   LoadgenRpc loadgen;

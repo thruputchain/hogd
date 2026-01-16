@@ -25,7 +25,7 @@ public:
 private:
   ERC20PaymentsConfig config_;
 
-  bool check_config_valid() const { return config_.num_accounts >= 2; }
+  bool check_config_valid() const { return config_.num_addresses >= 2; }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);
 

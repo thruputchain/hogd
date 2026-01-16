@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -220,12 +220,12 @@ BlockTX::commit(WorkerPool &pool)
           ret = tmp;
         }
 
-        if (v.first.is_account_auth_data()) {
+        if (v.first.is_address_auth_data()) {
           if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
-            AccountAuthData auth_data = inner->get()->build_result();
+            AddressAuthData auth_data = inner->get()->build_result();
             key_changes->emplace_back(v.first.to_contract_address(),
-                                      x23::Ptr<AccountAuthData>(
-                                          new AccountAuthData(
+                                      x23::Ptr<AddressAuthData>(
+                                          new AddressAuthData(
                                               inner->get()->build_result())));
           }
           else if (v.second.get_inner<DeletionLock>()) {

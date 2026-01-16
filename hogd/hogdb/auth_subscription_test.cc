@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/io.h"
@@ -203,11 +203,11 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   grant_storage_token(addr, kStorageTokens);
 
   // Write auth data directly to the database
-  AccountAuthData initial_auth_data;
+  AddressAuthData initial_auth_data;
   initial_auth_data.public_keys[0] = make_test_pk_config(42);
   HogDBStatus<void> write_ret =
-      db_.write_address_account_auth_data(addr, initial_auth_data);
-  ASSERT_TRUE(write_ret) << "write_address_account_auth_data failed";
+      db_.write_address_auth_data(addr, initial_auth_data);
+  ASSERT_TRUE(write_ret) << "write_address_auth_data failed";
 
   BlockHeight height = 1;
   db_.load_trie(trie_);
@@ -221,7 +221,7 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
   InvokeTX invoke_tx(block_tx);
 
   // Request deletion of the auth data
-  ItemKey auth_key = make_account_auth_data_item_key(addr);
+  ItemKey auth_key = make_address_auth_data_item_key(addr);
   HogDBStatus<void> delete_ret = invoke_tx.request_deletion(
       auth_key, std::to_underlying(StorageItemRPCFlags::kStorageNone));
   ASSERT_TRUE(delete_ret) << "request_deletion failed";

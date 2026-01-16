@@ -16,7 +16,17 @@ def generate_header(json_file, output_file=None, namespace=None, extra_includes=
     # Replace the problematic typespec patterns
     content = re.sub(r'"typespec": "([^"]*)"', r'"typespec": "\1"', content)
     
-    spec = json.loads(content)
+    try:
+        spec = json.loads(content)
+    except json.JSONDecodeError as e:
+        # Show which file failed and context around the error
+        lines = content.split('\n')
+        error_line = e.lineno - 1  # JSONDecodeError uses 1-based indexing
+        start_line = max(0, error_line - 4)
+        end_line = min(len(lines), error_line + 5)
+        context = '\n'.join(f"{i+1:4d}: {lines[i]}" for i in range(start_line, end_line))
+        error_msg = f"Failed to parse {json_file} at line {e.lineno}, column {e.colno}:\n{context}\n\nOriginal error: {e.msg}"
+        raise ValueError(error_msg) from e
     
     interface_name = spec['interface']
     version = spec['version']

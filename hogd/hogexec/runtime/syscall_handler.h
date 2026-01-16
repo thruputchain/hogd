@@ -9,7 +9,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "event.hh"

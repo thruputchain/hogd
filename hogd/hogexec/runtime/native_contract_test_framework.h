@@ -21,7 +21,7 @@
 #include "x23/format.h"
 #include "x23/x23.h"
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
@@ -402,11 +402,11 @@ public:
   }
 
   constexpr static AddressAndKey
-  make_account_auth_data_addrkey(ContractAddress const &address)
+  make_address_auth_data_addrkey(ContractAddress const &address)
   {
     return AddressAndKey{.address = address,
                          .key = StorageKey(
-                             StorageKeyType::kStorageKeyTypeAccountAuthData)};
+                             StorageKeyType::kStorageKeyTypeAddressAuthData)};
   }
 
   constexpr static AddressAndKey

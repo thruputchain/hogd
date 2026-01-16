@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "auth_server_test_framework.h"
@@ -54,7 +54,7 @@ make_signature(SecretKey sk, Transaction const &tx, uint8_t id)
 }
 
 void
-add_pk_to_auth_data(AccountAuthData &auth_data, uint8_t id, PublicKey const &pk)
+add_pk_to_auth_data(AddressAuthData &auth_data, uint8_t id, PublicKey const &pk)
 {
   auth_data.public_keys[id] = x23::Ptr<PublicKeyConfig>(
       new PublicKeyConfig{.key = pk, .max_weight = 100});
@@ -71,7 +71,7 @@ TEST_F(AuthVerifyTest, VerifyTransaction)
 {
   ContractAddress address = make_test_address(8);
 
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
   auto [pk, sk] = make_key_pair();
   add_pk_to_auth_data(auth_data, 0, pk);
 
@@ -110,8 +110,8 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   ContractAddress address1 = make_test_address(8);
   ContractAddress address2 = make_test_address(9);
 
-  AccountAuthData auth_data1{};
-  AccountAuthData auth_data2{};
+  AddressAuthData auth_data1{};
+  AddressAuthData auth_data2{};
 
   auto [pk1, sk1] = make_key_pair();
   auto [pk2, sk2] = make_key_pair();
@@ -136,7 +136,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   mock_db().set(address1, auth_data1);
   mock_db().set(address2, auth_data2);
-  mock_db().set(address3, AccountAuthData{});
+  mock_db().set(address3, AddressAuthData{});
   mock_db().increment_height();
 
   auth_server().register_auth_data_updates(1,

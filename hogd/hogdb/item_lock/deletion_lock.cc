@@ -19,7 +19,7 @@ DeletionLock::write_committed_change(LockContext const &ctx,
                                      MerkleTriePrefix &trie)
 {
   int8_t type = 0;
-  if (ctx.key.is_account_auth_data()) {
+  if (ctx.key.is_address_auth_data()) {
     type = 0;
   }
   else if (ctx.key.is_contract_data()) {

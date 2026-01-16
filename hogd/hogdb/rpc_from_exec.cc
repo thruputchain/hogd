@@ -7,7 +7,7 @@
 #include <utility>
 
 // generated x23 headers
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
@@ -101,7 +101,7 @@ HogDBExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                                    delta.deployed_contract_hash()));
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeAccountAuthData);
+           StorageKeyType::kStorageKeyTypeAddressAuthData);
     return to_rpc_error(
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
@@ -231,9 +231,9 @@ HogDBExecutorRpc::get_snapshot_item(BlockID /*unused*/,
     ret.item() = out;
     return ret;
   }
-  if (key.is_account_auth_data()) {
-    HogDBStatus<AccountAuthData> auth_data =
-        ctx_.get_db().read_address_account_auth_data(key.get_address());
+  if (key.is_address_auth_data()) {
+    HogDBStatus<AddressAuthData> auth_data =
+        ctx_.get_db().read_address_auth_data(key.get_address());
     if (!auth_data)
       return ExpectedStorageItem(to_rpc_error(auth_data.error()));
     StorageItem out(StorageItemType::kItemTypeAuthData);

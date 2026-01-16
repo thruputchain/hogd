@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"

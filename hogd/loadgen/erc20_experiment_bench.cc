@@ -28,7 +28,7 @@ bm_erc20_generate_experiment(benchmark::State &state)
 
   for (auto _ : state) {
     auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-        .num_accounts = num_accounts,
+        .num_addresses = num_accounts,
     });
 
     auto result = exp.generate_experiment();
@@ -55,7 +55,7 @@ bm_erc20_extend_experiment(benchmark::State &state)
 
   // Setup the experiment once
   auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-      .num_accounts = num_accounts,
+      .num_addresses = num_accounts,
   });
 
   auto init_result = exp.generate_experiment();

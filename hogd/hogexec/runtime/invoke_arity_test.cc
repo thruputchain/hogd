@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

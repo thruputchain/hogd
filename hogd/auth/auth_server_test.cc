@@ -5,7 +5,7 @@
 #include <optional>
 #include <thread>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_server_test_framework.h"
 #include "hogd/base/types.h"
@@ -34,10 +34,10 @@ make_test_pk_config(uint8_t id)
       new PublicKeyConfig{.key = key, .max_weight = 100});
 }
 
-AccountAuthData
+AddressAuthData
 make_test_auth_data(uint8_t id)
 {
-  AccountAuthData auth_data{};
+  AddressAuthData auth_data{};
   auth_data.public_keys[id] = make_test_pk_config(id);
   auth_data.last_written_height = 0;
   return auth_data;
@@ -55,7 +55,7 @@ private:
 TEST_F(AuthServerTest, BasicLookup)
 {
   ContractAddress address = make_test_address(1);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().set(address, auth_data);
   mock_db().increment_height();
@@ -98,8 +98,8 @@ TEST_F(AuthServerTest, LookupNonExistent)
 TEST_F(AuthServerTest, OutOfOrderUpdates)
 {
   ContractAddress address = make_test_address(3);
-  AccountAuthData auth_data = make_test_auth_data(1);
-  AccountAuthData auth_data_2 = make_test_auth_data(2);
+  AddressAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data_2 = make_test_auth_data(2);
 
   mock_db().increment_height(); // height 1
 
@@ -142,7 +142,7 @@ TEST_F(AuthServerTest, OutOfOrderUpdates)
 TEST_F(AuthServerTest, StaleBlockHeight)
 {
   ContractAddress address = make_test_address(4);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height();
 
@@ -194,7 +194,7 @@ TEST_F(AuthServerTest, StaleBlockHeight)
 TEST_F(AuthServerTest, QueriesDelayed)
 {
   ContractAddress address = make_test_address(6);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height(); // 1
   mock_db().increment_height(); // 2
@@ -237,7 +237,7 @@ TEST_F(AuthServerTest, QueriesDelayed)
 TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
 {
   ContractAddress address = make_test_address(6);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().increment_height(); // 1
   mock_db().increment_height(); // 2
@@ -290,7 +290,7 @@ TEST_F(AuthServerTest, QueriesDelayedFromInitialized)
 TEST_F(AuthServerTest, InitializeFromLateBlock)
 {
   ContractAddress address = make_test_address(7);
-  AccountAuthData auth_data = make_test_auth_data(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
 
   mock_db().set(address, auth_data);
 

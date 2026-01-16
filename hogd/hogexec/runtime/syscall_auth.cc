@@ -7,7 +7,7 @@
 #include <span>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"

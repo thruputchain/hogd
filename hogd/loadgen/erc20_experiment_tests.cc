@@ -58,7 +58,7 @@ protected:
 TEST_F(ERC20ExperimentTest, Basic)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_accounts = 10,
+      .num_addresses = 10,
   });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
@@ -105,7 +105,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
 {
   auto state =
       std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
-          .num_accounts = 10,
+          .num_addresses = 10,
       });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());
@@ -151,7 +151,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
 TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
 {
   auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
-      .num_accounts = 1000,
+      .num_addresses = 1000,
   });
   auto result = state->generate_experiment();
   ASSERT_TRUE(result.has_value());

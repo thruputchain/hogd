@@ -6,7 +6,7 @@
 #include <span>
 #include <string_view>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"

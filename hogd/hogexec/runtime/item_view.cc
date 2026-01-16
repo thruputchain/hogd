@@ -323,7 +323,7 @@ ReplayCacheItem::get_delta() const
 }
 
 StorageDelta
-AccountAuthDataItem::get_delta() const
+AddressAuthDataItem::get_delta() const
 {
   auto delta = StorageDelta(StorageDeltaType::kDeltaTypeAuthDataChange);
   for (auto const &[key_index, new_key] : pk_changes_) {

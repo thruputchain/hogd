@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "auth_claim.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -94,7 +95,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressNonceConfigSuccess)
 
   // Verify the nonce config was written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.nonce_config.accepted_keys, 0x01);
@@ -165,7 +166,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsSuccess)
 
   // Verify the gas permission configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 2);
@@ -231,7 +232,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsEmpty)
 
   // Verify the gas permission configs are empty
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 0);
@@ -373,7 +374,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
              for (int i = 0; i < 5; i++) {
                ffi_configs[i].limit =
                    GasAmount{static_cast<uint64_t>(1000 + (i * 100))};
-               ffi_configs[i].accepted_keys = BitMap{1ULL << i};
+               ffi_configs[i].accepted_keys = BitMap{1U << i};
                ffi_configs[i].required_weight =
                    Weight{static_cast<uint32_t>(i + 1)};
              }
@@ -420,14 +421,14 @@ TEST_F(SyscallAuthConfigTest, WriteAddressGasPermissionConfigsAllFive)
 
   // Verify all 5 gas permission configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
   ASSERT_EQ(auth_data.gas_permissions.size(), 5);
   for (int i = 0; i < 5; i++) {
     ASSERT_EQ(auth_data.gas_permissions[i].limit,
               GasAmount{static_cast<uint64_t>(1000 + (i * 100))});
-    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys, BitMap{1ULL << i});
+    ASSERT_EQ(auth_data.gas_permissions[i].accepted_keys, BitMap{1U << i});
     ASSERT_EQ(auth_data.gas_permissions[i].required_weight,
               Weight{static_cast<uint32_t>(i + 1)});
   }
@@ -538,7 +539,7 @@ TEST_F(SyscallAuthConfigTest, AllThreeAuthConfigSyscalls)
 
   // Verify all three configs were written
   auto item = lookup_storage_item_from_db(
-      make_account_auth_data_addrkey(contract_addr));
+      make_address_auth_data_addrkey(contract_addr));
   ASSERT_TRUE(item.has_value());
   auto auth_data = item->auth_data();
 

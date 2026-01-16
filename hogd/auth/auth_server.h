@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/auth/auth_data_cache.h"
@@ -40,7 +40,7 @@ public:
                                          SignedTransactionBatch txs);
 
   x23::Async<AuthStatus<
-      std::shared_ptr<std::pair<BlockHeight, std::optional<AccountAuthData>>>>>
+      std::shared_ptr<std::pair<BlockHeight, std::optional<AddressAuthData>>>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   // This mentod can be called in any order.  However, it is vital for cache
@@ -67,7 +67,7 @@ private:
   // populated with the auth data for the given address.
   x23::Async<AuthErrorCode>
   populate_auth_data(BlockHeight height, ContractAddress const &address,
-                     const AccountAuthData *&auth_data);
+                     const AddressAuthData *&auth_data);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.

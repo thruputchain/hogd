@@ -6,7 +6,7 @@
 #include <utility>
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
@@ -128,11 +128,11 @@ private:
   Uniquifier consumed_uniquifier_;
 };
 
-class AccountAuthDataItem {
+class AddressAuthDataItem {
 public:
   StorageDelta get_delta() const;
 
-  constexpr static ItemViewType kItemType = ItemViewType::kAccountAuthData;
+  constexpr static ItemViewType kItemType = ItemViewType::kAddressAuthData;
 
   void change_public_key(uint32_t key_index, PublicKeyConfigOpt new_key)
   {
@@ -262,7 +262,7 @@ public:
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
-               AccountAuthDataItem>
+               AddressAuthDataItem>
       delta_args_;
   StorageItemRPCFlagSet flags_ =
       std::to_underlying(StorageItemRPCFlags::kStorageNone);

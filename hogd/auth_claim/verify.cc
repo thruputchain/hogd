@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/base/log.h"
@@ -70,14 +70,14 @@ static_assert(!bitmap_accepts_key(0, 0));
 static_assert(bitmap_accepts_key(0xF, 2));
 
 bool
-has_public_key(const AccountAuthData &auth_data, size_t idx)
+has_public_key(const AddressAuthData &auth_data, size_t idx)
 {
   return idx < auth_data.public_keys.size() && auth_data.public_keys[idx];
 }
 
 AuthVerifyStatus<void>
 verify_decorated_signature(const DecoratedSignature &dec_sig,
-                           const AccountAuthData &auth_data,
+                           const AddressAuthData &auth_data,
                            SHA256Hash const &tx_hash,
                            Ed25519SignatureVerifier *signature_verifier)
 {
@@ -131,7 +131,7 @@ verify_signatures(VerificationType VerfType)
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_individual_key_claim_internal(
-    uint32_t key_id, const AccountAuthData *auth_data,
+    uint32_t key_id, const AddressAuthData *auth_data,
     x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
     SHA256Hash const &tx_hash, Ed25519SignatureVerifier *signature_verifier)
 {
@@ -165,7 +165,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
     BitMap accepted_keys, Weight required_weight,
-    const AccountAuthData *auth_data,
+    const AddressAuthData *auth_data,
     x23::Vec<DecoratedSignature, 0xffffffff> const &sigs,
     SHA256Hash const &tx_hash, Ed25519SignatureVerifier *signature_verifier)
 {
@@ -211,7 +211,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
                            DecoratedSignatureList const &sigs,
-                           const AccountAuthData *auth_data,
+                           const AddressAuthData *auth_data,
                            SHA256Hash const &tx_hash,
                            Ed25519SignatureVerifier *signature_verifier)
 {
@@ -252,7 +252,7 @@ verify_auth_claim_internal(AuthClaim const &claim,
 template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
 AuthVerifyStatus<void>
-validate_nonce(const SignedTransaction &stx, const AccountAuthData &auth_data,
+validate_nonce(const SignedTransaction &stx, const AddressAuthData &auth_data,
                const NonceConfig &nonce_config)
 {
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
@@ -291,7 +291,7 @@ template<VerificationType VerfType>
 requires (verify_weights_against_auth_data(VerfType))
 AuthVerifyStatus<void>
 validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
-                        const AccountAuthData &auth_data)
+                        const AddressAuthData &auth_data)
 {
   assert(stx.tx.auth_claims.size() == stx.signatures.size());
   x23::Vec<Weight, kMaxGasConfigs> gas_weights(auth_data.gas_permissions.size(),
@@ -343,8 +343,8 @@ validate_gas_permission(const SignedTransaction &stx, const GasClaim &gas_claim,
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claims_internal(
-    const SignedTransaction &stx, const AccountAuthData *source_auth_data,
-    std::unordered_map<ContractAddress, const AccountAuthData *> const
+    const SignedTransaction &stx, const AddressAuthData *source_auth_data,
+    std::unordered_map<ContractAddress, const AddressAuthData *> const
         &aux_auth_data,
     Ed25519SignatureVerifier *signature_verifier)
 {
@@ -369,7 +369,7 @@ verify_auth_claims_internal(
   for (size_t i = 0; i < stx.tx.auth_claims.size(); i++) {
     const AuthClaim &auth_claim = stx.tx.auth_claims[i];
     const DecoratedSignatureList &sigs = stx.signatures[i];
-    const AccountAuthData *auth_data = nullptr;
+    const AddressAuthData *auth_data = nullptr;
 
     if constexpr (verify_weights_against_auth_data(VerfType)) {
       switch (auth_claim.claim_type()) {
@@ -450,8 +450,8 @@ verify_auth_claims_internal(
 
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
-            const AccountAuthData &source_auth_data,
-            std::unordered_map<ContractAddress, const AccountAuthData *> const
+            const AddressAuthData &source_auth_data,
+            std::unordered_map<ContractAddress, const AddressAuthData *> const
                 &aux_auth_data,
             Ed25519SignatureVerifier *signature_verifier)
 {
@@ -461,8 +461,8 @@ verify_auth(const SignedTransaction &stx,
 
 AuthVerifyStatus<void>
 lightweight_validate_auth_claims(
-    const SignedTransaction &stx, const AccountAuthData &source_auth_data,
-    std::unordered_map<ContractAddress, const AccountAuthData *> const
+    const SignedTransaction &stx, const AddressAuthData &source_auth_data,
+    std::unordered_map<ContractAddress, const AddressAuthData *> const
         &aux_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
@@ -474,7 +474,7 @@ auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
       stx, nullptr,
-      std::unordered_map<ContractAddress, const AccountAuthData *>{}, nullptr);
+      std::unordered_map<ContractAddress, const AddressAuthData *>{}, nullptr);
 }
 
 } // namespace hogd

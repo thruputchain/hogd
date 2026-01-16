@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

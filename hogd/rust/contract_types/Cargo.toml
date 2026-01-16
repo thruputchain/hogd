@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-groundhog_xdr = { git = "ssh://git@github.com/groundhogchain/protocol-rs.git", features = ["xdrs"]}
+groundhog-xdr = { workspace = true }

@@ -1,6 +1,6 @@
 #include "hogd/hogdb/rpc_from_auth.h"
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/hogdb_dao.h"
@@ -19,8 +19,7 @@ HogDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
   }
 
   HogDBDAO &db = ctx_.get_db();
-  HogDBStatus<AccountAuthData> status =
-      db.read_address_account_auth_data(address);
+  HogDBStatus<AddressAuthData> status = db.read_address_auth_data(address);
   if (!status) {
     if (status.error().code() == HogDBCode::kNotFound) {
       co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
@@ -51,8 +50,7 @@ HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
   auto &db = ctx_.get_db();
   for (const ContractAddress &address : addresses) {
     result.emplace_back(DBAuthError::kDBAuthSuccess);
-    HogDBStatus<AccountAuthData> status =
-        db.read_address_account_auth_data(address);
+    HogDBStatus<AddressAuthData> status = db.read_address_auth_data(address);
     if (!status) {
       if (status.error().code() == HogDBCode::kNotFound) {
         result.back().error(DBAuthError::kDBAuthNotFound);

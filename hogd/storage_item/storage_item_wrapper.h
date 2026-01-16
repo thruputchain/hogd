@@ -2,7 +2,8 @@
 
 #include <variant>
 
-#include "account.hh"
+#include "address_auth.hh"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/replay_cache.h"
@@ -23,7 +24,7 @@ public:
                      StorageCostModel const *cost_model);
   StorageItemWrapper(ReplayCache replay_cache,
                      StorageCostModel const *cost_model);
-  StorageItemWrapper(AccountAuthData auth_data,
+  StorageItemWrapper(AddressAuthData auth_data,
                      StorageCostModel const *cost_model);
   StorageItemWrapper(DeployedContractHash deployed_contract_hash,
                      StorageCostModel const *cost_model);
@@ -115,7 +116,7 @@ private:
   };
 
   struct AuthDataWrapper {
-    AccountAuthData auth_data_;
+    AddressAuthData auth_data_;
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeAuthData;
     // Converts to wire format for network transmission

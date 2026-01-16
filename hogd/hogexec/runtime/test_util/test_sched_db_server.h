@@ -9,6 +9,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
 
@@ -28,8 +29,8 @@ public:
     register_height(hogs.block, hogs_transferred);
   };
 
-  void scheddb_changed_accounts(BlockHeight height,
-                                ContractAddressBatch addresses)
+  void scheddb_changed_addresses(BlockHeight height,
+                                 ContractAddressBatch addresses)
   {
     std::unique_lock<std::mutex> lock(mtx_);
     assert(!changed_accounts_.contains(height));

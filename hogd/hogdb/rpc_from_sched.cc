@@ -9,7 +9,7 @@
 #include <utility>
 
 // generated x23 headers
-#include "account.hh"
+#include "address_auth.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 
@@ -85,8 +85,8 @@ HogDBSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
   co_return DbSchedResult::DbSchedResultOK;
 }
 
-x23::Async<DbAccountAuthDataBatchResult>
-HogDBSchedRpc::dbsched_get_account_auth_data(BlockID block_id,
+x23::Async<DbAddressAuthDataBatchResult>
+HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
                                              ContractAddressBatch accounts)
 {
   HogDBDAO &db = ctx_.get_db();
@@ -96,20 +96,19 @@ HogDBSchedRpc::dbsched_get_account_auth_data(BlockID block_id,
     // each other.
     HogDBStatus<DbTip> ret = db.read_dbtip();
     if (!ret || ret->id != block_id) {
-      co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+      co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }
   }
 
-  DbAccountAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
-  ret.account_auth_data_batch().reserve(accounts.size());
+  DbAddressAuthDataBatchResult ret(DbSchedResult::DbSchedResultOK);
+  ret.address_auth_data_batch().reserve(accounts.size());
 
   for (const ContractAddress &account : accounts) {
-    HogDBStatus<AccountAuthData> status =
-        db.read_address_account_auth_data(account);
+    HogDBStatus<AddressAuthData> status = db.read_address_auth_data(account);
     if (!status) {
-      co_return DbAccountAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+      co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }
-    ret.account_auth_data_batch().push_back(status.value());
+    ret.address_auth_data_batch().push_back(status.value());
   }
   co_return ret;
 }

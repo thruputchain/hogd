@@ -1,6 +1,6 @@
 add_xdr(
   protocol
-  ../../protocol/account.x
+  ../../protocol/address_auth.x
   ../../protocol/auth_card.x
   ../../protocol/auth_claim.x
   ../../protocol/auth_rpc.x
@@ -50,8 +50,3 @@ target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
 target_include_directories(protocol INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 add_dependencies(build_protocol generate_syscall_x)
 target_link_libraries(protocol INTERFACE crypto_interface)
-
-add_xdr_rs(
-	ffi_enum_rs 
-	${CMAKE_SOURCE_DIR}/hogd/rust/common/src
-	../../protocol/ffi_enums.x)

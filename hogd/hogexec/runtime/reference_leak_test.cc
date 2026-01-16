@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -169,7 +169,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
 // reference should be released.
-// AuthData is only allowed for kStorageKeyTypeAccountAuthData.
+// AuthData is only allowed for kStorageKeyTypeAddressAuthData.
 // We check that the reference is released by committing the block
 // and making sure the item does not exist in the next block.
 TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
@@ -177,7 +177,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_account_auth_data_addrkey(contract_addr);
+  auto key = make_address_auth_data_addrkey(contract_addr);
 
   // First, create a successful auth data reservation to occupy key ID 0
   auto tx1 = make_new_per_tx_db_proxy();
@@ -332,7 +332,7 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto key = make_account_auth_data_addrkey(contract_addr);
+  auto key = make_address_auth_data_addrkey(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),

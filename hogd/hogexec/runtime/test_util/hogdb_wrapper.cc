@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "account.hh"
+#include "address_auth.hh"
 #include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
