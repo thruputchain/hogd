@@ -79,7 +79,7 @@ submit_unvetted(benchmark::State &state)
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(txs))();
+        t_to_parallel_batch(txs)())();
   }
 }
 BENCHMARK(submit_unvetted)->Unit(benchmark::kMillisecond);
@@ -97,7 +97,7 @@ submit_vetted(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
   }
 }
 BENCHMARK(submit_vetted)->Unit(benchmark::kMicrosecond);
@@ -112,7 +112,7 @@ nominate(benchmark::State &state)
     const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
     // Submit unvetted transactions so there's something to nominate
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(txs))();
+        t_to_parallel_batch(txs)())();
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     state.ResumeTiming();
 
@@ -134,7 +134,7 @@ validate(benchmark::State &state)
     const SignedTransactionBatch txs = generate_signed_txs(fib_client, kNumTxs);
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(txs))();
+        t_to_parallel_batch(txs)())();
 
     DbTip db_tip{.height = 0, .hash = {}, .id = 0};
     auto res_nominate =
@@ -162,7 +162,7 @@ validate(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_validate =
@@ -189,7 +189,7 @@ loadgen_submit_unvetted(benchmark::State &state)
     state.ResumeTiming();
 
     server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-        t_to_parallel_batch(txs))();
+        t_to_parallel_batch(txs)())();
   }
 }
 BENCHMARK(loadgen_submit_unvetted)->Unit(benchmark::kMillisecond);
@@ -210,7 +210,7 @@ loadgen_submit_vetted(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
   }
 }
 BENCHMARK(loadgen_submit_vetted)->Unit(benchmark::kMicrosecond);
@@ -230,7 +230,7 @@ loadgen_nominate(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_nominate =
@@ -256,7 +256,7 @@ loadgen_validate(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -282,7 +282,7 @@ loadgen_validate(benchmark::State &state)
 
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
     state.ResumeTiming();
 
     auto res_validate =
@@ -310,7 +310,7 @@ loadgen_nominate_throughput(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
     state.ResumeTiming();
 
     size_t txs_so_far = 0;
@@ -355,7 +355,7 @@ loadgen_validate_throughput(benchmark::State &state)
     ValidatorID validator_id{};
     server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                             t_to_parallel_batch(
-                                                                txs))();
+                                                                txs)())();
 
     auto res_nominate =
         server.mempool_coord_rpc().schedulercoord_nominate(db_tip)();
@@ -388,7 +388,7 @@ loadgen_validate_throughput(benchmark::State &state)
 
       ValidatorID validator_id{};
       server.mempool_coord_rpc().schedulercoord_submit_vetted(
-          validator_id, t_to_parallel_batch(txs))();
+          validator_id, t_to_parallel_batch(txs)())();
 
       auto res_validate =
           server.mempool_coord_rpc().schedulercoord_validate(db_tip,

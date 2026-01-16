@@ -147,43 +147,65 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
 }
 
 template<typename T>
-inline void
+inline x23::Async<void>
 t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 {
-  ElapsedTimer timer;
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
-  for (T &obj : objs) {
-    parallel.xdr += x23::serialize(obj);
+  ElapsedTimer timer;
+  const std::vector<ChunkRange> chunks =
+      make_chunks(objs.size(), kNumThreadsForParallelBatch);
+  x23::Vec<x23::Async<void>> handles;
+  handles.reserve(chunks.size());
+  x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
+  xdrs.resize(chunks.size(), {});
+  for (size_t i = 0; i < chunks.size(); i++) {
+    const ChunkRange &chunk = chunks[i];
+    handles.push_back([](const ChunkRange &chunk, size_t i,
+                         ParallelBatch &parallel,
+                         x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
+                         x23::span<T> &objs) -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      for (size_t j = chunk.start; j < chunk.end; j++) {
+        xdrs[i] += x23::serialize(objs[j]);
+      }
+      parallel.segment_bytes[i] = chunk.end - chunk.start;
+      co_return;
+    }(chunk, i, parallel, xdrs, objs));
   }
-  parallel.segment_tokens = {static_cast<unsigned int>(objs.size())};
-  parallel.segment_bytes = {static_cast<unsigned int>(parallel.xdr.size())};
+  for (size_t i = 0; i < chunks.size(); i++) {
+    co_await handles[i];
+    parallel.xdr += xdrs[i];
+  }
+  parallel.segment_tokens = {static_cast<unsigned int>(chunks.size())};
   info("t_to_parallel_batch took {}", timer.elapsed());
+  co_return;
 }
 
 template<typename T>
-inline ParallelBatch
+inline x23::Async<ParallelBatch>
 t_to_parallel_batch(x23::span<T> objs)
 {
   ParallelBatch parallel;
-  t_to_parallel_batch(objs, parallel);
-  return parallel;
+  co_await t_to_parallel_batch(objs, parallel);
+  co_return parallel;
 }
 
 template<typename T>
-inline void
+inline x23::Async<void>
 t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
 {
-  t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_return;
 }
 
 template<typename T>
-inline ParallelBatch
+inline x23::Async<ParallelBatch>
 t_to_parallel_batch(const x23::XdrVec<T> &objs)
 {
   ParallelBatch parallel;
-  t_to_parallel_batch(x23::span<const T>(objs), parallel);
-  return parallel;
+  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_return parallel;
 }
 
 } // namespace hogd

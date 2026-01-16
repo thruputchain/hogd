@@ -58,7 +58,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
   ParallelBatch response;
-  t_to_parallel_batch(txs, response);
+  co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
@@ -457,9 +457,10 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
     nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
-    t_to_parallel_batch(cache.result_tx_hashes, nomination.transactions_hash);
-    t_to_parallel_batch(cache.result_tx_nominations,
-                        nomination.transactions_nondeterministic_data);
+    co_await t_to_parallel_batch(cache.result_tx_hashes,
+                                 nomination.transactions_hash);
+    co_await t_to_parallel_batch(cache.result_tx_nominations,
+                                 nomination.transactions_nondeterministic_data);
   }
 
   for (x23::Async<void> &handle : finish_block_handles) {
