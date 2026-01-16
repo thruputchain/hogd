@@ -100,7 +100,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                              erc20_meta::make_calldata<"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
-                            int128_t{500'000} * config_.num_addresses);
+                             int128_t{500'000} * config_.num_addresses);
   erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
       sha256(*erc20_contract), make_nonce(0));
 

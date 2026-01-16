@@ -104,8 +104,7 @@ HogDBSchedRpc::dbsched_get_address_auth_data(BlockID block_id,
   ret.address_auth_data_batch().reserve(accounts.size());
 
   for (const ContractAddress &account : accounts) {
-    HogDBStatus<AddressAuthData> status =
-        db.read_address_auth_data(account);
+    HogDBStatus<AddressAuthData> status = db.read_address_auth_data(account);
     if (!status) {
       co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
     }

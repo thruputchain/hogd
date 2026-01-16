@@ -11,12 +11,9 @@ use crate::{HostFnErrorCode, InvokeErrorCode};
 // this error is caught at the root of the invocation and converted to an InvokeResult.
 
 pub fn to_invoke_result(error: HostFnErrorCode) -> Result<(), InvokeErrorCode> {
-
     debug_assert!(error != HostFnErrorCode::kHostNoneOrRecoverable);
     match error {
-        HostFnErrorCode::kHostOutOfGas => {
-            Err(InvokeErrorCode::kInvokeOutOfGas)
-        }
+        HostFnErrorCode::kHostOutOfGas => Err(InvokeErrorCode::kInvokeOutOfGas),
         HostFnErrorCode::kHostReturn => Ok(()),
         HostFnErrorCode::kHostExit => {
             Err(InvokeErrorCode::kInvokeDeterministic)

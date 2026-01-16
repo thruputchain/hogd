@@ -277,8 +277,7 @@ public:
 
   HogDBStatus<int128_t> read_address_balance(const Address &addr);
   HogDBStatus<HogAge> read_address_average_hog_age(const Address &addr);
-  HogDBStatus<AddressAuthData>
-  read_address_auth_data(const Address &addr);
+  HogDBStatus<AddressAuthData> read_address_auth_data(const Address &addr);
   HogDBStatus<DeployedContractHash> read_address_metadata(const Address &addr);
   HogDBStatus<ReplayCacheMetadata>
   read_address_replay_cache_meta(Address const &addr);
@@ -287,9 +286,8 @@ public:
 
   HogDBStatus<void> write_address_balance(const Address &addr, int128_t val);
   HogDBStatus<void> write_address_average_hog_age(const HogAge &age);
-  HogDBStatus<void>
-  write_address_auth_data(const Address &addr,
-                                  const AddressAuthData &auth);
+  HogDBStatus<void> write_address_auth_data(const Address &addr,
+                                            const AddressAuthData &auth);
   HogDBStatus<void> write_address_metadata(Address const &addr,
                                            const DeployedContractHash &hash);
   HogDBStatus<void>

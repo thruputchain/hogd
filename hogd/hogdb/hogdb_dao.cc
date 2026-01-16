@@ -333,7 +333,7 @@ HogDBDAO::write_address_average_hog_age(const HogAge &age)
 // TODO(jhumphri): Handle [block_id].
 HogDBStatus<void>
 HogDBDAO::write_address_auth_data(const Address &addr,
-                                          const AddressAuthData &auth)
+                                  const AddressAuthData &auth)
 {
   auto key = make_address_key(addr, Prefix::kAddressAuthData);
   auto buf = x23::serialize(auth);

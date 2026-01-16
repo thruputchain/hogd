@@ -30,7 +30,7 @@ public:
   };
 
   void scheddb_changed_addresses(BlockHeight height,
-                                ContractAddressBatch addresses)
+                                 ContractAddressBatch addresses)
   {
     std::unique_lock<std::mutex> lock(mtx_);
     assert(!changed_accounts_.contains(height));

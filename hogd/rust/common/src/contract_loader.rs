@@ -1,11 +1,11 @@
 use crate::ForeignHostCallContext;
+use core::slice;
 /// Manages fetching contract data across the FFI boundary
 ///
 /// Warning: this struct returns pointers to external data (i.e. data held within the
 /// WasmiContext on the C++ side).
 /// As such, this struct cannot outlive the WasmiContext.)
 use hogexec_internal::ffi_enums::SystemErrorCode;
-use core::slice;
 
 #[repr(C)]
 pub struct ContractGetResult {

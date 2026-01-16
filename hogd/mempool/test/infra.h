@@ -139,9 +139,7 @@ public:
   void set_address_auth_data(const ContractAddress &account,
                              const AddressAuthData &auth_data)
   {
-    CHECK(get_db()
-              .write_address_auth_data(account, auth_data)
-              .has_value());
+    CHECK(get_db().write_address_auth_data(account, auth_data).has_value());
   }
 
   void set_dbtip(const DbTip &db_tip)

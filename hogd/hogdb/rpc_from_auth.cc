@@ -19,8 +19,7 @@ HogDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
   }
 
   HogDBDAO &db = ctx_.get_db();
-  HogDBStatus<AddressAuthData> status =
-      db.read_address_auth_data(address);
+  HogDBStatus<AddressAuthData> status = db.read_address_auth_data(address);
   if (!status) {
     if (status.error().code() == HogDBCode::kNotFound) {
       co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
@@ -51,8 +50,7 @@ HogDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
   auto &db = ctx_.get_db();
   for (const ContractAddress &address : addresses) {
     result.emplace_back(DBAuthError::kDBAuthSuccess);
-    HogDBStatus<AddressAuthData> status =
-        db.read_address_auth_data(address);
+    HogDBStatus<AddressAuthData> status = db.read_address_auth_data(address);
     if (!status) {
       if (status.error().code() == HogDBCode::kNotFound) {
         result.back().error(DBAuthError::kDBAuthNotFound);

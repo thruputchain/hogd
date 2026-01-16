@@ -7,7 +7,7 @@ use core::fmt;
 use core::fmt::Display;
 
 use crate::invoke_result::WasmtimeInvokeResult;
-use common::{HostFnErrorCode, to_invoke_result};
+use common::{to_invoke_result, HostFnErrorCode};
 
 use std::error::Error;
 

@@ -412,8 +412,7 @@ InvokeTX::request_auth_data(Address const &addr,
                             const AuthDataChangeArgs &auth_data_change,
                             StorageItemRPCFlagSet flags)
 {
-  auto base_auth_data =
-      block_.get().get_db().read_address_auth_data(addr);
+  auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
   if (!base_auth_data) {
     if (base_auth_data.error() != HogDBCode::kNotFound) {
       return base_auth_data.error();

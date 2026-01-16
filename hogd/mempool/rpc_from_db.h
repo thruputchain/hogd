@@ -65,7 +65,7 @@ public:
   }
 
   x23::Async<void> scheddb_changed_addresses(BlockHeight height,
-                                            ContractAddressBatch addresses)
+                                             ContractAddressBatch addresses)
   {
     scheduler_lock_.lock_shared();
     if (scheduler_) {
