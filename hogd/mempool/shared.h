@@ -71,7 +71,7 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
 
 // The number of coroutines to use (one coroutine per thread) when converting
 // to/from a parallel batch.
-constexpr size_t kNumThreadsForParallelBatch = 10;
+constexpr size_t kNumThreadsForParallelBatch = 20;
 
 template<typename T>
 inline x23::Async<bool>
