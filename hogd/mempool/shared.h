@@ -153,12 +153,17 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
   ElapsedTimer timer;
+  // [ParallelBatch] is a struct, and the caller likely allocated it without
+  // zeroing it out. Thus, we zero it out here.
+  parallel = {};
   const std::vector<ChunkRange> chunks =
       make_chunks(objs.size(), kNumThreadsForParallelBatch);
   x23::Vec<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   x23::Vec<x23::XdrVec<std::uint8_t>> xdrs;
   xdrs.resize(chunks.size(), {});
+  parallel.segment_bytes.resize(chunks.size(), 0);
+  parallel.segment_tokens.resize(chunks.size(), 0);
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
     handles.push_back([](const ChunkRange &chunk, size_t i,
@@ -166,10 +171,12 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
                          x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
                          x23::span<T> &objs) -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
+
       for (size_t j = chunk.start; j < chunk.end; j++) {
         xdrs[i] += x23::serialize(objs[j]);
       }
-      parallel.segment_bytes[i] = chunk.end - chunk.start;
+      parallel.segment_bytes[i] = xdrs[i].size();
+      parallel.segment_tokens[i] = chunk.end - chunk.start;
       co_return;
     }(chunk, i, parallel, xdrs, objs));
   }
@@ -177,7 +184,6 @@ t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
     co_await handles[i];
     parallel.xdr += xdrs[i];
   }
-  parallel.segment_tokens = {static_cast<unsigned int>(chunks.size())};
   info("t_to_parallel_batch took {}", timer.elapsed());
   co_return;
 }
