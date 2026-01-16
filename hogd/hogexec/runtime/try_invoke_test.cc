@@ -65,7 +65,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
   // read correctly.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<
-        NativeContract>(std::unordered_map<MethodID,
+        NativeContract>(std::unordered_map<Runtime::MethodID,
                                            NativeContract::function_t>{
         {0,
          [](SystemCallHandler &handler,
@@ -214,7 +214,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   // 1: Makes a bytestring write.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -307,7 +307,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
   // try_invoke frame.
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_0 = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -533,7 +533,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   // failure, then returns error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -669,7 +669,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // return error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -814,7 +814,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // return error
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -980,7 +980,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   // returns error 2: Invokes method 0 with [1], checks success
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -1143,7 +1143,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract_db_failure = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -1416,7 +1416,8 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   // 2: Root method: try_invoke method 0 (succeeds), then try_invoke method 1
   // (fails)
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_abc](SystemCallHandler &handler,
                  NativeRuntime &) -> InvokeStatus<void> {
@@ -1563,7 +1564,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_abc](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
@@ -1737,7 +1738,8 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   // 2: Write "abc" to key2
   // 3: Root method: try_invoke method 0, then 1, then 2
   auto native_contract = std::make_unique<
-      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      NativeContract>(std::unordered_map<Runtime::MethodID,
+                                         NativeContract::function_t>{
       {0,
        [str_short](SystemCallHandler &handler,
                    NativeRuntime &) -> InvokeStatus<void> {
@@ -1895,7 +1897,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   // 1: Write short string
   // 2: Root method: try_invoke method 0, then try_invoke method 1
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
@@ -2029,7 +2031,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
   // 2: Try-invoke method 1, then return error
   // 3: Root method: try_invoke method 0, then try_invoke method 2
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_long](SystemCallHandler &handler,
                       NativeRuntime &) -> InvokeStatus<void> {
@@ -2196,7 +2198,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Sender contract
   auto sender_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [token_contract_addr, receiver_addr,
             write_cost](SystemCallHandler &handler,
@@ -2242,7 +2244,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Receiver contract
   auto receiver_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello](SystemCallHandler &handler,
                        NativeRuntime &) -> InvokeStatus<void> {
@@ -2603,7 +2605,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
 
   // Contract 0: always errors, consumes 100 gas
   auto error_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler & /*handler*/,
               NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2618,7 +2620,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
 
   // Contract 1: performs the four try_invoke error cases
   auto caller_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [=](SystemCallHandler &handler,
                NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2765,7 +2767,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   // 1: try_invoke method 2, then manually revert
   // 2: Write "hello" to storage and return success
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [key](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<void> {

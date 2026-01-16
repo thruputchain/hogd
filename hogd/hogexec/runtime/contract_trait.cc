@@ -9,7 +9,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "types.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -37,19 +37,10 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
   return out;
 }
 
-MethodID
-sdk_method_id(std::string_view identifier_name,
-              std::string_view identifier_version, uint16_t method_id)
-{
-  return sdk_method_id(sdk_entrypoint_derivation(identifier_name,
-                                                 identifier_version,
-                                                 method_id));
-}
-
-MethodID
+Runtime::MethodID
 sdk_method_id(ContractEntrypointID entry_point_id)
 {
-  MethodID out{};
+  Runtime::MethodID out{};
   std::memcpy(reinterpret_cast<uint8_t *>(&out), entry_point_id.data(),
               sizeof(entry_point_id));
   static_assert(sizeof(out) == sizeof(entry_point_id));
@@ -58,7 +49,7 @@ sdk_method_id(ContractEntrypointID entry_point_id)
 
 // inverse of sdk_method_id
 ContractEntrypointID
-entrypoint_from_method_id(MethodID method_id)
+entrypoint_from_method_id(Runtime::MethodID method_id)
 {
   ContractEntrypointID out{};
   uint64_t byteswapped = std::byteswap(method_id);

@@ -64,7 +64,7 @@ check_result(HostFnStatus<SyscallStatus<std::optional<std::tuple<>>>> res)
 TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -157,7 +157,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 {
   auto native_contract_addr = make_contract_address(1);
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler &handler,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {

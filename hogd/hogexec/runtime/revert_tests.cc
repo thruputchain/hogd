@@ -53,7 +53,7 @@ TEST_P(RevertTest, RootFrameReverts)
 
   // Deploy contract with one method that writes a bytestring and then reverts
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello, key](SystemCallHandler &handler,
                             NativeRuntime &) -> InvokeStatus<void> {
@@ -141,7 +141,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   // 2: Write "hello" to storage, try_invoke method 3, then return success
   // 3: Write "world" to storage, then return success
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<void> {

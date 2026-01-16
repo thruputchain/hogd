@@ -36,11 +36,6 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
   }
 
-  if (data.size() > kMaxLogMessageLen) {
-    // log message too long, return error
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, 0};
-  }
-
   auto r = syscall_handler.log_event(topic0, topic1, topic2, data);
   if (!r.has_value()) {
     return {r.error().code(), 0};

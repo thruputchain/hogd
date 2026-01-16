@@ -74,7 +74,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
 
   // Contract that writes state, then reverts with return data
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [str_hello, return_data,
             key](SystemCallHandler &handler,
@@ -155,7 +155,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   auto child_key = make_storage_key("child_key");
 
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           // Parent method (0)
           {0,
            [parent_data,
@@ -286,7 +286,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             // Method 0: Manual revert with return data
             {0,
              [test_data, return_data,
@@ -406,7 +406,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   auto return_data = make_bytestring("revert_data");
 
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [test_data,
             return_data](SystemCallHandler &handler,
@@ -505,7 +505,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
   auto return3 = make_bytestring("return3");
 
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           // Level 1 - calls level 2, gets reverted data, then reverts itself
           {1,
            [data1, return1](SystemCallHandler &handler,
@@ -656,7 +656,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0,
              [test_data, key](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
