@@ -50,7 +50,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   int c = counter++;
 
   SignedTransactionBatch txs;
-  CHECK(parallel_batch_to_t(batch, txs));
+  CHECK(co_await parallel_batch_to_t(batch, txs));
   ElapsedTimer timer;
   info("submit_unvetted, {} txs, counter is {}, num outstanding calls is {}",
        txs.size(), c, ++outstanding);
@@ -58,7 +58,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_await scheduler_->add_txs(txs);
   ElapsedTimer timer2;
   ParallelBatch response;
-  t_to_parallel_batch(txs, response);
+  co_await t_to_parallel_batch(txs, response);
   co_await coord_client_->coordscheduler_notify_vetted(response);
   info("submit_unvetted finished, counter is {}, duration is {}, num "
        "outstanding calls is {}, coordscheduler_notify_vetted took {}",
@@ -71,7 +71,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
     ValidatorID validator_id, ParallelSignedTransactionBatch batch)
 {
   SignedTransactionBatch txs;
-  CHECK(parallel_batch_to_t(batch, txs));
+  CHECK(co_await parallel_batch_to_t(batch, txs));
   info("submit_vetted, {} txs", txs.size());
   co_await scheduler_->add_txs(txs);
   co_return;
@@ -457,9 +457,10 @@ MempoolCoordinatorRpc::finish_nominating_block(PendingBlock &cache)
     nomination.prev_block_hash = cache.db_tip.hash;
     nomination.transactions_hash = {};
     nomination.transactions_nondeterministic_data = {};
-    t_to_parallel_batch(cache.result_tx_hashes, nomination.transactions_hash);
-    t_to_parallel_batch(cache.result_tx_nominations,
-                        nomination.transactions_nondeterministic_data);
+    co_await t_to_parallel_batch(cache.result_tx_hashes,
+                                 nomination.transactions_hash);
+    co_await t_to_parallel_batch(cache.result_tx_nominations,
+                                 nomination.transactions_nondeterministic_data);
   }
 
   for (x23::Async<void> &handle : finish_block_handles) {
@@ -648,8 +649,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
-  CHECK(parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                            tx_nominations));
+  CHECK(co_await parallel_batch_to_t(
+      nomination.transactions_nondeterministic_data, tx_nominations));
   if (tx_nominations.empty()) {
     // Empty nomination.
     co_await decrement_num_validations_in_progress();
@@ -663,7 +664,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
   PendingBlock cache{};
   cache.block_id = generate_block_id();
   cache.db_tip = db_tip;
-  CHECK(parallel_batch_to_t(nomination.transactions_hash, cache.tx_hashes));
+  CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
+                                     cache.tx_hashes));
 
   co_await scheduler_->transfer_finished_.acquire();
 
@@ -721,8 +723,8 @@ MempoolCoordinatorRpc::schedulercoord_validate(DbTip db_tip,
       cache.txs.push_back(*tx);
     }
     x23::XdrVec<NondeterministicProposalData> tx_nominations;
-    CHECK(parallel_batch_to_t(nomination.transactions_nondeterministic_data,
-                              tx_nominations));
+    CHECK(co_await parallel_batch_to_t(
+        nomination.transactions_nondeterministic_data, tx_nominations));
     CHECK_EQ(cache.txs.size(), tx_nominations.size());
     for (size_t i = 0; i < cache.txs.size(); i++) {
       txs.push_back({.signed_tx = cache.txs[i],

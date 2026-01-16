@@ -78,7 +78,7 @@ public:
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
                                                       t_to_parallel_batch(
-                                                          init_tx))();
+                                                          init_tx)())();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
@@ -96,8 +96,8 @@ public:
         CHECK_EQ(res_nominate.nominated_block().block_id, nomination.block_id);
         {
           SignedTransactionHashBatch tx_hashes;
-          parallel_batch_to_t(nomination.nomination.transactions_hash,
-                              tx_hashes);
+          CHECK(parallel_batch_to_t(nomination.nomination.transactions_hash,
+                                    tx_hashes)());
           num_nominated_txs += tx_hashes.size();
         }
 
@@ -187,7 +187,7 @@ public:
           txs.begin() + (i * kSchedTxBatchSize),
           txs.begin() + ((i + 1) * kSchedTxBatchSize));
       handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
-          kValidatorId, t_to_parallel_batch(tx_chunk)));
+          kValidatorId, t_to_parallel_batch(tx_chunk)()));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       co_await handles[i];
@@ -253,7 +253,8 @@ public:
       size_t num_txs = 0;
       {
         SignedTransactionHashBatch tx_hashes;
-        parallel_batch_to_t(nomination.transactions_hash, tx_hashes);
+        CHECK(co_await parallel_batch_to_t(nomination.transactions_hash,
+                                           tx_hashes));
         num_txs = tx_hashes.size();
       }
 
