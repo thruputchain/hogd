@@ -98,6 +98,7 @@ jobs:
             ${{ secrets.HOGD_TO_LIB_GO_KEY }}
             ${{ secrets.HOGD_TO_SCP_KEY }}
             ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
@@ -200,6 +201,7 @@ jobs:
             ${{ secrets.HOGD_TO_LIB_GO_KEY }}
             ${{ secrets.HOGD_TO_SCP_KEY }}
             ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
@@ -302,6 +304,7 @@ jobs:
             ${{ secrets.HOGD_TO_LIB_GO_KEY }}
             ${{ secrets.HOGD_TO_SCP_KEY }}
             ${{ secrets.HOGD_TO_XDR_RPC }}
+            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8

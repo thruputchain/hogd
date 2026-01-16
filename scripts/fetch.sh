@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
 
