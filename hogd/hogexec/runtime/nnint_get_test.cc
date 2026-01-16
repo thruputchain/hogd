@@ -69,7 +69,7 @@ protected:
 TEST_P(NNIntGetTest, GetOnNonExistentKey)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -114,7 +114,7 @@ TEST_P(NNIntGetTest, GetOnNonExistentKey)
 TEST_P(NNIntGetTest, GetOnDeletedKey)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -179,7 +179,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
 TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -234,7 +234,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
 TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -289,7 +289,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 TEST_P(NNIntGetTest, GetOnBytestringKey)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -356,7 +356,7 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
   advance_block();
 
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -401,7 +401,7 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
 TEST_P(NNIntGetTest, MultipleOperationsSequence)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {

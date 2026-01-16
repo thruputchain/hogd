@@ -61,7 +61,7 @@ protected:
 TEST_P(NNIntAddTest, ReadWriteAddValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -145,7 +145,7 @@ TEST_P(NNIntAddTest, ReadWriteAddValue)
 TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
@@ -236,7 +236,7 @@ TEST_P(NNIntAddTest, SetAddWithAdd)
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto native_contract = std::make_unique<NativeContract>(
-        std::unordered_map<MethodID, NativeContract::function_t>{
+        std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
             {0, // First method: set_add on (0, 200)
              [](SystemCallHandler &handler,
                 NativeRuntime & /*unused*/) -> InvokeStatus<void> {

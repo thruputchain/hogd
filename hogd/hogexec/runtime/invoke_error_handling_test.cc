@@ -64,7 +64,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   // a native contract with methods that just return different InvokeError
   // codes, and one method that calls all the other methods.
   auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t>{
           {0,
            [&](SystemCallHandler & /*unused*/,
                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
