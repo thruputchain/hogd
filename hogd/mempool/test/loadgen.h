@@ -78,7 +78,7 @@ public:
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
                                                       t_to_parallel_batch(
-                                                          init_tx))();
+                                                          init_tx)())();
 
       // Now nominate and commit the initialization transactions with
       // [schedulercoord_nominate()].
@@ -187,7 +187,7 @@ public:
           txs.begin() + (i * kSchedTxBatchSize),
           txs.begin() + ((i + 1) * kSchedTxBatchSize));
       handles.push_back(sched_coord_clients_[i].schedulercoord_submit_vetted(
-          kValidatorId, t_to_parallel_batch(tx_chunk)));
+          kValidatorId, t_to_parallel_batch(tx_chunk)()));
     }
     for (size_t i = 0; i < kNumLoadgenClients; i++) {
       co_await handles[i];
