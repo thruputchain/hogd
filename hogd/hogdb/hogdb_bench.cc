@@ -30,6 +30,7 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "storage_delta_flags.hh"
 #include "transaction.hh"
@@ -116,7 +117,7 @@ make_key(size_t addr, size_t item)
 }
 
 constexpr std::optional<Uniquifier>
-maybe_uniquifier(BlockHeight height, ReplayNonce nonce, bool use_nonces)
+maybe_uniquifier(BlockHeight height, uint64_t nonce, bool use_nonces)
 {
   if (!use_nonces)
     return std::nullopt;
